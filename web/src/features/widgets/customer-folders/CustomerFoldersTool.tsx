@@ -6,9 +6,7 @@ import type { TCustomerFolder } from "@types";
 import { ToolCard } from "@entities/ui/dashboardStyle/ToolCard";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import type { DashboardToolDefinition, NavCrumb } from "@entities/Page/dashboardStyle/types";
-
-const DEFAULT_ACTIVE_PARENT = "1Bfu-bd98xtv3taCKii8ud44gPuAFdGnO";
-const DEFAULT_EXITED_PARENT = "1Vkvu-gJoCMti4S86B1U5Zw40KFnF7UEt";
+import { ACTIVE_PARENT_ID, EXITED_PARENT_ID } from "@lib/driveConfig";
 
 export type CustomerFoldersFilterState = {
   search: string;
@@ -45,8 +43,8 @@ export const CustomerFoldersTopbar: DashboardToolDefinition<
 >["ToolTopbar"] = ({ value, onChange }: CustomerFoldersTopbarProps) => {
   const { refetch, isFetching } = useGDriveCustomerFolderIndex(
     {
-      activeParentId: DEFAULT_ACTIVE_PARENT,
-      exitedParentId: DEFAULT_EXITED_PARENT,
+      activeParentId: ACTIVE_PARENT_ID,
+      exitedParentId: EXITED_PARENT_ID,
     },
     { staleTime: 5 * 60_000 }
   );
@@ -86,8 +84,8 @@ export function CustomerFoldersTool(props: CustomerFoldersToolProps = {}) {
 
   const { data, isLoading, isError, refetch, isFetching } = useGDriveCustomerFolderIndex(
     {
-      activeParentId: DEFAULT_ACTIVE_PARENT,
-      exitedParentId: DEFAULT_EXITED_PARENT,
+      activeParentId: ACTIVE_PARENT_ID,
+      exitedParentId: EXITED_PARENT_ID,
     },
     { staleTime: 5 * 60_000 }
   );

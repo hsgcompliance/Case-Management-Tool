@@ -11,13 +11,24 @@ type StoredGoogleDriveAccessToken = {
 };
 
 function canUseStorage() {
-  return typeof window !== "undefined" && !!window.localStorage;
+  return typeof window !== "undefined" && !!window.sessionStorage;
+}
+
+function primaryStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  return window.sessionStorage ?? null;
+}
+
+function legacyStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage ?? null;
 }
 
 function readStoredRecord(): StoredGoogleDriveAccessToken | null {
   if (!canUseStorage()) return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const storage = primaryStorage();
+    const raw = storage?.getItem(STORAGE_KEY) || legacyStorage()?.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredGoogleDriveAccessToken>;
     const uid = String(parsed?.uid || "").trim();
@@ -40,12 +51,13 @@ export function storeGoogleDriveAccessToken(uid: string, accessToken: string) {
     accessToken: cleanToken,
     updatedAt: Date.now(),
   };
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  primaryStorage()?.setItem(STORAGE_KEY, JSON.stringify(next));
+  legacyStorage()?.removeItem(STORAGE_KEY);
 }
 
 export function clearGoogleDriveAccessToken() {
-  if (!canUseStorage()) return;
-  window.localStorage.removeItem(STORAGE_KEY);
+  primaryStorage()?.removeItem(STORAGE_KEY);
+  legacyStorage()?.removeItem(STORAGE_KEY);
 }
 
 export function syncGoogleDriveAccessTokenOwner(uid: string | null | undefined) {

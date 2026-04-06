@@ -23,6 +23,7 @@ import { usePaymentsBuildSchedule, type PaymentScheduleBuildInput } from "@hooks
 import { useTasksGenerateScheduleWrite } from "@hooks/useTasks";
 import { useMe, useUsers, type CompositeUser } from "@hooks/useUsers";
 import { addYears, parseISO10, toISODate } from "@lib/date";
+import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import { isCaseManagerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
@@ -127,29 +128,7 @@ function readPayments(enrollment: Enrollment): Array<Record<string, unknown>> {
 }
 
 // ── Folder builder config (mirrors GAS config.gs) ────────────────────────────
-const FOLDER_TEMPLATES_FLOW = [
-  {
-    key: "tss_workbook",
-    label: "TSS Workbook",
-    docNameTpl: "{last}, {first} TSS Workbook",
-    defaultChecked: true,
-    variants: { payer: "1yqLat215HCXyqfCUPlsfkUhP0ruO9fK3", nonpayer: "1mqJiK60qgfW52W53E7c0HBdeeHjEMvUu" },
-  },
-  {
-    key: "ra_utility_allowance",
-    label: "Utility Allowance",
-    docNameTpl: "{last}, {first} Utility Allowance",
-    id: "1do3Cf40iP-OsrO4X9N9sJMB7lSVdEbLR",
-    defaultChecked: false,
-  },
-  {
-    key: "bridging_home_office_use",
-    label: "Bridging Home Office Use",
-    docNameTpl: "{last}, {first} Bridging Home Office Use",
-    id: "1V_9pxp1EhD8RUiQGM05ufaQ7Z2DUktU-",
-    defaultChecked: false,
-  },
-] as const;
+const FOLDER_TEMPLATES_FLOW = DRIVE_FILE_TEMPLATES;
 
 function renderFlowDocName(tpl: string, first: string, last: string): string {
   return tpl.replace(/\{first\}/gi, first).replace(/\{last\}/gi, last).replace(/\s{2,}/g, " ").trim();

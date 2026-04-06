@@ -5,6 +5,7 @@ import type { TCustomerFolder, TGDriveBuildCustomerFolderBody } from '@types';
 import { qk } from './queryKeys';
 import { RQ_DEFAULTS } from './base';
 import { useInvalidateMutation } from './optimistic';
+import { ACTIVE_PARENT_ID, EXITED_PARENT_ID } from '@lib/driveConfig';
 
 const INDEX_STALE_MS = 20 * 60_000; // 20 min — index changes infrequently
 
@@ -96,5 +97,4 @@ export function useGDriveUpload() {
 }
 
 // Re-exported for use in panel
-export const ACTIVE_PARENT_ID = "1Bfu-bd98xtv3taCKii8ud44gPuAFdGnO";
-export const EXITED_PARENT_ID = "1Vkvu-gJoCMti4S86B1U5Zw40KFnF7UEt";
+export { ACTIVE_PARENT_ID, EXITED_PARENT_ID };

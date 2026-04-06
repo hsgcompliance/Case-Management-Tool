@@ -13,6 +13,7 @@ import {
 } from "@hooks/useGDrive";
 import { fmtBytes, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
+import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
 import type { TCustomerFolder } from "@types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,33 +35,7 @@ type DriveFile = {
   webViewLink?: string;
 };
 
-// Mirrors config.gs TEMPLATES array — source-of-truth IDs live in the GAS project
-const FOLDER_TEMPLATES = [
-  {
-    key: "tss_workbook",
-    label: "TSS Workbook",
-    docNameTpl: "{last}, {first} TSS Workbook",
-    defaultChecked: true,
-    variants: {
-      payer: "1yqLat215HCXyqfCUPlsfkUhP0ruO9fK3",
-      nonpayer: "1mqJiK60qgfW52W53E7c0HBdeeHjEMvUu",
-    },
-  },
-  {
-    key: "ra_utility_allowance",
-    label: "Utility Allowance",
-    docNameTpl: "{last}, {first} Utility Allowance",
-    id: "1do3Cf40iP-OsrO4X9N9sJMB7lSVdEbLR",
-    defaultChecked: false,
-  },
-  {
-    key: "bridging_home_office_use",
-    label: "Bridging Home Office Use",
-    docNameTpl: "{last}, {first} Bridging Home Office Use",
-    id: "1V_9pxp1EhD8RUiQGM05ufaQ7Z2DUktU-",
-    defaultChecked: false,
-  },
-] as const;
+const FOLDER_TEMPLATES = DRIVE_FILE_TEMPLATES;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
