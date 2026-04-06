@@ -1,0 +1,412 @@
+/* app.css (neutral + high-contrast segmented controls) */
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------- Base tweaks ---------- */
+@layer base {
+  :root {
+    --topbar-height: 60px;
+    --shell-max-width: 1600px;
+  }
+
+  html,
+  body {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  .dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+
+  a {
+    @apply text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500;
+  }
+
+  .dark a {
+    @apply text-slate-100 decoration-slate-700 hover:decoration-slate-500;
+  }
+
+  /* Personal text size preference (render-only): keep defaults as-is, allow larger body copy. */
+  .hdb-text-scale-default :where(p) {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .hdb-text-scale-large :where(p) {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+
+  /* Catch common body-copy utility usage without broadly resizing buttons/inputs. */
+  .hdb-text-scale-large :where(.text-xs):not(button):not(input):not(select):not(textarea) {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .hdb-text-scale-large :where(.text-sm):not(button):not(input):not(select):not(textarea) {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+
+  .hdb-text-scale-large :where(li, dd, dt, td) {
+    line-height: 1.5rem;
+  }
+}
+
+/* ---------- Tool switcher hint animation ---------- */
+@keyframes hdb-tool-hint {
+  0%, 100% { transform: translateY(0);    background-color: transparent; }
+  30%      { transform: translateY(-6px); background-color: rgb(251 191 36); color: rgb(120 53 15); border-color: rgb(217 119 6); }
+  50%      { transform: translateY(0);    background-color: rgb(253 230 138); color: rgb(120 53 15); }
+  68%      { transform: translateY(0);    background-color: transparent; }
+}
+
+.hdb-hint-tool {
+  animation: hdb-tool-hint 2.2s ease-in-out infinite;
+}
+
+/* ---------- Layout ---------- */
+.dashboard-viewport {
+  min-height: calc(100vh - var(--topbar-height));
+  width: 100%;
+}
+
+.dashboard-padding {
+  padding: 0.75rem 1.5rem;
+}
+
+@layer components {
+  /* ---------- Surfaces ---------- */
+  .container-card {
+    @apply mx-auto rounded-xl border border-slate-200 bg-white p-6 shadow-sm;
+    max-width: var(--shell-max-width);
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .card-section {
+    @apply p-4 md:p-5;
+  }
+
+  /* ---------- Topbar ---------- */
+  .topbar {
+    @apply sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur;
+    @apply dark:border-slate-800 dark:bg-slate-900/85;
+  }
+
+  .topbar-inner {
+    @apply mx-auto flex h-[var(--topbar-height)] items-center justify-between px-6;
+    max-width: var(--shell-max-width);
+  }
+
+  .topbar-title {
+    @apply font-semibold text-slate-900 dark:text-slate-100;
+  }
+
+  .topbar-nav {
+    @apply flex items-center gap-1 rounded-lg bg-slate-900/90 p-1 shadow-sm;
+    @apply dark:bg-slate-800;
+  }
+
+  .topbar-link {
+    @apply rounded-md bg-slate-800/90 px-3 py-2 text-sm font-medium text-white transition-colors;
+    @apply hover:bg-slate-700/90;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply dark:border-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  .topbar-link-active {
+    @apply bg-white text-slate-900 shadow-sm hover:bg-white;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply dark:bg-slate-200 dark:text-slate-900 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition-colors;
+    @apply hover:bg-slate-800;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+    @apply dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  .btn-primary {
+    @apply bg-slate-900 text-white hover:bg-slate-800;
+    @apply dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm;
+    @apply hover:bg-white;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+    @apply dark:border-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-slate-700/60 bg-slate-800/90 px-3 py-2 text-sm font-medium text-white transition-colors;
+    @apply hover:bg-slate-700/90;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+    @apply dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  .btn-sm {
+    @apply rounded-md px-2.5 py-1.5 text-sm;
+  }
+
+  .btn-xs {
+    @apply rounded px-2 py-1 text-xs;
+  }
+
+  /* ---------- Inputs ---------- */
+  .field {
+    @apply mb-5;
+  }
+
+  .label {
+    @apply mb-1 block text-sm font-medium text-slate-600 dark:text-slate-300;
+  }
+
+  .input,
+  .select {
+    @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors;
+    @apply placeholder:text-slate-400;
+    @apply focus-visible:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200;
+    @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus-visible:border-slate-500 dark:focus-visible:ring-slate-700;
+  }
+
+  /* ---------- Table ---------- */
+  .table-wrap {
+    @apply overflow-auto rounded-lg border border-slate-200 bg-white;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .table {
+    @apply min-w-full text-left text-sm;
+  }
+
+  .table thead {
+    @apply bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-300;
+  }
+
+  .table th {
+    @apply border-b border-slate-200 px-4 py-2 font-medium dark:border-slate-800;
+  }
+
+  .table td {
+    @apply border-b border-slate-200 px-4 py-2 dark:border-slate-800;
+  }
+
+  .table tr:hover td {
+    @apply cursor-pointer bg-slate-50 dark:bg-slate-800;
+  }
+
+  /* ---------- Modal ---------- */
+  .modal-overlay {
+    @apply fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm;
+  }
+
+  .modal {
+    @apply flex max-h-[86vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .modal-header {
+    @apply flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800;
+  }
+
+  .modal-title {
+    @apply text-base font-semibold text-slate-900 dark:text-slate-100;
+  }
+
+  .modal-body {
+    @apply overflow-y-auto p-4;
+  }
+
+  .modal-footer {
+    @apply flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-800;
+  }
+
+  /* ---------- Tabs ---------- */
+  .tabs {
+    @apply flex gap-1 rounded-lg border border-slate-900/10 bg-slate-900/90 p-1;
+    @apply dark:border-slate-700 dark:bg-slate-800;
+  }
+
+  .tab {
+    @apply rounded-md bg-slate-800/90 px-3 py-2 text-sm font-medium text-white transition-colors;
+    @apply hover:bg-slate-700/90;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply dark:bg-slate-700 dark:hover:bg-slate-600 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  .tab-active {
+    @apply bg-white text-slate-900 shadow-sm hover:bg-white;
+    @apply dark:bg-slate-200 dark:text-slate-900;
+  }
+
+  /* ---------- Add field panel ---------- */
+  .add-field-panel {
+    @apply my-8 rounded-xl border border-slate-200 bg-slate-50 p-6 shadow-inner;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .add-field-label {
+    @apply mb-3 font-semibold text-slate-700 dark:text-slate-200;
+  }
+
+  .add-field-controls {
+    @apply flex flex-wrap items-center gap-3;
+  }
+
+  .small-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white transition-colors;
+    @apply hover:bg-slate-800;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+    @apply dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200 dark:focus-visible:ring-offset-slate-900;
+  }
+
+  /* ---------- Toggle ---------- */
+  .toggle-switch {
+    @apply relative inline-block h-6 w-11 align-middle;
+  }
+
+  .toggle-switch input {
+    @apply h-0 w-0 opacity-0;
+  }
+
+  .slider {
+    @apply absolute inset-0 rounded-full bg-slate-300 transition dark:bg-slate-700;
+  }
+
+  .slider::before {
+    content: "";
+    @apply absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white transition;
+  }
+
+  .toggle-switch input:checked + .slider {
+    @apply bg-slate-900 dark:bg-slate-100;
+  }
+
+  .toggle-switch input:checked + .slider::before {
+    transform: translateX(20px);
+  }
+
+  /* ---------- Badges ---------- */
+  .badge {
+    @apply inline-block rounded px-2 py-0.5 text-xs font-medium text-white;
+  }
+
+  .badge-green {
+    @apply bg-emerald-700;
+  }
+
+  .badge-red {
+    @apply bg-rose-700;
+  }
+
+  .badge-orange {
+    @apply bg-amber-600;
+  }
+
+  /* ---------- Workspace Modal ---------- */
+  .workspace-modal-shell {
+    @apply flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white text-slate-900 shadow-2xl;
+    @apply dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100;
+  }
+
+  .workspace-modal-topbar {
+    @apply border-b border-slate-200 bg-slate-50 px-4 py-3;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .workspace-modal-body {
+    @apply flex min-h-0 flex-1;
+  }
+
+  .workspace-modal-left {
+    @apply shrink-0 border-r border-slate-200 bg-slate-50;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .workspace-modal-right {
+    @apply min-w-0 flex-1 overflow-y-auto bg-slate-100;
+    @apply dark:bg-slate-950;
+  }
+
+  .workspace-breadcrumb {
+    @apply flex items-center gap-0.5;
+  }
+
+  .workspace-breadcrumb-back {
+    @apply rounded-md px-1.5 py-1 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 hover:text-slate-900;
+    @apply dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white;
+  }
+
+  .workspace-breadcrumb-sep {
+    @apply px-0.5 text-slate-400 dark:text-slate-500;
+  }
+
+  .workspace-breadcrumb-current {
+    @apply truncate text-sm font-semibold text-slate-900 dark:text-slate-100;
+  }
+
+  /* ---------- Tools Workspace ---------- */
+  .tools-shell {
+    @apply grid grid-cols-1 gap-4 lg:grid-cols-[270px_minmax(0,1fr)];
+  }
+
+  .tools-sidebar {
+    @apply rounded-2xl border border-slate-200 bg-white p-3 shadow-sm;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .tools-sidebar-title {
+    @apply mb-2 px-1 text-xs font-bold uppercase tracking-wider text-slate-500;
+    @apply dark:text-slate-400;
+  }
+
+  .tools-nav-btn {
+    @apply w-full rounded-xl border px-3 py-2.5 text-left transition;
+    @apply border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50;
+    @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800;
+  }
+
+  .tools-nav-btn-active {
+    @apply border-sky-300 bg-sky-50 text-sky-700;
+    @apply dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-300;
+  }
+
+  .tools-canvas {
+    @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-sm;
+    @apply dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .tool-surface {
+    @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+    @apply dark:border-slate-700 dark:bg-slate-900;
+  }
+
+  .tool-surface-muted {
+    @apply rounded-xl border border-slate-200 bg-slate-50 p-4;
+    @apply dark:border-slate-700 dark:bg-slate-800/50;
+  }
+
+  .tool-title {
+    @apply text-sm font-semibold text-slate-900 dark:text-slate-100;
+  }
+
+  .tool-subtitle {
+    @apply text-xs text-slate-500 dark:text-slate-400;
+  }
+}

@@ -1,0 +1,166 @@
+rules_version = '2';
+service cloud.firestore {
+  function authed() { return request.auth != null; }
+
+  function roleTags() {
+    return request.auth.token.roles != null
+      ? request.auth.token.roles
+      : (request.auth.token.role != null ? [request.auth.token.role] : []);
+  }
+
+  function topRole() {
+    return request.auth.token.topRole != null
+      ? request.auth.token.topRole
+      : (request.auth.token.role != null ? request.auth.token.role : "");
+  }
+
+  function tokenOrgId() {
+    return request.auth.token.orgId != null ? request.auth.token.orgId : null;
+  }
+
+  function hasLegacyAdminFlag() {
+    return authed() && request.auth.token.admin == true;
+  }
+
+  function isSuperDev() { return authed() && topRole() == "super_dev"; }
+  function isOrgDev() { return authed() && (topRole() == "org_dev" || isSuperDev()); }
+  function isDev()    { return authed() && (topRole() == "dev" || topRole() == "org_dev" || isSuperDev()); }
+  function isAdmin()  { return hasLegacyAdminFlag() || (authed() && (topRole() == "admin" || topRole() == "dev" || topRole() == "org_dev" || isSuperDev())); }
+
+  function hasRole(r) {
+    return authed() && (
+      (r == "super_dev" && isSuperDev())
+      || (r == "org_dev" && isOrgDev())
+      || (r == "dev" && isDev())
+      || (r == "admin" && isAdmin())
+      || (r == "user" && verifiedStaff())
+      || (r in roleTags())
+    );
+  }
+
+  function isBlocked() {
+    return authed() && !hasLegacyAdminFlag() && (
+      topRole() == ""
+      || topRole() == "unverified"
+      || topRole() == "public_user"
+    );
+  }
+
+  function verifiedStaff() { return authed() && !isBlocked(); }
+
+  // Org match: only super-dev bypasses org scoping. Other users stay inside token orgId.
+  // Falls back gracefully when orgId is absent (single-org deployments).
+  function sameOrg(doc) {
+    return isSuperDev()
+      || !("orgId" in doc)
+      || tokenOrgId() == null
+      || tokenOrgId() == doc.orgId;
+  }
+
+  function sameOrgId(orgId) {
+    return verifiedStaff() && (
+      isSuperDev()
+      || (tokenOrgId() != null && tokenOrgId() == orgId)
+    );
+  }
+
+  function canManageOrgDocs(orgId) {
+    return verifiedStaff() && (
+      isSuperDev()
+      || (topRole() == "org_dev" && tokenOrgId() != null && tokenOrgId() == orgId)
+    );
+  }
+
+  match /databases/{db}/documents {
+
+    // User profile / preferences — own record or admin
+    match /userExtras/{uid} {
+      allow read, write: if authed() && (isAdmin() || request.auth.uid == uid);
+    }
+
+    // Org-level metrics (non-PII aggregates)
+    match /metrics/{doc} {
+      allow read: if authed();
+      allow write: if false;
+    }
+
+    // Customers — verified staff, same org only
+    match /customers/{id} {
+      allow read: if verifiedStaff() && sameOrg(resource.data);
+      allow write: if false;
+    }
+
+    // Enrollments — verified staff, same org only
+    match /customerEnrollments/{id} {
+      allow read: if verifiedStaff() && sameOrg(resource.data);
+      allow write: if false;
+    }
+
+    // Payments
+    match /payments/{id} {
+      allow read: if verifiedStaff() && sameOrg(resource.data);
+      allow write: if false;
+    }
+
+    // Grants / programs
+    match /grants/{id} {
+      allow read: if verifiedStaff() && sameOrg(resource.data);
+      allow write: if false;
+    }
+
+    // Inbox / user tasks — own items, or admin/supervisor oversight
+    match /userTasks/{id} {
+      allow read: if verifiedStaff() && (
+        isAdmin()
+        || hasRole("compliance")
+        || hasRole("supervisor")
+        || request.auth.uid == resource.data.assignedToUid
+      );
+      allow write: if false;
+    }
+
+    // Other tasks
+    match /otherTasks/{id} {
+      allow read: if verifiedStaff() && sameOrg(resource.data);
+      allow write: if false;
+    }
+
+    // Jotform submissions
+    match /jotformSubmissions/{id} {
+      allow read: if verifiedStaff() && sameOrg(resource.data);
+      allow write: if false;
+    }
+
+    // Users directory — verified staff can read (needed for CM selectors etc.)
+    match /users/{uid} {
+      allow read: if verifiedStaff();
+      allow write: if false;
+    }
+
+    // Org workspace docs: any same-org user may edit existing docs.
+    // Creating or deleting org docs/subdocs is reserved for org_dev or super_dev.
+    match /orgs/{orgId} {
+      allow read: if sameOrgId(orgId);
+      allow create, delete: if canManageOrgDocs(orgId);
+      allow update: if sameOrgId(orgId);
+    }
+
+    match /orgs/{orgId}/{document=**} {
+      allow read: if sameOrgId(orgId);
+      allow create, delete: if canManageOrgDocs(orgId);
+      allow update: if sameOrgId(orgId);
+    }
+
+    // Catch-all: any unlisted collection still requires verified staff + same org.
+    // Restricts access while remaining safe for new collections added later.
+    match /{document=**} {
+      allow read: if verifiedStaff() && (
+        isSuperDev()
+        || !("orgId" in resource.data)
+        || tokenOrgId() == null
+        || tokenOrgId() == resource.data.orgId
+      );
+      allow write: if false;
+    }
+  }
+}

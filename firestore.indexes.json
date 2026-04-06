@@ -1,0 +1,494 @@
+
+{
+  "indexes": [
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedToUid", "order": "ASCENDING" },
+        { "fieldPath": "dueMonth", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "assignedToUid", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "assignedToUid", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "assignedToUid", "order": "ASCENDING" },
+        { "fieldPath": "clientId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedToGroup", "order": "ASCENDING" },
+        { "fieldPath": "assignedToUid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dueMonth", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "notify", "order": "ASCENDING" },
+        { "fieldPath": "cmUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedToUid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "customerId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "caseManagerId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "grants",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tours",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "id", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "otherTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "notify", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "dueMonth", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "otherTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "notify", "order": "ASCENDING" },
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "assignedToUids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "dueMonth", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── paymentQueue — projection + CC/invoice query by grantId ───────────────
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "lineItemId", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── paymentQueue — projection + CC/invoice query by customerId ────────────
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customerId", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customerId", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── paymentQueue — org-wide spending tool queries ─────────────────────────
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "paymentQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── ledger — paid spend query by grantId ──────────────────────────────────
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "lineItemId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── ledger — paid spend query by customerId ───────────────────────────────
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customerId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customerId", "order": "ASCENDING" },
+        { "fieldPath": "grantId", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── ledger — compliance patch by enrollmentId+paymentId ──────────────────
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "enrollmentId", "order": "ASCENDING" },
+        { "fieldPath": "paymentId", "order": "ASCENDING" }
+      ]
+    },
+
+    // ── ledger — org-wide query by month ──────────────────────────────────────
+    {
+      "collectionGroup": "ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── assessmentSubmissions ──────────────────────────────────────────────────
+
+    // contextId history stack — primary query for "all runs in this entity+kind context"
+    {
+      "collectionGroup": "assessmentSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",      "order": "ASCENDING" },
+        { "fieldPath": "contextId",  "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
+      ]
+    },
+    // contextId + status — for finding active run within a context (openReassessment lookup)
+    {
+      "collectionGroup": "assessmentSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",      "order": "ASCENDING" },
+        { "fieldPath": "contextId",  "order": "ASCENDING" },
+        { "fieldPath": "status",     "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
+      ]
+    },
+    // customer history — all submissions for a customer across templates
+    {
+      "collectionGroup": "assessmentSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",       "order": "ASCENDING" },
+        { "fieldPath": "customerId",  "order": "ASCENDING" },
+        { "fieldPath": "kind",        "order": "ASCENDING" },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+      ]
+    },
+    // enrollment history — all submissions for an enrollment
+    {
+      "collectionGroup": "assessmentSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",         "order": "ASCENDING" },
+        { "fieldPath": "enrollmentId",  "order": "ASCENDING" },
+        { "fieldPath": "kind",          "order": "ASCENDING" },
+        { "fieldPath": "createdAt",     "order": "DESCENDING" }
+      ]
+    },
+    // org-wide by kind + status — workload / admin views
+    {
+      "collectionGroup": "assessmentSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",      "order": "ASCENDING" },
+        { "fieldPath": "kind",       "order": "ASCENDING" },
+        { "fieldPath": "status",     "order": "ASCENDING" },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
+      ]
+    },
+    // template recalc scan
+    {
+      "collectionGroup": "assessmentSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",       "order": "ASCENDING" },
+        { "fieldPath": "templateId",  "order": "ASCENDING" },
+        { "fieldPath": "status",      "order": "ASCENDING" },
+        { "fieldPath": "createdAt",   "order": "DESCENDING" }
+      ]
+    },
+
+    // ── assessmentTemplates versions subcollection ─────────────────────────────
+    {
+      "collectionGroup": "versions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "orgId",         "order": "ASCENDING" },
+        { "fieldPath": "templateId",    "order": "ASCENDING" },
+        { "fieldPath": "status",        "order": "ASCENDING" },
+        { "fieldPath": "versionNumber", "order": "DESCENDING" }
+      ]
+    },
+
+    // ── customers — acuity sort ────────────────────────────────────────────────
+    {
+      "collectionGroup": "customers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",        "order": "ASCENDING" },
+        { "fieldPath": "deleted",      "order": "ASCENDING" },
+        { "fieldPath": "acuityScore",  "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",         "order": "ASCENDING" },
+        { "fieldPath": "caseManagerId", "order": "ASCENDING" },
+        { "fieldPath": "deleted",       "order": "ASCENDING" },
+        { "fieldPath": "acuityScore",   "order": "DESCENDING" }
+      ]
+    },
+
+    // ── customerEnrollments — priority sort ───────────────────────────────────
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",          "order": "ASCENDING" },
+        { "fieldPath": "grantId",        "order": "ASCENDING" },
+        { "fieldPath": "active",         "order": "ASCENDING" },
+        { "fieldPath": "priorityScore",  "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",          "order": "ASCENDING" },
+        { "fieldPath": "customerId",     "order": "ASCENDING" },
+        { "fieldPath": "priorityScore",  "order": "DESCENDING" }
+      ]
+    },
+
+    // ── customerEnrollments — list by customer (enrollmentsList with customerId filter) ──
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",       "order": "ASCENDING" },
+        { "fieldPath": "customerId",  "order": "ASCENDING" },
+        { "fieldPath": "updatedAt",   "order": "DESCENDING" },
+        { "fieldPath": "__name__",    "order": "DESCENDING" }
+      ]
+    },
+    // ── customerEnrollments — list by grant (enrollmentsList with grantId filter) ─────
+    {
+      "collectionGroup": "customerEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",      "order": "ASCENDING" },
+        { "fieldPath": "grantId",    "order": "ASCENDING" },
+        { "fieldPath": "updatedAt",  "order": "DESCENDING" },
+        { "fieldPath": "__name__",   "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@hdb/contracts",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+
+    "./assessments": { "types": "./dist/assessments.d.ts", "import": "./dist/assessments.js", "require": "./dist/assessments.cjs" },
+    "./customers":   { "types": "./dist/customers.d.ts",   "import": "./dist/customers.js",   "require": "./dist/customers.cjs" },
+    "./creditCards": { "types": "./dist/creditCards.d.ts", "import": "./dist/creditCards.js", "require": "./dist/creditCards.cjs" },
+    "./enrollments": { "types": "./dist/enrollments.d.ts", "import": "./dist/enrollments.js", "require": "./dist/enrollments.cjs" },
+    "./gdrive":      { "types": "./dist/gdrive.d.ts",      "import": "./dist/gdrive.js",      "require": "./dist/gdrive.cjs" },
+    "./grants":      { "types": "./dist/grants.d.ts",      "import": "./dist/grants.js",      "require": "./dist/grants.cjs" },
+    "./inbox":       { "types": "./dist/inbox.d.ts",       "import": "./dist/inbox.js",       "require": "./dist/inbox.cjs" },
+    "./jotform":     { "types": "./dist/jotform.d.ts",     "import": "./dist/jotform.js",     "require": "./dist/jotform.cjs" },
+    "./ledger":      { "types": "./dist/ledger.d.ts",      "import": "./dist/ledger.js",      "require": "./dist/ledger.cjs" },
+    "./payments":    { "types": "./dist/payments.d.ts",    "import": "./dist/payments.js",    "require": "./dist/payments.cjs" },
+    "./tasks":       { "types": "./dist/tasks.d.ts",       "import": "./dist/tasks.js",       "require": "./dist/tasks.cjs" },
+    "./tours":       { "types": "./dist/tours.d.ts",       "import": "./dist/tours.js",       "require": "./dist/tours.cjs" },
+    "./users":       { "types": "./dist/users.d.ts",       "import": "./dist/users.js",       "require": "./dist/users.cjs" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/*.ts --dts --format esm,cjs --outDir dist --clean"
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,24 @@
+# Legacy output
+lib/
+typings/
+
+# Dependencies
+node_modules/
+
+# Secrets and local env
+.env
+.env.*
+*.local
+!.env*.example
+!*.local.example
+
+# Generated build artifacts
+build/
+vendor/
+*.tsbuildinfo
+.tmp-*.mjs
+
+# Local debug logs
+firebase-debug.log*
+firestore-debug.log*
+pubsub-debug.log*

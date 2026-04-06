@@ -1,0 +1,74 @@
+{
+  "firestore": {
+    "database": "(default)",
+    "location": "us-central1",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "src",
+        "*.ts",
+        "tsconfig*.json"
+      ],
+      "predeploy": [
+        "node scripts/pack-contracts.mjs",
+        "node scripts/set-functions-contracts-dep.mjs",
+        "npm --prefix \"$RESOURCE_DIR\" install --package-lock-only --ignore-scripts",
+        "npm --prefix \"$RESOURCE_DIR\" run lint",
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
+  "apphosting": {
+    "backendId": "housing-db-v2",
+    "rootDir": "./",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "functions"
+    ]
+  },
+  "hosting": {
+    "source": "web",
+    "predeploy": [
+      "node scripts/pack-contracts.mjs"
+    ],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
+  "emulators": {
+    "apphosting": {
+      "port": 5000,
+      "rootDirectory": "./",
+      "startCommand": "npm run dev --prefix web"
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {"port": 5002},
+    "pubsub": {"port": 5003},
+    "auth": { "port": 5005 }, 
+    "ui": {
+      "enabled": true,
+      "port": 5004
+    },
+    "singleProjectMode": true
+  },
+  "remoteconfig": {
+    "template": "remoteconfig.template.json"
+  }
+}

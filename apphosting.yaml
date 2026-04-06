@@ -1,0 +1,91 @@
+# apphosting.yaml
+#Settings for Backend (on Cloud Run).
+# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+runtime: nodejs20
+runConfig:
+  minInstances: 0
+  # maxInstances: 100
+  # concurrency: 80
+  # cpu: 1
+  # memoryMiB: 512
+
+source:
+  dir: web
+  scripts:
+    build: npm run build
+    dev: npm run dev
+    start: npm run start
+
+# Environment variables — all NEXT_PUBLIC_* are safe to commit (client-side Firebase config).
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyBbaSin6GKx6sZNioJ1uz36rD8jgMu-fxI
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: housing-db-v2.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: housing-db-v2
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: housing-db-v2.appspot.com
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "184082104139"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:184082104139:web:ac03a5c22db791a32332ce
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_APPCHECK_KEY
+    value: 6LfUMvErAAAAAKJ5fZmPyVqt3TrxRLShrhRhBVyS
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FUNCTIONS_REGION
+    value: us-central1
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FUNCTIONS_BASE
+    value: https://us-central1-housing-db-v2.cloudfunctions.net
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_USE_EMULATORS
+    value: "0"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_EMULATORS
+    value: "false"
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION
+    value: us-central1
+    availability:
+      - BUILD
+      - RUNTIME

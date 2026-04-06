@@ -1,0 +1,51 @@
+{
+  "name": "hdb",
+  "private": true,
+  "workspaces": [
+    "contracts",
+    "web",
+    "functions"
+  ],
+  "dependencies": {
+    "firebase-admin": "^13.6.1",
+    "firebase-functions": "^7.0.5",
+    "rg": "^0.0.2"
+  },
+  "scripts": {
+    "build:functions": "npm -w functions run build",
+    "build:web": "npm -w web run build",
+    "build:contracts": "npm -w contracts run build",
+    "deploy:hosting": "node scripts/deploy-hosting-safe.mjs",
+    "deploy:reset-functions": "node scripts/reset-and-redeploy.mjs housing-db-v2",
+    "deploy:reset-functions-hosting": "node scripts/reset-and-redeploy.mjs housing-db-v2 --hosting",
+    "emulators": "firebase emulators:start",
+    "emulators:data": "firebase emulators:start --only functions,firestore,auth,pubsub --import=.emulator-data --export-on-exit=.emulator-data",
+    "emulators:seed-only": "firebase emulators:start --only firestore,auth --import=.emulator-data --export-on-exit=.emulator-data",
+    "emulators:backend": "firebase emulators:start --only functions,firestore,auth,pubsub",
+    "contracts:update": "node scripts/update-contracts.mjs",
+    "seed:emulator": "node scripts/seed-emulator.mjs",
+    "seed:emulator:small": "node scripts/seed-emulator.mjs --small",
+    "seed:emulator:safe": "node scripts/seed-emulator-safe.mjs",
+    "seed:emulator:safe:small": "node scripts/seed-emulator-safe.mjs --small",
+    "migration:harvest:v1": "node scripts/migration-harvest-v1.mjs",
+    "migration:harvest:v1:collections": "node scripts/migration-harvest-v1.mjs --include-firestore-collections",
+    "migration:seed-harvest": "node scripts/migration-seed-harvest.mjs",
+    "migration:seed-harvest:safe": "node scripts/migration-seed-harvest-safe.mjs",
+    "migration:run": "node scripts/migration-run.mjs",
+    "migration:run:grants": "node scripts/migration-run.mjs --collections=grants",
+    "migration:run:safe": "node scripts/migration-run-safe.mjs",
+    "migration:phase2": "node scripts/migration/reconcile-phase2.mjs",
+    "migration:phase2:safe": "node scripts/migration-phase2-safe.mjs",
+    "migration:phase2f": "node scripts/migration/reconcile-phase2f-grant-tasks.mjs",
+    "migration:phase2f:safe": "node scripts/migration-phase2f-safe.mjs",
+    "migration:phase2g": "node scripts/migration/reconcile-phase2g-fixes.mjs",
+    "migration:phase2g:safe": "node scripts/migration-phase2g-safe.mjs",
+    "migration:rebuild:safe": "node scripts/migration-rebuild-safe.mjs",
+    "migration:auth:apply": "node scripts/migration/auth-apply.mjs",
+    "migration:auth:apply:safe": "node scripts/migration-auth-apply-safe.mjs",
+    "migration:firestore:apply": "node scripts/migration/firestore-apply.mjs",
+    "migration:checks": "node scripts/migration-checks.mjs",
+    "migration:checks:coverage": "node scripts/migration/checks/check-harvest-coverage.mjs",
+    "migration:checks:field-maps": "node scripts/migration/checks/check-field-maps.mjs"
+  }
+}
