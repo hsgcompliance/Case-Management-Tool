@@ -144,7 +144,20 @@ export function AssessmentsTab({
   };
 
   return (
-    <div className="space-y-3 mt-4">
+    <div className="space-y-4 mt-4">
+      {/* Description banner */}
+      {!editing && (
+        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-700 dark:bg-slate-800/40">
+          <div className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">About Assessments</div>
+          <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+            Assessment templates define the structured intake, acuity, and compliance forms used for clients in this program.
+            Templates are linked to this grant and appear on each enrollment for case managers to complete.
+            Rubric-based assessments calculate an acuity score that rolls up to case manager dashboards and workload metrics.
+            Changes to templates do not automatically update past submissions — use <strong>Recompute Scores</strong> for that.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
         <label className="flex-1 min-w-[220px] text-sm">
           <div className="text-xs text-slate-600">Template</div>

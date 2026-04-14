@@ -5,6 +5,7 @@ import React from "react";
 import type { TCustomerEntity } from "@types";
 import type { CaseManagerOption } from "@entities/selectors/CaseManagerSelect";
 import { CustomerCardView } from "./CustomerCardView";
+import type { CustomerViewFeatureFlags } from "./customerViewFlags";
 
 type ActiveMode = "all" | "active" | "inactive";
 type DeletedMode = "exclude" | "include" | "only";
@@ -45,6 +46,8 @@ type CustomersNewStateViewProps = {
   onGrantFilterChange: (value: string) => void;
   onResetFilters: () => void;
   onSearchEnter?: () => void;
+  onCustomerOpen?: (customerId: string, options?: { tab?: "tasks" }) => void;
+  featureFlags?: Partial<CustomerViewFeatureFlags>;
 };
 
 export function CustomersNewStateView({
@@ -73,6 +76,8 @@ export function CustomersNewStateView({
   onGrantFilterChange,
   onResetFilters,
   onSearchEnter,
+  onCustomerOpen,
+  featureFlags,
 }: CustomersNewStateViewProps) {
   return (
     <>
@@ -102,6 +107,8 @@ export function CustomersNewStateView({
         onGrantFilterChange={onGrantFilterChange}
         onResetFilters={onResetFilters}
         onSearchEnter={onSearchEnter}
+        onCustomerOpen={onCustomerOpen}
+        featureFlags={featureFlags}
       />
     </>
   );

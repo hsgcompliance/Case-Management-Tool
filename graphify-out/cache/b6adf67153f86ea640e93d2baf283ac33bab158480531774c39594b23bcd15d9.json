@@ -1,0 +1,1 @@
+{"nodes": [{"id": "contracts_src_tasks_ts", "label": "tasks.ts", "file_type": "code", "source_file": "contracts\\src\\tasks.ts", "source_location": "L1"}], "edges": [{"source": "contracts_src_tasks_ts", "target": "contracts_src_core", "relation": "imports_from", "confidence": "EXTRACTED", "source_file": "contracts\\src\\tasks.ts", "source_location": "L2", "weight": 1.0}]}

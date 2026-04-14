@@ -12,11 +12,13 @@
  *   `firebase deploy --only hosting --project housing-db-v2`
  */
 import { spawnSync } from "node:child_process";
+import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
 
 const PROJECT = process.argv[2] || "housing-db-v2";
 const DEPLOY_HOSTING = process.argv.includes("--hosting");
 const DELETE_HOSTING_SSR = process.argv.includes("--delete-hosting-ssr");
 const HOSTING_ONLY = process.argv.includes("--hosting-only");
+const { shouldPush, commitMsg } = parsePushArgs();
 const REGION = "us-central1";
 const BATCH_SIZE = 20;
 
@@ -205,3 +207,7 @@ if (!HOSTING_ONLY) {
 }
 
 deploy();
+
+if (shouldPush) {
+  pushCurrentBranchToGithub({ commitMsg });
+}

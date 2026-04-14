@@ -52,6 +52,13 @@ export default function DevMenu({
           className="absolute right-0 z-50 mt-2 w-56 rounded border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-900"
         >
           <Link
+            href="/dev/secret-games"
+            className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+            onClick={() => setOpen(false)}
+          >
+            Secret Games
+          </Link>
+          <Link
             href="/dev/functions"
             className="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
             onClick={() => setOpen(false)}

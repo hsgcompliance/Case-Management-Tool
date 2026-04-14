@@ -27,7 +27,7 @@ import { fmtDateOrDash } from "@lib/formatters";
 import { isAdminLike } from "@lib/roles";
 import { toApiError } from "@client/api";
 import type { TGrant as Grant, ISODate } from "@types";
-import { DetailsTab, BudgetTab, TasksTab, AssessmentsTab, ActivityTab, AllocationTab } from "./tabs";
+import { DetailsTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab } from "./tabs";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 
@@ -193,13 +193,12 @@ const grantKindOf = (row: Record<string, unknown>): "grant" | "program" => {
   return total <= 0 ? "program" : "grant";
 };
 
-type GrantTab = "details" | "budget" | "tasks" | "assessments" | "activity" | "allocation";
+type GrantTab = "details" | "budget" | "tasks" | "assessments" | "allocation";
 
 const tabFromQuery = (tab: string | null): GrantTab => {
-  if (tab === "budget") return "budget";
+  if (tab === "budget" || tab === "activity") return "budget";
   if (tab === "tasks") return "tasks";
   if (tab === "assessments") return "assessments";
-  if (tab === "activity") return "activity";
   if (tab === "allocation") return "allocation";
   return "details";
 };
@@ -535,6 +534,21 @@ export default function GrantDetailModal({
     setPendingKind(null);
   };
 
+  // ── Pin dropdown state ────────────────────────────────────────────────────
+  const [pinOpen, setPinOpen] = useState(false);
+  const pinRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!pinOpen) return;
+    function onDown(e: MouseEvent) {
+      if (pinRef.current && !pinRef.current.contains(e.target as Node)) setPinOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [pinOpen]);
+
+  const pageLabel = currentKind === "program" ? "Programs Page" : "Grants Page";
+  const anyPinned = isPinned || isDashPinned;
+
   const title = isCreate
     ? "New Grant"
     : editing
@@ -576,22 +590,39 @@ export default function GrantDetailModal({
             </div>
             <div className="flex items-center gap-2">
               {!isCreate && fetchId && (
-                <>
+                <div ref={pinRef} className="relative">
                   <button
-                    title={isDashPinned ? "Unpin from dashboard" : "Pin to dashboard"}
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => toggleDashPin.mutate({ type: "grant", id: fetchId })}
+                    type="button"
+                    className={["btn btn-ghost btn-sm gap-1", anyPinned ? "text-amber-600" : ""].join(" ")}
+                    onClick={() => setPinOpen((v) => !v)}
                   >
-                    {isDashPinned ? "📌 Pinned" : "📌 Dashboard"}
+                    {anyPinned ? "★" : "☆"} Pin ▾
                   </button>
-                  <button
-                    title={isPinned ? "Unpin" : "Pin grant"}
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => togglePin.mutate(fetchId)}
-                  >
-                    {isPinned ? "★ Pinned" : "☆ Pin"}
-                  </button>
-                </>
+                  {pinOpen && (
+                    <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-[14px] border border-slate-200 bg-white py-1.5 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                        onClick={() => { togglePin.mutate(fetchId); setPinOpen(false); }}
+                      >
+                        <span className={`text-base ${isPinned ? "text-amber-500" : "text-slate-300"}`}>{isPinned ? "★" : "☆"}</span>
+                        <span className="flex-1 text-left text-slate-800 dark:text-slate-200">
+                          {isPinned ? `Unpin from ${pageLabel}` : `Pin to ${pageLabel}`}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                        onClick={() => { toggleDashPin.mutate({ type: "grant", id: fetchId }); setPinOpen(false); }}
+                      >
+                        <span className={`text-base ${isDashPinned ? "text-sky-500" : "text-slate-300"}`}>{isDashPinned ? "◆" : "◇"}</span>
+                        <span className="flex-1 text-left text-slate-800 dark:text-slate-200">
+                          {isDashPinned ? "Unpin from Metrics" : "Pin to Metrics"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               {!isCreate && (
                 <button
@@ -620,22 +651,40 @@ export default function GrantDetailModal({
           </div>
           <div className="flex items-center gap-2">
             {!isCreate && fetchId && (
-              <>
+              <div ref={pinRef} className="relative">
                 <button
-                  title={isDashPinned ? "Unpin from dashboard" : "Pin to dashboard"}
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => toggleDashPin.mutate({ type: "grant", id: fetchId })}
+                  type="button"
+                  className={["btn btn-ghost btn-sm gap-1 text-xs", anyPinned ? "text-amber-600" : ""].join(" ")}
+                  onClick={() => setPinOpen((v) => !v)}
+                  title="Pin options"
                 >
-                  {isDashPinned ? "📌" : "📌"}
+                  {anyPinned ? "★" : "☆"} Pin ▾
                 </button>
-                <button
-                  title={isPinned ? "Unpin" : "Pin"}
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => togglePin.mutate(fetchId)}
-                >
-                  {isPinned ? "★" : "☆"}
-                </button>
-              </>
+                {pinOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-[14px] border border-slate-200 bg-white py-1.5 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                      onClick={() => { togglePin.mutate(fetchId); setPinOpen(false); }}
+                    >
+                      <span className={`text-base ${isPinned ? "text-amber-500" : "text-slate-300"}`}>{isPinned ? "★" : "☆"}</span>
+                      <span className="flex-1 text-left text-slate-800 dark:text-slate-200">
+                        {isPinned ? `Unpin from ${pageLabel}` : `Pin to ${pageLabel}`}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                      onClick={() => { toggleDashPin.mutate({ type: "grant", id: fetchId }); setPinOpen(false); }}
+                    >
+                      <span className={`text-base ${isDashPinned ? "text-sky-500" : "text-slate-300"}`}>{isDashPinned ? "◆" : "◇"}</span>
+                      <span className="flex-1 text-left text-slate-800 dark:text-slate-200">
+                        {isDashPinned ? "Unpin from Metrics" : "Pin to Metrics"}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             {!isCreate && (
               <button
@@ -701,12 +750,12 @@ export default function GrantDetailModal({
       {(isCreate || grant) && (
         <TabsRouter
           showBudgetTab={showBudgetTab}
-          showActivityTab={showActivityTab}
           showAllocationTab={showAllocationTab}
           editing={editing}
           model={model}
           setModel={setModel}
           grant={grant ?? null}
+          grantId={fetchId}
           derived={derived}
           onOpenRegen={() => setRegenOpen(true)}
           affected={affected}
@@ -813,9 +862,9 @@ export default function GrantDetailModal({
 
 function TabsRouter(props: {
   showBudgetTab: boolean;
-  showActivityTab: boolean;
   showAllocationTab: boolean;
   editing: boolean;
+  grantId?: string;
   model: Record<string, unknown>;
   setModel: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
   grant: Grant | null;
@@ -846,30 +895,32 @@ function TabsRouter(props: {
 
   const dynamicValue = useMemo(() => pickNonMeta(props.model), [props.model]);
 
+  const TAB_LABELS: Record<GrantTab, string> = {
+    details:     "Details",
+    budget:      "Budget & Activity",
+    tasks:       "Tasks",
+    assessments: "Assessments",
+    allocation:  "Allocation",
+  };
+
   return (
     <>
       <div className="tabs mt-4" data-tour="grant-tabs">
-        {(["details", "budget", "allocation", "tasks", "assessments", "activity"] as const)
+        {(["details", "budget", "allocation", "tasks", "assessments"] as const)
           .filter((t) => {
-            if (t === "budget") return props.showBudgetTab;
-            if (t === "activity") return props.showActivityTab;
+            if (t === "budget")     return props.showBudgetTab;
             if (t === "allocation") return props.showAllocationTab;
             return true;
           })
-          .map(
-          (t) => (
+          .map((t) => (
             <button
               key={t}
-              className={[
-                "tab",
-                tab === t ? "tab-active" : "",
-              ].join(" ")}
+              className={["tab", tab === t ? "tab-active" : ""].join(" ")}
               onClick={() => setTab(t)}
             >
-              {t[0].toUpperCase() + t.slice(1)}
+              {TAB_LABELS[t]}
             </button>
-          ),
-        )}
+          ))}
       </div>
 
       {tab === "details" && (
@@ -884,11 +935,14 @@ function TabsRouter(props: {
           canEditKind={props.canEditKind}
           onRequestKindChange={props.onRequestKindChange}
           STATUS_OPTS={props.STATUS_OPTS}
+          derived={props.derived}
+          showBudgetStrip={props.showBudgetTab}
+          currency={props.currency}
         />
       )}
 
       {tab === "budget" && props.showBudgetTab && (
-        <BudgetTab
+        <BudgetActivityTab
           editing={props.editing}
           model={props.model}
           setModel={props.setModel}
@@ -896,6 +950,7 @@ function TabsRouter(props: {
           currency={props.currency}
           recomputeBudgetTotals={recomputeBudgetTotals}
           num={num}
+          grantId={props.grantId}
         />
       )}
 
@@ -918,10 +973,6 @@ function TabsRouter(props: {
           grant={props.grant}
           affected={props.affected}
         />
-      )}
-
-      {tab === "activity" && props.grant?.id && (
-        <ActivityTab grantId={String(props.grant.id)} />
       )}
 
       {tab === "allocation" && props.grant?.id && (

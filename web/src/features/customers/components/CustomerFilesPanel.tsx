@@ -102,7 +102,7 @@ function scoreMatch(folder: TCustomerFolder, first: string, last: string, cwid?:
 // BuildFolderDialog — full GAS-equivalent new-folder builder
 // ─────────────────────────────────────────────────────────────────────────────
 
-function BuildFolderDialog({
+export function BuildFolderDialog({
   defaultName,
   customerFirst,
   customerLast,
@@ -392,7 +392,7 @@ function BuildFolderDialog({
 // LinkFolderDialog — link existing Drive folder
 // ─────────────────────────────────────────────────────────────────────────────
 
-function LinkFolderDialog({
+export function LinkFolderDialog({
   customerFirst,
   customerLast,
   customerCwid,

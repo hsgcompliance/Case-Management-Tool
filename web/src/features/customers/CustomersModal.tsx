@@ -249,7 +249,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
     ["assessments", "Assessments"],
     ["tasks", "Tasks"],
     ["payments", "Payment Schedules"],
-    ["files", "Files"],
+    ["files", "Integrations"],
   ];
 
   const hasRecord = !!customerId && customerId !== "new";

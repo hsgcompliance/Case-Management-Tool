@@ -10,7 +10,7 @@ import { attachReactQueryDebug } from "@lib/reactQueryDebug";
 import { shouldUseEmulators } from "@lib/runtimeEnv";
 import { resolveFunctionsBase } from "@lib/functionsBase";
 import { getAuth } from "firebase/auth";
-import GameMiniPlayerProvider, { GameMiniPlayerFloat } from "@features/games/GameMiniPlayer";
+import GameMiniPlayerProvider from "@features/games/GameMiniPlayerContext";
 
 const CHUNK_RELOAD_ONCE_KEY = "__hdb_chunk_reload_once__";
 
@@ -158,7 +158,6 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       <AuthProvider>
         <GameMiniPlayerProvider>
           {children}
-          <GameMiniPlayerFloat />
         </GameMiniPlayerProvider>
       </AuthProvider>
     </QueryClientProvider>

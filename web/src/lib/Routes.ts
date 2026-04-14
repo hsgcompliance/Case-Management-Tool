@@ -54,6 +54,7 @@ export const Routes = {
     admin: {
       root: (() => "/admin") as RouteFn,
       acuity: (() => "/admin/acuity") as RouteFn,
+      arcadeManager: (() => "/admin/arcade-manager") as RouteFn,
       debug: (() => "/admin/debug") as RouteFn,
       users: (() => "/admin/users") as RouteFn,
       orgConfig: (() => "/admin/org-config") as RouteFn,

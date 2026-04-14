@@ -192,6 +192,21 @@ export const UserToursState = z.object({
   updatedAt: TsLike.optional(),
 });
 
+// ── Game metadata ─────────────────────────────────────────────────────────────
+// Per-game record: at minimum a highScore; games can store arbitrary extra state
+// via .catchall(). New games can be added without changing this schema.
+export const UserGameRecord = z
+  .object({
+    highScore: z.number().int().nonnegative().optional(),
+    lastPlayed: z.string().optional(),          // ISO date
+    gamesPlayed: z.number().int().nonnegative().optional(),
+  })
+  .catchall(z.unknown());
+
+// Map of gameId → GameRecord (open-ended — add any game without schema changes)
+export const UserGameMeta = z.record(z.string(), UserGameRecord);
+
+// Kept for backward-compat reads during migration; new writes go to game_meta
 export const UserGameHighScores = z
   .object({
     runner: z.number().int().nonnegative().optional(),
@@ -211,6 +226,8 @@ export const UserExtras = z
     // Feature sub-objects
     dashboardPrefs: UserDashboardPrefs.nullable().optional(),
     tours: UserToursState.nullable().optional(),
+    game_meta: UserGameMeta.optional(),
+    // Legacy — kept readable so migration code can pull old scores
     gameHighScores: UserGameHighScores.optional(),
     quickBreakHighScore: z.number().int().nonnegative().optional(),
 
@@ -255,6 +272,8 @@ export type TUserCustomersPageMode = z.infer<typeof UserCustomersPageMode>;
 export type TTourProgressStatus = z.infer<typeof TourProgressStatus>;
 export type TTourProgressEntry = z.infer<typeof TourProgressEntry>;
 export type TUserToursState = z.infer<typeof UserToursState>;
+export type TUserGameRecord = z.infer<typeof UserGameRecord>;
+export type TUserGameMeta = z.infer<typeof UserGameMeta>;
 export type TUserGameHighScores = z.infer<typeof UserGameHighScores>;
 export type TUserExtras = z.infer<typeof UserExtras>;
 export type TTaskMode = NonNullable<TUserExtras["taskMode"]>;

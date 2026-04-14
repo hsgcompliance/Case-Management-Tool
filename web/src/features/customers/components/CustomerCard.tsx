@@ -6,7 +6,7 @@ import { useCustomerEnrollments, usePreloadCustomerEnrollments } from "@hooks/us
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
 import { currentMonthKey } from "@hooks/useMetrics";
 import { populationChipClass, populationTone } from "@lib/colorRegistry";
-import { normalizePayments } from "./paymentScheduleUtils";
+import { normalizePayments, currency, todayISO } from "./paymentScheduleUtils";
 import { customerContactRoleForUid } from "../contactCaseManagers";
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
@@ -78,10 +78,6 @@ function formatDate(value: unknown): string {
   return new Date(time).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function formatAcuity(score: number | null | undefined): string {
-  if (score == null) return "-";
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
-}
 
 function populationLabel(population: unknown): string {
   const text = String(population || "").trim();
@@ -113,26 +109,7 @@ function sortTasks(tasks: TasksListItem[]): TasksListItem[] {
   return [...tasks].sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")));
 }
 
-function formatMonthYear(value: string): string {
-  const text = String(value || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
-  return `${text.slice(5, 7)}/${text.slice(0, 4)}`;
-}
 
-function assistanceWindowLabel(enrollment: Enrollment): string | null {
-  const payments = normalizePayments(Array.isArray(enrollment.payments) ? enrollment.payments : []);
-  const assistancePayments = payments.filter((payment) => payment.type !== "service");
-  if (!assistancePayments.length) return null;
-  const dates = assistancePayments
-    .map((payment) => String(payment.dueDate || "").trim())
-    .filter((dueDate) => /^\d{4}-\d{2}-\d{2}$/.test(dueDate))
-    .sort();
-  if (!dates.length) return null;
-  const start = formatMonthYear(dates[0]);
-  const end = formatMonthYear(dates[dates.length - 1]);
-  if (!start || !end) return null;
-  return `${start} - ${end} (Last month of assistance)`;
-}
 
 function enrollmentSummaryLabel(enrollment: Enrollment): string {
   return (
@@ -269,6 +246,50 @@ function CustomerTasksList({
   );
 }
 
+type EnrollmentFinancial = {
+  id: string;
+  label: string;
+  firstDate: string | null;
+  lastDate: string | null;
+  totalProjected: number;
+  totalPaid: number;
+  nextDue: { date: string; amount: number } | null;
+  hasAnyMoney: boolean;
+};
+
+function computeEnrollmentFinancial(enrollment: Enrollment): EnrollmentFinancial {
+  const all = normalizePayments(Array.isArray(enrollment.payments) ? enrollment.payments : []);
+  // Exclude service payments for financial summary (rent, deposit, prorated only)
+  const financial = all.filter((p) => p.type !== "service" && !p.void);
+  const label =
+    String(enrollment.grantName || "").trim() ||
+    String(enrollment.name || "").trim() ||
+    "Enrollment";
+
+  if (!financial.length) {
+    return { id: String(enrollment.id || ""), label, firstDate: null, lastDate: null, totalProjected: 0, totalPaid: 0, nextDue: null, hasAnyMoney: false };
+  }
+
+  const today = todayISO();
+  const dates = financial.map((p) => p.dueDate).filter(Boolean).sort();
+  const firstDate = dates[0] || null;
+  const lastDate = dates[dates.length - 1] || null;
+  const totalProjected = financial.reduce((s, p) => s + p.amount, 0);
+  const totalPaid = financial.filter((p) => p.paid === true).reduce((s, p) => s + p.amount, 0);
+  const unpaid = financial
+    .filter((p) => !p.paid && p.dueDate >= today)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const nextDue = unpaid.length ? { date: unpaid[0].dueDate, amount: unpaid[0].amount } : null;
+
+  return { id: String(enrollment.id || ""), label, firstDate, lastDate, totalProjected, totalPaid, nextDue, hasAnyMoney: totalProjected > 0 };
+}
+
+function fmtShortDate(iso: string | null): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "—";
+  const [, m, d] = iso.split("-");
+  return `${m}/${d}/${iso.slice(2, 4)}`;
+}
+
 const COL_SPAN_CLASSES = ["", "lg:col-span-1", "lg:col-span-2"] as const;
 const DRAG_PX_PER_STEP = 140;
 
@@ -279,6 +300,7 @@ function CustomerCardInner({
   selectionMode = false,
   onSelectGesture,
   onOpen,
+  loading = false,
 }: CustomerCardProps) {
   const preloadCustomerEnrollments = usePreloadCustomerEnrollments();
   const [colSpan, setColSpan] = React.useState(1);
@@ -325,13 +347,8 @@ function CustomerCardInner({
   const activeEnrollments = sortActiveEnrollments(enrollments.filter(isActiveEnrollment));
   const inactiveEnrollments = enrollments.filter((enrollment) => !isActiveEnrollment(enrollment));
   const activeEnrollmentIds = activeEnrollments.map((enrollment) => enrollment.id);
-  const assistanceEnrollments = activeEnrollments
-    .map((enrollment) => ({
-      id: String(enrollment.id || "").trim(),
-      label: enrollmentSummaryLabel(enrollment),
-      window: assistanceWindowLabel(enrollment),
-    }))
-    .filter((entry) => entry.id && entry.window);
+  const enrollmentFinancials = activeEnrollments.map(computeEnrollmentFinancial);
+  const hasAnyFinancialAssistance = enrollmentFinancials.some((f) => f.hasAnyMoney);
   const relationship =
     viewerRelationship === "primary"
       ? {
@@ -352,6 +369,7 @@ function CustomerCardInner({
 
   return (
     <article
+      data-card-physics-id={`customer:${customer.id}`}
       className={[
         COL_SPAN_CLASSES[colSpan],
         "group relative h-full cursor-pointer overflow-hidden rounded-[24px] border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
@@ -393,6 +411,14 @@ function CustomerCardInner({
       role="button"
       tabIndex={0}
     >
+      {loading && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center rounded-[24px] bg-white/70 backdrop-blur-[2px] dark:bg-slate-900/70">
+          <div className="flex flex-col items-center gap-2">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700 dark:border-slate-700 dark:border-t-slate-300" />
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Loading…</span>
+          </div>
+        </div>
+      )}
       <div
         className={[
           "absolute right-4 top-4 z-20 transition-opacity",
@@ -489,38 +515,111 @@ function CustomerCardInner({
         <div className={["mt-1 text-xs font-medium uppercase tracking-[0.18em]", inactiveCustomer ? "text-slate-500 dark:text-slate-500" : "text-slate-600 dark:text-slate-400"].join(" ")}>
           CW ID: {customer.cwId ? String(customer.cwId) : "--"}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {showEnrollmentSections ? (
-            <span className={["rounded-full border px-3 py-1 text-xs font-semibold", inactiveCustomer ? "border-slate-200 bg-white text-slate-500" : "border-sky-300 bg-white text-slate-900"].join(" ")}>
-              Enrollments: {hasEnrollmentData ? `${activeEnrollments.length}/${inactiveEnrollments.length}` : "--"}
-            </span>
-          ) : null}
-          <span className={["rounded-full border px-3 py-1 text-xs font-semibold", inactiveCustomer ? "border-slate-200 bg-slate-100 text-slate-500" : "border-amber-200 bg-amber-50 text-amber-800"].join(" ")}>
-            Acuity: {formatAcuity(customer.acuityScore as number | null | undefined)}
-          </span>
-        </div>
-        {showEnrollmentSections && hasEnrollmentData && assistanceEnrollments.length > 0 ? (
-          <div className="mt-3 space-y-1.5">
-            {assistanceEnrollments.slice(0, 2).map((entry) => (
-              <div
-                key={entry.id}
-                className={[
-                  "rounded-xl border px-3 py-2 text-xs",
-                  inactiveCustomer
-                    ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500"
-                    : "border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
-                ].join(" ")}
-              >
-                <span className="font-semibold">{entry.label}:</span> {entry.window}
-              </div>
-            ))}
-            {assistanceEnrollments.length > 2 ? (
-              <div className={inactiveCustomer ? "text-xs text-slate-400" : "text-xs text-slate-500"}>
-                +{assistanceEnrollments.length - 2} more assistance window{assistanceEnrollments.length - 2 === 1 ? "" : "s"}
-              </div>
-            ) : null}
+      </div>
+
+      {/* ── Below-banner: Payments (left) + Enrollments (right) ── */}
+      <div className="grid grid-cols-2 gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        {/* LEFT: financial summary per enrollment */}
+        <div className="min-w-0 space-y-1.5">
+          <div className={["text-[10px] font-semibold uppercase tracking-[0.18em]", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"].join(" ")}>
+            Financial Assistance
           </div>
-        ) : null}
+          {isLoadingEnrollmentData && !hasEnrollmentData ? (
+            <div className="text-[11px] text-slate-400 dark:text-slate-500">Loading…</div>
+          ) : !hasEnrollmentData ? (
+            <div className={["text-[11px] italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+              Expand card for enrollment info and tasks
+            </div>
+          ) : !hasAnyFinancialAssistance ? (
+            <div className={["text-[11px] italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+              No financial assistance provided
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {enrollmentFinancials.filter((f) => f.hasAnyMoney).slice(0, 2).map((f) => (
+                <div
+                  key={f.id}
+                  className={[
+                    "rounded-lg border px-2 py-1.5 text-[11px]",
+                    inactiveCustomer
+                      ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                      : "border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200",
+                  ].join(" ")}
+                >
+                  <div className="truncate font-semibold">{f.label}</div>
+                  <div className="mt-0.5 text-[10px] opacity-75">
+                    {fmtShortDate(f.firstDate)} – {fmtShortDate(f.lastDate)}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+                    <span>
+                      <span className="opacity-60">Projected </span>
+                      <span className="font-semibold">{currency(f.totalProjected)}</span>
+                    </span>
+                    <span>
+                      <span className="opacity-60">Paid </span>
+                      <span className="font-semibold">{currency(f.totalPaid)}</span>
+                    </span>
+                  </div>
+                  {f.nextDue ? (
+                    <div className="mt-0.5 text-[10px]">
+                      <span className="opacity-60">Next </span>
+                      <span className="font-semibold">{fmtShortDate(f.nextDue.date)} · {currency(f.nextDue.amount)}</span>
+                    </div>
+                  ) : (
+                    <div className="mt-0.5 text-[10px] opacity-60">All paid</div>
+                  )}
+                </div>
+              ))}
+              {enrollmentFinancials.filter((f) => f.hasAnyMoney).length > 2 ? (
+                <div className="text-[10px] text-slate-400">
+                  +{enrollmentFinancials.filter((f) => f.hasAnyMoney).length - 2} more
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: enrollment chip + list */}
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className={["text-[10px] font-semibold uppercase tracking-[0.18em]", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"].join(" ")}>
+              Enrollments
+            </div>
+            <span className={["ml-auto rounded-full border px-2 py-0.5 text-[10px] font-semibold", inactiveCustomer ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400" : "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300"].join(" ")}>
+              {hasEnrollmentData ? `${activeEnrollments.length} / ${enrollments.length}` : "—"}
+            </span>
+          </div>
+          {isLoadingEnrollmentData && !hasEnrollmentData ? (
+            <div className="text-[11px] text-slate-400 dark:text-slate-500">Loading…</div>
+          ) : hasEnrollmentData ? (
+            activeEnrollments.length > 0 ? (
+              <div className="space-y-1">
+                {activeEnrollments.slice(0, 3).map((enr) => (
+                  <div
+                    key={enr.id}
+                    className={[
+                      "truncate rounded-lg border px-2 py-1 text-[11px] font-medium",
+                      inactiveCustomer
+                        ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                        : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
+                    ].join(" ")}
+                  >
+                    {enrollmentSummaryLabel(enr)}
+                  </div>
+                ))}
+                {activeEnrollments.length > 3 ? (
+                  <div className="text-[10px] text-slate-400">+{activeEnrollments.length - 3} more</div>
+                ) : null}
+              </div>
+            ) : (
+              <div className={["text-[11px] italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+                No active
+              </div>
+            )
+          ) : (
+            <div className="text-[11px] text-slate-400 dark:text-slate-500">—</div>
+          )}
+        </div>
       </div>
 
       {showEnrollmentSections ? (
@@ -558,13 +657,7 @@ function CustomerCardInner({
             />
           </div>
         </div>
-      ) : (
-        <div className="px-4 pb-4 pt-3">
-          <div className={["text-xs", inactiveCustomer ? "text-slate-400 dark:text-slate-600" : "text-slate-500 dark:text-slate-400"].join(" ")}>
-            Expand card for enrollment info and tasks.
-          </div>
-        </div>
-      )}
+      ) : null}
 
       <div className="group absolute bottom-0 right-0" onClick={(event) => event.stopPropagation()}>
         <div

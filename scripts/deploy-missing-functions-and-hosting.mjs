@@ -11,6 +11,7 @@ import { execSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -18,6 +19,7 @@ const require = createRequire(import.meta.url);
 const PROJECT = process.argv[2] || "housing-db-v2";
 const WITH_HOSTING = process.argv.includes("--hosting");
 const LIST_ONLY = process.argv.includes("--list-only");
+const { shouldPush, commitMsg } = parsePushArgs();
 const CHUNK_SIZE = 20;
 
 function run(cmd, args, { allowFailure = false, cwd = ROOT, env = process.env } = {}) {
@@ -101,4 +103,8 @@ if (missing.length) {
 if (WITH_HOSTING) {
   console.log("Deploying hosting...");
   run("firebase", ["deploy", "--only", "hosting", "--project", PROJECT]);
+}
+
+if (shouldPush) {
+  pushCurrentBranchToGithub({ commitMsg });
 }

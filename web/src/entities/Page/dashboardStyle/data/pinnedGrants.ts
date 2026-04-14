@@ -9,7 +9,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@lib/firebase";
 
-export const MAX_PINNED_GRANTS = 4;
+export const MAX_PINNED_GRANTS = 6;
 
 type ExtrasShape = { grantPrefs?: { pinnedGrantIds?: unknown } };
 

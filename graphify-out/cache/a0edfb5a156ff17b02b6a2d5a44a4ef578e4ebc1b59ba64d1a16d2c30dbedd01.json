@@ -1,0 +1,1 @@
+{"nodes": [{"id": "functions_src_core_env_ts", "label": "env.ts", "file_type": "code", "source_file": "functions\\src\\core\\env.ts", "source_location": "L1"}], "edges": [{"source": "functions_src_core_env_ts", "target": "params", "relation": "imports_from", "confidence": "EXTRACTED", "source_file": "functions\\src\\core\\env.ts", "source_location": "L2", "weight": 1.0}]}

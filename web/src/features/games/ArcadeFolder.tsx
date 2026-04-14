@@ -2,7 +2,7 @@
 
 import React from "react";
 import { GAME_REGISTRY } from "./registry";
-import { useGameMiniPlayer } from "./GameMiniPlayer";
+import { getLegacySecretGameByLegacyGameId, useLegacySecretGameLauncher } from "@features/secret-games";
 
 /**
  * Discrete folder-style arcade launcher.
@@ -11,7 +11,7 @@ import { useGameMiniPlayer } from "./GameMiniPlayer";
  */
 export function ArcadeFolder() {
   const [open, setOpen] = React.useState(false);
-  const { openMiniPlayer } = useGameMiniPlayer();
+  const launchLegacySecretGame = useLegacySecretGameLauncher("legacy-host");
   const ref = React.useRef<HTMLDivElement>(null);
 
   // Close on outside click
@@ -47,12 +47,13 @@ export function ArcadeFolder() {
         <div className="mt-0.5 overflow-hidden rounded-md border border-slate-700/50 bg-slate-900/85 py-1 backdrop-blur-sm">
           {games.map((game, idx) => {
             const isLast = idx === games.length - 1;
+            const secretGame = getLegacySecretGameByLegacyGameId(game.id);
             return (
               <button
                 key={game.id}
                 type="button"
                 onClick={() => {
-                  openMiniPlayer(game.id);
+                  if (secretGame) launchLegacySecretGame(secretGame.id);
                   setOpen(false);
                 }}
                 className="group flex w-full items-center gap-2 px-3 py-1 text-left text-xs text-slate-500 transition-colors hover:bg-slate-700/40 hover:text-slate-200"

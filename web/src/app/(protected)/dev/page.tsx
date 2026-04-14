@@ -17,6 +17,12 @@ export default function DevIndexPage() {
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link
+            href="/dev/secret-games"
+            className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-700 hover:bg-violet-100 dark:border-violet-900/60 dark:bg-violet-900/20 dark:text-violet-300"
+          >
+            Secret Games
+          </Link>
+          <Link
             href="/dev/functions"
             className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-900/20 dark:text-blue-300"
           >

@@ -277,7 +277,7 @@ export const jotformSyncSelection = secureHandler(
     const out = await syncJotformSelection(body, caller, targetOrg);
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "admin", methods: ["POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+  { auth: "admin", methods: ["POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET], memory: "512MiB" }
 );
 
 /** POST /jotformDigestUpsert — upsert digest config for a form */
@@ -367,5 +367,5 @@ export const jotformSyncSubmissions = secureHandler(
     const out = await syncJotformSubmissions(body, caller, targetOrg);
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "admin", methods: ["POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+  { auth: "admin", methods: ["POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET], memory: "512MiB" }
 );

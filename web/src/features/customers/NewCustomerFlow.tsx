@@ -22,11 +22,16 @@ import { useGrants } from "@hooks/useGrants";
 import { usePaymentsBuildSchedule, type PaymentScheduleBuildInput } from "@hooks/usePayments";
 import { useTasksGenerateScheduleWrite } from "@hooks/useTasks";
 import { useMe, useUsers, type CompositeUser } from "@hooks/useUsers";
+import { useQueryClient } from "@tanstack/react-query";
+import CustomersAPI from "@client/customers";
 import { addYears, parseISO10, toISODate } from "@lib/date";
 import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
+import { findDuplicates, DUP_WARN_THRESHOLD } from "@lib/duplicateScore";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import { isCaseManagerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
+import { DuplicateChecker, type DupCheckState } from "./DuplicateChecker";
+import type { DupMatch } from "@lib/duplicateScore";
 
 type FlowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type Population = "Youth" | "Individual" | "Family" | "";
@@ -374,6 +379,12 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [workingLabel, setWorkingLabel] = React.useState<string | null>(null);
   const [flowError, setFlowError] = React.useState<string | null>(null);
 
+  // Duplicate check
+  const qc = useQueryClient();
+  const [dupCheckState, setDupCheckState] = React.useState<DupCheckState>("idle");
+  const [dupMatches, setDupMatches] = React.useState<DupMatch<TCustomerEntity>[]>([]);
+  const [dupOverrideConfirmed, setDupOverrideConfirmed] = React.useState(false);
+
   React.useEffect(() => {
     if (!meUid) return;
     setIsMyCaseManager((current) => (current ? true : meIsCaseManager));
@@ -431,6 +442,16 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     }
   }, [enrollments, existingGrantIds.size, selectedEnrollmentDrafts.length]);
 
+  // Reset dup check when identifying fields change after a check was run
+  React.useEffect(() => {
+    if (dupCheckState !== "idle") {
+      setDupCheckState("idle");
+      setDupMatches([]);
+      setDupOverrideConfirmed(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstName, lastName, dob, cwId]);
+
   // Pre-fill folder name when customer details change
   React.useEffect(() => {
     if (!buildFolderName && lastName.trim() && firstName.trim()) {
@@ -470,7 +491,13 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     [enrollments],
   );
 
-  const canStepOneContinue = !!firstName.trim() && !!lastName.trim() && !!dob.trim();
+  const hasHighDupMatch = dupMatches.some((m) => m.score >= DUP_WARN_THRESHOLD);
+  const canStepOneContinue =
+    !!firstName.trim() &&
+    !!lastName.trim() &&
+    !!dob.trim() &&
+    dupCheckState === "done" &&
+    (!hasHighDupMatch || dupOverrideConfirmed);
   const canStepTwoContinue = !!population && (isMyCaseManager || !!primaryCaseManagerId.trim());
   const canStepThreeContinue = selectedGrantIds.length > 0;
   const folderId = parseFolderId(folderUrl);
@@ -578,6 +605,31 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     },
     [enrollCustomer, enrollmentsQ, existingGrantIds, selectedEnrollmentDrafts],
   );
+
+  const runDupCheck = React.useCallback(async () => {
+    setDupCheckState("checking");
+    setDupMatches([]);
+    setDupOverrideConfirmed(false);
+    try {
+      const all = await qc.fetchQuery({
+        queryKey: ["customers", "list", { deleted: "exclude" }, "all-pages", 200, 50_000],
+        queryFn: () => CustomersAPI.listAll({ deleted: "exclude" }),
+        staleTime: 5 * 60 * 1_000, // 5 min cache for the bulk fetch
+      });
+      const candidates = Array.isArray(all) ? (all as TCustomerEntity[]) : [];
+      const matches = findDuplicates(candidates, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        dob: dob.trim(),
+        cwId: cwId.trim(),
+      });
+      setDupMatches(matches);
+      setDupCheckState("done");
+    } catch {
+      setDupCheckState("idle");
+      toast("Duplicate check failed — please try again.", { type: "error" });
+    }
+  }, [qc, firstName, lastName, dob, cwId]);
 
   const goToPrevious = React.useCallback(() => {
     setFlowError(null);
@@ -757,29 +809,51 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     wantsTaskReminders,
   ]);
 
+  const canRunDupCheck = !!firstName.trim() && !!lastName.trim() && !!dob.trim();
+
   const stepContent = step === 1 ? (
     <StepFrame
       eyebrow="Page 1"
       title="Customer basics"
-      description="Capture the required fields first. The next step unlocks when first name, last name, and DOB are entered."
+      description="Enter the required fields, then run a duplicate check. Build Client unlocks once the check is complete and any high-similarity matches are reviewed."
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <label className="field">
-          <span className="label">First name</span>
-          <input className="input" value={firstName} onChange={(e) => setFirstName(e.currentTarget.value)} />
-        </label>
-        <label className="field">
-          <span className="label">Last name</span>
-          <input className="input" value={lastName} onChange={(e) => setLastName(e.currentTarget.value)} />
-        </label>
-        <label className="field">
-          <span className="label">DOB</span>
-          <input className="input" type="date" value={dob} onChange={(e) => setDob(e.currentTarget.value)} />
-        </label>
-        <label className="field">
-          <span className="label">Caseworthy ID</span>
-          <input className="input" value={cwId} onChange={(e) => setCwId(e.currentTarget.value)} />
-        </label>
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="field">
+            <span className="label">First name</span>
+            <input className="input" value={firstName} onChange={(e) => setFirstName(e.currentTarget.value)} />
+          </label>
+          <label className="field">
+            <span className="label">Last name</span>
+            <input className="input" value={lastName} onChange={(e) => setLastName(e.currentTarget.value)} />
+          </label>
+          <label className="field">
+            <span className="label">DOB</span>
+            <input className="input" type="date" value={dob} onChange={(e) => setDob(e.currentTarget.value)} />
+          </label>
+          <label className="field">
+            <span className="label">Caseworthy ID</span>
+            <input className="input" value={cwId} onChange={(e) => setCwId(e.currentTarget.value)} />
+          </label>
+        </div>
+
+        {/* Duplicate checker — only shown once required fields are filled */}
+        {canRunDupCheck ? (
+          <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 text-sm font-semibold text-slate-950">Duplicate check</div>
+            <DuplicateChecker
+              checkState={dupCheckState}
+              matches={dupMatches}
+              onCheck={runDupCheck}
+              onOverride={() => setDupOverrideConfirmed(true)}
+              overrideConfirmed={dupOverrideConfirmed}
+            />
+          </div>
+        ) : (
+          <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-400">
+            Enter first name, last name, and DOB to enable the duplicate check.
+          </div>
+        )}
       </div>
     </StepFrame>
   ) : step === 2 ? (
@@ -875,21 +949,6 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                       options={caseManagerOptions}
                       includeAll
                       allLabel="Select user"
-                    />
-                  </label>
-                </div>
-                <div className="flex-1">
-                  <label className="field">
-                    <span className="label">Role</span>
-                    <input
-                      className="input"
-                      placeholder="Compliance, admin, support…"
-                      value={contact.role}
-                      onChange={(e) => {
-                        const next = otherContactDrafts.slice();
-                        next[index] = { ...next[index], role: e.currentTarget.value };
-                        setOtherContactDrafts(next);
-                      }}
                     />
                   </label>
                 </div>
@@ -1451,7 +1510,16 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     </StepFrame>
   );
 
-  const nextLabel = step === 9 ? "Finish" : step === 8 ? "Review Build" : "Next";
+  const nextLabel =
+    step === 9
+      ? "Finish"
+      : step === 8
+        ? "Review Build"
+        : step === 1 && dupCheckState !== "done"
+          ? "Check duplicates first"
+          : step === 1 && hasHighDupMatch && !dupOverrideConfirmed
+            ? "Review matches above"
+            : "Next";
   const canGoNext =
     step === 1
       ? canStepOneContinue
