@@ -15,8 +15,14 @@ import {
 import { useGrantEnrolledCustomerIds } from "@hooks/useEnrollments";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
+import { useOrgConfig } from "@hooks/useOrgConfig";
 import { useMe, useUpdateMe, useUsers, type CompositeUser } from "@hooks/useUsers";
 import type { TCustomerEntity } from "@types";
+import {
+  buildSecretGameFeatureFlagsForRoute,
+  readSecretGamesAdminConfig,
+  resolveCustomerSearchSecretLaunch,
+} from "@features/secret-games";
 
 import PageHeader from "@entities/Page/PageHeader";
 import RefreshButton from "@entities/ui/RefreshButton";
@@ -24,7 +30,8 @@ import ActionMenu from "@entities/ui/ActionMenu";
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
 import { statusChipClass } from "@lib/colorRegistry";
 import { fmtDateSmartOrDash } from "@lib/formatters";
-import { isAdminLike, isCaseManagerLike } from "@lib/roles";
+import { isAdminLike, isCaseManagerLike, isDevLike } from "@lib/roles";
+import { toast } from "@lib/toast";
 import { useSystemMetrics } from "@hooks/useMetrics";
 import { CustomersMetricsBar } from "./components/CustomersMetricsBar";
 import CustomersNewStateView from "./components/CustomersNewStateView";
@@ -228,6 +235,7 @@ export function CustomersPage() {
   const myUid = String(meUser?.uid || "");
   const meReady = me !== undefined;
   const isCM = isCaseManagerLike(meUser);
+  const isDevUser = isDevLike(meUser);
   const isAdminUser = isAdminLike(meUser);
   const didApplyInitialScope = React.useRef(false);
   const didApplyInitialCardPool = React.useRef(false);
@@ -255,6 +263,7 @@ export function CustomersPage() {
   }, [defaultCardPoolMode, myUid, setCardPoolMode]);
 
   const { data: users = [] } = useUsers({ status: "all", limit: 500 });
+  const { data: orgConfig } = useOrgConfig();
 
   const caseManagerOptions = React.useMemo(() => {
     const labelFor = (u: CompositeUser) =>
@@ -424,6 +433,22 @@ export function CustomersPage() {
     return sortCustomerRows(rows, sortMode);
   }, [locallyFilteredRows, search, sortMode]);
 
+  const secretSearchFallbackCustomerId = React.useMemo(() => {
+    const rows = pageMode === "new" ? newPageDisplayRows : displayRows;
+    const firstCustomer = rows.find((customer) => !!String(customer?.id || "").trim());
+    return firstCustomer ? String(firstCustomer.id || "").trim() : null;
+  }, [displayRows, newPageDisplayRows, pageMode]);
+
+  const secretGamesAdminConfig = React.useMemo(
+    () => readSecretGamesAdminConfig(orgConfig?.secretGames),
+    [orgConfig],
+  );
+
+  const secretGameCustomerPageFlags = React.useMemo(
+    () => buildSecretGameFeatureFlagsForRoute(secretGamesAdminConfig, "customers"),
+    [secretGamesAdminConfig],
+  );
+
   const newPageTotalRows = React.useMemo(() => activeCardPoolRows.length, [activeCardPoolRows]);
   const isFetchingNewPagePool =
     defaultCardPoolMode === "mine" && cardPoolMode !== "all"
@@ -437,7 +462,7 @@ export function CustomersPage() {
   const promoteCustomersPool = React.useCallback(() => {
     if (pageMode !== "new") return;
     if (defaultCardPoolMode === "mine") setCardPoolMode("all");
-  }, [defaultCardPoolMode, pageMode]);
+  }, [defaultCardPoolMode, pageMode, setCardPoolMode]);
 
   const onNext = () => {
     if (!items.length || items.length < PAGE_SIZE) return;
@@ -541,7 +566,7 @@ export function CustomersPage() {
       setScopeMode(nextScopeMode);
       promoteCustomersPool();
     },
-    [promoteCustomersPool],
+    [promoteCustomersPool, setScopeMode],
   );
 
   const handleCmFilterChange = React.useCallback(
@@ -551,7 +576,7 @@ export function CustomersPage() {
       if (nextCmFilter === "all") setScopeMode("all");
       promoteCustomersPool();
     },
-    [promoteCustomersPool],
+    [promoteCustomersPool, setCmFilter, setScopeMode],
   );
 
   const handleSearchChange = React.useCallback(
@@ -562,11 +587,29 @@ export function CustomersPage() {
   );
 
   const handleSearchEnter = React.useCallback(() => {
+    if (isDevUser) {
+      const secretLaunch = resolveCustomerSearchSecretLaunch({
+        input: search,
+        isDevUser,
+        userId: myUid,
+        fallbackCustomerId: secretSearchFallbackCustomerId,
+        featureFlags: secretGameCustomerPageFlags,
+      });
+
+      if (secretLaunch.matched) {
+        if (secretLaunch.ok) {
+          void router.push(secretLaunch.href);
+        } else {
+          toast(secretLaunch.message, { type: "warning" });
+        }
+        return;
+      }
+    }
     // Search across everything — reset scope and CM filter to All
     setScopeMode("all");
     setCmFilter("all");
     promoteCustomersPool();
-  }, [promoteCustomersPool]);
+  }, [isDevUser, myUid, promoteCustomersPool, router, search, secretGameCustomerPageFlags, secretSearchFallbackCustomerId, setCmFilter, setScopeMode]);
 
   // ── 2-hour stale data banner ───────────────────────────────────────────────
 
@@ -592,7 +635,7 @@ export function CustomersPage() {
     } else {
       void refetch();
     }
-  }, [pageMode, qc, refetch]);
+  }, [pageMode, qc, refetch, setCardPoolMode]);
 
   const setCustomersPageMode = React.useCallback(
     async (nextMode: CustomersPageMode) => {

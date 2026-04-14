@@ -2,10 +2,10 @@
 "use client";
 
 import React from "react";
-import { CustomerFilesPanel } from "../components";
+import { CustomerIntegrationsPanel } from "../components/CustomerIntegrationsPanel";
 
 export function CustomerFilesTab({ customerId }: { customerId: string }) {
-  return <CustomerFilesPanel customerId={customerId} />;
+  return <CustomerIntegrationsPanel customerId={customerId} />;
 }
 
 export default CustomerFilesTab;

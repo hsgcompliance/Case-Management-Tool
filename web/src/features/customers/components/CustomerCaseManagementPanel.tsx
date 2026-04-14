@@ -53,7 +53,6 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
     () => normalizeOtherContacts((customer as { otherContacts?: unknown } | null | undefined)?.otherContacts),
     [customer],
   );
-  const [draftRoles, setDraftRoles] = React.useState<Record<string, string>>({});
   const userOptions = React.useMemo(
     () =>
       (users || [])
@@ -71,14 +70,6 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
     () => new Map(userOptions.map((user) => [user.uid, user.label])),
     [userOptions],
   );
-
-  React.useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const [index, contact] of otherContacts.entries()) {
-      next[`${index}:${contact.uid}`] = contact.role || "";
-    }
-    setDraftRoles(next);
-  }, [otherContacts]);
 
   const summary = React.useMemo(() => {
     const activeEnrollments = enrollments.filter((e) => e.active !== false && e.status !== "deleted").length;
@@ -133,13 +124,6 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
     if (existingIndex >= 0) next.splice(existingIndex, 1);
     const current = next[index] || { uid: "", name: null, role: null };
     next[index] = { ...current, uid: nextUid, name: userLabelById.get(nextUid) || current.name || null };
-    await saveOtherContacts(next);
-  };
-
-  const updateOtherContactRole = async (index: number, role: string) => {
-    const next = otherContacts.slice();
-    if (!next[index]) return;
-    next[index] = { ...next[index], role: role.trim() || null };
     await saveOtherContacts(next);
   };
 
@@ -208,7 +192,7 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
                   .filter((uid) => uid !== contact.uid) as string[],
               );
               return (
-                <div key={`${contact.uid || "contact"}_${index}`} className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr),180px,auto]">
+                <div key={`${contact.uid || "contact"}_${index}`} className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr),auto]">
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">User</div>
                     <div className="mt-2">
@@ -224,23 +208,6 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
                       />
                     </div>
                   </div>
-                  <label className="block">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Role</div>
-                    <input
-                      type="text"
-                      className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                      value={draftRoles[`${index}:${contact.uid}`] ?? contact.role ?? ""}
-                      onChange={(event) =>
-                        setDraftRoles((prev) => ({
-                          ...prev,
-                          [`${index}:${contact.uid}`]: event.currentTarget.value,
-                        }))
-                      }
-                      onBlur={() => void updateOtherContactRole(index, draftRoles[`${index}:${contact.uid}`] ?? contact.role ?? "")}
-                      placeholder="Compliance, admin, support..."
-                      disabled={patchCustomer.isPending}
-                    />
-                  </label>
                   <div className="flex items-end">
                     <button
                       type="button"
@@ -255,31 +222,26 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
               );
             })}
             {otherContacts.length < 3 ? (
-              <div className="grid grid-cols-1 gap-3 rounded-xl border border-dashed border-slate-300 bg-white/70 p-3 md:grid-cols-[minmax(0,1fr),180px,auto]">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Add User</div>
-                  <div className="mt-2">
-                    <UserSelect
-                      value={null}
-                      onChange={(uid) => void saveOtherContacts([
-                        ...otherContacts,
-                        {
-                          uid: String(uid || "").trim(),
-                          name: userLabelById.get(String(uid || "").trim()) || null,
-                          role: null,
-                        },
-                      ])}
-                      includeUnassigned
-                      placeholderLabel="Select user"
-                      status="all"
-                      limit={500}
-                      options={userOptions.filter((user) => user.uid !== currentCM && user.uid !== currentSecondaryCM && !otherContacts.some((entry) => entry.uid === user.uid))}
-                      disabled={patchCustomer.isPending}
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center text-xs text-slate-500 md:pt-6">
-                  Save a user first, then add an optional role.
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Add User</div>
+                <div className="mt-2 max-w-sm">
+                  <UserSelect
+                    value={null}
+                    onChange={(uid) => void saveOtherContacts([
+                      ...otherContacts,
+                      {
+                        uid: String(uid || "").trim(),
+                        name: userLabelById.get(String(uid || "").trim()) || null,
+                        role: null,
+                      },
+                    ])}
+                    includeUnassigned
+                    placeholderLabel="Select user"
+                    status="all"
+                    limit={500}
+                    options={userOptions.filter((user) => user.uid !== currentCM && user.uid !== currentSecondaryCM && !otherContacts.some((entry) => entry.uid === user.uid))}
+                    disabled={patchCustomer.isPending}
+                  />
                 </div>
               </div>
             ) : null}

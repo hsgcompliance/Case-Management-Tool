@@ -106,6 +106,180 @@ function PromotedField({
   );
 }
 
+// ── Compact structured grant-info fields ─────────────────────────────────────
+
+function FieldBlock({
+  label,
+  empty,
+  children,
+}: {
+  label: string;
+  empty: boolean;
+  children?: React.ReactNode;
+}) {
+  if (empty) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-400 py-0.5">
+        <span className="font-medium text-slate-500 min-w-[120px]">{label}</span>
+        <span>—</span>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function ServicesOfferedDisplay({ value }: { value: unknown }) {
+  const items = Array.isArray(value)
+    ? value.map((v) => String(v)).filter(Boolean)
+    : typeof value === "string" && value.trim()
+      ? [value]
+      : [];
+  if (items.length === 0) return null;
+  return (
+    <ul className="ml-3 space-y-0.5">
+      {items.map((item, i) => (
+        <li key={i} className="flex items-start gap-2 text-sm text-slate-800">
+          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" />
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function EligibilityDisplay({ value }: { value: unknown }) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  if (entries.length === 0) return null;
+  return (
+    <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+      {entries.map(([k, v]) => (
+        <React.Fragment key={k}>
+          <span className="font-medium text-slate-600">{k}</span>
+          <span className="text-slate-800">{String(v)}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function GrantInfoPanel({
+  model,
+  grant,
+  derived,
+  showBudgetStrip,
+  currency,
+}: {
+  model: Record<string, any>;
+  grant: Record<string, any> | null;
+  derived?: { total: number; spent: number; projected: number; balance: number; projectedBalance: number } | null;
+  showBudgetStrip?: boolean;
+  currency?: (n: number) => string;
+}) {
+  const g = (grant ?? model) as Record<string, any>;
+  const fmt = (n: number) =>
+    n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtFn = currency ?? fmt;
+
+  const startDate     = String(g.startDate   || "").slice(0, 10);
+  const endDate       = String(g.endDate     || "").slice(0, 10);
+  const description   = String(g.description || "").trim();
+  const maxLen        = String(g.lengthOfAssistance ?? g.maxLengthOfAssistance ?? "").trim();
+  const maxAmount     = String(g.maxAmount   ?? g.maximumAmount ?? g.maxAssistanceAmount ?? "").trim();
+  const services      = g.servicesOffered;
+  const eligibility   = g.eligibility;
+
+  const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
+  const hasEligibility = !!eligibility && typeof eligibility === "object" && Object.keys(eligibility).length > 0;
+  const hasMaxAmount  = !!maxAmount && maxAmount.toLowerCase() !== "n/a" && maxAmount !== "0";
+
+  // Budget strip values
+  const total    = derived?.total    ?? 0;
+  const spent    = derived?.spent    ?? 0;
+  const projected = derived?.projected ?? 0;
+  const projBal  = derived?.projectedBalance ?? (total - spent - projected);
+  const denom    = total > 0 ? total : 1;
+  const spentPct = Math.min(100, (spent / denom) * 100);
+  const projPct  = Math.min(100 - spentPct, (projected / denom) * 100);
+  const remPct   = Math.max(0, 100 - spentPct - projPct);
+
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-white p-5 space-y-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Grant Info</div>
+
+      {/* Dates row — always shown */}
+      <div className="flex flex-wrap gap-4">
+        <div>
+          <div className="text-xs text-slate-400 mb-0.5">Start Date</div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            {startDate ? new Date(startDate + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "—"}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-400 mb-0.5">End Date</div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            {endDate ? new Date(endDate + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "—"}
+          </div>
+        </div>
+      </div>
+
+      {/* Budget strip (grants only) */}
+      {showBudgetStrip && derived && total > 0 && (
+        <div className="space-y-2">
+          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full bg-amber-400 transition-all" style={{ width: `${spentPct}%` }} />
+            <div className="h-full bg-blue-400 transition-all"  style={{ width: `${projPct}%`  }} />
+            <div className={`h-full transition-all ${projBal < 0 ? "bg-red-400" : "bg-emerald-300"}`} style={{ width: `${remPct}%` }} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            {[
+              { label: "Total",    value: total,     color: "text-slate-700" },
+              { label: "Spent",    value: spent,     color: "text-amber-700" },
+              { label: "Projected", value: projected, color: "text-blue-700" },
+              { label: "Balance",  value: projBal,   color: projBal >= 0 ? "text-emerald-700" : "text-red-600" },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="rounded-lg border border-slate-100 px-2.5 py-1.5 bg-slate-50">
+                <div className="text-slate-400 mb-0.5">{label}</div>
+                <div className={`font-semibold ${color}`}>{fmtFn(value)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Description */}
+      <FieldBlock label="Description" empty={!description}>
+        {description && <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{description}</p>}
+      </FieldBlock>
+
+      {/* Max Length of Assistance */}
+      <FieldBlock label="Max Length of Assistance" empty={!maxLen}>
+        {maxLen && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{maxLen}</span>}
+      </FieldBlock>
+
+      {/* Max Amount of Assistance */}
+      <FieldBlock label="Max Amount of Assistance" empty={!hasMaxAmount}>
+        {hasMaxAmount && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{maxAmount}</span>}
+      </FieldBlock>
+
+      {/* Services Offered */}
+      <FieldBlock label="Services Offered" empty={!hasServices}>
+        <ServicesOfferedDisplay value={services} />
+      </FieldBlock>
+
+      {/* Eligibility */}
+      <FieldBlock label="Eligibility" empty={!hasEligibility}>
+        <EligibilityDisplay value={eligibility} />
+      </FieldBlock>
+    </div>
+  );
+}
+
 export function DetailsTab({
   editing,
   model,
@@ -117,6 +291,9 @@ export function DetailsTab({
   canEditKind,
   onRequestKindChange,
   STATUS_OPTS,
+  derived,
+  showBudgetStrip,
+  currency,
 }: {
   editing: boolean;
   model: Record<string, any>;
@@ -128,6 +305,9 @@ export function DetailsTab({
   canEditKind: boolean;
   onRequestKindChange: (nextKind: "grant" | "program") => void;
   STATUS_OPTS: readonly string[];
+  derived?: { total: number; spent: number; projected: number; balance: number; projectedBalance: number } | null;
+  showBudgetStrip?: boolean;
+  currency?: (n: number) => string;
 }) {
   // external canonical values (used for initial buffer + read mode)
   const extName = String(model.name ?? "");
@@ -185,9 +365,9 @@ export function DetailsTab({
 
   return (
     <>
-      {/* ── View mode: metrics cards ──────────────────────────────────── */}
+      {/* ── View mode: metrics + grant info ──────────────────────────── */}
       {!editing && (
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-4">
           {/* Kind + Status chips */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md bg-sky-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-sky-600 dark:bg-sky-900/40 dark:text-sky-400">
@@ -200,37 +380,14 @@ export function DetailsTab({
 
           {/* Rich metric cards — powered by grantMetrics/{id} */}
           {grant?.id && <GrantMetricCards grantId={grant.id} />}
-        </div>
-      )}
 
-      {/* ── View mode: description + eligibility ─────────────────────── */}
-      {!editing && (
-        <div className="mt-4 space-y-3">
-          <PromotedField
-            label="Description"
-            fieldKey="description"
-            multiline
-            editing={false}
+          {/* Grant info panel: dates, budget strip, description, services, eligibility */}
+          <GrantInfoPanel
             model={model}
-            setModel={setModel}
             grant={grant as any}
-          />
-          <PromotedField
-            label="Eligibility"
-            fieldKey="eligibility"
-            multiline
-            editing={false}
-            model={model}
-            setModel={setModel}
-            grant={grant as any}
-          />
-          <PromotedField
-            label="Length of Assistance"
-            fieldKey="lengthOfAssistance"
-            editing={false}
-            model={model}
-            setModel={setModel}
-            grant={grant as any}
+            derived={derived}
+            showBudgetStrip={showBudgetStrip}
+            currency={currency}
           />
         </div>
       )}
@@ -449,6 +606,8 @@ function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
     "updatedAt", "createdAt", "deleted", "active", "orgId",
     "startDate", "endDate", "kind",
     "tags", "eligibility", "lengthOfAssistance",
+    "description", "servicesOffered", "maxAmount", "maximumAmount", "maxAssistanceAmount",
+    "maxLengthOfAssistance",
   ]);
 
   type FieldEntry = { key: string; rawValue: any; priority: Priority };

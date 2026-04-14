@@ -70,6 +70,10 @@ export function isLineItemsFormId(formId: unknown): boolean {
   return id === LINE_ITEMS_FORM_IDS.creditCard || id === LINE_ITEMS_FORM_IDS.invoice;
 }
 
+export function isInvoiceFormId(formId: unknown): boolean {
+  return String(formId || "").trim() === LINE_ITEMS_FORM_IDS.invoice;
+}
+
 function asText(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value.trim();

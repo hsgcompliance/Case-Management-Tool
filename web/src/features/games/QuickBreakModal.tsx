@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useGameMiniPlayer } from "./GameMiniPlayer";
+import { useLegacySecretGameLauncher } from "@features/secret-games";
 
 /**
  * QuickBreakModal — thin shim kept for backward compat.
@@ -16,7 +16,7 @@ export type QuickBreakModalProps = {
 };
 
 export function QuickBreakModal({ open, onClose }: QuickBreakModalProps) {
-  const { openMiniPlayer } = useGameMiniPlayer();
+  const launchLegacySecretGame = useLegacySecretGameLauncher("legacy-host");
   const didOpenRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -26,9 +26,9 @@ export function QuickBreakModal({ open, onClose }: QuickBreakModalProps) {
     }
     if (didOpenRef.current) return;
     didOpenRef.current = true;
-    openMiniPlayer("runner", { celebration: true });
+    launchLegacySecretGame("legacy-runner", { celebration: true });
     onClose();
-  }, [open, openMiniPlayer, onClose]);
+  }, [launchLegacySecretGame, onClose, open]);
 
   return null;
 }

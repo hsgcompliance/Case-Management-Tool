@@ -52,6 +52,8 @@ export type OrgDisplayConfig = {
   };
   /** Per-digest-type enabled flag. Missing key = enabled. */
   digestsEnabled: Record<string, boolean>;
+  /** Secret-games admin configuration. */
+  secretGames?: unknown;
 };
 
 // ─── Default config ───────────────────────────────────────────────────────────
@@ -68,6 +70,7 @@ const DEFAULT_CONFIG: OrgDisplayConfig = {
     ],
     items: {},
   },
+  secretGames: undefined,
 };
 
 // ─── Backward-compat hydration ────────────────────────────────────────────────
@@ -140,6 +143,7 @@ async function fetchOrgConfig(): Promise<OrgConfigQueryResult> {
       groups: value?.programDisplay?.groups ?? DEFAULT_CONFIG.programDisplay.groups,
       items: value?.programDisplay?.items ?? {},
     },
+    secretGames: value?.secretGames,
   };
 
   return { configId: displayDoc.id, config };

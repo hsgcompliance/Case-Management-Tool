@@ -933,6 +933,7 @@ function normalizeDigestMapInput(input: any, targetOrg: string): TJotformDigestM
           label: String(s.label || "").trim() || `Section ${idx + 1}`,
           show: s.show !== false,
           order: Number.isFinite(Number(s.order)) ? Number(s.order) : idx,
+          ...(s.color ? { color: String(s.color) } : {}),
         }))
         .filter((s) => !!s.id)
     : [];
@@ -1128,16 +1129,17 @@ function mapJotformApiSubmission(sub: JotformSubmissionApi, formId: string, incl
 export async function syncJotformSubmissions(body: unknown, caller: Claims, targetOrg: string) {
   assertTargetOrgAllowed(caller, targetOrg);
 
-  const { formId, since, limit = 1000, maxPages = 5, includeRaw } = body as any;
+  const { formId, since, limit = 50, maxPages = 1, startOffset, includeRaw } = body as any;
 
-  const pageLimit = Math.max(1, Math.min(1000, Number(limit) || 1000));
-  const pageMax = Math.max(1, Math.min(25, Number(maxPages) || 5));
+  const pageLimit = Math.max(1, Math.min(1000, Number(limit) || 50));
+  const pageMax = Math.max(1, Math.min(25, Number(maxPages) || 1));
 
   const sinceIso = toUtcIso(since as any);
 
-  let offset = 0;
+  let offset = Math.max(0, Number(startOffset) || 0);
   let page = 0;
   const ids: string[] = [];
+  let hasMore = false;
 
   while (page < pageMax) {
     let content: JotformSubmissionApi[];
@@ -1175,10 +1177,16 @@ export async function syncJotformSubmissions(body: unknown, caller: Claims, targ
       mapped.forEach((s) => { if (s.id) ids.push(s.id); });
     }
 
-    if (submissions.length < pageLimit) break;
     offset += submissions.length;
     page += 1;
+
+    if (submissions.length < pageLimit) break;
+
+    // If we've hit pageMax but got a full page, there may be more
+    if (page >= pageMax) {
+      hasMore = true;
+    }
   }
 
-  return { ids, count: ids.length };
+  return { ids, count: ids.length, nextOffset: offset, hasMore };
 }

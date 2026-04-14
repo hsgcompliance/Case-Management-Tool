@@ -462,13 +462,14 @@ export const JotformSyncBody = z
     since: TsLike.optional(),
     limit: z.coerce.number().int().min(1).max(1000).optional(),
     maxPages: z.coerce.number().int().min(1).max(25).optional(),
+    startOffset: z.coerce.number().int().min(0).optional(),
     includeRaw: BoolFromLike.optional(),
     orgId: IdLike.optional(),
   })
   .passthrough();
 
 export type TJotformSyncBody = z.infer<typeof JotformSyncBody>;
-export type TJotformSyncResp = Ok<{ ids: string[]; count: number }>;
+export type TJotformSyncResp = Ok<{ ids: string[]; count: number; nextOffset: number; hasMore: boolean }>;
 
 /* ---- Live API proxy (no Firestore) ---- */
 

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { GAME_REGISTRY, getGameById, type GameDefinition } from "./registry";
-import { useGameMiniPlayer } from "./GameMiniPlayer";
+import { useGameMiniPlayer } from "./GameMiniPlayerContext";
 
 export type GameSelectorProps = {
   embedded?: boolean;

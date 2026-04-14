@@ -7,7 +7,8 @@
     "prebuild": "node ../scripts/pack-contracts.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.0.0",
@@ -35,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

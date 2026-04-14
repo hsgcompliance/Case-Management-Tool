@@ -45,11 +45,9 @@ const newWidgets: readonly AnyDashboardToolDefinition[] = [
         formSearch: "",
         submissionSearch: "",
         detailView: "pipeline",
+        submissionsColWidth: 360,
       } satisfies JotformsFilterState),
-    shouldRenderSidebar: ({ filterState }) => {
-      const fs = filterState as JotformsFilterState;
-      return fs.jotformsView === "dashboard";
-    },
+    shouldRenderSidebar: () => true,
     ToolTopbar: JotformsTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Sidebar: JotformsSidebar as AnyDashboardToolDefinition["Sidebar"],
     Main: JotformsMain as AnyDashboardToolDefinition["Main"],

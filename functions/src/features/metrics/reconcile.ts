@@ -623,25 +623,34 @@ export const reconcileMetricsWeekly = onSchedule(
     }
     await grantWriter.close();
 
-    // ── 8. Write userExtras (existing + extended with lowercase pop counts) ──
-    const userExtrasIds = new Set<string>();
-    await forEachDoc("userExtras", null, (id) => userExtrasIds.add(id));
-    for (const uid of taskByUser.keys()) userExtrasIds.add(uid);
-    for (const uid of paymentByUser.keys()) userExtrasIds.add(uid);
-    for (const uid of caseloadByUser.keys()) userExtrasIds.add(uid);
-    for (const uid of acuityByUser.keys()) userExtrasIds.add(uid);
-    for (const uid of clientByUser.keys()) userExtrasIds.add(uid);
-    for (const uid of enrollPopByUser.keys()) userExtrasIds.add(uid);
+    // ── 8. Write userExtras ───────────────────────────────────────────────────
+    // Only iterate uids that actually have reconciled data. Skipping the full
+    // userExtras scan avoids reading every doc just for its ID, and prevents
+    // incorrectly zeroing out caseloadActive/enrollmentCount for users whose
+    // uid doesn't appear in caseloadByUser (e.g. non-CM staff, or CMs whose
+    // enrollments store a legacy caseManagerId). Real-time triggers
+    // (caseloadMetrics.ts, taskMetrics.ts, etc.) keep per-user counts current
+    // between reconcile runs.
+    const userExtrasIds = new Set<string>([
+      ...taskByUser.keys(),
+      ...paymentByUser.keys(),
+      ...caseloadByUser.keys(),
+      ...acuityByUser.keys(),
+      ...clientByUser.keys(),
+      ...enrollPopByUser.keys(),
+    ]);
 
     const userWriter = db.bulkWriter();
     for (const uid of userExtrasIds) {
       const t = taskByUser.get(uid) || emptyTaskTotals();
       const p = paymentByUser.get(uid) || emptyPaymentTotals();
-      const cl = caseloadByUser.get(uid) || { caseloadActive: 0, enrollmentCount: 0 };
-      const ac = acuityByUser.get(uid) || { sum: 0, count: 0 };
+      const hasCaseload = caseloadByUser.has(uid);
+      const cl = caseloadByUser.get(uid) ?? { caseloadActive: 0, enrollmentCount: 0 };
+      const ac = acuityByUser.get(uid) ?? { sum: 0, count: 0 };
       const acuityAvg = ac.count > 0 ? Math.round((ac.sum / ac.count) * 100) / 100 : null;
-      const clients = clientByUser.get(uid) || emptyClientTotals();
-      const enrollPop = enrollPopByUser.get(uid) || emptyPopByLower();
+      const hasClients = clientByUser.has(uid);
+      const clients = clientByUser.get(uid) ?? emptyClientTotals();
+      const enrollPop = enrollPopByUser.get(uid) ?? emptyPopByLower();
 
       userWriter.set(
         db.doc(`userExtras/${uid}`),
@@ -658,22 +667,29 @@ export const reconcileMetricsWeekly = onSchedule(
             updatedAt: FieldValue.serverTimestamp(),
             reconciledAt: FieldValue.serverTimestamp(),
           },
-          // Caseload (enrollment) counts
-          caseloadActive: cl.caseloadActive,
-          enrollmentCount: cl.enrollmentCount,
-          enrollmentActive: cl.caseloadActive,
-          enrollmentInactive: cl.enrollmentCount - cl.caseloadActive,
-          enrollmentPopulationCounts: enrollPop,
-          // Client (customer) counts
-          clientTotal: clients.total,
-          clientActive: clients.active,
-          clientInactive: clients.inactive,
-          clientPopulationCounts: clients.populationCounts,
-          // Acuity
-          acuityScoreSum: ac.sum,
-          acuityScoreCount: ac.count,
-          acuityScoreAvg: acuityAvg,
-          ...(ac.count > 0 ? { lastAcuityUpdatedAt: reconciledAtISO } : {}),
+          // Only overwrite caseload/client/acuity fields for uids that
+          // actually appeared in the enrollment/customer scans. This prevents
+          // the reconcile from zeroing out real-time-maintained counts for
+          // users with no enrollment activity this cycle.
+          ...(hasCaseload ? {
+            caseloadActive: cl.caseloadActive,
+            enrollmentCount: cl.enrollmentCount,
+            enrollmentActive: cl.caseloadActive,
+            enrollmentInactive: cl.enrollmentCount - cl.caseloadActive,
+            enrollmentPopulationCounts: enrollPop,
+          } : {}),
+          ...(hasClients ? {
+            clientTotal: clients.total,
+            clientActive: clients.active,
+            clientInactive: clients.inactive,
+            clientPopulationCounts: clients.populationCounts,
+          } : {}),
+          ...(acuityByUser.has(uid) ? {
+            acuityScoreSum: ac.sum,
+            acuityScoreCount: ac.count,
+            acuityScoreAvg: acuityAvg,
+            ...(ac.count > 0 ? { lastAcuityUpdatedAt: reconciledAtISO } : {}),
+          } : {}),
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -698,8 +714,9 @@ export const reconcileMetricsWeekly = onSchedule(
         reconciledAt: FieldValue.serverTimestamp(),
         caseManagers: {
           total: caseManagerUids.size,
-          active: caseManagerUids.size,
-          inactive: 0,
+          // A CM is "active" if they have at least one non-deleted enrollment
+          active: [...caseManagerUids].filter((uid) => (caseloadByUser.get(uid)?.enrollmentCount ?? 0) > 0).length,
+          inactive: [...caseManagerUids].filter((uid) => (caseloadByUser.get(uid)?.enrollmentCount ?? 0) === 0).length,
         },
         customers: {
           total: customerTotal,
@@ -775,8 +792,12 @@ export const reconcileMetricsWeekly = onSchedule(
     await systemMonthWriter.close();
 
     // ── 10. Write caseManagerMetrics/{uid} + month subdocs ───────────────
+    // Only write for uids that have actual data — do NOT include all userNames
+    // keys, because that would write zero-filled docs for every user in the
+    // system (admins, compliance officers, etc.) and would zero out real-time-
+    // maintained caseload/client counts for users with no activity this cycle.
     const allCmUids = new Set<string>([
-      ...userNames.keys(),
+      ...caseManagerUids,
       ...clientByUser.keys(),
       ...caseloadByUser.keys(),
     ]);
@@ -786,11 +807,14 @@ export const reconcileMetricsWeekly = onSchedule(
       const name = userNames.get(uid) ?? null;
       const t = taskByUser.get(uid) || emptyTaskTotals();
       const p = paymentByUser.get(uid) || emptyPaymentTotals();
-      const cl = caseloadByUser.get(uid) || { caseloadActive: 0, enrollmentCount: 0 };
-      const ac = acuityByUser.get(uid) || { sum: 0, count: 0 };
+      const hasCaseload = caseloadByUser.has(uid);
+      const cl = caseloadByUser.get(uid) ?? { caseloadActive: 0, enrollmentCount: 0 };
+      const hasAcuity = acuityByUser.has(uid);
+      const ac = acuityByUser.get(uid) ?? { sum: 0, count: 0 };
       const acuityAvg = ac.count > 0 ? Math.round((ac.sum / ac.count) * 100) / 100 : null;
-      const clients = clientByUser.get(uid) || emptyClientTotals();
-      const enrollPop = enrollPopByUser.get(uid) || emptyPopByLower();
+      const hasClients = clientByUser.has(uid);
+      const clients = clientByUser.get(uid) ?? emptyClientTotals();
+      const enrollPop = enrollPopByUser.get(uid) ?? emptyPopByLower();
 
       // Build customer refs for this CM (capped)
       const cmCustomerRefs: Array<{
@@ -817,29 +841,35 @@ export const reconcileMetricsWeekly = onSchedule(
           caseManager: { id: uid, name },
           updatedAt: FieldValue.serverTimestamp(),
           reconciledAt: FieldValue.serverTimestamp(),
-          customers: {
-            total: clients.total,
-            active: clients.active,
-            inactive: clients.inactive,
-            byPopulation: {
-              youth: clients.populationCounts.Youth,
-              family: clients.populationCounts.Family,
-              individual: clients.populationCounts.Individual,
-              unknown: clients.populationCounts.unknown,
+          ...(hasClients ? {
+            customers: {
+              total: clients.total,
+              active: clients.active,
+              inactive: clients.inactive,
+              byPopulation: {
+                youth: clients.populationCounts.Youth,
+                family: clients.populationCounts.Family,
+                individual: clients.populationCounts.Individual,
+                unknown: clients.populationCounts.unknown,
+              },
+              refs: cmCustomerRefs,
             },
-            refs: cmCustomerRefs,
-          },
-          enrollments: {
-            total: cl.enrollmentCount,
-            active: cl.caseloadActive,
-            inactive: cl.enrollmentCount - cl.caseloadActive,
-            byPopulation: enrollPop,
-          },
-          acuity: {
-            scoreSum: ac.sum,
-            scoreCount: ac.count,
-            scoreAvg: acuityAvg,
-          },
+          } : {}),
+          ...(hasCaseload ? {
+            enrollments: {
+              total: cl.enrollmentCount,
+              active: cl.caseloadActive,
+              inactive: cl.enrollmentCount - cl.caseloadActive,
+              byPopulation: enrollPop,
+            },
+          } : {}),
+          ...(hasAcuity ? {
+            acuity: {
+              scoreSum: ac.sum,
+              scoreCount: ac.count,
+              scoreAvg: acuityAvg,
+            },
+          } : {}),
           tasks: {
             openThisMonth: t.openThisMonth,
             openNextMonth: t.openNextMonth,
@@ -847,7 +877,7 @@ export const reconcileMetricsWeekly = onSchedule(
           },
           payments: p,
         },
-        { merge: false },
+        { merge: true },
       );
 
       // CM month subdocs

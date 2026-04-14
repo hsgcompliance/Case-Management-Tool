@@ -311,10 +311,23 @@ export function TasksTab({
   };
 
   return (
-    <div className="space-y-3 mt-4">
+    <div className="space-y-4 mt-4">
+      {/* Description banner */}
+      {!editing && (
+        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-700 dark:bg-slate-800/40">
+          <div className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">About Tasks</div>
+          <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+            Task definitions set the standard work schedule for clients enrolled in this program. When a customer is enrolled,
+            these definitions are used to generate a personal task schedule with due dates and assignments. Conditional rules
+            can trigger additional tasks based on client attributes like age or concurrent enrollment.
+            Use <strong>Regenerate for enrolled customers</strong> to apply template changes to existing enrollments.
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="text-sm text-slate-600 dark:text-slate-400">
-          Build managed task definitions for this grant, then regenerate enrolled customer schedules.
+          {editing ? "Build managed task definitions for this grant." : "Task definitions for this program."}
         </div>
         {!editing && grant?.id && affected.length > 0 && (
           <button className="btn btn-sm" onClick={onOpenRegen}>

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import type { TCustomerEntity } from "@types";
 import type { TPayment, ReqOf } from "@types";
 import EnrollmentsAPI, { type Enrollment } from "@client/enrollments";
@@ -24,6 +24,10 @@ import {
 import { qk } from "@hooks/queryKeys";
 import { toast } from "@lib/toast";
 import { CustomerCard } from "./CustomerCard";
+import {
+  resolveCustomerViewFeatureFlags,
+  type CustomerViewFeatureFlags,
+} from "./customerViewFlags";
 
 // ─── Enrollment grant filter dropdown ───────────────────────────────────────
 
@@ -95,6 +99,8 @@ type CustomerCardViewProps = {
   onResetFilters: () => void;
   /** Called when Enter is pressed in search — triggers full-pool search */
   onSearchEnter?: () => void;
+  onCustomerOpen?: (customerId: string, options?: { tab?: "tasks" }) => void;
+  featureFlags?: Partial<CustomerViewFeatureFlags>;
 };
 
 type FilterOption<T extends string> = { value: T; label: string };
@@ -169,8 +175,12 @@ export function CustomerCardView({
   onGrantFilterChange,
   onResetFilters,
   onSearchEnter,
+  onCustomerOpen,
+  featureFlags,
 }: CustomerCardViewProps) {
+  const viewFlags = React.useMemo(() => resolveCustomerViewFeatureFlags(featureFlags), [featureFlags]);
   const router = useRouter();
+  const pathname = usePathname();
   const queryClient = useQueryClient();
   const patchCustomers = usePatchCustomers();
   const softDeleteCustomers = useSoftDeleteCustomers();
@@ -189,6 +199,12 @@ export function CustomerCardView({
   const [showEnrollmentRefreshDialog, setShowEnrollmentRefreshDialog] = React.useState(false);
   const [pendingEnrollmentRefreshIds, setPendingEnrollmentRefreshIds] = React.useState<string[]>([]);
   const [gridCols, setGridCols] = React.useState<1 | 2 | 3>(2);
+  const [pendingCardId, setPendingCardId] = React.useState<string | null>(null);
+
+  // Clear loading state once the route actually changes (modal opened or closed)
+  React.useEffect(() => {
+    setPendingCardId(null);
+  }, [pathname]);
   const todayIso = React.useMemo(() => toTodayIso(), []);
   const customerIdsInScope = React.useMemo(
     () => Array.from(new Set(displayRows.map((customer) => String(customer.id || "").trim()).filter(Boolean))),
@@ -242,8 +258,6 @@ export function CustomerCardView({
       { value: "last-added", label: "Last Added" },
       { value: "first-updated", label: "First Updated" },
       { value: "last-updated", label: "Last Updated" },
-      { value: "highest-acuity", label: "Highest Acuity" },
-      { value: "lowest-acuity", label: "Lowest Acuity" },
     ],
     [],
   );
@@ -309,9 +323,15 @@ export function CustomerCardView({
   );
 
   const handleCardOpen = React.useCallback(
-    (id: string, options?: { tab?: string }) =>
-      router.push(options?.tab ? `/customers/${id}?tab=${options.tab}` : `/customers/${id}`),
-    [router],
+    (id: string, options?: { tab?: string }) => {
+      if (onCustomerOpen) {
+        onCustomerOpen(id, options as { tab?: "tasks" } | undefined);
+        return;
+      }
+      setPendingCardId(id);
+      router.push(options?.tab ? `/customers/${id}?tab=${options.tab}` : `/customers/${id}`);
+    },
+    [onCustomerOpen, router],
   );
 
   const handleCardSelectGesture = React.useCallback(
@@ -659,19 +679,21 @@ export function CustomerCardView({
         search={search}
         onSearchChange={onSearchChange}
         onSearchEnter={onSearchEnter}
-        searchPlaceholder="Search by name, CW ID, HMIS ID — Enter to search all"
+        searchPlaceholder={viewFlags.searchPlaceholder}
         resultLabel={isLoading ? "Loading..." : `${displayRows.length} / ${totalRows} Customers`}
         actions={
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn btn-sm rounded-lg border border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100"
-              onClick={handleEnrollmentRefresh}
-              disabled={isRefreshingEnrollments || isLoading || displayRows.length === 0}
-              title="This system pre loads enrollments only for the clients of the user, click to load all enrollments."
-            >
-              {isRefreshingEnrollments ? "Refreshing Enrollments..." : "Refresh Enrollments"}
-            </button>
+            {viewFlags.showEnrollmentRefreshAction ? (
+              <button
+                type="button"
+                className="btn btn-sm rounded-lg border border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100"
+                onClick={handleEnrollmentRefresh}
+                disabled={isRefreshingEnrollments || isLoading || displayRows.length === 0}
+                title="This system pre loads enrollments only for the clients of the user, click to load all enrollments."
+              >
+                {isRefreshingEnrollments ? "Refreshing Enrollments..." : "Refresh Enrollments"}
+              </button>
+            ) : null}
             <button type="button" className="btn btn-ghost btn-sm rounded-lg" onClick={onResetFilters}>
               Clear
             </button>
@@ -727,7 +749,7 @@ export function CustomerCardView({
         </div>
       </PageFilterBar>
 
-      {selectedRows.length > 0 ? (
+      {viewFlags.showBulkActions && selectedRows.length > 0 ? (
         <PageBulkActionsBar
           selectedCount={selectedRows.length}
           noun="customer"
@@ -796,35 +818,37 @@ export function CustomerCardView({
         </PageBulkActionsBar>
       ) : null}
 
-      <div className="flex items-center justify-end gap-1">
-        {([1, 2, 3] as const).map((n) => (
-          <button
-            key={n}
-            type="button"
-            title={`${n} column${n > 1 ? "s" : ""}`}
-            onClick={() => setGridCols(n)}
-            className={[
-              "flex h-7 w-7 items-center justify-center rounded-md border text-xs font-semibold transition",
-              gridCols === n
-                ? "border-slate-700 bg-slate-900 text-white dark:border-slate-400 dark:bg-slate-100 dark:text-slate-900"
-                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
-            ].join(" ")}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
+      {viewFlags.showGridColumnToggle ? (
+        <div className="flex items-center justify-end gap-1">
+          {([1, 2, 3] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              title={`${n} column${n > 1 ? "s" : ""}`}
+              onClick={() => setGridCols(n)}
+              className={[
+                "flex h-7 w-7 items-center justify-center rounded-md border text-xs font-semibold transition",
+                gridCols === n
+                  ? "border-slate-700 bg-slate-900 text-white dark:border-slate-400 dark:bg-slate-100 dark:text-slate-900"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+              ].join(" ")}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <CardGrid
         isLoading={isLoading}
         isError={isError}
         isEmpty={displayRows.length === 0}
-        loadingMessage="Loading customers..."
-        errorMessage="Error loading customers."
+        loadingMessage={viewFlags.loadingMessage}
+        errorMessage={viewFlags.errorMessage}
         cols={gridCols}
         emptyState={
           <div className="py-12 text-center text-sm text-slate-400">
-            {search.trim() ? "No customers match your search." : "No customers found."}
+            {search.trim() ? viewFlags.emptyStateSearchMessage : viewFlags.emptyStateDefaultMessage}
           </div>
         }
       >
@@ -837,6 +861,7 @@ export function CustomerCardView({
             selectionMode={selectedRows.length > 0}
             onSelectGesture={handleCardSelectGesture}
             onOpen={handleCardOpen}
+            loading={pendingCardId === String(customer.id || "")}
           />
         ))}
       </CardGrid>

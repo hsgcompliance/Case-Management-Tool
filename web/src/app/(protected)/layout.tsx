@@ -11,6 +11,7 @@ import TourPickerModal from "@tour/TourPickerModal";
 import TourProfileSyncClient from "@tour/TourProfileSyncClient";
 import TourBuilderGate from "@tour/TourBuilderGate";
 import { TaskModeGate } from "@widgets/TaskModeGate";
+import GameSystemGate from "@features/games/GameSystemGate";
 
 export default function ProtectedLayout({
   children,
@@ -27,6 +28,7 @@ export default function ProtectedLayout({
         <TourBuilderGate />
         <TourHost />
         <TaskModeGate />
+        <GameSystemGate />
       </RequireVerified>
     </RequireAuth>
   );
