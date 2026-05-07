@@ -88,10 +88,10 @@ export function CustomersMetricsBar({ myUid }: CustomersMetricsBarProps) {
       {
         id: "my-open-tasks",
         label: "My Open Tasks",
-        value: formatNumber(myMetrics?.tasks.openThisMonth),
+        value: formatNumber(myMetrics?.tasks?.openThisMonth),
         subtext:
-          myMetrics?.tasks.openNextMonth != null
-            ? `This month | Next ${formatNumber(myMetrics.tasks.openNextMonth)}`
+          myMetrics?.tasks?.openNextMonth != null
+            ? `This month | Next ${formatNumber(myMetrics.tasks?.openNextMonth)}`
             : "This month",
         loading: !!myUid && myMetricsLoading,
         disabled: !myUid,

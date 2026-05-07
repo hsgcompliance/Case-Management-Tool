@@ -3,11 +3,12 @@
 import React from "react";
 import type { TJotformDigestMap, TJotformDigestField, TJotformDigestSection } from "@types";
 import type { JotformSubmission } from "@hooks/useJotform";
-import { CustomerSearch } from "@entities/selectors/CustomerSearch";
-import { GrantSelect } from "@entities/selectors/GrantSelect";
-import { EnrollmentSelect } from "@entities/selectors/EnrollmentSelect";
-import { UserSelect } from "@entities/selectors/UserSelect";
+import CustomerSearch from "@entities/selectors/CustomerSearch";
+import GrantSelect from "@entities/selectors/GrantSelect";
+import EnrollmentSelect from "@entities/selectors/EnrollmentSelect";
+import UserSelect from "@entities/selectors/UserSelect";
 import { buildNormalizedAnswerFields } from "../jotformSubmissionView";
+import { buildLineItemsDigestTemplate, isLineItemsFormId } from "../lineItemsFormMap";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,17 @@ function initDraft(
       showQuestions: true,
       showAnswers: true,
       task: { enabled: false, assignedToGroup: "admin" as const, titlePrefix: null, titleFieldKeys: [], subtitleFieldKeys: [] },
+      spending: {
+        enabled: false,
+        schemaKind: "other",
+        grantFieldKeys: [],
+        lineItemFieldKeys: [],
+        customerFieldKeys: [],
+        amountFieldKeys: [],
+        merchantFieldKeys: [],
+        keywordRules: [],
+        notes: null,
+      },
     },
     createdAt: null,
     updatedAt: null,
@@ -108,8 +120,8 @@ function computeAnalysis(draft: DigestDraft, answers: Record<string, unknown>) {
   const digestKeys = new Set(draft.fields.map((f) => f.key));
   return {
     newKeys: answerKeys.filter((k) => !digestKeys.has(k)),
-    missingKeys: new Set(draft.fields.filter((f) => !answerKeys.includes(f.key)).map((f) => f.key)),
-    emptyKeys: new Set(answerKeys.filter((k) => digestKeys.has(k) && !getAnswerText(answers, k))),
+    missingKeys: new Set<string>(draft.fields.filter((f) => !answerKeys.includes(f.key)).map((f) => String(f.key))),
+    emptyKeys: new Set<string>(answerKeys.filter((k) => digestKeys.has(k) && !getAnswerText(answers, k))),
   };
 }
 
@@ -122,6 +134,10 @@ function reorderByIdx<T>(arr: T[], from: number, to: number): T[] {
   const [item] = next.splice(from, 1);
   next.splice(to, 0, item);
   return next.map((x, i) => ({ ...x, order: i }));
+}
+
+function splitKeys(value: string): string[] {
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 // ── ColorDot ──────────────────────────────────────────────────────────────────
@@ -203,8 +219,20 @@ type SettingsPanelProps = {
 function SettingsPanel({ draft, linkDraft, onDraftChange, onLinkChange }: SettingsPanelProps) {
   const opts = draft.options;
   const task = opts?.task;
+  const spending = (opts as Record<string, unknown> | undefined)?.spending as Record<string, unknown> | undefined;
   const setOpts = (patch: Partial<typeof opts>) => onDraftChange({ ...draft, options: { ...opts, ...patch } as typeof opts });
   const setTask = (patch: Partial<typeof task>) => setOpts({ task: { ...task, ...patch } as typeof task });
+  const setSpending = (patch: Record<string, unknown>) => setOpts({ spending: { ...(spending || {}), ...patch } } as Partial<typeof opts>);
+  const applySpendingPreset = () => {
+    const template = buildLineItemsDigestTemplate({
+      formId: draft.formId,
+      formAlias: draft.formAlias,
+      formTitle: draft.formTitle,
+    });
+    const preset = (template?.options as Record<string, unknown> | undefined)?.spending as Record<string, unknown> | undefined;
+    if (!preset) return;
+    setSpending(preset);
+  };
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -289,6 +317,96 @@ function SettingsPanel({ draft, linkDraft, onDraftChange, onLinkChange }: Settin
         ) : null}
       </div>
 
+      {/* Spending map config */}
+      <div>
+        <div className="mb-2 flex items-center gap-3">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Spending Map</span>
+          <Toggle value={spending?.enabled === true} onChange={(v) => setSpending({ enabled: v })} />
+          {isLineItemsFormId(draft.formId) ? (
+            <button type="button" className="btn btn-ghost btn-xs" onClick={applySpendingPreset}>
+              Load spending preset
+            </button>
+          ) : null}
+        </div>
+        {spending?.enabled === true ? (
+          <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Form Kind</label>
+                <select
+                  className="input w-full text-sm"
+                  value={String(spending?.schemaKind || "other")}
+                  onChange={(e) => setSpending({ schemaKind: e.currentTarget.value })}
+                >
+                  <option value="credit-card">Credit card</option>
+                  <option value="invoice">Invoice</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Amount Field Keys</label>
+                <input
+                  className="input w-full text-sm"
+                  value={Array.isArray(spending?.amountFieldKeys) ? (spending.amountFieldKeys as string[]).join(", ") : ""}
+                  onChange={(e) => setSpending({ amountFieldKeys: splitKeys(e.currentTarget.value) })}
+                  placeholder="86, 107, 291"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Grant Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.grantFieldKeys) ? (spending.grantFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ grantFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Line Item Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.lineItemFieldKeys) ? (spending.lineItemFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ lineItemFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Customer Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.customerFieldKeys) ? (spending.customerFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ customerFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Merchant Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.merchantFieldKeys) ? (spending.merchantFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ merchantFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Card Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.cardFieldKeys) ? (spending.cardFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ cardFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Direction Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.directionFieldKeys) ? (spending.directionFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ directionFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Category Field Keys</label>
+                <input className="input w-full text-sm" value={Array.isArray(spending?.categoryFieldKeys) ? (spending.categoryFieldKeys as string[]).join(", ") : ""} onChange={(e) => setSpending({ categoryFieldKeys: splitKeys(e.currentTarget.value) })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Split Field Keys</label>
+                <input
+                  className="input w-full text-sm"
+                  value={Array.isArray(spending?.splitFieldKeys) ? (spending.splitFieldKeys as string[]).join(", ") : ""}
+                  onChange={(e) => setSpending({ splitFieldKeys: splitKeys(e.currentTarget.value) })}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">Flex Field Keys</label>
+                <input
+                  className="input w-full text-sm"
+                  value={Array.isArray(spending?.flexFieldKeys) ? (spending.flexFieldKeys as string[]).join(", ") : ""}
+                  onChange={(e) => setSpending({ flexFieldKeys: splitKeys(e.currentTarget.value) })}
+                />
+              </div>
+            </div>
+            <textarea
+              className="input min-h-20 w-full text-sm"
+              value={String(spending?.notes || "")}
+              onChange={(e) => setSpending({ notes: e.currentTarget.value || null })}
+              placeholder="Special mapping notes, PATH categories, keyword buckets, exact aliases, or review instructions."
+            />
+          </div>
+        ) : null}
+      </div>
+
       {/* Task config */}
       <div>
         <div className="mb-2 flex items-center gap-3">
@@ -319,8 +437,8 @@ function SettingsPanel({ draft, linkDraft, onDraftChange, onLinkChange }: Settin
             <input className="input w-full text-sm" placeholder="Task title prefix (e.g. 'Review:')" value={task?.titlePrefix || ""} onChange={(e) => setTask({ titlePrefix: e.currentTarget.value || null })} />
             <div className="text-[11px] text-slate-500">Title / subtitle field keys (comma-separated)</div>
             <div className="grid grid-cols-2 gap-3">
-              <input className="input text-sm" placeholder="Title field keys" value={(task?.titleFieldKeys || []).join(", ")} onChange={(e) => setTask({ titleFieldKeys: e.currentTarget.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
-              <input className="input text-sm" placeholder="Subtitle field keys" value={(task?.subtitleFieldKeys || []).join(", ")} onChange={(e) => setTask({ subtitleFieldKeys: e.currentTarget.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
+              <input className="input text-sm" placeholder="Title field keys" value={(task?.titleFieldKeys || []).join(", ")} onChange={(e) => setTask({ titleFieldKeys: splitKeys(e.currentTarget.value) })} />
+              <input className="input text-sm" placeholder="Subtitle field keys" value={(task?.subtitleFieldKeys || []).join(", ")} onChange={(e) => setTask({ subtitleFieldKeys: splitKeys(e.currentTarget.value) })} />
             </div>
           </div>
         ) : null}

@@ -107,3 +107,16 @@ export function useVoidPaymentQueueItem() {
     },
   });
 }
+
+export function useRecomputeGrantAllocations() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.paymentQueue.root, qk.ledger.root],
+    mutationFn: (body: { grantId: string; dryRun?: boolean }) =>
+      PaymentQueue.recomputeGrantAllocations(body),
+    onSuccess: async (_res, vars) => {
+      await qc.invalidateQueries({ queryKey: ["grantAllocations", vars.grantId] });
+    },
+  });
+}

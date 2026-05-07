@@ -5,6 +5,7 @@ import {
   OAUTH_CLIENT_ID,
   OAUTH_CLIENT_SECRET,
   OAUTH_REFRESH_TOKEN,
+  WEB_BASE_URL,
   secureHandler,
 } from "../../core";
 import { SendInviteBody, SendMonthlySummaryBody } from "./schemas";
@@ -60,6 +61,15 @@ export async function sendHtmlEmail(args: {
   return { ok: true, id: data.id ?? null };
 }
 
+function escapeHtml(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function sendInviteService({
   to,
   name = "",
@@ -73,15 +83,20 @@ export async function sendInviteService({
   subject?: string;
   html?: string;
 }) {
-  const finalSubject = subject || "You’re invited to households-db";
+  const finalSubject = subject || "You have been invited to use the Case Management Dashboard";
+  const safeName = escapeHtml(name || "there");
+  const safeLink = escapeHtml(resetLink || "#");
+  const loginLink = escapeHtml(WEB_BASE_URL.value() || "https://housing-db-v2.web.app");
   const finalHtml =
     html ||
     `
     <div style="font:14px system-ui, -apple-system, Segoe UI, Roboto">
-      <h2>Welcome to households-db</h2>
-      <p>Hi ${name || "there"}, your account is ready.</p>
-      <p><a href="${resetLink}">Set your password</a> to get started.</p>
-      <p style="color:#666">If you didn’t expect this, ignore this email.</p>
+      <h2>Case Management Dashboard invitation</h2>
+      <p>Hi ${safeName},</p>
+      <p>You have been invited to use the Case Management Dashboard.</p>
+      <p><a href="${safeLink}">Set your password</a> to get started.</p>
+      <p>Or <a href="${loginLink}">login with Google</a>.</p>
+      <p style="color:#666">If you did not expect this invitation, you can ignore this email.</p>
     </div>
   `;
   return sendHtmlEmail({

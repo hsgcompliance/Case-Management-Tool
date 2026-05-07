@@ -7,6 +7,7 @@ export const LINE_ITEMS_FORM_IDS = {
 
 export const CC_SCHEMA = {
   globals: {
+    type: "222",
     cardChoice: "33",
     cardUsed: "219",
     purchaserName: "55",
@@ -23,6 +24,21 @@ export const CC_SCHEMA = {
     { merchant: "192", expenseType: "193", purpose: "122", cost: "123", supportiveProgram: "194", programOperations: "196", customerName: "195", notes: null, files: ["125"], flexToggle: "207" },
     { merchant: "197", expenseType: "198", purpose: "130", cost: "131", supportiveProgram: "199", programOperations: "201", customerName: "200", notes: null, files: ["133"], flexToggle: "208" },
   ],
+  returnRecord: {
+    cardUsed: "281",
+    merchant: "284",
+    expenseType: "285",
+    supportiveProgram: "286",
+    tssCategory: "303",
+    flexToggle: "287",
+    customerName: "288",
+    programOperations: "289",
+    purpose: "290",
+    cost: "291",
+    files: ["293"],
+    notes: "294",
+    email: "295",
+  },
 } as const;
 
 export const INVOICE_SCHEMA = {
@@ -74,6 +90,97 @@ export function isInvoiceFormId(formId: unknown): boolean {
   return String(formId || "").trim() === LINE_ITEMS_FORM_IDS.invoice;
 }
 
+export function isCreditCardFormId(formId: unknown): boolean {
+  return String(formId || "").trim() === LINE_ITEMS_FORM_IDS.creditCard;
+}
+
+function creditCardSpendingOptions() {
+  const txs = CC_SCHEMA.transactions;
+  const returnRecord = CC_SCHEMA.returnRecord;
+  return {
+    enabled: true,
+    schemaKind: "credit-card",
+    directionFieldKeys: [CC_SCHEMA.globals.type],
+    cardFieldKeys: [CC_SCHEMA.globals.cardUsed, CC_SCHEMA.globals.cardChoice, returnRecord.cardUsed],
+    amountFieldKeys: [...txs.map((tx) => tx.cost), returnRecord.cost],
+    merchantFieldKeys: [...txs.map((tx) => tx.merchant), returnRecord.merchant],
+    grantFieldKeys: [
+      ...txs.map((tx) => tx.supportiveProgram),
+      ...txs.map((tx) => tx.programOperations),
+      returnRecord.supportiveProgram,
+      returnRecord.programOperations,
+    ],
+    lineItemFieldKeys: [
+      ...txs.map((tx) => tx.expenseType),
+      ...txs.map((tx) => tx.purpose),
+      "296",
+      "297",
+      "298",
+      "299",
+      "302",
+      "303",
+      returnRecord.expenseType,
+      returnRecord.tssCategory,
+      returnRecord.purpose,
+    ],
+    customerFieldKeys: [...txs.map((tx) => tx.customerName), returnRecord.customerName],
+    categoryFieldKeys: ["296", "297", "298", "299", "302", "303", returnRecord.tssCategory],
+    flexFieldKeys: [...txs.map((tx) => tx.flexToggle), returnRecord.flexToggle],
+    transactionGroups: txs.map((tx, idx) => ({
+      id: `tx_${idx + 1}`,
+      kind: "purchase",
+      index: idx + 1,
+      fields: tx,
+    })),
+    returnGroup: {
+      id: "return",
+      kind: "return",
+      fields: returnRecord,
+    },
+    keywordRules: [],
+    notes: "Credit card purchases and returns stage into paymentQueue. Card budget impact should count all non-void queue rows immediately.",
+  };
+}
+
+function invoiceSpendingOptions() {
+  return {
+    enabled: true,
+    schemaKind: "invoice",
+    amountFieldKeys: [
+      INVOICE_SCHEMA.globals.costSingle,
+      ...INVOICE_SCHEMA.customerPath.amounts,
+      ...INVOICE_SCHEMA.programPath.amounts,
+    ],
+    merchantFieldKeys: [INVOICE_SCHEMA.globals.vendor, INVOICE_SCHEMA.globals.purchaser],
+    grantFieldKeys: [
+      INVOICE_SCHEMA.globals.expenseType,
+      INVOICE_SCHEMA.globals.serviceType,
+      INVOICE_SCHEMA.globals.wioaScopeWex,
+      ...INVOICE_SCHEMA.customerPath.projects,
+      ...INVOICE_SCHEMA.customerPath.projectOther,
+      ...INVOICE_SCHEMA.programPath.billToList,
+      ...INVOICE_SCHEMA.programPath.billToOther,
+    ],
+    lineItemFieldKeys: [
+      INVOICE_SCHEMA.globals.serviceType,
+      INVOICE_SCHEMA.globals.otherService,
+      INVOICE_SCHEMA.globals.paymentMethod,
+      INVOICE_SCHEMA.globals.purposeDetail,
+      INVOICE_SCHEMA.globals.note,
+      INVOICE_SCHEMA.globals.wioaScopeWex,
+    ],
+    customerFieldKeys: [INVOICE_SCHEMA.globals.firstName, INVOICE_SCHEMA.globals.lastName],
+    splitFieldKeys: [
+      INVOICE_SCHEMA.customerPath.multiToggle,
+      INVOICE_SCHEMA.customerPath.splitCount,
+      ...INVOICE_SCHEMA.customerPath.amounts,
+      ...INVOICE_SCHEMA.programPath.amounts,
+    ],
+    keywordRules: [],
+    notes: "Invoices stage into paymentQueue for grant, line item, customer, and card review before posting.",
+  };
+}
+
 function asText(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value.trim();
@@ -120,6 +227,9 @@ export function lineItemsAmountEstimate(submission: AnyObj): number {
   const kind = lineItemsFormKind(submission);
   const answers = ((submission?.answers || {}) as AnyObj) || {};
   if (kind === "credit-card") {
+    if (/made\s+a\s+return|return/i.test(asText(getAns(answers, CC_SCHEMA.globals.type)))) {
+      return -Math.abs(parseMoney(getAns(answers, CC_SCHEMA.returnRecord.cost)));
+    }
     let total = 0;
     for (const tx of CC_SCHEMA.transactions) total += parseMoney(getAns(answers, tx.cost));
     return total;
@@ -348,6 +458,7 @@ export function buildLineItemsDigestTemplate(input: {
           titleFieldKeys: [CC_SCHEMA.globals.purchaserName, CC_SCHEMA.globals.cardUsed],
           subtitleFieldKeys: [CC_SCHEMA.globals.email, CC_SCHEMA.globals.checkoutDateTime],
         },
+        spending: creditCardSpendingOptions(),
       },
       mapKind: "line-items-template",
       mapVersion: 1,
@@ -407,19 +518,20 @@ export function buildLineItemsDigestTemplate(input: {
     header: { show: true, title: input.formTitle || "Line Items Invoice", subtitle: "Line-items template map" },
     sections,
     fields,
-    options: {
-      hideEmptyFields: true,
-      showQuestions: true,
-      showAnswers: true,
-      task: {
+      options: {
+        hideEmptyFields: true,
+        showQuestions: true,
+        showAnswers: true,
+        task: {
         enabled: true,
         assignedToGroup: "compliance",
         titlePrefix: "Invoice Documentation",
-        titleFieldKeys: [INVOICE_SCHEMA.globals.vendor, INVOICE_SCHEMA.globals.expenseType],
-        subtitleFieldKeys: [INVOICE_SCHEMA.globals.invoiceDate, INVOICE_SCHEMA.globals.purchaser],
+          titleFieldKeys: [INVOICE_SCHEMA.globals.vendor, INVOICE_SCHEMA.globals.expenseType],
+          subtitleFieldKeys: [INVOICE_SCHEMA.globals.invoiceDate, INVOICE_SCHEMA.globals.purchaser],
+        },
+        spending: invoiceSpendingOptions(),
       },
-    },
-    mapKind: "line-items-template",
+      mapKind: "line-items-template",
     mapVersion: 1,
     schemaKind: "invoice",
     schema: { globals: INVOICE_SCHEMA.globals, customerPath: INVOICE_SCHEMA.customerPath, programPath: INVOICE_SCHEMA.programPath },

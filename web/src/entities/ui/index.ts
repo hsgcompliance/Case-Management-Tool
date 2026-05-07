@@ -7,6 +7,15 @@
  */
 
 export { BadgeChip, type BadgeChipProps, type BadgeVariant } from "./BadgeChip";
+export {
+  ComplexDateSelector,
+  complexDateMatchesIsoDate,
+  complexDatePrimaryMonth,
+  complexDateValueLabel,
+  normalizeComplexDateValue,
+  type ComplexDateMode,
+  type ComplexDateValue,
+} from "./ComplexDateSelector";
 export { default as ActionMenu, type ActionItem } from "./ActionMenu";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { FilterToggleGroup, type FilterToggleGroupProps, type FilterOption } from "./FilterToggleGroup";

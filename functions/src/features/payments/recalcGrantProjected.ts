@@ -28,6 +28,7 @@ import type { Request, Response } from "express";
 
 import { assertOrgAccessMaybe, getGrantWindowISO, isInGrantWindow } from "./utils";
 import type { GrantWindowISO } from "./utils";
+import { unscopedQueueItemBelongsToOrg } from "../paymentQueue/service";
 
 import { PaymentsRecalcGrantProjectedBody } from "./schemas";
 import type { TPaymentsRecalcGrantProjectedBody } from "./schemas";
@@ -59,6 +60,13 @@ function toCents(val: any): number {
 }
 
 function ledgerAmountCents(row: any): number {
+  if (!row) return 0;
+  if (Number.isFinite(Number(row.amountCents))) return Number(row.amountCents);
+  if (Number.isFinite(Number(row.amount))) return Math.round(Number(row.amount) * 100);
+  return 0;
+}
+
+function queueAmountCents(row: any): number {
   if (!row) return 0;
   if (Number.isFinite(Number(row.amountCents))) return Number(row.amountCents);
   if (Number.isFinite(Number(row.amount))) return Math.round(Number(row.amount) * 100);
@@ -129,6 +137,7 @@ export async function recalcProjectedForGrant(
     : [];
 
   const grantOrgNorm = grant?.orgId ? normId(grant.orgId) : null;
+  const countedEnrollmentProjectionKeys = new Set<string>();
 
   // Initialize accumulator per LI
   const accById: Record<
@@ -199,6 +208,8 @@ export async function recalcProjectedForGrant(
         if (dueISO && isInGrantWindow(dueISO, win)) {
           acc.projectedWinCents += amtCents;
         }
+        const paymentId = String(p?.id || "").trim();
+        if (paymentId) countedEnrollmentProjectionKeys.add(`${doc.id}:${paymentId}`);
       }
 
       // legacy spent path: paid payments in enrollment (NOT authoritative)
@@ -214,6 +225,55 @@ export async function recalcProjectedForGrant(
           }
         }
       }
+    }
+  }
+
+  // --------- Pass 1b: projected from pending paymentQueue rows ----------
+  // Queue rows are the canonical in-flight source for Jotform invoice/card
+  // spend. Enrollment projection queue rows mirror Pass 1, so they are only
+  // counted here when no matching enrollment payment was counted above.
+  const pendingQueueSources = new Set(["projection", "invoice", "credit-card"]);
+  const queueSnap = await db
+    .collection("paymentQueue")
+    .where("grantId", "==", grantId)
+    .where("queueStatus", "==", "pending")
+    .get();
+
+  for (const doc of queueSnap.docs) {
+    const row: any = { id: doc.id, ...(doc.data() || {}) };
+    const source = String(row?.source || "").toLowerCase();
+    if (!pendingQueueSources.has(source)) continue;
+
+    const rowOrgNorm = row?.orgId ? normId(row.orgId) : null;
+    if (rowOrgNorm && grantOrgNorm && rowOrgNorm !== grantOrgNorm) {
+      warnings.push(`Skipped cross-org paymentQueue row ${doc.id} (row org != grant org)`);
+      continue;
+    }
+    if (!rowOrgNorm && grantOrgNorm && !(await unscopedQueueItemBelongsToOrg(row, grantOrgNorm))) {
+      warnings.push(`Skipped unscoped paymentQueue row ${doc.id} (ownership could not be verified)`);
+      continue;
+    }
+
+    const liId = String(row?.lineItemId || "");
+    if (!liId) continue;
+    const acc = accById[liId];
+    if (!acc) {
+      warnings.push(`PaymentQueue row references unknown lineItemId: ${liId}`);
+      continue;
+    }
+
+    if (source === "projection") {
+      const projectionKey = `${String(row?.enrollmentId || "").trim()}:${String(row?.paymentId || row?.submissionId || "").trim()}`;
+      if (countedEnrollmentProjectionKeys.has(projectionKey)) continue;
+    }
+
+    const amtCents = queueAmountCents(row);
+    if (!amtCents) continue;
+
+    acc.projectedCents += amtCents;
+    const dueISO = toDateOnly(row?.dueDate || row?.createdAt || row?.postedAt);
+    if (dueISO && isInGrantWindow(dueISO, win)) {
+      acc.projectedWinCents += amtCents;
     }
   }
 

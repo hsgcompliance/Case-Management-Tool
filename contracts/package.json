@@ -25,11 +25,15 @@
     "./payments":    { "types": "./dist/payments.d.ts",    "import": "./dist/payments.js",    "require": "./dist/payments.cjs" },
     "./tasks":       { "types": "./dist/tasks.d.ts",       "import": "./dist/tasks.js",       "require": "./dist/tasks.cjs" },
     "./tours":       { "types": "./dist/tours.d.ts",       "import": "./dist/tours.js",       "require": "./dist/tours.cjs" },
-    "./users":       { "types": "./dist/users.d.ts",       "import": "./dist/users.js",       "require": "./dist/users.cjs" }
+    "./users":       { "types": "./dist/users.d.ts",       "import": "./dist/users.js",       "require": "./dist/users.cjs" },
+    "./core":        { "types": "./dist/core.d.ts",        "import": "./dist/core.js",        "require": "./dist/core.cjs" },
+    "./http":        { "types": "./dist/http.d.ts",        "import": "./dist/http.js",        "require": "./dist/http.cjs" },
+    "./endpointMap": { "types": "./dist/endpointMap.d.ts", "import": "./dist/endpointMap.js", "require": "./dist/endpointMap.cjs" },
+    "./metrics":     { "types": "./dist/metrics.d.ts",     "import": "./dist/metrics.js",     "require": "./dist/metrics.cjs" }
   },
   "files": ["dist"],
   "scripts": {
-    "build": "tsup src/*.ts --dts --format esm,cjs --outDir dist --clean"
+    "build": "tsup src/*.ts --format esm,cjs --outDir dist --clean && tsc -p tsconfig.build.json && node scripts/fix-dts-extensions.mjs"
   },
   "dependencies": {
     "zod": "^4.1.12"

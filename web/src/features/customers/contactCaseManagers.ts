@@ -31,10 +31,14 @@ export function normalizeOtherContacts(value: unknown): CustomerOtherContact[] {
 
 export function contactCaseManagerIdsForCustomer(customer: Record<string, unknown> | null | undefined): string[] {
   if (!customer) return [];
+  const flatIds = Array.isArray(customer.contactCaseManagerIds)
+    ? (customer.contactCaseManagerIds as unknown[]).map((id) => trimOrEmpty(id)).filter(Boolean)
+    : [];
   const ids = [
     trimOrEmpty(customer.caseManagerId),
     trimOrEmpty(customer.secondaryCaseManagerId),
     ...normalizeOtherContacts(customer.otherContacts).map((entry) => entry.uid),
+    ...flatIds,
   ].filter(Boolean);
   return Array.from(new Set(ids));
 }

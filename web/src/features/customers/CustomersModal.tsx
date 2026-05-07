@@ -5,7 +5,10 @@ import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@entities/ui/Modal";
-import { useCustomer, useSetCustomerActive, useUpsertCustomers } from "@hooks/useCustomers";
+import { useAuth } from "@app/auth/AuthProvider";
+import { isViewerLike } from "@lib/roles";
+import { useCustomer, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
+import { useGDriveCustomerFolderSync } from "@hooks/useGDrive";
 import { qk } from "@hooks/queryKeys";
 import type { CustomersUpsertReq } from "@types";
 
@@ -98,14 +101,16 @@ function isCustomerActive(model: Record<string, unknown>, detail: unknown) {
   return String(source.status || "active").trim().toLowerCase() === "active";
 }
 
-export function CustomersModal(props: { customerId: string | null; onClose?: () => void; pageMode?: boolean }) {
-  const { customerId, onClose: onCloseProp, pageMode = false } = props;
+export function CustomersModal(props: { customerId: string | null; onClose?: () => void; pageMode?: boolean; initialTab?: TabKey }) {
+  const { customerId, onClose: onCloseProp, pageMode = false, initialTab } = props;
+  const { profile } = useAuth();
+  const isViewer = isViewerLike(profile as { roles?: unknown } | null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const customerIdStr = String(customerId || "").trim();
   const creating = !customerIdStr || customerIdStr === "new" || customerIdStr === "(.)new";
-  const requestedTab = React.useMemo(() => readRequestedTab(searchParams), [searchParams]);
+  const requestedTab = React.useMemo(() => initialTab ?? readRequestedTab(searchParams), [initialTab, searchParams]);
 
   const onClose = onCloseProp ?? (() => router.back());
 
@@ -156,7 +161,10 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
 
   const upsert = useUpsertCustomers();
   const setCustomerActive = useSetCustomerActive();
+  const softDeleteCustomer = useSoftDeleteCustomers();
+  const folderSync = useGDriveCustomerFolderSync();
   const saving = upsert.isPending;
+  const [archivePrompt, setArchivePrompt] = React.useState<{ nextActive: boolean } | null>(null);
 
   const resetToServer = () => {
     if (creating) setModel({ status: "active" });
@@ -172,8 +180,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
     });
   };
 
-  const onToggleActive = async () => {
-    const nextActive = !isCustomerActive(model, detail);
+  const applyCustomerActiveToggle = async (nextActive: boolean, syncFolder: boolean) => {
     setError(null);
     setModel((prev) => applyActiveState(prev as Record<string, unknown>, nextActive));
 
@@ -181,9 +188,39 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
 
     try {
       await setCustomerActive.mutateAsync({ id: customerIdStr, active: nextActive });
+      if (syncFolder) {
+        await folderSync.mutateAsync({
+          mode: "setFolderState",
+          customerId: customerIdStr,
+          active: nextActive,
+          apply: true,
+        });
+      }
     } catch (e: unknown) {
       if (detail) setModel(clone(detail));
       setError(e instanceof Error ? e.message : "Status update failed. Please try again.");
+    }
+  };
+
+  const onToggleActive = async () => {
+    const nextActive = !isCustomerActive(model, detail);
+    if (creating || !customerIdStr) {
+      setModel((prev) => applyActiveState(prev as Record<string, unknown>, nextActive));
+      return;
+    }
+    setArchivePrompt({ nextActive });
+  };
+
+  const onDelete = async () => {
+    if (creating || !customerIdStr) return;
+    const ok = window.confirm("Soft delete this customer?");
+    if (!ok) return;
+    setError(null);
+    try {
+      await softDeleteCustomer.mutateAsync(customerIdStr);
+      onClose();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Delete failed. Please try again.");
     }
   };
 
@@ -379,20 +416,69 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                 editing={editing}
                 model={model}
                 setModel={setModel}
-                onToggleEdit={!creating ? onToggleEdit : undefined}
+                onToggleEdit={!creating && !isViewer ? onToggleEdit : undefined}
+                onDelete={!creating && !isViewer ? onDelete : undefined}
                 onToggleActive={onToggleActive}
-                statusBusy={setCustomerActive.isPending}
+                statusBusy={setCustomerActive.isPending || folderSync.isPending}
               />
             )}
             {tab === "enrollments" && hasRecord && <EnrollmentsTab customerId={customerId!} />}
             {tab === "case" && hasRecord && <CaseManagementTab customerId={customerId!} />}
             {tab === "assessments" && hasRecord && <AssessmentsTab customerId={customerId!} />}
             {tab === "tasks" && hasRecord && <TasksTab customerId={customerId!} />}
-            {tab === "payments" && hasRecord && <PaymentsTab customerId={customerId!} />}
+            {tab === "payments" && hasRecord && <PaymentsTab customerId={customerId!} customerName={titleName || undefined} />}
             {tab === "files" && hasRecord && <CustomerFilesTab customerId={customerId!} />}
           </div>
         )}
       </div>
+
+      {archivePrompt ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="text-base font-semibold text-slate-900">
+              {archivePrompt.nextActive ? "Unarchive Customer Folder?" : "Archive Customer Folder?"}
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              This updates the customer folder index sheet so the daily trigger can keep Drive in sync.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setArchivePrompt(null)}
+                disabled={setCustomerActive.isPending || folderSync.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const nextActive = archivePrompt.nextActive;
+                  setArchivePrompt(null);
+                  void applyCustomerActiveToggle(nextActive, false);
+                }}
+                disabled={setCustomerActive.isPending || folderSync.isPending}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                autoFocus
+                onClick={() => {
+                  const nextActive = archivePrompt.nextActive;
+                  setArchivePrompt(null);
+                  void applyCustomerActiveToggle(nextActive, true);
+                }}
+                disabled={setCustomerActive.isPending || folderSync.isPending}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 

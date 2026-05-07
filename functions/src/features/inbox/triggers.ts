@@ -219,7 +219,11 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
       await batch.commit();
     }
 
-    // -------- TASKS (only when CM explicitly assigned) --------
+    // -------- Deprecated taskSchedule projection --------
+    // Keep this compatibility path so existing embedded taskSchedule notes still
+    // surface in digest emails and customer/workload flags. The old completion
+    // lifecycle should not be extended; new reminder/notification work should
+    // write lightweight note/reminder rows instead of relying on status changes.
     const prevTasks: any[] = Array.isArray(before.taskSchedule) ? before.taskSchedule : [];
     const nextTasks: any[] = Array.isArray(after.taskSchedule) ? after.taskSchedule : [];
 

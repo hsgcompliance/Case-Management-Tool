@@ -113,7 +113,7 @@ export function buildNoteTags(p: Payment): string[] {
       else if (d >= firstOfThisMonth && d < firstOfNextMonth) base.push("Due this month");
     }
   }
-  return Array.from(new Set(base)).slice(0, 5);
+  return Array.from(new Set(base.map(String))).slice(0, 5);
 }
 
 export function displayTypeLabel(p: Payment): string {
@@ -176,6 +176,77 @@ export function normalizePayments(
       (p): p is Payment =>
         !!p && !!p.id && p.amount > 0 && isISO(p.dueDate) && (!requireLI || !!p.lineItemId)
     );
+}
+
+export type RentCertDue = {
+  enrollmentId?: string;
+  enrollmentLabel?: string;
+  dueDate: string;
+  targetPaymentDate: string;
+  asap: boolean;
+  label: string;
+};
+
+function paymentNotes(p: Payment): string[] {
+  if (Array.isArray(p.note)) return p.note.filter(Boolean).map(String);
+  return p.note ? [String(p.note)] : [];
+}
+
+export function isRentPayment(p: Payment): boolean {
+  if (p.type !== "monthly") return false;
+  const notes = paymentNotes(p).join(" ").toLowerCase();
+  return !notes || notes.includes("rent");
+}
+
+export function computeRentCertDues(
+  payments: unknown[],
+  opts?: { enrollmentId?: string; enrollmentLabel?: string; today?: string }
+): RentCertDue[] {
+  const today = opts?.today && isISO(opts.today) ? opts.today : todayISO();
+  const rentPayments = normalizePayments(Array.isArray(payments) ? payments : [])
+    .filter((p) => !p.void && isRentPayment(p))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+  if (rentPayments.length < 4) return [];
+
+  const out: RentCertDue[] = [];
+  for (let i = 3; i < rentPayments.length; i += 3) {
+    const targetPaymentDate = rentPayments[i].dueDate;
+    const dueDate = addMonthsISO(targetPaymentDate, -1);
+    if (!dueDate) continue;
+    out.push({
+      enrollmentId: opts?.enrollmentId,
+      enrollmentLabel: opts?.enrollmentLabel,
+      dueDate,
+      targetPaymentDate,
+      asap: dueDate <= today,
+      label: `${fmtShortMonth(targetPaymentDate)} rent cert due ${fmtShortMonth(dueDate)}`,
+    });
+  }
+  return out;
+}
+
+export function nextRentCertDue(
+  enrollments: Array<{ id?: string; grantName?: unknown; name?: unknown; payments?: unknown }>
+): RentCertDue | null {
+  const dues = enrollments.flatMap((enrollment) =>
+    computeRentCertDues(Array.isArray(enrollment.payments) ? enrollment.payments : [], {
+      enrollmentId: String(enrollment.id || ""),
+      enrollmentLabel:
+        String(enrollment.grantName || "").trim() ||
+        String(enrollment.name || "").trim() ||
+        "Enrollment",
+    })
+  );
+  const sorted = dues.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  return sorted.find((due) => due.targetPaymentDate >= todayISO()) || sorted[sorted.length - 1] || null;
+}
+
+function fmtShortMonth(iso: string): string {
+  if (!isISO(iso)) return iso;
+  const [, m, d] = iso.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[Math.max(0, Math.min(11, Number(m) - 1))]} ${Number(d)}`;
 }
 
 export function tmpId(): string {

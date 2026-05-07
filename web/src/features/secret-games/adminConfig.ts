@@ -1,3 +1,8 @@
+// web/src/features/secret-games/adminConfig.ts
+// Central admin defaults for secret games and their triggers.
+// The bug game is intentionally archived here: its renderer stays in-repo for
+// future reuse, but the shipped defaults keep it disconnected from live routes.
+
 import Routes from "@lib/Routes";
 import type { SecretGameFeatureFlags } from "./types";
 import { listSecretGames } from "./registry";
@@ -58,7 +63,10 @@ export type SecretGameAdminEntry = {
 
 // ─── Ambient Trigger settings ──────────────────────────────────────────────────
 
-export type AmbientTriggerId = "bug" | "asteroid" | "plant" | "snake";
+// Ambient triggers: floaters that drift across or onto the screen and invite game play.
+//   Ambient (full-screen float): bug, asteroid, snake, moon
+//   Card (attach to a customer card): plant, farm, alert
+export type AmbientTriggerId = "bug" | "asteroid" | "snake" | "moon" | "plant" | "farm" | "alert";
 
 export type AmbientTriggerAdminEntry = {
   enabled: boolean;
@@ -70,17 +78,27 @@ export type AmbientTriggerAdminEntry = {
 };
 
 export const AMBIENT_TRIGGER_DEFAULTS: Record<AmbientTriggerId, AmbientTriggerAdminEntry> = {
-  bug:      { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 10, jitterMinutes: 2  },
+  // ── Ambient floaters (full-screen / cross-screen) ────────────────────────────
+  bug:      { enabled: false, allowedRoutes: ["customers"], minIntervalMinutes: 10, jitterMinutes: 2  },
   asteroid: { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 14, jitterMinutes: 5  },
-  plant:    { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 12, jitterMinutes: 4  },
   snake:    { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 13, jitterMinutes: 4  },
+  moon:     { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 20, jitterMinutes: 8  },
+  // ── Card triggers (attach to / overlay a customer card) ─────────────────────
+  plant:    { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 12, jitterMinutes: 4  },
+  farm:     { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 15, jitterMinutes: 5  },
+  alert:    { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 11, jitterMinutes: 3  },
 };
 
 export const AMBIENT_TRIGGER_LABELS: Record<AmbientTriggerId, { emoji: string; label: string; hint: string }> = {
-  bug:      { emoji: "🪲", label: "Bug (Cockroach)",  hint: "Wanders across the screen; click to play Donkey Kong." },
-  asteroid: { emoji: "☄️",  label: "Asteroid",         hint: "Streaks diagonally across the screen; click for Space Invaders." },
-  plant:    { emoji: "🌱", label: "Plant Sprout",     hint: "Grows from the bottom edge; click for Tower Defense." },
-  snake:    { emoji: "🐍", label: "Snake",             hint: "Slithers across the screen; click to play Snake." },
+  // ── Ambient floaters ────────────────────────────────────────────────────────
+  bug:      { emoji: "🪲", label: "Bug",         hint: "Wanders across the screen; click to play Donkey Kong." },
+  asteroid: { emoji: "☄️",  label: "Asteroid",    hint: "Streaks diagonally across the screen; click for Space Invaders." },
+  snake:    { emoji: "🐍", label: "Snake",        hint: "Slithers across the screen; click to play Snake." },
+  moon:     { emoji: "🌕", label: "Moon Rise",    hint: "Moon rises; screen darkens. Click for Necromancer (prototype)." },
+  // ── Card triggers ────────────────────────────────────────────────────────────
+  plant:    { emoji: "🌱", label: "Plant Sprout", hint: "Grows from a customer card; click for Tower Defense." },
+  farm:     { emoji: "🚜", label: "Farm",         hint: "A tractor trundles past; click for Farm game (prototype)." },
+  alert:    { emoji: "⚠️", label: "Alert Badge",  hint: "A warning badge latches onto a card; click for Broken Data (prototype)." },
 };
 
 export type SecretGamesAdminConfig = {

@@ -23,12 +23,16 @@ type SecretGamesSandboxValue = {
   activeCaseManagerId: string;
   activeCaseManager: FakeCaseManager | null;
   setActiveCaseManagerId: (next: string) => void;
+  /** When true, the lab page shows real Firestore customers instead of sandbox fixtures. */
+  useRealCustomers: boolean;
+  setUseRealCustomers: (next: boolean) => void;
 };
 
 const SecretGamesSandboxCtx = React.createContext<SecretGamesSandboxValue | null>(null);
 
 export function SecretGamesSandboxProvider({ children }: { children: React.ReactNode }) {
   const [activeCaseManagerId, setActiveCaseManagerId] = React.useState<string>(SANDBOX_ALL_CASE_MANAGERS);
+  const [useRealCustomers, setUseRealCustomers] = React.useState<boolean>(true);
 
   const activeCaseManager = React.useMemo(
     () => FAKE_CASE_MANAGERS.find((manager) => manager.id === activeCaseManagerId) || null,
@@ -56,8 +60,10 @@ export function SecretGamesSandboxProvider({ children }: { children: React.React
       activeCaseManagerId,
       activeCaseManager,
       setActiveCaseManagerId,
+      useRealCustomers,
+      setUseRealCustomers,
     }),
-    [activeCaseManager, activeCaseManagerId, visibleCustomerEntities, visibleCustomers],
+    [activeCaseManager, activeCaseManagerId, visibleCustomerEntities, visibleCustomers, useRealCustomers],
   );
 
   return <SecretGamesSandboxCtx.Provider value={value}>{children}</SecretGamesSandboxCtx.Provider>;

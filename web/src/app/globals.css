@@ -211,8 +211,34 @@
   }
 
   /* ---------- Modal ---------- */
+  :root {
+    --z-dropdown: 200;
+    --z-modal: 1000;
+    --z-workspace-modal: 1100;
+    --z-modal-nested: 1200;
+    --z-global-pending: 9999;
+  }
+
+  .modal-layer {
+    z-index: var(--z-modal);
+  }
+
+  .workspace-modal-layer {
+    z-index: var(--z-workspace-modal);
+  }
+
+  .modal-nested-layer {
+    z-index: var(--z-modal-nested);
+  }
+
   .modal-overlay {
-    @apply fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm;
+    @apply fixed inset-0 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm;
+    z-index: var(--z-modal);
+  }
+
+  .workspace-modal-overlay {
+    @apply fixed inset-0 bg-black/40 p-2 backdrop-blur-sm md:p-4;
+    z-index: var(--z-workspace-modal);
   }
 
   .modal {

@@ -78,7 +78,7 @@ function setCors(req: Request, res: Response, methods: HttpMethod[]) {
   }
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "authorization, content-type, x-firebase-appcheck, x-correlation-id, idempotency-key"
+    "authorization, content-type, x-firebase-appcheck, x-correlation-id, idempotency-key, x-drive-access-token"
   );
   res.setHeader("Access-Control-Expose-Headers", "x-correlation-id");
   res.setHeader("Access-Control-Allow-Methods", methods.join(", "));

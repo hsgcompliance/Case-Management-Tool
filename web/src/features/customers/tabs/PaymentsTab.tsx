@@ -19,6 +19,11 @@ import PaymentPaidDialog from "@entities/dialogs/payments/PaymentPaidDialog";
 import PaymentsDeleteDialog from "@entities/dialogs/payments/PaymentsDeleteDialog";
 import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
 import PaymentsProjectionsAdjustDialog from "@entities/dialogs/payments/PaymentsProjectionsAdjustDialog";
+import dynamic from "next/dynamic";
+const GrantBudgetStrip = dynamic(
+  () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
+  { ssr: false, loading: () => <div className="h-6 animate-pulse rounded bg-slate-100" /> },
+);
 import { CustomerPaymentsTable } from "../components";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
@@ -46,7 +51,7 @@ function paymentTypeKey(p: TPayment): string {
   return isUtility ? "monthly:utility" : "monthly:rent";
 }
 
-export function PaymentsTab({ customerId }: { customerId: string }) {
+export function PaymentsTab({ customerId, customerName }: { customerId: string; customerName?: string }) {
   const { data: rows = [], isLoading } = useCustomerPayments(customerId);
   const { data: enrollments = [] } = useCustomerEnrollments(customerId, { enabled: !!customerId });
   const spend = usePaymentsSpend();
@@ -59,6 +64,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
   const [paidDialogOpen, setPaidDialogOpen] = React.useState(false);
   const [builderOpen, setBuilderOpen] = React.useState(false);
   const [adjustOpen, setAdjustOpen] = React.useState(false);
+  const [adjustInitialEnrollmentId, setAdjustInitialEnrollmentId] = React.useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [hmisComplete, setHmisComplete] = React.useState(false);
   const [caseworthyComplete, setCaseworthyComplete] = React.useState(false);
@@ -82,14 +88,26 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
     let total = 0;
     let paid = 0;
     let projectedUnpaid = 0;
+    let overdue = 0;
+    let dueThisMonth = 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const thisMonth = today.slice(0, 7);
+    let nextDue = "";
     for (const row of filteredRows) {
       const amt = Number((row.payment as any)?.amount || 0);
       if (!Number.isFinite(amt)) continue;
       total += amt;
-      if ((row.payment as any)?.paid) paid += amt;
-      else projectedUnpaid += amt;
+      const isPaid = Boolean((row.payment as any)?.paid);
+      const due = paymentDate(row.payment);
+      if (isPaid) paid += amt;
+      else {
+        projectedUnpaid += amt;
+        if (due && due < today) overdue += 1;
+        if (due && due.slice(0, 7) === thisMonth) dueThisMonth += 1;
+        if (due && (!nextDue || due < nextDue)) nextDue = due;
+      }
     }
-    return { total, paid, projectedUnpaid };
+    return { total, paid, projectedUnpaid, overdue, dueThisMonth, nextDue };
   }, [filteredRows]);
 
   const byType = React.useMemo(() => {
@@ -149,13 +167,6 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
       .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   }, [filteredRows]);
 
-  React.useEffect(() => {
-    setError(null);
-    setHmisComplete(Boolean(selected?.payment?.compliance?.hmisComplete));
-    setCaseworthyComplete(Boolean(selected?.payment?.compliance?.caseworthyComplete));
-  }, [selected]);
-
-  const paymentId = selected?.payment?.id ? String(selected.payment.id) : "";
   const builderEnrollments = React.useMemo(() => {
     return enrollments.map((e) => {
       const status = String(e?.status || "").toLowerCase();
@@ -174,6 +185,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
         statusLabel,
         lineItemIds,
         scheduleMeta: (e as Record<string, unknown>).scheduleMeta,
+        payments: (Array.isArray(e.payments) ? e.payments : []) as TPayment[],
       };
     });
   }, [enrollments]);
@@ -197,6 +209,47 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
     });
   }, [enrollments]);
 
+  const visibleGrantIds = React.useMemo(() => {
+    const relevant = enrollmentFilterId === "all"
+      ? adjustEnrollments
+      : adjustEnrollments.filter((e) => e.id === enrollmentFilterId);
+    return Array.from(new Set(relevant.map((e) => e.grantId).filter(Boolean))) as string[];
+  }, [enrollmentFilterId, adjustEnrollments]);
+
+  const selectedEnrollmentForBudget = React.useMemo(() => {
+    if (enrollmentFilterId === "all") return null;
+    return adjustEnrollments.find((e) => e.id === enrollmentFilterId) || null;
+  }, [adjustEnrollments, enrollmentFilterId]);
+
+  const budgetStripEmptyState = React.useMemo(() => {
+    if (visibleGrantIds.length > 0) return null;
+    if (adjustEnrollments.length === 0) return "Create an enrollment before budget totals can be shown.";
+    if (enrollmentFilterId === "all") return "No enrolled grants are available for this customer.";
+    if (!selectedEnrollmentForBudget) return "The selected enrollment could not be found.";
+    return `${selectedEnrollmentForBudget.label} is not linked to a grant, so no budget is available.`;
+  }, [adjustEnrollments.length, enrollmentFilterId, selectedEnrollmentForBudget, visibleGrantIds.length]);
+
+  const selectedGrantId = React.useMemo(
+    () => adjustEnrollments.find((e) => e.id === selected?.enrollmentId)?.grantId || null,
+    [selected, adjustEnrollments],
+  );
+
+  React.useEffect(() => {
+    setError(null);
+    setHmisComplete(Boolean(selected?.payment?.compliance?.hmisComplete));
+    setCaseworthyComplete(Boolean(selected?.payment?.compliance?.caseworthyComplete));
+  }, [selected]);
+
+  const selectRow = React.useCallback((row: CustomerPaymentRow, key: string) => {
+    setSelected({
+      enrollmentId: row.enrollmentId,
+      paymentKey: key,
+      payment: row.payment,
+      row,
+    });
+  }, []);
+
+  const paymentId = selected?.payment?.id ? String(selected.payment.id) : "";
   const markUnpaid = async () => {
     if (!selected?.enrollmentId || !paymentId) return;
     setError(null);
@@ -332,15 +385,21 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-medium text-slate-900">Payment Schedule</div>
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Payment Schedule</div>
+          <div className="text-xs text-slate-500">Create schedules, post payments, adjust rows, and preview budget impact.</div>
+        </div>
         <div className="flex items-center gap-2">
           <button
-            className="btn btn-sm"
-            onClick={() => setAdjustOpen(true)}
+            className="btn-secondary btn-sm"
+            onClick={() => {
+              setAdjustInitialEnrollmentId(enrollmentFilterId === "all" ? null : enrollmentFilterId);
+              setAdjustOpen(true);
+            }}
             disabled={adjustMutation.isPending || adjustEnrollments.length === 0}
             title={adjustEnrollments.length === 0 ? "Create an enrollment first." : "Adjust payments and projections"}
           >
-            {adjustMutation.isPending ? "Applying..." : "Adjust"}
+            {adjustMutation.isPending ? "Applying..." : "Adjust Schedule"}
           </button>
           <button
             className="btn btn-sm"
@@ -348,7 +407,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
             disabled={buildScheduleMutation.isPending || builderEnrollments.length === 0}
             title={builderEnrollments.length === 0 ? "Create an enrollment first." : "Build projected schedule rows"}
           >
-            {buildScheduleMutation.isPending ? "Building..." : "Open Builder"}
+            {buildScheduleMutation.isPending ? "Building..." : "Build Schedule"}
           </button>
         </div>
       </div>
@@ -388,6 +447,33 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
             <div className="text-xs text-slate-500">Projected (Unpaid) Total</div>
             <div className="text-lg font-semibold text-sky-700">{fmtCurrencyUSD(totals.projectedUnpaid)}</div>
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          <div className="rounded border border-slate-200 bg-white px-3 py-2">
+            <div className="text-xs text-slate-500">Next Unpaid Due</div>
+            <div className="text-sm font-semibold text-slate-900">{totals.nextDue ? fmtDateOrDash(totals.nextDue) : "-"}</div>
+          </div>
+          <div className="rounded border border-slate-200 bg-white px-3 py-2">
+            <div className="text-xs text-slate-500">Due This Month</div>
+            <div className="text-sm font-semibold text-slate-900">{totals.dueThisMonth}</div>
+          </div>
+          <div className={`rounded border px-3 py-2 ${totals.overdue ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
+            <div className="text-xs text-slate-500">Overdue Unpaid</div>
+            <div className={`text-sm font-semibold ${totals.overdue ? "text-rose-700" : "text-slate-900"}`}>{totals.overdue}</div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {visibleGrantIds.length > 0 ? (
+            visibleGrantIds.map((gid) => (
+              <GrantBudgetStrip key={gid} grantId={gid} />
+            ))
+          ) : (
+            <div className="rounded border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              {budgetStripEmptyState}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
@@ -514,14 +600,16 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
           onToggleCompliance={toggleComplianceInline}
           busyPaid={spend.isPending}
           busyCompliance={compliance.isPending}
-          onManage={(row, key) =>
-            setSelected({
-              enrollmentId: row.enrollmentId,
-              paymentKey: key,
-              payment: row.payment,
-              row,
-            })
-          }
+          onManage={selectRow}
+          onAdjustSchedule={(row, key) => {
+            selectRow(row, key);
+            setAdjustInitialEnrollmentId(String(row.enrollmentId || ""));
+            setAdjustOpen(true);
+          }}
+          onDeleteRow={(row, key) => {
+            selectRow(row, key);
+            setDeleteOpen(true);
+          }}
         />
       )}
 
@@ -529,6 +617,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
         open={paidDialogOpen}
         amount={Number(selected?.payment?.amount || 0)}
         dueDate={String(selected?.payment?.dueDate || "")}
+        grantId={selectedGrantId}
         onCancel={() => setPaidDialogOpen(false)}
         onSave={(meta) => void markPaid(meta)}
       />
@@ -536,6 +625,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
       <PaymentsDeleteDialog
         open={deleteOpen}
         busy={deleteRows.isPending}
+        grantId={selectedGrantId}
         selected={
           selected
             ? {
@@ -555,6 +645,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
         open={builderOpen}
         busy={buildScheduleMutation.isPending}
         enrollments={builderEnrollments}
+        customerName={customerName}
         onCancel={() => setBuilderOpen(false)}
         onBuild={(payload) => void buildSchedule(payload)}
       />
@@ -563,6 +654,7 @@ export function PaymentsTab({ customerId }: { customerId: string }) {
         open={adjustOpen}
         busy={adjustMutation.isPending}
         enrollments={adjustEnrollments}
+        initialEnrollmentId={adjustInitialEnrollmentId}
         onCancel={() => setAdjustOpen(false)}
         onApply={(payload) => void applyAdjustments(payload)}
       />

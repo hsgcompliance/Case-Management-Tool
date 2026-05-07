@@ -1,6 +1,6 @@
 // frontend/src/entities/DynamicFormFields.tsx
 "use client";
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 export type AnyRecord = Record<string, any>;
 export type OnChange = (next: AnyRecord) => void;
@@ -604,16 +604,15 @@ function NumberInput({
 // ─── Add Field Row ────────────────────────────────────────────────────────────
 
 function AddFieldRow({ onAdd }: { onAdd: (k: string, type: string) => void }) {
-  const nameRef = useRef<HTMLInputElement>(null);
-  const typeRef = useRef<HTMLSelectElement>(null);
+  const [name, setName] = useState("");
+  const [type, setType] = useState("string");
 
   const submit = () => {
-    const name = nameRef.current?.value?.trim() ?? "";
-    const type = typeRef.current?.value ?? "string";
-    if (name) {
-      onAdd(name, type);
-      if (nameRef.current) nameRef.current.value = "";
-      if (typeRef.current) typeRef.current.value = "string";
+    const nextName = name.trim();
+    if (nextName) {
+      onAdd(nextName, type);
+      setName("");
+      setType("string");
     }
   };
 
@@ -621,9 +620,10 @@ function AddFieldRow({ onAdd }: { onAdd: (k: string, type: string) => void }) {
     <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
       <span className="text-sm text-slate-600">+ Add field</span>
       <input
-        ref={nameRef}
         className="px-2 py-1 border rounded text-sm bg-white"
         placeholder="Field name"
+        value={name}
+        onChange={(e) => setName(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -632,9 +632,9 @@ function AddFieldRow({ onAdd }: { onAdd: (k: string, type: string) => void }) {
         }}
       />
       <select
-        ref={typeRef}
         className="px-2 py-1 border rounded text-sm bg-white"
-        defaultValue="string"
+        value={type}
+        onChange={(e) => setType(e.currentTarget.value)}
       >
         <option value="string">String</option>
         <option value="number">Number</option>

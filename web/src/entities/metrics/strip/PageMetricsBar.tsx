@@ -135,10 +135,10 @@ export function SharedPageMetricsBar() {
         id: "my-open-tasks",
         metricId: "my-open-tasks",
         label: "My Open Tasks",
-        value: formatNumber(caseManagerMetrics?.tasks.openThisMonth),
+        value: formatNumber(caseManagerMetrics?.tasks?.openThisMonth),
         subtext:
-          caseManagerMetrics?.tasks.openNextMonth != null
-            ? `${month} | Next ${formatNumber(caseManagerMetrics.tasks.openNextMonth)}`
+          caseManagerMetrics?.tasks?.openNextMonth != null
+            ? `${month} | Next ${formatNumber(caseManagerMetrics.tasks?.openNextMonth)}`
             : month,
         loading: !!myUid && caseManagerLoading,
         disabled: !myUid || !isCaseManager,

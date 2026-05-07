@@ -7,10 +7,11 @@ import { useUsers } from "@hooks/useUsers";
 import { useAuth } from "@app/auth/AuthProvider";
 import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import { toast } from "@lib/toast";
+import { isAdminLike } from "@lib/roles";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Types
 
-type DigestType = "caseload" | "budget" | "enrollments" | "caseManagers";
+type DigestType = "caseload" | "budget" | "enrollments" | "caseManagers" | "rentalAssistance";
 
 type DigestSubRecord = {
   uid: string;
@@ -22,13 +23,24 @@ type DigestSubRecord = {
   effective: Record<DigestType, boolean>;
 };
 
-// ── Config ────────────────────────────────────────────────────────────────────
+type UserListItem = {
+  uid?: unknown;
+  email?: unknown;
+  displayName?: unknown;
+};
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+// Config
 
 const DIGEST_DEFS: { type: DigestType; label: string; schedule: string }[] = [
   { type: "caseload",     label: "Caseload",      schedule: "1st of each month, 7 AM MT" },
   { type: "budget",       label: "Budget",         schedule: "1st of each month, 7 AM MT" },
   { type: "enrollments",  label: "Enrollments",    schedule: "1st of each month, 7 AM MT" },
   { type: "caseManagers", label: "Case Managers",  schedule: "1st of each month, 7 AM MT" },
+  { type: "rentalAssistance", label: "Rental Assistance", schedule: "1st of each month, 7 AM MT" },
 ];
 
 function currentMonthValue(): string {
@@ -42,7 +54,7 @@ function monthLabel(ym: string): string {
   } catch { return ym; }
 }
 
-// ── Left panel ────────────────────────────────────────────────────────────────
+// Left panel
 
 function TemplatePanel({
   def,
@@ -54,6 +66,7 @@ function TemplatePanel({
   onSendNow,
   sending,
   disabled,
+  sendBlockedReason,
 }: {
   def: (typeof DIGEST_DEFS)[number];
   month: string;
@@ -64,6 +77,7 @@ function TemplatePanel({
   onSendNow: () => void;
   sending: boolean;
   disabled: boolean;
+  sendBlockedReason?: string;
 }) {
   const [html, setHtml] = React.useState<string | null>(null);
   const [subject, setSubject] = React.useState("");
@@ -80,8 +94,8 @@ function TemplatePanel({
       });
       setHtml(resp.html);
       setSubject(resp.subject);
-    } catch (e: any) {
-      toast(e?.message || "Preview failed.", { type: "error" });
+    } catch (e: unknown) {
+      toast(errorMessage(e, "Preview failed."), { type: "error" });
     } finally {
       setLoadingPreview(false);
     }
@@ -121,7 +135,7 @@ function TemplatePanel({
             onClick={loadPreview}
             disabled={loadingPreview}
           >
-            {loadingPreview ? "Loading…" : "Refresh Preview"}
+            {loadingPreview ? "Loading..." : "Refresh Preview"}
           </button>
         </div>
 
@@ -136,14 +150,14 @@ function TemplatePanel({
               type="button"
               onClick={onClearUser}
               className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
-              title="Clear — show generic preview"
+              title="Clear - show generic preview"
             >
-              ✕ Clear
+              x Clear
             </button>
           </div>
         ) : (
           <div className="text-xs text-slate-400 italic">
-            Generic preview — click a name in the subscriber list to preview for a specific user.
+            Generic preview - click a name in the subscriber list to preview for a specific user.
           </div>
         )}
 
@@ -160,10 +174,10 @@ function TemplatePanel({
             type="button"
             className="btn btn-sm btn-primary"
             onClick={onSendNow}
-            disabled={sending || !month || disabled}
-            title={disabled ? "Re-enable this digest before sending" : undefined}
+            disabled={sending || !month || disabled || !!sendBlockedReason}
+            title={disabled ? "Re-enable this digest before sending" : sendBlockedReason}
           >
-            {sending ? "Sending…" : forUid ? `Send to ${forUidName}` : "Send Now (All)"}
+            {sending ? "Sending..." : forUid ? `Send to ${forUidName}` : "Send Now (All)"}
           </button>
           <div className="text-xs text-slate-400 ml-1">
             Scheduled: <span className="text-slate-600">{def.schedule}</span>
@@ -174,11 +188,11 @@ function TemplatePanel({
       {/* Preview iframe */}
       <div className="flex-1 min-h-0 overflow-hidden bg-slate-100">
         {loadingPreview ? (
-          <div className="flex items-center justify-center h-full text-sm text-slate-400">Loading preview…</div>
+          <div className="flex items-center justify-center h-full text-sm text-slate-400">Loading preview...</div>
         ) : html ? (
           <iframe
             srcDoc={html}
-            title={`${def.label} Digest Preview${forUidName ? ` — ${forUidName}` : ""}`}
+            title={`${def.label} Digest Preview${forUidName ? ` - ${forUidName}` : ""}`}
             className="w-full h-full border-0"
             sandbox="allow-same-origin"
           />
@@ -190,7 +204,7 @@ function TemplatePanel({
   );
 }
 
-// ── Right panel (subscribers) ─────────────────────────────────────────────────
+// Right panel (subscribers)
 
 function SubscribersPanel({
   def,
@@ -219,9 +233,9 @@ function SubscribersPanel({
   const unsubscribed = records.filter((r) => !r.effective[def.type]);
 
   const recordUids = new Set(records.map((r) => r.uid));
-  const addable = (allUsers as any[])
-    .filter((u: any) => u?.uid && !recordUids.has(u.uid) && u.email)
-    .map((u: any) => ({ uid: String(u.uid), label: String(u.displayName || u.email) }))
+  const addable = (allUsers as UserListItem[])
+    .filter((u) => u?.uid && !recordUids.has(String(u.uid)) && u.email)
+    .map((u) => ({ uid: String(u.uid), label: String(u.displayName || u.email) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
   const handleToggle = async (uid: string, on: boolean) => {
@@ -239,7 +253,7 @@ function SubscribersPanel({
       <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-3">
         <div className="font-semibold text-slate-900 text-sm">Subscribers</div>
         <div className="text-xs text-slate-500 mt-0.5">
-          {subscribed.length} subscribed · click name to preview
+          {subscribed.length} subscribed - click name to preview
         </div>
       </div>
 
@@ -250,7 +264,7 @@ function SubscribersPanel({
         ) : (
           [...subscribed, ...unsubscribed].map((r) => {
             const isMe = r.uid === myUid;
-            const canToggle = true;
+            const canToggle = isAdmin || isMe;
             const on = !!r.effective[def.type];
             const isDefault = !(def.type in r.subs);
             const isSelected = selectedUid === r.uid;
@@ -282,7 +296,7 @@ function SubscribersPanel({
                   ].join(" ")}>
                     {displayName}
                     {isMe && <span className="ml-1 text-xs text-blue-500">you</span>}
-                    {isSelected && <span className="ml-1 text-[10px] text-sky-500">← previewing</span>}
+                    {isSelected && <span className="ml-1 text-[10px] text-sky-500">previewing</span>}
                   </div>
                   {isDefault && <div className="text-xs text-slate-400">default</div>}
                 </button>
@@ -300,7 +314,7 @@ function SubscribersPanel({
                     (!canToggle || toggling) ? "opacity-40 cursor-default" : "cursor-pointer",
                   ].join(" ")}
                 >
-                  {toggling ? "…" : on ? "On" : "Off"}
+                  {toggling ? "..." : on ? "On" : "Off"}
                 </button>
               </div>
             );
@@ -318,7 +332,7 @@ function SubscribersPanel({
               onChange={(e) => setAddUid(e.currentTarget.value)}
               className="flex-1 min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
             >
-              <option value="">Select user…</option>
+              <option value="">Select user...</option>
               {addable.map((u) => (
                 <option key={u.uid} value={u.uid}>{u.label}</option>
               ))}
@@ -338,12 +352,12 @@ function SubscribersPanel({
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// Main component
 
 export function EmailDigestMain() {
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const myUid   = user?.uid || "";
-  const isAdmin = ["admin", "dev", "org_dev"].includes(profile?.topRole ?? "");
+  const isAdmin = isAdminLike(profile as { topRole?: unknown; role?: unknown } | null);
 
   const [activeTab, setActiveTab] = React.useState<DigestType>("caseload");
   const [month, setMonth]         = React.useState(currentMonthValue);
@@ -358,6 +372,12 @@ export function EmailDigestMain() {
   const saveOrgConfig = useSaveOrgConfig();
 
   const def = DIGEST_DEFS.find((d) => d.type === activeTab)!;
+  const selectedRecord = forUid ? records.find((r) => r.uid === forUid) ?? null : null;
+  const selectedSubscribed = selectedRecord ? !!selectedRecord.effective[activeTab] : true;
+  const sendBlockedReason =
+    selectedRecord && !selectedSubscribed
+      ? `${forUidName || selectedRecord.email} is not subscribed to this digest.`
+      : undefined;
 
   // A digest is enabled unless explicitly set to false
   const isDisabled = (type: DigestType) =>
@@ -367,38 +387,45 @@ export function EmailDigestMain() {
     if (!orgConfig) return;
     setSavingDisable(true);
     try {
+      const currentlyDisabled = isDisabled(activeTab);
       const next = {
         ...orgConfig,
         digestsEnabled: {
           ...orgConfig.digestsEnabled,
-          [activeTab]: isDisabled(activeTab), // toggle: false → true, true → false (or absent → false)
+          [activeTab]: currentlyDisabled,
         },
       };
       await saveOrgConfig.mutateAsync(next);
       toast(
-        isDisabled(activeTab)
+        currentlyDisabled
           ? `${def.label} digest re-enabled.`
           : `${def.label} digest disabled.`,
         { type: "success" }
       );
-    } catch (e: any) {
-      toast(e?.message || "Failed to save setting.", { type: "error" });
+    } catch (e: unknown) {
+      toast(errorMessage(e, "Failed to save setting."), { type: "error" });
     } finally {
       setSavingDisable(false);
     }
   };
 
   const loadRecords = React.useCallback(async () => {
+    if (authLoading) return;
+    if (!isAdmin) {
+      setRecords([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const resp = await Inbox.digestSubsGet();
       setRecords(resp.records as DigestSubRecord[]);
-    } catch (e: any) {
-      toast(e?.message || "Failed to load subscriptions.", { type: "error" });
+    } catch (e: unknown) {
+      toast(errorMessage(e, "Failed to load subscriptions."), { type: "error" });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, isAdmin]);
 
   React.useEffect(() => { loadRecords(); }, [loadRecords]);
 
@@ -429,8 +456,8 @@ export function EmailDigestMain() {
           : `Unsubscribed from ${def.label} digest.`,
         { type: "success" }
       );
-    } catch (e: any) {
-      toast(e?.message || "Update failed.", { type: "error" });
+    } catch (e: unknown) {
+      toast(errorMessage(e, "Update failed."), { type: "error" });
       loadRecords(); // revert optimistic update
     }
   };
@@ -440,25 +467,48 @@ export function EmailDigestMain() {
   };
 
   const handleSendNow = async () => {
+    if (!isAdmin) { toast("Admin access is required.", { type: "error" }); return; }
     if (!month) { toast("Select a month.", { type: "error" }); return; }
     if (isDisabled(activeTab)) { toast("Re-enable this digest before sending.", { type: "error" }); return; }
+    if (sendBlockedReason) { toast(sendBlockedReason, { type: "error" }); return; }
     setSending(true);
     try {
-      const body: Record<string, unknown> = { months: [month], digestType: activeTab };
+      const body: Parameters<typeof Inbox.sendDigestNow>[0] = { months: [month], digestType: activeTab };
       if (forUid) body.cmUid = forUid;
-      const resp = await (Inbox.sendDigestNow as any)(body);
+      const resp = await Inbox.sendDigestNow(body);
       const { sent = 0, skipped = 0, failed = 0 } = resp || {};
       if (failed > 0) {
         toast(`Sent ${sent}, skipped ${skipped}, failed ${failed}.`, { type: "error" });
       } else {
         toast(`Sent ${sent} digest${sent !== 1 ? "s" : ""}${skipped ? ` (${skipped} already sent)` : ""}.`, { type: "success" });
       }
-    } catch (e: any) {
-      toast(e?.message || "Send failed.", { type: "error" });
+    } catch (e: unknown) {
+      toast(errorMessage(e, "Send failed."), { type: "error" });
     } finally {
       setSending(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-slate-400">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex h-full min-h-[360px] items-center justify-center bg-slate-50 px-6">
+        <div className="max-w-md rounded-lg border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <div className="text-base font-semibold text-slate-900">Admin access required</div>
+          <div className="mt-2 text-sm leading-6 text-slate-500">
+            Email digest previews, subscriber lists, and manual sends are available to admins only.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -488,7 +538,7 @@ export function EmailDigestMain() {
           })}
         </div>
 
-        {/* Global disable toggle — admin only */}
+        {/* Global disable toggle - admin only */}
         {isAdmin && orgConfig && (
           <button
             type="button"
@@ -509,7 +559,7 @@ export function EmailDigestMain() {
 
       {/* Body */}
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Loading…</div>
+        <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Loading...</div>
       ) : (
         <div className="flex-1 min-h-0 flex">
           <div className="flex-1 min-w-0 min-h-0">
@@ -523,6 +573,7 @@ export function EmailDigestMain() {
               onSendNow={handleSendNow}
               sending={sending}
               disabled={isDisabled(activeTab)}
+              sendBlockedReason={sendBlockedReason}
             />
           </div>
           <div className="w-64 shrink-0 min-h-0 flex flex-col">

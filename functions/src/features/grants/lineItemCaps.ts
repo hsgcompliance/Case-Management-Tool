@@ -114,6 +114,62 @@ export async function recordCustomerSpend(opts: {
   });
 }
 
+export async function recomputeCustomerSpendForGrant(opts: {
+  grantId: string;
+  dryRun?: boolean;
+}): Promise<{ grantId: string; customers: number; ledgerRows: number; totals: Record<string, number>; dryRun: boolean }> {
+  const grantId = String(opts.grantId || "").trim();
+  if (!grantId) throw new Error("grant_required");
+
+  const ledgerSnap = await db.collection("ledger").where("grantId", "==", grantId).get();
+  const byCustomer = new Map<string, { lineItemSpend: Record<string, number>; ledgerRows: number }>();
+
+  for (const doc of ledgerSnap.docs) {
+    const row = doc.data() || {};
+    const customerId = String(row.customerId || "").trim();
+    const lineItemId = String(row.lineItemId || "").trim();
+    if (!customerId || !lineItemId) continue;
+    const amount = Number(row.amount || 0) || (Number(row.amountCents || 0) / 100);
+    if (!amount) continue;
+    const hit = byCustomer.get(customerId) || { lineItemSpend: {}, ledgerRows: 0 };
+    hit.lineItemSpend[lineItemId] = (hit.lineItemSpend[lineItemId] || 0) + amount;
+    hit.ledgerRows += 1;
+    byCustomer.set(customerId, hit);
+  }
+
+  const totals = Array.from(byCustomer.entries()).reduce<Record<string, number>>((acc, [customerId, data]) => {
+    acc[customerId] = Object.values(data.lineItemSpend).reduce((sum, value) => sum + value, 0);
+    return acc;
+  }, {});
+
+  if (!opts.dryRun) {
+    const existing = await db.collection(COLLECTION).where("grantId", "==", grantId).get();
+    const batch = db.batch();
+    for (const doc of existing.docs) batch.delete(doc.ref);
+    const now = isoNow();
+    for (const [customerId, data] of byCustomer.entries()) {
+      batch.set(db.collection(COLLECTION).doc(docId(grantId, customerId)), {
+        grantId,
+        customerId,
+        lineItemSpend: data.lineItemSpend,
+        totalSpend: totals[customerId] || 0,
+        ledgerRows: data.ledgerRows,
+        recomputedAt: now,
+        updatedAt: now,
+      }, { merge: false });
+    }
+    await batch.commit();
+  }
+
+  return {
+    grantId,
+    customers: byCustomer.size,
+    ledgerRows: Array.from(byCustomer.values()).reduce((sum, data) => sum + data.ledgerRows, 0),
+    totals,
+    dryRun: !!opts.dryRun,
+  };
+}
+
 /**
  * Fetch the grant doc and check whether a spend for a customer on a specific
  * line item would exceed the cap.  Returns `null` if no cap is configured.

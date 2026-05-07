@@ -4,6 +4,8 @@ export {
   usersInvite,
   usersSetRole,
   usersSetActive,
+  usersUpdateProfile,
+  usersResendInvite,
   usersRevokeSessions,
   usersList,
   devOrgsList,
@@ -20,8 +22,6 @@ const isEmu =
 export const devGrantAdmin = isEmu ? devGrantAdminEmu : undefined;
 
 export {onAuthUserCreated, onAuthUserDeleted} from "./triggers";
-export {onUserTaskMetrics} from "./taskMetrics";
-export {onUserTaskWorkloadMetrics} from "./workloadMetrics";
 export {onUserPaymentMetrics} from "./paymentMetrics";
 export {onCaseloadMetrics} from "./caseloadMetrics";
 export {onAcuityMetrics} from "./acuityMetrics";

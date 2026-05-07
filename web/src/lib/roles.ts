@@ -58,6 +58,11 @@ export function isCaseManagerLike(input: RoleLike): boolean {
   return normalizeRoles(input.roles).some((r) => CASE_MANAGER_ALIASES.has(r));
 }
 
+export function isViewerLike(input: RoleLike): boolean {
+  if (!input) return false;
+  return normalizeRoles(input.roles).includes("viewer");
+}
+
 export const isAdmin = (roles: string[]): boolean => hasRole(roles, "admin");
 export const isCompliance = (roles: string[]): boolean => hasRole(roles, "compliance");
 export const isCaseManager = (roles: string[]): boolean => hasRole(roles, "case_manager");

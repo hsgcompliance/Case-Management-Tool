@@ -5,7 +5,7 @@ import { slug, summarize, assertOrgAccess, requireUid, resolveCaseManagerUid } f
 
 const Body = C.TasksUpsertManualBody;
 
-/** POST /tasksUpsertManual — create or update a manual (non-managed) task inside taskSchedule */
+/** POST /tasksUpsertManual — create/update a lightweight reminder note inside taskSchedule. */
 export const tasksUpsertManual = secureHandler(async (req, res) => {
   const { enrollmentId, task } = Body.parse(req.body || {});
   const user: any = (req as any)?.user || {};
@@ -21,7 +21,8 @@ export const tasksUpsertManual = secureHandler(async (req, res) => {
     assertOrgAccess(user, e);
 
     const sched: any[] = Array.isArray(e.taskSchedule) ? [...e.taskSchedule] : [];
-    const id = task.id || `task_manual_${slug(task.title)}_${task.dueDate}`;
+    const dueDate = String(task.dueDate || "");
+    const id = task.id || `task_manual_${slug(task.title)}_${dueDate || nowIso.slice(0, 10)}`;
 
     const existingIdx = sched.findIndex((t)=> String(t?.id)===id);
     const base = existingIdx >= 0 ? { ...sched[existingIdx] } : {};
@@ -51,8 +52,8 @@ export const tasksUpsertManual = secureHandler(async (req, res) => {
       type: task.title,
       notes: task.notes ?? (base.notes || ""),
       description: String((base as any)?.description || "").trim() || null,
-      dueDate: task.dueDate,
-      dueMonth: task.dueDate.slice(0,7),
+      dueDate,
+      dueMonth: dueDate ? dueDate.slice(0,7) : null,
       notify: task.notify !== false,
       bucket: task.bucket || "task",
       customerName: (base as any)?.customerName ?? customerName,

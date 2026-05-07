@@ -8,13 +8,17 @@ import {
   onDocumentCreated,
   onDocumentUpdated,
   onDocumentDeleted,
+  onDocumentWritten,
 } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions";
 import { RUNTIME } from "../../core";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
 import { upsertPaymentQueueItems, voidPaymentQueueItems } from "./service";
+import { recalcGrantProjectedForGrant } from "../payments/recalcGrantProjected";
 
 const FN = "onPaymentQueueSync";
+const FN_BUDGET = "onPaymentQueueBudgetProjection";
+const BUDGET_SOURCES = new Set(["projection", "invoice", "credit-card"]);
 
 function getOrgId(sub: any): string | null {
   return String(sub?.orgId || "").trim() || null;
@@ -106,6 +110,53 @@ export const onPaymentQueueSyncDelete = onDocumentDeleted(
       logger.info(`${FN}_delete_voided`, { id, voided });
     } catch (err) {
       logger.error(`${FN}_delete_error`, { id, err });
+    }
+  },
+);
+
+function budgetProjectionSignature(row: any): string {
+  if (!row) return "";
+  return [
+    String(row.source || "").toLowerCase(),
+    String(row.queueStatus || "").toLowerCase(),
+    String(row.grantId || ""),
+    String(row.lineItemId || ""),
+    String(row.customerId || ""),
+    String(row.enrollmentId || ""),
+    String(row.paymentId || row.submissionId || ""),
+    String(row.amountCents ?? row.amount ?? ""),
+    String(row.dueDate || row.createdAt || ""),
+  ].join("|");
+}
+
+function affectedBudgetGrantIds(before: any, after: any): string[] {
+  const ids = new Set<string>();
+  for (const row of [before, after]) {
+    if (!row) continue;
+    const source = String(row.source || "").toLowerCase();
+    if (!BUDGET_SOURCES.has(source)) continue;
+    const grantId = String(row.grantId || "").trim();
+    if (grantId) ids.add(grantId);
+  }
+  return Array.from(ids);
+}
+
+export const onPaymentQueueBudgetProjection = onDocumentWritten(
+  { region: RUNTIME.region, document: "paymentQueue/{id}" },
+  async (event) => {
+    const before = event.data?.before.exists ? event.data.before.data() : null;
+    const after = event.data?.after.exists ? event.data.after.data() : null;
+    if (budgetProjectionSignature(before) === budgetProjectionSignature(after)) return;
+
+    const grantIds = affectedBudgetGrantIds(before, after);
+    if (!grantIds.length) return;
+
+    for (const grantId of grantIds) {
+      try {
+        await recalcGrantProjectedForGrant({ grantId, activeOnly: true, source: 1 });
+      } catch (err) {
+        logger.error(`${FN_BUDGET}_error`, { grantId, queueId: String(event.params.id || ""), err });
+      }
     }
   },
 );

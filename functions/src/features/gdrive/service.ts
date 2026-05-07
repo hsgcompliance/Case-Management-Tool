@@ -58,6 +58,7 @@ export type DriveListDiagnostics = {
 };
 
 type DriveContext = {
+  authClient: any;
   drive: any;
   oauth2?: any;
   clientId?: string;
@@ -226,6 +227,7 @@ async function buildServiceAccountContext() {
     serviceAccountEmail = null;
   }
   return {
+    authClient: client,
     drive,
     authMode: "service_account" as const,
     authDiagnostics: {
@@ -260,6 +262,7 @@ async function buildSharedRefreshTokenContext(expectedScopes: string[]) {
     expectedScopes,
   });
   return {
+    authClient: oauth2,
     drive,
     oauth2,
     clientId,
@@ -307,6 +310,7 @@ async function buildUserAccessTokenContext(googleAccessToken: string) {
   }
   const drive = google.drive({ version: "v3", auth: oauth2 });
   return {
+    authClient: oauth2,
     drive,
     oauth2,
     authMode: "user_access_token" as const,
@@ -330,6 +334,12 @@ async function buildDriveContext(opts?: { googleAccessToken?: string; includeDia
           : mode === "service_account"
           ? await buildServiceAccountContext()
           : await buildSharedRefreshTokenContext(expectedScopes);
+      if (
+        context.authMode === "shared_refresh_token" &&
+        context.authDiagnostics?.hasDriveScope === false
+      ) {
+        throw new Error("shared_refresh_token_missing_drive_scope");
+      }
       selection.resolvedMode = context.authMode;
       return {
         ...context,
@@ -377,6 +387,18 @@ function buildInaccessibleFolderError(
 export async function getDriveClient(opts?: { googleAccessToken?: string; includeDiagnostics?: boolean }) {
   const { drive } = await buildDriveContext(opts);
   return drive;
+}
+
+export async function getSheetsClient(opts?: { googleAccessToken?: string; includeDiagnostics?: boolean }) {
+  const { authClient } = await buildDriveContext(opts);
+  const { google } = await getGoogle();
+  return google.sheets({ version: "v4", auth: authClient as any });
+}
+
+/** Like getDriveClient but also returns auth diagnostics — used by debug endpoints */
+export async function getDriveClientWithDiagnostics(opts?: { googleAccessToken?: string }) {
+  const context = await buildDriveContext({ ...opts, includeDiagnostics: true });
+  return { drive: context.drive, authMode: context.authMode, authDiagnostics: context.authDiagnostics, selection: context.selection };
 }
 
 export async function listInFolder(

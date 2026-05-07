@@ -161,17 +161,29 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     setCloseDate(suggested);
   }, [closeTarget, today]);
 
+  const [search, setSearch] = React.useState("");
+
   const visible = React.useMemo(
     () => enrollments.filter((e) => String(e.status || "").toLowerCase() !== "deleted"),
     [enrollments],
   );
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return visible;
+    return visible.filter((e) => {
+      const label = formatEnrollmentLabel(e as unknown as Record<string, unknown>).toLowerCase();
+      const grantId = String(e.grantId || "").toLowerCase();
+      const status = String(e.status || "").toLowerCase();
+      return label.includes(q) || grantId.includes(q) || status.includes(q);
+    });
+  }, [visible, search]);
   const activeRows = React.useMemo(
-    () => visible.filter((e) => !isInactiveEnrollment(e)),
-    [visible],
+    () => filtered.filter((e) => !isInactiveEnrollment(e)),
+    [filtered],
   );
   const inactiveRows = React.useMemo(
-    () => visible.filter((e) => isInactiveEnrollment(e)),
-    [visible],
+    () => filtered.filter((e) => isInactiveEnrollment(e)),
+    [filtered],
   );
 
   const onCreate = async () => {
@@ -568,8 +580,33 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         {error ? <div className="mt-2 text-sm text-red-700">{error}</div> : null}
       </div>
 
+      {!isLoading && visible.length > 3 && (
+        <div className="flex items-center gap-2">
+          <input
+            className="input flex-1"
+            type="search"
+            placeholder="Search enrollments by grant, status…"
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+          />
+          {search && (
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost border border-slate-300"
+              onClick={() => setSearch("")}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="text-sm text-slate-600">Loading enrollments...</div>
+      ) : filtered.length === 0 && search ? (
+        <div className="rounded-xl border border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+          No enrollments match &ldquo;{search}&rdquo;
+        </div>
       ) : (
         <>
           {renderTable(activeRows, "Active Enrollments")}

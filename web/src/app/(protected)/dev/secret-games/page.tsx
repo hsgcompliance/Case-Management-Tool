@@ -1,5 +1,5 @@
-import SecretGamesOverviewPage from "@features/dev/secret-games/SecretGamesOverviewPage";
+import SecretGamesLabPage from "@features/dev/secret-games/SecretGamesLabPage";
 
 export default function DevSecretGamesPage() {
-  return <SecretGamesOverviewPage />;
+  return <SecretGamesLabPage />;
 }

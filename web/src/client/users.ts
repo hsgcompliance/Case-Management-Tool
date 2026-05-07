@@ -10,6 +10,8 @@ import type {
   UsersInviteReq, UsersInviteResp,
   UsersSetRoleReq, UsersSetRoleResp,
   UsersSetActiveReq, UsersSetActiveResp,
+  UsersUpdateProfileReq, UsersUpdateProfileResp,
+  UsersResendInviteReq, UsersResendInviteResp,
   UsersRevokeSessionsReq, UsersRevokeSessionsResp,
   UsersListResp, UsersMeResp, UsersMeUpdateReq, UsersMeUpdateResp
 } from '@types';
@@ -26,6 +28,12 @@ export const Users = {
 
   setActive: (body: UsersSetActiveReq) =>
     api.callIdem('usersSetActive', noUndefined(body) as any, idemKey(body)) as Promise<UsersSetActiveResp>,
+
+  updateProfile: (body: UsersUpdateProfileReq) =>
+    api.callIdem('usersUpdateProfile', noUndefined(body) as any, idemKey(body)) as Promise<UsersUpdateProfileResp>,
+
+  resendInvite: (body: UsersResendInviteReq) =>
+    api.callIdem('usersResendInvite', noUndefined(body) as any, idemKey(body)) as Promise<UsersResendInviteResp>,
 
   revokeSessions: (body: UsersRevokeSessionsReq = {}) =>
     api.callIdem('usersRevokeSessions', noUndefined(body) as any, idemKey({ op: 'usersRevokeSessions', body })) as Promise<UsersRevokeSessionsResp>,

@@ -5,7 +5,7 @@ import React from "react";
 import { parseISO10Strict } from "@lib/date";
 
 type AnyRecord = Record<string, any>;
-type Status = "active" | "inactive" | "closed" | "deleted";
+type Status = "active" | "inactive";
 
 function asStr(v: any) {
   return v === null || v === undefined ? "" : String(v);
@@ -18,7 +18,7 @@ function fullName(first: any, last: any) {
 }
 
 function isStatus(s: any): s is Status {
-  return ["active", "inactive", "closed", "deleted"].includes(String(s));
+  return ["active", "inactive"].includes(String(s));
 }
 
 function computeAgeYears(dobISO: string): number | null {
@@ -40,6 +40,7 @@ export function DetailsTab({
   model,
   setModel,
   onToggleEdit,
+  onDelete,
   onToggleActive,
   statusBusy = false,
 }: {
@@ -48,6 +49,7 @@ export function DetailsTab({
   model: AnyRecord;
   setModel: (updater: any) => void;
   onToggleEdit?: () => void;
+  onDelete?: () => void;
   onToggleActive?: () => void;
   statusBusy?: boolean;
 }) {
@@ -86,14 +88,9 @@ export function DetailsTab({
         next.active = true;
         if ("deleted" in next) next.deleted = false;
       }
-      if (nextStatus === "inactive" || nextStatus === "closed") {
+      if (nextStatus === "inactive") {
         next.active = false;
         if ("deleted" in next) next.deleted = false;
-      }
-      if (nextStatus === "deleted") {
-        next.deleted = true;
-        next.active = false;
-        next.enrolled = false;
       }
       return next;
     });
@@ -146,6 +143,11 @@ export function DetailsTab({
               {!creating && onToggleEdit ? (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={onToggleEdit}>
                   {editing ? "Cancel edit" : "Edit"}
+                </button>
+              ) : null}
+              {!creating && onDelete ? (
+                <button type="button" className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50" onClick={onDelete}>
+                  Delete
                 </button>
               ) : null}
               <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-slate-700">
@@ -240,8 +242,6 @@ export function DetailsTab({
               >
                 <option value="active">active</option>
                 <option value="inactive">inactive</option>
-                <option value="closed">closed</option>
-                <option value="deleted">deleted</option>
               </select>
             </label>
           </div>

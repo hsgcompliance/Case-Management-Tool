@@ -3,17 +3,17 @@ export const FARM_PLOT_COUNT = 4;
 export const FARM_CROP_DEFINITIONS = {
   carrot: {
     label: "Carrot",
-    growthMs: 8_000,
+    growthMs: 5_000,
     rewardGold: 3,
   },
   corn: {
     label: "Corn",
-    growthMs: 14_000,
+    growthMs: 12_000,
     rewardGold: 5,
   },
   pumpkin: {
     label: "Pumpkin",
-    growthMs: 22_000,
+    growthMs: 20_000,
     rewardGold: 8,
   },
 } as const;
@@ -46,8 +46,8 @@ export type FarmPlotView = FarmPlotState & {
 
 export function createInitialFarmState(now: number): FarmState {
   return {
-    gold: 6,
-    unlockedPlots: 1,
+    gold: 10,
+    unlockedPlots: 2,
     speedLevel: 0,
     yieldLevel: 0,
     plots: Array.from({ length: FARM_PLOT_COUNT }, (_, index) => ({

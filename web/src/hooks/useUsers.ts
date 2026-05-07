@@ -280,6 +280,32 @@ export function useSetUserActive() {
   );
 }
 
+export function useUpdateUserProfile() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.users.root],
+    mutationFn: Users.updateProfile,
+    onSuccess: (res) => {
+      const u = (res as any)?.user as CompositeUser | undefined;
+      if (u?.uid) qc.setQueryData(qk.users.detail(u.uid), u);
+    },
+  });
+}
+
+export function useResendUserInvite() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.users.root],
+    mutationFn: Users.resendInvite,
+    onSuccess: (res) => {
+      const u = (res as any)?.user as CompositeUser | undefined;
+      if (u?.uid) qc.setQueryData(qk.users.detail(u.uid), u);
+    },
+  });
+}
+
 /* ---------------- me extras ---------------- */
 
 export function useUpdateMe() {

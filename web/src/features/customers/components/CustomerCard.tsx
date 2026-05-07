@@ -6,7 +6,7 @@ import { useCustomerEnrollments, usePreloadCustomerEnrollments } from "@hooks/us
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
 import { currentMonthKey } from "@hooks/useMetrics";
 import { populationChipClass, populationTone } from "@lib/colorRegistry";
-import { normalizePayments, currency, todayISO } from "./paymentScheduleUtils";
+import { normalizePayments, currency, todayISO, nextRentCertDue } from "./paymentScheduleUtils";
 import { customerContactRoleForUid } from "../contactCaseManagers";
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
@@ -15,6 +15,7 @@ const CARD_TASKS_LIMIT = 1000;
 type CustomerCardProps = {
   customer: TCustomerEntity & { id: string };
   viewerUid?: string;
+  selectedCmUid?: string;
   selected?: boolean;
   selectionMode?: boolean;
   onSelectGesture?: (
@@ -296,6 +297,7 @@ const DRAG_PX_PER_STEP = 140;
 function CustomerCardInner({
   customer,
   viewerUid,
+  selectedCmUid,
   selected = false,
   selectionMode = false,
   onSelectGesture,
@@ -334,11 +336,15 @@ function CustomerCardInner({
   const age = calcAge((customer as { dob?: string | null }).dob || null);
   const inactiveCustomer = isInactiveCustomer(customer);
   const viewerId = String(viewerUid || "").trim();
+  const selectedCmId = String(selectedCmUid || "").trim();
   const caseManagerName = String(customer.caseManagerName || customer.caseManagerId || "Unassigned").trim();
   const viewerRelationship = customerContactRoleForUid(customer as Record<string, unknown>, viewerId);
   const isViewerCustomer = !!viewerRelationship;
+  const [hoveredEnrollmentSection, setHoveredEnrollmentSection] = React.useState(false);
+  const [shouldLoadEnrollments, setShouldLoadEnrollments] = React.useState(false);
   const enrollmentsQuery = useCustomerEnrollments(customer.id, {
-    enabled: !!customer.id && isViewerCustomer,
+    enabled: !!customer.id && isViewerCustomer && shouldLoadEnrollments,
+    limit: 25,
   });
   const enrollments = enrollmentsQuery.data || [];
   const hasEnrollmentData = enrollmentsQuery.data !== undefined;
@@ -349,27 +355,43 @@ function CustomerCardInner({
   const activeEnrollmentIds = activeEnrollments.map((enrollment) => enrollment.id);
   const enrollmentFinancials = activeEnrollments.map(computeEnrollmentFinancial);
   const hasAnyFinancialAssistance = enrollmentFinancials.some((f) => f.hasAnyMoney);
-  const relationship =
-    viewerRelationship === "primary"
-      ? {
-          label: "My Client",
-          className: "border-orange-200 bg-orange-50 text-orange-800",
-        }
-      : viewerRelationship === "secondary"
-        ? {
-            label: "Secondary Contact",
-            className: "border-emerald-200 bg-emerald-50 text-emerald-800",
-          }
-        : viewerRelationship === "other"
-          ? {
-              label: "Other Contact",
-              className: "border-violet-200 bg-violet-50 text-violet-800",
-            }
-          : null;
+  const rentCertDue = nextRentCertDue(activeEnrollments);
+
+  // Selected CM's relationship (only when a different CM is selected)
+  const selectedCmRole = (selectedCmId && selectedCmId !== viewerId)
+    ? customerContactRoleForUid(customer as Record<string, unknown>, selectedCmId)
+    : null;
+
+  const ROLE_CLASSES = {
+    primary: "border-orange-200 bg-orange-50 text-orange-800",
+    secondary: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    other: "border-violet-200 bg-violet-50 text-violet-800",
+  } as const;
+
+  const cmChip = selectedCmRole
+    ? {
+        label: selectedCmRole === "primary" ? "Primary" : selectedCmRole === "secondary" ? "Secondary" : "Other",
+        className: ROLE_CLASSES[selectedCmRole],
+      }
+    : null;
+
+  const myChip = viewerRelationship
+    ? {
+        label: viewerRelationship === "primary" ? "My Client" : viewerRelationship === "secondary" ? "Secondary Contact" : "Other Contact",
+        className: ROLE_CLASSES[viewerRelationship],
+      }
+    : null;
 
   return (
     <article
       data-card-physics-id={`customer:${customer.id}`}
+      data-block-id={`customer:${customer.id}`}
+      data-block-name={
+        (customer.name && String(customer.name).trim()) ||
+        [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim() ||
+        customer.id
+      }
+      data-customer-active={inactiveCustomer ? "false" : "true"}
       className={[
         COL_SPAN_CLASSES[colSpan],
         "group relative h-full cursor-pointer overflow-hidden rounded-[24px] border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
@@ -460,16 +482,28 @@ function CustomerCardInner({
         </label>
       </div>
 
-      {relationship ? (
-        <div
-          className={[
-            "mx-4 mt-4 inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
-            inactiveCustomer
-              ? "border-slate-200 bg-slate-100 text-slate-500"
-              : relationship.className,
-          ].join(" ")}
-        >
-          {relationship.label}
+      {(cmChip || myChip) ? (
+        <div className="mx-4 mt-4 flex flex-wrap gap-1.5">
+          {cmChip ? (
+            <div
+              className={[
+                "inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
+                inactiveCustomer ? "border-slate-200 bg-slate-100 text-slate-500" : cmChip.className,
+              ].join(" ")}
+            >
+              {cmChip.label}
+            </div>
+          ) : null}
+          {myChip ? (
+            <div
+              className={[
+                "inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
+                inactiveCustomer ? "border-slate-200 bg-slate-100 text-slate-500" : myChip.className,
+              ].join(" ")}
+            >
+              {myChip.label}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -478,13 +512,13 @@ function CustomerCardInner({
           "mt-3 border-y px-4 py-4",
           inactiveCustomer
             ? "border-slate-200 bg-slate-100/80 text-slate-500 dark:border-slate-700 dark:bg-slate-700/50 dark:text-slate-400"
-            : ["text-slate-950 dark:text-slate-100", populationHeaderClass(customer.population)].join(" "),
+            : ["text-slate-950", populationHeaderClass(customer.population)].join(" "),
         ].join(" ")}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className={["text-lg font-bold tracking-tight", inactiveCustomer ? "text-slate-600 dark:text-slate-400" : "text-slate-950 dark:text-slate-50"].join(" ")}>
+              <span className={["text-lg font-bold tracking-tight", inactiveCustomer ? "text-slate-600 dark:text-slate-400" : "text-slate-950"].join(" ")}>
                 {displayName(customer)}
               </span>
               <span
@@ -520,37 +554,95 @@ function CustomerCardInner({
       {/* ── Below-banner: Payments (left) + Enrollments (right) ── */}
       <div className="grid grid-cols-2 gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
         {/* LEFT: financial summary per enrollment */}
-        <div className="min-w-0 space-y-1.5">
-          <div className={["text-[10px] font-semibold uppercase tracking-[0.18em]", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"].join(" ")}>
+        <div 
+          className="min-w-0 space-y-1.5" 
+          onMouseEnter={() => setHoveredEnrollmentSection(true)}
+          onMouseLeave={() => setHoveredEnrollmentSection(false)}
+        >
+          <div className={["font-semibold uppercase tracking-[0.18em]", colSpan > 1 ? "text-xs" : "text-[10px]", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"].join(" ")}>
             Financial Assistance
           </div>
           {isLoadingEnrollmentData && !hasEnrollmentData ? (
-            <div className="text-[11px] text-slate-400 dark:text-slate-500">Loading…</div>
+            <div className={[colSpan > 1 ? "text-sm" : "text-[11px]", "text-slate-400 dark:text-slate-500"].join(" ")}>Loading…</div>
           ) : !hasEnrollmentData ? (
-            <div className={["text-[11px] italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
-              Expand card for enrollment info and tasks
-            </div>
+            hoveredEnrollmentSection ? (
+              <button
+                type="button"
+                className={[
+                  "inline-flex h-8 items-center rounded-full border px-3 text-sm font-medium transition",
+                  "border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-300 hover:bg-sky-100",
+                ].join(" ")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShouldLoadEnrollments(true);
+                }}
+                disabled={enrollmentsQuery.isFetching}
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  className={["h-3.5 w-3.5 mr-1.5", enrollmentsQuery.isFetching ? "animate-spin" : ""].join(" ")}
+                >
+                  <path
+                    d="M16 10a6 6 0 1 1-2.1-4.57"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M16 4.5v4h-4"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Load Enrollment
+              </button>
+            ) : (
+              <div className={[colSpan > 1 ? "text-sm" : "text-[11px]", "italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+                Hover to load enrollment info
+              </div>
+            )
           ) : !hasAnyFinancialAssistance ? (
-            <div className={["text-[11px] italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+            <div className={[colSpan > 1 ? "text-sm" : "text-[11px]", "italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
               No financial assistance provided
             </div>
           ) : (
             <div className="space-y-2">
+              {rentCertDue ? (
+                <div
+                  className={[
+                    "rounded-lg border px-2 transition-all",
+                    colSpan > 1 ? "py-2.5 text-sm" : "py-1.5 text-[11px]",
+                    rentCertDue.asap
+                      ? "border-amber-300 bg-amber-100 font-bold text-amber-950 dark:border-amber-600 dark:bg-amber-900/40 dark:text-amber-100"
+                      : inactiveCustomer
+                      ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                      : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+                  ].join(" ")}
+                >
+                  <span className="opacity-75">Next Rent Cert Due: </span>
+                  <span>{fmtShortDate(rentCertDue.dueDate)}</span>
+                  {rentCertDue.asap ? <span> ASAP</span> : null}
+                </div>
+              ) : null}
               {enrollmentFinancials.filter((f) => f.hasAnyMoney).slice(0, 2).map((f) => (
                 <div
                   key={f.id}
                   className={[
-                    "rounded-lg border px-2 py-1.5 text-[11px]",
+                    "rounded-lg border px-2 transition-all",
+                    colSpan > 1 ? "py-2.5 text-sm" : "py-1.5 text-[11px]",
                     inactiveCustomer
                       ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
                       : "border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200",
                   ].join(" ")}
                 >
                   <div className="truncate font-semibold">{f.label}</div>
-                  <div className="mt-0.5 text-[10px] opacity-75">
+                  <div className={[colSpan > 1 ? "mt-1 text-xs" : "mt-0.5 text-[10px]", "opacity-75"].join(" ")}>
                     {fmtShortDate(f.firstDate)} – {fmtShortDate(f.lastDate)}
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+                  <div className={["flex flex-wrap gap-x-2 gap-y-0.5", colSpan > 1 ? "mt-1.5 text-xs" : "mt-1 text-[10px]"].join(" ")}>
                     <span>
                       <span className="opacity-60">Projected </span>
                       <span className="font-semibold">{currency(f.totalProjected)}</span>
@@ -561,12 +653,12 @@ function CustomerCardInner({
                     </span>
                   </div>
                   {f.nextDue ? (
-                    <div className="mt-0.5 text-[10px]">
+                    <div className={colSpan > 1 ? "mt-1 text-xs" : "mt-0.5 text-[10px]"}>
                       <span className="opacity-60">Next </span>
                       <span className="font-semibold">{fmtShortDate(f.nextDue.date)} · {currency(f.nextDue.amount)}</span>
                     </div>
                   ) : (
-                    <div className="mt-0.5 text-[10px] opacity-60">All paid</div>
+                    <div className={[colSpan > 1 ? "mt-1 text-xs" : "mt-0.5 text-[10px]", "opacity-60"].join(" ")}>All paid</div>
                   )}
                 </div>
               ))}
@@ -580,25 +672,105 @@ function CustomerCardInner({
         </div>
 
         {/* RIGHT: enrollment chip + list */}
-        <div className="min-w-0 space-y-1.5">
+        <div 
+          className="min-w-0 space-y-1.5" 
+          onMouseEnter={() => setHoveredEnrollmentSection(true)}
+          onMouseLeave={() => setHoveredEnrollmentSection(false)}
+        >
           <div className="flex flex-wrap items-center gap-1.5">
-            <div className={["text-[10px] font-semibold uppercase tracking-[0.18em]", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"].join(" ")}>
+            <div className={["font-semibold uppercase tracking-[0.18em]", colSpan > 1 ? "text-xs" : "text-[10px]", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"].join(" ")}>
               Enrollments
             </div>
-            <span className={["ml-auto rounded-full border px-2 py-0.5 text-[10px] font-semibold", inactiveCustomer ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400" : "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300"].join(" ")}>
+            <span className={[colSpan > 1 ? "text-xs" : "text-[10px]", "ml-auto rounded-full border px-2 py-0.5 font-semibold", inactiveCustomer ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400" : "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-300"].join(" ")}>
               {hasEnrollmentData ? `${activeEnrollments.length} / ${enrollments.length}` : "—"}
             </span>
           </div>
           {isLoadingEnrollmentData && !hasEnrollmentData ? (
-            <div className="text-[11px] text-slate-400 dark:text-slate-500">Loading…</div>
+            <div className={[colSpan > 1 ? "text-sm" : "text-[11px]", "text-slate-400 dark:text-slate-500"].join(" ")}>Loading…</div>
+          ) : !hasEnrollmentData ? (
+            hoveredEnrollmentSection ? (
+              <button
+                type="button"
+                className={[
+                  "inline-flex h-8 items-center rounded-full border px-3 text-sm font-medium transition",
+                  "border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-300 hover:bg-sky-100",
+                ].join(" ")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShouldLoadEnrollments(true);
+                }}
+                disabled={enrollmentsQuery.isFetching}
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  className={["h-3.5 w-3.5 mr-1.5", enrollmentsQuery.isFetching ? "animate-spin" : ""].join(" ")}
+                >
+                  <path
+                    d="M16 10a6 6 0 1 1-2.1-4.57"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M16 4.5v4h-4"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Load Enrollment
+              </button>
+            ) : (
+              <div className={[colSpan > 1 ? "text-sm" : "text-[11px]", "italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+                Hover to load enrollment info
+              </div>
+            )
+          ) : hasEnrollmentData && hoveredEnrollmentSection ? (
+            <button
+              type="button"
+              className={[
+                "inline-flex h-8 items-center rounded-full border px-3 text-sm font-medium transition",
+                "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100",
+              ].join(" ")}
+              onClick={(event) => {
+                event.stopPropagation();
+                // Force refresh by re-enabling the query
+                void enrollmentsQuery.refetch();
+              }}
+              disabled={enrollmentsQuery.isFetching}
+            >
+              <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                className={["h-3.5 w-3.5 mr-1.5", enrollmentsQuery.isFetching ? "animate-spin" : ""].join(" ")}
+              >
+                <path
+                  d="M16 10a6 6 0 1 1-2.1-4.57"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M16 4.5v4h-4"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Refresh Enrollment
+            </button>
           ) : hasEnrollmentData ? (
             activeEnrollments.length > 0 ? (
-              <div className="space-y-1">
+              <div className={colSpan > 1 ? "space-y-1.5" : "space-y-1"}>
                 {activeEnrollments.slice(0, 3).map((enr) => (
                   <div
                     key={enr.id}
                     className={[
-                      "truncate rounded-lg border px-2 py-1 text-[11px] font-medium",
+                      "truncate rounded-lg border px-2 font-medium transition-all",
+                      colSpan > 1 ? "py-1.5 text-sm" : "py-1 text-[11px]",
                       inactiveCustomer
                         ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
                         : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
@@ -608,11 +780,11 @@ function CustomerCardInner({
                   </div>
                 ))}
                 {activeEnrollments.length > 3 ? (
-                  <div className="text-[10px] text-slate-400">+{activeEnrollments.length - 3} more</div>
+                  <div className={[colSpan > 1 ? "text-xs" : "text-[10px]", "text-slate-400"].join(" ")}>+{activeEnrollments.length - 3} more</div>
                 ) : null}
               </div>
             ) : (
-              <div className={["text-[11px] italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
+              <div className={[colSpan > 1 ? "text-sm" : "text-[11px]", "italic", inactiveCustomer ? "text-slate-400 dark:text-slate-500" : "text-slate-400 dark:text-slate-500"].join(" ")}>
                 No active
               </div>
             )

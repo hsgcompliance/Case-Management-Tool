@@ -1784,15 +1784,93 @@ const CaseManagerLoadSidebar: DashboardToolDefinition<CaseManagerLoadFilterState
   );
 };
 
+function createSpendingFilterState(): SpendingFilterState {
+  const month = monthKeyOffsetDays(5);
+  return {
+    month,
+    dateFilter: { mode: "month", month },
+    typeFilter: "",
+    workflowFilter: "",
+    cardFilterId: "",
+    grantId: "",
+    cardBucketFilter: "",
+    search: "",
+    showReversals: false,
+    customerId: "",
+    cmId: "",
+  };
+}
+
+function cloneSpendingFilterState(value: SpendingFilterState): SpendingFilterState {
+  return JSON.parse(JSON.stringify(value)) as SpendingFilterState;
+}
+
 const SpendingMain: DashboardToolDefinition<SpendingFilterState, null>["Main"] = ({
   filterState,
   onFilterChange,
-}) => (
-  <LineItemSpendingTool
-    filterState={filterState as SpendingFilterState}
-    onFilterChange={(next) => onFilterChange?.(next)}
-  />
-);
+}) => {
+  const primaryFilter = filterState as SpendingFilterState;
+  const [compareOpen, setCompareOpen] = React.useState(false);
+  const [compareFilter, setCompareFilter] = React.useState<SpendingFilterState>(() =>
+    cloneSpendingFilterState(primaryFilter)
+  );
+
+  const openCompare = () => {
+    setCompareFilter(cloneSpendingFilterState(primaryFilter));
+    setCompareOpen(true);
+  };
+
+  if (!compareOpen) {
+    return (
+      <div className="space-y-2">
+        <div className="flex justify-end">
+          <button type="button" className="btn btn-sm btn-ghost" onClick={openCompare}>
+            Compare
+          </button>
+        </div>
+        <LineItemSpendingTool
+          filterState={primaryFilter}
+          onFilterChange={(next) => onFilterChange?.(next)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs text-slate-500">
+          Compare mode shows two independent spending tools side by side.
+        </div>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setCompareOpen(false)}>
+          Close Compare
+        </button>
+      </div>
+      <div className="overflow-x-auto pb-2">
+        <div className="grid min-w-[1480px] grid-cols-2 gap-3">
+          <section className="min-w-0 space-y-2">
+            <div className="rounded border border-slate-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Spending A
+            </div>
+            <LineItemSpendingTool
+              filterState={primaryFilter}
+              onFilterChange={(next) => onFilterChange?.(next)}
+            />
+          </section>
+          <section className="min-w-0 space-y-2">
+            <div className="rounded border border-slate-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Spending B
+            </div>
+            <LineItemSpendingTool
+              filterState={compareFilter}
+              onFilterChange={setCompareFilter}
+            />
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const CustomerFoldersMain: DashboardToolDefinition<CustomerFoldersFilterState, null>["Main"] = ({
   filterState,
@@ -1851,16 +1929,7 @@ export const DASHBOARD_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
     id: "spending",
     title: "Spending",
     hidden: true,
-    createFilterState: () =>
-      ({
-        month: monthKeyOffsetDays(5),
-        typeFilter: "",
-        workflowFilter: "",
-        cardFilterId: "",
-        grantId: "",
-        cardBucketFilter: "",
-        search: "",
-      } satisfies SpendingFilterState),
+    createFilterState: createSpendingFilterState,
     ToolTopbar: SpendingTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Main: SpendingMain as AnyDashboardToolDefinition["Main"],
   },

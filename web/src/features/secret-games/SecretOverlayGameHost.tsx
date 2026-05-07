@@ -26,7 +26,7 @@ export function createOverlayMountContext(args: {
   };
 }
 
-export default function SecretOverlayGameHost({
+export function SecretOverlayGameHost({
   gameId,
   open,
   availableWidth,
@@ -99,3 +99,5 @@ export default function SecretOverlayGameHost({
     </div>
   );
 }
+
+export default SecretOverlayGameHost;

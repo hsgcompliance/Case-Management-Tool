@@ -120,11 +120,15 @@ export const Jotform = {
     ),
 
   syncSelection: (body: JotformSyncSelectionReq): Promise<JotformSyncSelectionResp> =>
-    api.callIdem(
+    api.call(
       "jotformSyncSelection",
-      body,
-      idemKey({ scope: "jotform", op: "syncSelection", body })
-    ),
+      {
+        body,
+        idempotencyKey: idemKey({ scope: "jotform", op: "syncSelection", body }),
+        timeoutOverrideMs: 120_000,
+        retriesOverride: 0,
+      } as any
+    ) as Promise<JotformSyncSelectionResp>,
 
   digestUpsert: (body: JotformDigestUpsertReq): Promise<JotformDigestUpsertResp> =>
     api.callIdem(

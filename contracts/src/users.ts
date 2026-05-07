@@ -2,7 +2,7 @@
 import { z, Id, TsLike } from "./core";
 
 /** Org-level role tags (NOT ladder). */
-export const RoleTagCanonical = z.enum(["casemanager", "compliance"]);
+export const RoleTagCanonical = z.enum(["casemanager", "compliance", "viewer"]);
 
 /** API-settable ladder levels that admins may set through admin endpoints. */
 export const TopRoleCanonical = z.enum(["user", "admin", "dev", "org_dev", "super_dev"]);
@@ -28,6 +28,10 @@ const ROLE_ALIAS: Record<string, TRoleTag> = {
   casemgr: "casemanager",
   caseworkermanager: "casemanager",
   compliance: "compliance",
+  viewer: "viewer",
+  view: "viewer",
+  read: "viewer",
+  readonly: "viewer",
 };
 
 export const RoleInput = z.string().transform((v) => {
@@ -66,11 +70,25 @@ export const SetRoleBody = z.object({
   topRole: TopRoleCanonical.optional(),
   orgId: Id.optional(),
   teamIds: z.array(Id).max(10).optional(),
+  displayName: z.string().trim().max(120).nullable().optional(),
 });
 
 export const SetActiveBody = z.object({
   uid: Id,
   active: z.boolean(),
+});
+
+export const UpdateUserProfileBody = z.object({
+  uid: Id,
+  displayName: z.string().trim().max(120).nullable().optional(),
+});
+
+export const ResendInviteBody = z.object({
+  uid: Id.optional(),
+  email: z.email().optional(),
+  continueUrl: z.string().url().optional(),
+}).refine((v) => !!v.uid || !!v.email, {
+  message: "uid_or_email_required",
 });
 
 export const RevokeSessionsBody = z.object({
@@ -283,6 +301,8 @@ export type CreateUserBodyT = z.infer<typeof CreateUserBody>;
 export type InviteUserBodyT = z.infer<typeof InviteUserBody>;
 export type SetRoleBodyT = z.infer<typeof SetRoleBody>;
 export type SetActiveBodyT = z.infer<typeof SetActiveBody>;
+export type UpdateUserProfileBodyT = z.infer<typeof UpdateUserProfileBody>;
+export type ResendInviteBodyT = z.infer<typeof ResendInviteBody>;
 export type RevokeSessionsBodyT = z.infer<typeof RevokeSessionsBody>;
 export type ListUsersBodyT = z.infer<typeof ListUsersBody>;
 export type OrgManagerTeamT = z.infer<typeof OrgManagerTeam>;
@@ -300,6 +320,8 @@ export type CreateUserBodyIn = z.input<typeof CreateUserBody>;
 export type InviteUserBodyIn = z.input<typeof InviteUserBody>;
 export type SetRoleBodyIn = z.input<typeof SetRoleBody>;
 export type SetActiveBodyIn = z.input<typeof SetActiveBody>;
+export type UpdateUserProfileBodyIn = z.input<typeof UpdateUserProfileBody>;
+export type ResendInviteBodyIn = z.input<typeof ResendInviteBody>;
 export type RevokeSessionsBodyIn = z.input<typeof RevokeSessionsBody>;
 export type ListUsersBodyIn = z.input<typeof ListUsersBody>;
 export type OrgManagerListOrgsBodyIn = z.input<typeof OrgManagerListOrgsBody>;

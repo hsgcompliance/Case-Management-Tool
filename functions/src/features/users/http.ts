@@ -10,6 +10,9 @@ import {
   roleTagsFromClaims,
   isDev,
   isSuperDev,
+  OAUTH_CLIENT_ID,
+  OAUTH_CLIENT_SECRET,
+  OAUTH_REFRESH_TOKEN,
 } from "../../core";
 import type { Claims } from "../../core";
 import type { AuthedRequest } from "../../core";
@@ -20,6 +23,8 @@ import {
   InviteUserBody,
   SetRoleBody,
   SetActiveBody,
+  UpdateUserProfileBody,
+  ResendInviteBody,
   RevokeSessionsBody,
   ListUsersBody,
   OrgManagerListOrgsBody,
@@ -32,6 +37,8 @@ import {
   inviteUserService,
   setUserRoleService,
   setUserActiveService,
+  updateUserProfileService,
+  resendInviteService,
   revokeUserSessionsService,
   listUsersService,
   listDevOrgsService,
@@ -123,7 +130,13 @@ export const usersInvite = secureHandler(
 
     res.status(200).json({ ok: true, user: out });
   },
-  { auth: "admin", requireOrg: true, methods: ["POST", "OPTIONS"] }
+  {
+    auth: "admin",
+    requireOrg: true,
+    methods: ["POST", "OPTIONS"],
+    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+    memory: "512MiB",
+  }
 );
 
 // POST /usersSetRole (admin)
@@ -167,6 +180,32 @@ export const usersSetActive = secureHandler(
     res.status(200).json({ ok: true, user });
   },
   { auth: "admin", requireOrg: true, methods: ["POST", "OPTIONS"] }
+);
+
+// POST /usersUpdateProfile (admin)
+export const usersUpdateProfile = secureHandler(
+  async (req, res) => {
+    const body = UpdateUserProfileBody.parse(req.body);
+    const user = await updateUserProfileService(body);
+    res.status(200).json({ ok: true, user });
+  },
+  { auth: "admin", requireOrg: true, methods: ["POST", "OPTIONS"] }
+);
+
+// POST /usersResendInvite (admin)
+export const usersResendInvite = secureHandler(
+  async (req, res) => {
+    const body = ResendInviteBody.parse(req.body);
+    const out = await resendInviteService(body);
+    res.status(200).json({ ok: true, ...out });
+  },
+  {
+    auth: "admin",
+    requireOrg: true,
+    methods: ["POST", "OPTIONS"],
+    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+    memory: "512MiB",
+  }
 );
 
 // POST /usersRevokeSessions (admin, org-scoped unless super_dev)

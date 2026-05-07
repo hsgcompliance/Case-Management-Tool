@@ -157,7 +157,14 @@ export type {
   TGDriveListQuery,
   TGDriveCreateFolderBody,
   TGDriveUploadBody,
+  TGDriveConfigPatchBody,
+  TGDriveOrgConfig,
+  TGDriveCustomerFolderIndexConfig,
+  TGDriveTemplate,
+  TGDriveTemplateType,
+  TGDriveBuildSettings,
 } from "./gdrive";
+export { GDRIVE_TEMPLATE_TYPES } from "./gdrive";
 
 // Grants — UPDATED
 export type {
@@ -165,6 +172,7 @@ export type {
   TGrant,
   TGrantStatus,
   TGrantKind,
+  TGrantLineItemType,
   TGrantBudgetLineItem,
   TGrantBudgetTotals,
   TGrantBudget,
@@ -389,6 +397,9 @@ export {
   InviteUserBody,
   SetRoleBody,
   SetActiveBody,
+  UpdateUserProfileBody,
+  ResendInviteBody,
+  RevokeSessionsBody,
   ListUsersBody,
   OrgManagerTeam,
   OrgManagerOrg,
@@ -461,6 +472,8 @@ export type {
   InviteUserBodyT,
   SetRoleBodyT,
   SetActiveBodyT,
+  UpdateUserProfileBodyT,
+  ResendInviteBodyT,
   RevokeSessionsBodyT,
   ListUsersBodyT,
   OrgManagerTeamT,
@@ -474,6 +487,8 @@ export type {
   InviteUserBodyIn,
   SetRoleBodyIn,
   SetActiveBodyIn,
+  UpdateUserProfileBodyIn,
+  ResendInviteBodyIn,
   RevokeSessionsBodyIn,
   ListUsersBodyIn,
   OrgManagerListOrgsBodyIn,

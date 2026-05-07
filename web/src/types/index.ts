@@ -355,6 +355,10 @@ export type GDriveCreateFolderResp = RespOf<"gdriveCreateFolder">;
 export type GDriveUploadReq = ReqOf<"gdriveUpload">;
 export type GDriveUploadResp = RespOf<"gdriveUpload">;
 
+export type GDriveConfigGetResp = RespOf<"gdriveConfigGet">;
+export type GDriveConfigPatchReq = ReqOf<"gdriveConfigPatch">;
+export type GDriveConfigPatchResp = RespOf<"gdriveConfigPatch">;
+
 export type GDriveCustomerFolderIndexResp = RespOf<"gdriveCustomerFolderIndex">;
 export type GDriveBuildCustomerFolderResp = RespOf<"gdriveBuildCustomerFolder">;
 
@@ -400,6 +404,12 @@ export type UsersSetRoleResp = RespOf<"usersSetRole">;
 
 export type UsersSetActiveReq = ReqOf<"usersSetActive">;
 export type UsersSetActiveResp = RespOf<"usersSetActive">;
+
+export type UsersUpdateProfileReq = ReqOf<"usersUpdateProfile">;
+export type UsersUpdateProfileResp = RespOf<"usersUpdateProfile">;
+
+export type UsersResendInviteReq = ReqOf<"usersResendInvite">;
+export type UsersResendInviteResp = RespOf<"usersResendInvite">;
 
 export type UsersRevokeSessionsReq = ReqOf<"usersRevokeSessions">;
 export type UsersRevokeSessionsResp = RespOf<"usersRevokeSessions">;

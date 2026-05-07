@@ -144,6 +144,32 @@ export function useGrantEnrolledCustomerIds(grantId: string | undefined) {
   });
 }
 
+export type EnrollmentStatusBucket = "active" | "closed" | "deleted";
+
+export function useGrantEnrollmentMap(grantId: string | undefined) {
+  const safeId = String(grantId || "").trim();
+  return useQuery<Map<string, EnrollmentStatusBucket>>({
+    queryKey: ["enrollments", "byGrantMap", safeId],
+    enabled: !!safeId,
+    queryFn: async () => {
+      const enrollments = await EnrollmentsAPI.listAll({ grantId: safeId });
+      const map = new Map<string, EnrollmentStatusBucket>();
+      for (const e of enrollments) {
+        const cid = String(e.customerId || "").trim();
+        if (!cid) continue;
+        const bucket: EnrollmentStatusBucket =
+          e.deleted === true ? "deleted" : e.active === false ? "closed" : "active";
+        // Prefer active > closed > deleted per customer
+        const existing = map.get(cid);
+        if (!existing || (existing === "deleted") || (existing === "closed" && bucket === "active")) {
+          map.set(cid, bucket);
+        }
+      }
+      return map;
+    },
+  });
+}
+
 export function useEnrollmentsList(query?: EnrollmentsListQuery, opts?: { enabled?: boolean }) {
   return useQuery<Enrollment[]>({
     ...RQ_DEFAULTS,

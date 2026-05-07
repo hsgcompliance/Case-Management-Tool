@@ -778,7 +778,7 @@ export const RGTextInput: React.FC<RGTextInputProps> = (props) => {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     if (!gate.allowed || gate.readOnly) return;
-    onChange?.(e.target.value);
+    onChange?.(e.currentTarget.value);
   };
 
   const commonProps = {

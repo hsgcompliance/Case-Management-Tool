@@ -48,7 +48,7 @@ export const CustomerMeta = z
         z.object({
           id: z.string(), // NOTE: gdrive ids aren't your Id shape; keep string
           alias: z.string().trim().nullish().optional(),
-          name: z.string().optional(),
+          name: z.string().trim().nullish().optional(),
           driveId: z.string().trim().nullish().optional(),
           kind: z.literal("gdrive").default("gdrive"),
         }),

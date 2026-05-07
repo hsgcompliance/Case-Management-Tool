@@ -102,6 +102,14 @@ export function CreditCardBudgetCard({ card, onClick }: CreditCardBudgetCardProp
             {fmtUsd(Math.max(card.remainingCents, 0))}
           </span>
         </div>
+        {(card.lastMonthSpentCents ?? 0) > 0 && (
+          <div className="flex items-baseline justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-800">
+            <span className="text-xs text-slate-400 dark:text-slate-500">Last month</span>
+            <span className="text-xs font-medium tabular-nums text-slate-500 dark:text-slate-400">
+              {fmtUsd(card.lastMonthSpentCents ?? 0)}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

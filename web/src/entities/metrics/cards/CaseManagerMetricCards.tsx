@@ -54,10 +54,10 @@ export function buildCaseManagerMetricItems(
     {
       id: "case-manager-open-tasks",
       label: "Open Tasks",
-      value: formatNumber(data?.tasks.openThisMonth),
+      value: formatNumber(data?.tasks?.openThisMonth),
       subtext:
         data?.tasks
-          ? `Next month ${formatNumber(data.tasks.openNextMonth)} | Assessments ${formatNumber(data.tasks.byType.assessment.thisMonth)}`
+          ? `Next month ${formatNumber(data.tasks?.openNextMonth)} | Assessments ${formatNumber(data.tasks?.byType?.assessment?.thisMonth)}`
           : undefined,
       metricId: "my-open-tasks",
       loading: isLoading,

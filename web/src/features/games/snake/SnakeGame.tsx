@@ -166,6 +166,9 @@ export default function SnakeGame({ embedded = false, renderStyle = "embedded", 
 
   usePauseOnHidden(() => setRunning(false));
 
+  // Speed scales with score: 95ms → ~62ms at score 33+
+  const tickMs = Math.max(62, 95 - Math.floor(score / 6) * 3);
+
   React.useEffect(() => {
     if (!running || gameOver) return;
     const interval = window.setInterval(() => {
@@ -200,9 +203,9 @@ export default function SnakeGame({ embedded = false, renderStyle = "embedded", 
 
         return nextSnake;
       });
-    }, 95);
+    }, tickMs);
     return () => window.clearInterval(interval);
-  }, [board.cols, board.rows, food, gameOver, nextDir, running, score]);
+  }, [board.cols, board.rows, food, gameOver, nextDir, running, score, tickMs]);
 
   React.useEffect(() => {
     if (!gameOver) return;
@@ -257,6 +260,7 @@ export default function SnakeGame({ embedded = false, renderStyle = "embedded", 
           <span>Score: {score}</span>
           <span>Best: {best}</span>
           <span>Board: {progress}</span>
+          {score >= 6 && <span style={{ color: "#f97316" }}>Speed ×{(95 / tickMs).toFixed(1)}</span>}
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className="btn btn-xs" onClick={() => setRunning((v) => !v)}>
@@ -281,19 +285,77 @@ export default function SnakeGame({ embedded = false, renderStyle = "embedded", 
               backgroundSize: `${CELL_SIZE}px ${CELL_SIZE}px`,
             }}
           >
+          {/* Food — red apple with shine, stem, and leaf */}
           {food ? (
-            <div
-              className="absolute rounded-[4px] bg-amber-500"
-              style={{ width: CELL_SIZE - 3, height: CELL_SIZE - 3, left: food.x * CELL_SIZE + 1, top: food.y * CELL_SIZE + 1 }}
-            />
+            <svg
+              className="absolute"
+              style={{ left: food.x * CELL_SIZE, top: food.y * CELL_SIZE, width: CELL_SIZE, height: CELL_SIZE, overflow: "visible" }}
+              viewBox="0 0 18 18"
+            >
+              {/* Glow */}
+              <circle cx="9" cy="11" r="8" fill="#ef4444" fillOpacity={0.18} />
+              {/* Apple body */}
+              <ellipse cx="9" cy="11.5" rx="6.8" ry="6.2" fill="#ef4444" />
+              {/* Shine */}
+              <ellipse cx="6.4" cy="8.5" rx="2.4" ry="1.8" fill="rgba(255,255,255,0.32)" transform="rotate(-22 6.4 8.5)" />
+              {/* Stem */}
+              <path d="M9 5.5 Q10.5 3 12 4" stroke="#92400e" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+              {/* Leaf */}
+              <path d="M9 5 Q12.5 2.5 13 6 Q10.5 5 9 5" fill="#16a34a" />
+            </svg>
           ) : null}
-          {snake.map((seg, idx) => (
-            <div
-              key={`${seg.x}:${seg.y}:${idx}`}
-              className={`absolute rounded-[4px] ${idx === 0 ? "bg-slate-700" : "bg-slate-500"}`}
-              style={{ width: CELL_SIZE - 3, height: CELL_SIZE - 3, left: seg.x * CELL_SIZE + 1, top: seg.y * CELL_SIZE + 1 }}
-            />
-          ))}
+          {/* Snake segments */}
+          {snake.map((seg, idx) => {
+            const total = snake.length;
+            if (idx === 0) {
+              // Head with directional eyes
+              const cs = CELL_SIZE - 2;
+              // Eye positions based on direction
+              let eyeA = { cx: cs * 0.3, cy: cs * 0.28 };
+              let eyeB = { cx: cs * 0.7, cy: cs * 0.28 };
+              if (dir === "down")  { eyeA = { cx: cs * 0.3, cy: cs * 0.72 }; eyeB = { cx: cs * 0.7, cy: cs * 0.72 }; }
+              if (dir === "left")  { eyeA = { cx: cs * 0.28, cy: cs * 0.3 }; eyeB = { cx: cs * 0.28, cy: cs * 0.7 }; }
+              if (dir === "right") { eyeA = { cx: cs * 0.72, cy: cs * 0.3 }; eyeB = { cx: cs * 0.72, cy: cs * 0.7 }; }
+              return (
+                <svg
+                  key={`head:${seg.x}:${seg.y}`}
+                  className="absolute"
+                  style={{ left: seg.x * CELL_SIZE + 1, top: seg.y * CELL_SIZE + 1, width: cs, height: cs }}
+                  viewBox={`0 0 ${cs} ${cs}`}
+                >
+                  <rect width={cs} height={cs} rx={4.5} fill="#14532d" />
+                  {/* Scales hint */}
+                  <rect width={cs} height={cs} rx={4.5} fill="none" stroke="#166534" strokeWidth={1} />
+                  {/* Eyes */}
+                  <circle cx={eyeA.cx} cy={eyeA.cy} r={cs * 0.16} fill="white" />
+                  <circle cx={eyeB.cx} cy={eyeB.cy} r={cs * 0.16} fill="white" />
+                  <circle cx={eyeA.cx + 0.5} cy={eyeA.cy + 0.5} r={cs * 0.09} fill="#052e16" />
+                  <circle cx={eyeB.cx + 0.5} cy={eyeB.cy + 0.5} r={cs * 0.09} fill="#052e16" />
+                  {/* Eye shine */}
+                  <circle cx={eyeA.cx - 0.5} cy={eyeA.cy - 0.5} r={cs * 0.04} fill="white" />
+                  <circle cx={eyeB.cx - 0.5} cy={eyeB.cy - 0.5} r={cs * 0.04} fill="white" />
+                </svg>
+              );
+            }
+            // Body segments: fade green → olive toward tail
+            const t = idx / Math.max(total - 1, 1);
+            const g = Math.round(83 + t * 30);
+            const b = Math.round(20 + t * 10);
+            return (
+              <div
+                key={`${seg.x}:${seg.y}:${idx}`}
+                className="absolute"
+                style={{
+                  width: CELL_SIZE - 3 - (idx > total - 4 ? 1 : 0),
+                  height: CELL_SIZE - 3 - (idx > total - 4 ? 1 : 0),
+                  left: seg.x * CELL_SIZE + 1 + (idx > total - 4 ? 0.5 : 0),
+                  top: seg.y * CELL_SIZE + 1 + (idx > total - 4 ? 0.5 : 0),
+                  borderRadius: 4,
+                  background: `rgb(21, ${g}, ${b})`,
+                }}
+              />
+            );
+          })}
           {gameOver ? (
             <div className="absolute inset-0 grid place-items-center bg-white/70 dark:bg-slate-900/70">
               <div className="rounded-md border border-slate-300 bg-white/95 px-4 py-3 text-center text-slate-800 dark:border-slate-600 dark:bg-slate-900/95 dark:text-slate-100">
@@ -306,7 +368,7 @@ export default function SnakeGame({ embedded = false, renderStyle = "embedded", 
         </div>
       </div>
 
-      <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Use arrows or WASD. The board expands every few seconds until it reaches your window size.</p>
+      <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Use arrows or WASD. Board expands every ~14s. Snake speeds up as your score climbs.</p>
     </div>
   );
 }

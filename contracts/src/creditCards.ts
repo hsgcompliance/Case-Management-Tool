@@ -182,11 +182,14 @@ export type TCreditCardsSummaryItem = {
   name: string;
   status: TCreditCardStatus;
   month: string;
+  lastMonth: string;
   monthlyLimitCents: number;
   spentCents: number;
   remainingCents: number;
   usagePct: number;
   entryCount: number;
+  lastMonthSpentCents: number;
+  lastMonthEntryCount: number;
   cycleType: TCreditCardCycleType;
   statementCloseDay: number | null;
   last4: string | null;

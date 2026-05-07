@@ -16,7 +16,7 @@ This folder is organized by feature surface:
     - `DetailsTab.tsx`
     - `EnrollmentsTab.tsx`
     - `CaseManagementTab.tsx`
-    - `TasksTab.tsx`
+    - `TasksTab.tsx` (legacy name; product direction is notes/reminders)
     - `PaymentsTab.tsx`
     - `CustomerFilesTab.tsx`
     - `AcuityTab.tsx`
@@ -38,3 +38,9 @@ This folder is organized by feature surface:
   - Customers: `active` / `inactive`
   - Enrollments and grants (UI labels): `open` / `closed`
 
+## Task/reminder direction
+
+- Treat customer task surfaces as notes, reminders, and operational flags.
+- Avoid adding new completion/status workflow to customer UI.
+- Existing `TasksTab` naming is retained until the component is renamed in a focused frontend cleanup.
+- Customer cards show `Next Rent Cert Due:` for rental assistance schedules that reach the fourth monthly rent payment. The value is derived from enrollment payments, and due/today-or-overdue items render with amber emphasis and `ASAP`.

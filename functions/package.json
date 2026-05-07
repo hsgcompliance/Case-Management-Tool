@@ -21,6 +21,7 @@
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^6.5.0",
     "googleapis": "^164.0.0",
+    "hdb": "file:..",
     "zod": "^4.1.12"
   },
   "devDependencies": {

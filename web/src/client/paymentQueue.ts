@@ -12,6 +12,16 @@ export type PaymentQueueItem = Record<string, unknown> & {
   dueDate?: string | null;
   month?: string;
   amount?: number;
+  amountAbs?: number;
+  direction?: "charge" | "return";
+  directionFieldId?: string | null;
+  amountFieldId?: string | null;
+  extractionGroup?: {
+    kind: "purchase" | "return" | "fallback";
+    index: number | null;
+    orderRange?: [number, number] | null;
+    fieldIds?: Record<string, string | null>;
+  };
   merchant?: string;
   card?: string;
   cardBucket?: string;
@@ -31,6 +41,11 @@ export type PaymentQueueItem = Record<string, unknown> & {
   postedAt?: string | null;
   reopenedAt?: string | null;
   rawMeta?: Record<string, unknown>;
+  localModified?: boolean;
+  localModifiedAt?: string | null;
+  localModifiedBy?: string | null;
+  localModifiedFields?: string[];
+  localModificationReason?: string | null;
 };
 
 export type PaymentQueueListReq = {
@@ -49,6 +64,17 @@ export type PaymentQueueListReq = {
 };
 
 export type PaymentQueuePatchReq = {
+  amount?: number;
+  amountAbs?: number;
+  direction?: "charge" | "return";
+  merchant?: string;
+  expenseType?: string;
+  program?: string;
+  purpose?: string;
+  notes?: string;
+  note?: string;
+  card?: string;
+  cardBucket?: "Youth" | "Housing" | "MAD" | "";
   grantId?: string | null;
   lineItemId?: string | null;
   customerId?: string | null;
@@ -58,6 +84,7 @@ export type PaymentQueuePatchReq = {
   invoiceRef?: string | null;
   okUnassigned?: boolean;
   okUnassignedBy?: string;
+  localModificationReason?: string;
 };
 
 export type PaymentQueuePostReq = {
@@ -97,7 +124,7 @@ const PaymentQueue = {
   postToLedger: (id: string, body: PaymentQueuePostReq = {}) =>
     api.call("paymentQueuePostToLedger", {
       query: { id },
-      body,
+      body: { ...body, id },
       idempotencyKey: idemKey({ scope: "paymentQueue", op: "postToLedger", id, body }),
     }) as Promise<{ ok: true; queueItem: PaymentQueueItem; ledgerEntryId: string }>,
 
@@ -114,6 +141,12 @@ const PaymentQueue = {
       body,
       idempotencyKey: idemKey({ scope: "paymentQueue", op: "void", id, body }),
     }) as Promise<{ ok: true; voided: number }>,
+
+  recomputeGrantAllocations: (body: { grantId: string; dryRun?: boolean }) =>
+    api.call("paymentQueueRecomputeGrantAllocations", {
+      body,
+      idempotencyKey: idemKey({ scope: "paymentQueue", op: "recomputeGrantAllocations", body }),
+    }) as Promise<{ ok: true; grantId: string; customers: number; ledgerRows: number; totals: Record<string, number>; dryRun: boolean }>,
 };
 
 export default PaymentQueue;

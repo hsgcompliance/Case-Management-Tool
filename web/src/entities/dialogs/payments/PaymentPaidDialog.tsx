@@ -20,8 +20,14 @@
  */
 
 import React from "react";
+import dynamic from "next/dynamic";
 import { Modal } from "@entities/ui/Modal";
 import type { ISODate } from "@types";
+
+const GrantBudgetStrip = dynamic(
+  () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
+  { ssr: false, loading: () => <div className="h-10 animate-pulse rounded bg-slate-100" /> },
+);
 
 export type PayMeta = {
   note?: string;
@@ -34,6 +40,7 @@ type Props = {
   amount: number;
   dueDate?: ISODate | string | null;
   defaults?: PayMeta;
+  grantId?: string | null;
   onCancel: () => void;
   onSave: (meta: PayMeta) => void;
 };
@@ -43,6 +50,7 @@ export function PaymentPaidDialog({
   amount,
   dueDate,
   defaults,
+  grantId,
   onCancel,
   onSave,
 }: Props) {
@@ -98,6 +106,8 @@ export function PaymentPaidDialog({
         ) : null}
         Amount <b>{fmtUSD(amount)}</b>
       </div>
+
+      {grantId && <GrantBudgetStrip grantId={grantId} className="mb-3" />}
 
       <div className="space-y-3" data-tour="payment-paid-dialog-form">
         <label className="block text-sm" data-tour="payment-paid-dialog-note">

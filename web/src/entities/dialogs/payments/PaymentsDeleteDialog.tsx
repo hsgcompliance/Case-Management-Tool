@@ -1,8 +1,14 @@
 "use client";
 
 import React from "react";
+import dynamic from "next/dynamic";
 import { Modal } from "@entities/ui/Modal";
 import type { ReqOf } from "@types";
+
+const GrantBudgetStrip = dynamic(
+  () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
+  { ssr: false, loading: () => <div className="h-10 animate-pulse rounded bg-slate-100" /> },
+);
 
 type Scope = "selected" | "allEnrollment";
 
@@ -18,6 +24,7 @@ type Props = {
   open: boolean;
   selected: SelectedPaymentLite | null;
   busy?: boolean;
+  grantId?: string | null;
   onCancel: () => void;
   onConfirm: (body: ReqOf<"paymentsDeleteRows">) => void;
 };
@@ -26,6 +33,7 @@ export default function PaymentsDeleteDialog({
   open,
   selected,
   busy = false,
+  grantId,
   onCancel,
   onConfirm,
 }: Props) {
@@ -86,6 +94,8 @@ export default function PaymentsDeleteDialog({
     >
       <div className="space-y-3 text-sm">
         {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div> : null}
+
+        {grantId && <GrantBudgetStrip grantId={grantId} />}
 
         <div className="rounded border border-slate-200 bg-slate-50 p-3">
           <div className="font-medium text-slate-900">Scope</div>

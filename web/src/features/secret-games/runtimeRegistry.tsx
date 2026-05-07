@@ -6,7 +6,7 @@ import AsteroidsOverlayPlaceholder from "./native/AsteroidsOverlayPlaceholder";
 import BrokenDataGameCard from "./native/BrokenDataGameCard";
 import FarmGameCard from "./native/FarmGameCard";
 import FlipGameCard from "./native/FlipGameCard";
-import NecromancerOverlayPlaceholder from "./native/NecromancerOverlayPlaceholder";
+import NecromancerOverlayRuntime from "./native/NecromancerOverlayRuntime";
 
 export type SecretGameRuntimeProps = {
   definition: SecretGameDefinition;
@@ -18,7 +18,7 @@ const SECRET_GAME_RUNTIME_COMPONENTS: Readonly<Record<string, ComponentType<Secr
   flip: FlipGameCard,
   "broken-data": BrokenDataGameCard,
   farm: FarmGameCard,
-  necromancer: NecromancerOverlayPlaceholder,
+  necromancer: NecromancerOverlayRuntime,
   asteroids: AsteroidsOverlayPlaceholder,
 };
 

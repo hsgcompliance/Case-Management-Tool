@@ -16,6 +16,28 @@ export type TGrantKind = z.infer<typeof GrantKind>;
 const Num = z.coerce.number().refine(Number.isFinite, "not_finite").default(0);
 
 /** ---------- Budget ---------- */
+const GrantLineItemTypeInput = z.preprocess((v) => {
+  if (v == null) return null;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s || ["na", "n/a", "none", "null"].includes(s.toLowerCase())) return null;
+    return { label: s };
+  }
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const raw = String(o.label ?? o.name ?? o.id ?? "").trim();
+    if (!raw || ["na", "n/a", "none", "null"].includes(raw.toLowerCase())) return null;
+    if (!o.label) return { ...o, label: raw };
+  }
+  return v;
+}, z.object({
+  id: z.string().trim().min(1).optional(),
+  label: z.string().trim().min(1),
+}).passthrough().nullable());
+
+export const GrantLineItemType = GrantLineItemTypeInput;
+export type TGrantLineItemType = z.infer<typeof GrantLineItemType>;
+
 /** Per-customer spending cap on a single budget line item. Optional. */
 export const GrantLineItemCap = z
   .object({
@@ -42,6 +64,14 @@ export const GrantBudgetLineItem = z
     spentInWindow: Num.optional(),
 
     locked: z.boolean().nullish(),
+
+    /**
+     * Open line-item grouping object for reporting across grants.
+     * null = uncategorized / N/A. Frontend can add new categories by writing
+     * any { id, label } pair; current defaults include Rental Assistance,
+     * Program Spending, and Customer Support Service.
+     */
+    type: GrantLineItemType.nullish(),
 
     // ── Per-customer cap (optional) ──────────────────────────────────────────
     /** USD cap per enrolled customer on this line item. Only enforced if capEnabled. */
@@ -106,7 +136,7 @@ export type TGrantBudget = z.infer<typeof GrantBudget>;
 // Concurrent-enrollment rules: check if the customer has another active
 //   enrollment whose grantName matches programName on the start date.
 
-export const ConditionalTaskRuleType = z.enum(["age", "concurrent_enrollment"]);
+export const ConditionalTaskRuleType = z.enum(["age", "population", "concurrent_enrollment"]);
 export type TConditionalTaskRuleType = z.infer<typeof ConditionalTaskRuleType>;
 
 export const AgeOperator = z.enum([">=", "<=", ">", "<"]);
@@ -131,6 +161,9 @@ export const ConditionalTaskRule = z
      * enrollments on the start date.  Case-insensitive substring match.
      */
     programName: z.string().trim().optional(),
+    /** Match against customer/enrollment population. Accepts Youth, Individual, or Family. */
+    population: z.enum(["Youth", "Individual", "Family"]).optional(),
+    populations: z.array(z.enum(["Youth", "Individual", "Family"])).optional(),
 
     // ── Task definition ──────────────────────────────────────────────────────
     taskName: z.string().trim().min(1),
@@ -140,6 +173,13 @@ export const ConditionalTaskRule = z
     dueOffsetDays: z.number().int().nullish(),
     assignToGroup: z.enum(["admin", "compliance", "casemanager"]).default("casemanager"),
     taskNotes: z.string().trim().nullish(),
+    /** Optional recurrence for condition-created reminders. Defaults to one-off. */
+    kind: z.enum(["one-off", "recurring"]).optional(),
+    frequency: z.string().trim().nullish(),
+    every: z.number().int().min(1).nullish(),
+    dueDate: z.string().trim().nullish(),
+    endDate: z.string().trim().nullish(),
+    notify: z.boolean().optional(),
   })
   .passthrough();
 

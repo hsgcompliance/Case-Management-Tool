@@ -4,7 +4,7 @@ import { createDirectSecretLaunchRequest, parseSecretSearchTrigger } from "./tri
 import { buildSandboxLaunchHref, createSandboxLaunchEnvironment } from "./sandboxLaunch";
 
 describe("sandbox launch routing", () => {
-  it("routes card-native search launches to the cards sandbox page", () => {
+  it("routes search launches to the unified lab page", () => {
     const parsed = parseSecretSearchTrigger("flip");
     if (!parsed.matched) throw new Error("Expected flip to parse.");
 
@@ -15,10 +15,10 @@ describe("sandbox launch routing", () => {
       fallbackCustomerId: "cust-1",
     });
 
-    expect(href).toBe("/dev/secret-games/cards?game=flip&source=search-exact&triggerId=search-flip&command=flip&customer=cust-1");
+    expect(href).toBe("/dev/secret-games?game=flip&source=search-exact&triggerId=search-flip&command=flip&customer=cust-1");
   });
 
-  it("routes immersive triggers to the overlay sandbox page", () => {
+  it("routes all triggers to the unified lab page", () => {
     const request = createDirectSecretLaunchRequest("konami", { gameId: "necromancer" });
     const decision = resolveSecretGameLaunch(request, createSandboxLaunchEnvironment());
     const href = buildSandboxLaunchHref({
@@ -27,6 +27,6 @@ describe("sandbox launch routing", () => {
       fallbackCustomerId: "cust-1",
     });
 
-    expect(href).toBe("/dev/secret-games/overlay?game=necromancer&source=konami&triggerId=konami-necromancer");
+    expect(href).toBe("/dev/secret-games?game=necromancer&source=konami&triggerId=konami-necromancer&customer=cust-1");
   });
 });

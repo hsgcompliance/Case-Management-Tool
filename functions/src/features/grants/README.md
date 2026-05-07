@@ -128,7 +128,7 @@ All handlers are wrapped by `core/secureHandler`.
 ### Structure
 - `GET /grantsStructure` (auth: `user`)
   - Returns an empty, **correctly-shaped** skeleton for form initialization.
-  - **Note:** `tasks` is a record/object, not an array.
+  - **Note:** `tasks` is a legacy/reminder metadata record, not an array.
 
 ### Activity
 - `GET /grantsActivity?grantId=...&limit=...` (auth: `user`)
@@ -248,6 +248,7 @@ Server will persist `budget:null` and set `budgetMode:"none"` automatically.
 * **Org scoping is enforced server-side.** Clients do not set `orgId`.
 * **Programs never carry budgets.** If the client tries, the server clears it.
 * **`unset[]` is the only supported deletion mechanism on PATCH.**
-* **`tasks` is a record/object**, not an array. Any code treating it as an array is wrong.
+* **`tasks` is a legacy/reminder metadata record**, not an array. Any code treating it as an array is wrong.
+* **Do not build new grant behavior around generic task completion.** Prefer reminders, notes, flags, and digest visibility.
 
 ```

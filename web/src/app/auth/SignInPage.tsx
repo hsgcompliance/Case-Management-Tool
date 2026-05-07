@@ -110,7 +110,7 @@ export default function SignInPage() {
                   onClick={() => setShowEmail(false)}
                   className="text-sm text-slate-600 hover:underline dark:text-slate-300"
                 >
-                  Use Google instead
+                  Or login with Google
                 </button>
               )}
             </div>

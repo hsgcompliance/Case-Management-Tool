@@ -9,6 +9,8 @@ interface Props {
   onActivate: () => void;
   minIntervalMs?: number;
   jitterMs?: number;
+  /** Dev sandbox: immediately spawn the floater without waiting for the timer */
+  forceShow?: boolean;
 }
 
 const DEFAULT_INTERVAL_MS = 13 * 60_000;
@@ -17,7 +19,7 @@ const SLITHER_MS = 8_000;
 
 type Phase = "hidden" | "slithering";
 
-export default function SnakeFloat({ onActivate, minIntervalMs, jitterMs }: Props) {
+export default function SnakeFloat({ onActivate, minIntervalMs, jitterMs, forceShow }: Props) {
   const intervalMs = minIntervalMs ?? DEFAULT_INTERVAL_MS;
   const jitterMsVal = jitterMs ?? DEFAULT_JITTER_MS;
 
@@ -46,6 +48,13 @@ export default function SnakeFloat({ onActivate, minIntervalMs, jitterMs }: Prop
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!forceShow || phase !== "hidden") return;
+    setFromRight(Math.random() > 0.5);
+    setYFrac(0.3 + Math.random() * 0.5);
+    setPhase("slithering");
+  }, [forceShow, phase]);
 
   React.useEffect(() => {
     if (phase !== "slithering") return;

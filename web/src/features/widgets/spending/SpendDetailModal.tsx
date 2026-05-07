@@ -14,30 +14,33 @@ import GrantSelect from "@entities/selectors/GrantSelect";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import CreditCardSelect from "@entities/selectors/CreditCardSelect";
 import PaymentsProjectionsAdjustDialog from "@entities/dialogs/payments/PaymentsProjectionsAdjustDialog";
+import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
+import CardInvoiceEntryDialog from "@entities/dialogs/payments/CardInvoiceEntryDialog";
+import type { CardInvoiceEntryMode } from "@entities/dialogs/payments/CardInvoiceEntryDialog";
+import { GrantBudgetStrip } from "@entities/grants/GrantBudgetStrip";
+import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
 import {
   useEnrollmentPayments,
   usePaymentsUpdateCompliance,
   usePaymentsSpend,
-  usePaymentsAdjustProjections,
-  usePaymentsAdjustSpend,
+  usePaymentsProjectionsAdjust,
+  usePaymentsBuildSchedule,
   type PaymentsProjectionsAdjustInput,
+  type PaymentScheduleBuildInput,
 } from "@hooks/usePayments";
 import { toApiError } from "@client/api";
 import {
   usePatchPaymentQueueItem,
   usePostPaymentQueueToLedger,
   useReopenPaymentQueueItem,
+  useVoidPaymentQueueItem,
 } from "@hooks/usePaymentQueue";
-import { useClassifyLedgerEntries, useLedgerEntry } from "@hooks/useLedger";
+import { useClassifyLedgerEntries, useCreateLedgerEntry, useLedgerEntry } from "@hooks/useLedger";
 import { useJotformSubmission } from "@hooks/useJotform";
 import { useTaskOtherCreate, useTaskOtherStatus } from "@hooks/useTasks";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
-import type {
-  PaymentsAdjustProjectionsReq,
-  PaymentsAdjustSpendReq,
-  TPayment,
-} from "@types";
+import type { TPayment } from "@types";
 import {
   buildNormalizedAnswerFields,
   stageLabelFromQueueSource,
@@ -450,11 +453,13 @@ function EnrollmentSpendCard({
   grantNameById,
   lineItemLookup,
   customerNameById,
+  onOpenCustomerPayments,
 }: {
   row: SpendRow;
   grantNameById: Map<string, string>;
   lineItemLookup: Map<string, { grantName: string; lineItemLabel: string }>;
   customerNameById: Map<string, string>;
+  onOpenCustomerPayments: (customerId: string) => void;
 }) {
   const isProjection = row.kind === "queue-projection";
 
@@ -498,10 +503,11 @@ function EnrollmentSpendCard({
 
   const updateCompliance = usePaymentsUpdateCompliance();
   const spendMutation = usePaymentsSpend();
-  const adjustMutation = usePaymentsAdjustProjections();
-  const adjustSpendMutation = usePaymentsAdjustSpend();
+  const adjustMutation = usePaymentsProjectionsAdjust();
+  const buildMutation = usePaymentsBuildSchedule();
 
   const [adjustOpen, setAdjustOpen] = React.useState(false);
+  const [builderOpen, setBuilderOpen] = React.useState(false);
 
   const handleToggle = async (field: "hmis" | "cw" | "paid", next: boolean) => {
     setSaving(true);
@@ -549,7 +555,19 @@ function EnrollmentSpendCard({
     if (!enrollmentId) return [];
     const payments = enrollmentPayments as TPayment[];
     return [{ id: enrollmentId, label: `${grantName} enrollment`, grantId: row.grantId, payments }];
-  }, [enrollmentId, enrollmentPayments, grantName, row.grantId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrollmentId, enrollmentPayments]);
+
+  // Build enrollment option for Schedule Builder dialog
+  const builderEnrollmentOption = React.useMemo(() => {
+    if (!enrollmentId) return [];
+    return [{
+      id: enrollmentId,
+      label: `${grantName} enrollment`,
+      grantId: row.grantId || undefined,
+      lineItemIds: row.lineItemId ? [row.lineItemId] : [],
+    }];
+  }, [enrollmentId, grantName, row.grantId, row.lineItemId]);
 
   const allDone = localHmis && localCw && localPaid;
 
@@ -619,15 +637,21 @@ function EnrollmentSpendCard({
               className="btn btn-sm btn-ghost col-span-1"
               onClick={() => setAdjustOpen(true)}
             >
-              Adjust
+              Adjust Projections
+            </button>
+          )}
+          {enrollmentId && (
+            <button
+              className="btn btn-sm btn-ghost col-span-1"
+              onClick={() => setBuilderOpen(true)}
+            >
+              Build Schedule
             </button>
           )}
           {row.customerId && (
             <button
-              className="btn btn-sm btn-ghost col-span-1"
-              onClick={() => {
-                window.open(`/customers/${row.customerId}?tab=payments`, "_blank");
-              }}
+              className="btn btn-sm btn-ghost col-span-2"
+              onClick={() => onOpenCustomerPayments(row.customerId)}
             >
               Open Payment Schedule
             </button>
@@ -640,19 +664,35 @@ function EnrollmentSpendCard({
         <PaymentsProjectionsAdjustDialog
           open={adjustOpen}
           enrollments={enrollmentOption}
-          busy={adjustMutation.isPending || adjustSpendMutation.isPending}
+          busy={adjustMutation.isPending}
           onCancel={() => setAdjustOpen(false)}
           onApply={async (payload: PaymentsProjectionsAdjustInput) => {
             try {
-              if (payload.spendAdjustment) {
-                await adjustSpendMutation.mutateAsync({ body: payload as PaymentsAdjustSpendReq });
-              } else {
-                await adjustMutation.mutateAsync({ body: payload as PaymentsAdjustProjectionsReq });
-              }
+              await adjustMutation.mutateAsync(payload);
               toast("Adjustment applied.", { type: "success" });
               setAdjustOpen(false);
             } catch (e: unknown) {
               toast(toApiError(e, "Adjustment failed.").error, { type: "error" });
+            }
+          }}
+        />
+      )}
+
+      {/* Build Schedule dialog */}
+      {builderOpen && (
+        <PaymentScheduleBuilderDialog
+          open={builderOpen}
+          enrollments={builderEnrollmentOption}
+          busy={buildMutation.isPending}
+          customerName={customerNameById.get(row.customerId) || undefined}
+          onCancel={() => setBuilderOpen(false)}
+          onBuild={async (payload: PaymentScheduleBuildInput) => {
+            try {
+              await buildMutation.mutateAsync(payload);
+              toast("Payment schedule built.", { type: "success" });
+              setBuilderOpen(false);
+            } catch (e: unknown) {
+              toast(toApiError(e, "Schedule build failed.").error, { type: "error" });
             }
           }}
         />
@@ -672,6 +712,7 @@ function CardSpendCard({
   customerNameById,
   cardBudget,
   workflowTask,
+  onOpenCustomerWorkspace,
 }: {
   row: SpendRow;
   grantNameById: Map<string, string>;
@@ -679,16 +720,23 @@ function CardSpendCard({
   customerNameById: Map<string, string>;
   cardBudget?: CardBudget | null;
   workflowTask?: Record<string, unknown> | null;
+  onOpenCustomerWorkspace: (customerId: string, initialTab?: "details" | "payments") => void;
 }) {
   const [viewMode, setViewMode] = React.useState<ViewMode>("detail");
   const [assignGrantId, setAssignGrantId] = React.useState(row.grantId || "");
   const [assignLineItemId, setAssignLineItemId] = React.useState(row.lineItemId || "");
+  const [amountDraft, setAmountDraft] = React.useState(String((row.amountCents / 100).toFixed(2)));
+  const [correctionReason, setCorrectionReason] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [entryDialogMode, setEntryDialogMode] = React.useState<CardInvoiceEntryMode>("manual-cc");
+  const [entryDialogOpen, setEntryDialogOpen] = React.useState(false);
 
   const patchQueue = usePatchPaymentQueueItem();
   const postQueue = usePostPaymentQueueToLedger();
   const reopenQueue = useReopenPaymentQueueItem();
+  const voidQueue = useVoidPaymentQueueItem();
   const classifyLedger = useClassifyLedgerEntries();
+  const createLedger = useCreateLedgerEntry();
   const createTask = useTaskOtherCreate();
   const updateTaskStatus = useTaskOtherStatus();
 
@@ -704,8 +752,10 @@ function CardSpendCard({
   const lineItemLabel = info?.lineItemLabel || row.lineItemId || "-";
   const customerName = customerNameById.get(row.customerId) || row.customerId || "";
 
-  const anyMutating = patchQueue.isPending || postQueue.isPending || reopenQueue.isPending ||
-    classifyLedger.isPending || createTask.isPending || updateTaskStatus.isPending;
+  const anyMutating =
+    patchQueue.isPending || postQueue.isPending || reopenQueue.isPending ||
+    voidQueue.isPending || classifyLedger.isPending || createLedger.isPending ||
+    createTask.isPending || updateTaskStatus.isPending;
 
   const handleReopen = async () => {
     setSaving(true);
@@ -721,6 +771,18 @@ function CardSpendCard({
     }
   };
 
+  const handleVoid = async () => {
+    setSaving(true);
+    try {
+      await voidQueue.mutateAsync({ id: queueId });
+      toast("Voided — item will not be posted to ledger.", { type: "success" });
+    } catch (e: unknown) {
+      toast(toApiError(e, "Void failed.").error, { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handlePost = async () => {
     setSaving(true);
     try {
@@ -728,7 +790,12 @@ function CardSpendCard({
         if (assignGrantId) {
           await patchQueue.mutateAsync({
             id: queueId,
-            body: { grantId: assignGrantId || null, lineItemId: assignLineItemId || null },
+            body: {
+              grantId: assignGrantId || null,
+              lineItemId: assignLineItemId || null,
+              amount: Number(amountDraft || 0),
+              localModificationReason: correctionReason || undefined,
+            },
           });
         }
         await postQueue.mutateAsync({ id: queueId });
@@ -747,6 +814,32 @@ function CardSpendCard({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveQueueCorrection = async () => {
+    if (!isQueue) return;
+    setSaving(true);
+    try {
+      await patchQueue.mutateAsync({
+        id: queueId,
+        body: {
+          grantId: assignGrantId || null,
+          lineItemId: assignLineItemId || null,
+          amount: Number(amountDraft || 0),
+          localModificationReason: correctionReason || undefined,
+        },
+      });
+      toast("Local queue correction saved.", { type: "success" });
+    } catch (e: unknown) {
+      toast(toApiError(e, "Save failed.").error, { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEntryDialog = (m: CardInvoiceEntryMode) => {
+    setEntryDialogMode(m);
+    setEntryDialogOpen(true);
   };
 
   const handleCreateTask = async () => {
@@ -794,7 +887,16 @@ function CardSpendCard({
 
       {/* Customer link */}
       {row.customerId && (
-        <CustomerLink customerId={row.customerId} name={customerName} />
+        <div className="flex flex-wrap items-center gap-2">
+          <CustomerLink customerId={row.customerId} name={customerName} />
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={() => onOpenCustomerWorkspace(row.customerId, "details")}
+          >
+            Open Customer Workspace
+          </button>
+        </div>
       )}
 
       {/* Card budget bar */}
@@ -885,48 +987,164 @@ function CardSpendCard({
             onChange={(v) => { setAssignGrantId(String(v || "")); setAssignLineItemId(""); }}
             includeUnassigned
           />
+          {assignGrantId && <GrantBudgetStrip grantId={assignGrantId} />}
           <LineItemSelect
             grantId={assignGrantId || null}
             value={assignLineItemId || null}
             onChange={(v) => setAssignLineItemId(String(v || ""))}
             inputClassName="w-full"
           />
+          {isQueue && (
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                className="input text-sm"
+                type="number"
+                step="0.01"
+                value={amountDraft}
+                onChange={(e) => setAmountDraft(e.currentTarget.value)}
+                placeholder="Amount"
+              />
+              <input
+                className="input text-sm"
+                value={correctionReason}
+                onChange={(e) => setCorrectionReason(e.currentTarget.value)}
+                placeholder="Correction note"
+              />
+            </div>
+          )}
+          {isQueue && (
+            <button
+              className="btn btn-ghost btn-sm w-full"
+              disabled={anyMutating || saving}
+              onClick={handleSaveQueueCorrection}
+            >
+              Save Local Correction
+            </button>
+          )}
         </div>
       </DetailSection>
 
       {/* Workflow actions */}
-      <div className="grid grid-cols-2 gap-2">
-        {isQueue && (
-          <button
-            className="btn btn-ghost btn-sm"
-            disabled={anyMutating || saving || row.workflowState === "open"}
-            onClick={handleReopen}
-          >
-            Reopen
-          </button>
-        )}
-        <button
-          className="btn btn-sm"
-          disabled={anyMutating || saving || row.workflowState === "closed"}
-          onClick={handlePost}
-        >
-          {isQueue ? "Post to Ledger" : "Allocate"}
-        </button>
-        {row.kind === "card-ledger" && !workflowTask && (
-          <button
-            className="btn btn-ghost btn-sm col-span-2"
-            disabled={anyMutating}
-            onClick={handleCreateTask}
-          >
-            Create Spend Task
-          </button>
+      <DetailSection title="Actions">
+        {isQueue ? (
+          <div className="space-y-2">
+            {row.paymentQueueItem?.localModified ? (
+              <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                Local tracker edits are preserved during Jotform reconcile.
+              </div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="btn btn-sm"
+                disabled={anyMutating || saving || row.workflowState === "closed"}
+                onClick={handlePost}
+              >
+                Post to Ledger
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={anyMutating || saving || row.workflowState === "open"}
+                onClick={handleReopen}
+              >
+                Reopen
+              </button>
+              <button
+                className="btn btn-ghost btn-sm text-rose-700 col-span-2"
+                disabled={anyMutating || saving || row.workflowState === "closed"}
+                onClick={handleVoid}
+                title="Void this item — it will not be posted to ledger"
+              >
+                Void Item
+              </button>
+            </div>
+            <div className="border-t border-slate-100 pt-2 grid grid-cols-1 gap-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Manual Entry</div>
+              <button
+                className="btn btn-ghost btn-sm w-full text-left"
+                disabled={anyMutating}
+                onClick={() => openEntryDialog("manual-cc")}
+              >
+                Record CC Spend (manual)
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className="btn btn-sm col-span-2"
+                disabled={anyMutating || saving || !assignGrantId || !assignLineItemId}
+                onClick={handlePost}
+                title={!assignGrantId || !assignLineItemId ? "Select grant and line item first" : undefined}
+              >
+                Allocate to Grant
+              </button>
+            </div>
+            <div className="border-t border-slate-100 pt-2 grid grid-cols-1 gap-1.5">
+              <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Adjustments</div>
+              <button
+                className="btn btn-ghost btn-sm w-full text-left"
+                disabled={anyMutating}
+                onClick={() => openEntryDialog("reversal")}
+              >
+                Create Reversal
+              </button>
+              <button
+                className="btn btn-ghost btn-sm w-full text-left"
+                disabled={anyMutating}
+                onClick={() => openEntryDialog("adjustment")}
+              >
+                Create Adjustment
+              </button>
+              <button
+                className="btn btn-ghost btn-sm w-full text-left"
+                disabled={anyMutating}
+                onClick={() => openEntryDialog("manual-cc")}
+              >
+                Record CC Spend (manual)
+              </button>
+            </div>
+            {!workflowTask && (
+              <button
+                className="btn btn-ghost btn-sm w-full"
+                disabled={anyMutating}
+                onClick={handleCreateTask}
+              >
+                Create Spend Task
+              </button>
+            )}
+          </div>
         )}
         {workflowTask && (
-          <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
             Spend task: {String(workflowTask.title || workflowTask.id || "-")}
           </div>
         )}
-      </div>
+      </DetailSection>
+
+      {entryDialogOpen && (
+        <CardInvoiceEntryDialog
+          open={entryDialogOpen}
+          mode={entryDialogMode}
+          sourceEntryId={entryDialogMode === "reversal" ? (provenanceLedgerId || undefined) : undefined}
+          sourceAmountCents={entryDialogMode === "reversal" ? row.amountCents : undefined}
+          sourceGrantId={assignGrantId || row.grantId || undefined}
+          sourceLineItemId={assignLineItemId || row.lineItemId || undefined}
+          sourceCreditCardId={row.creditCardId || undefined}
+          sourceNote={typeof row.paymentQueueItem?.note === "string" ? row.paymentQueueItem.note : undefined}
+          busy={createLedger.isPending}
+          onCancel={() => setEntryDialogOpen(false)}
+          onSave={async (body) => {
+            try {
+              await createLedger.mutateAsync(body);
+              toast("Ledger entry created.", { type: "success" });
+              setEntryDialogOpen(false);
+            } catch (e: unknown) {
+              toast(toApiError(e, "Create failed.").error, { type: "error" });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -940,21 +1158,28 @@ function InvoiceSpendCard({
   grantNameById,
   lineItemLookup,
   customerNameById,
+  onOpenCustomerWorkspace,
 }: {
   row: SpendRow;
   grantNameById: Map<string, string>;
   lineItemLookup: Map<string, { grantName: string; lineItemLabel: string }>;
   customerNameById: Map<string, string>;
+  onOpenCustomerWorkspace: (customerId: string, initialTab?: "details" | "payments") => void;
 }) {
   const [viewMode, setViewMode] = React.useState<ViewMode>("detail");
   const [assignGrantId, setAssignGrantId] = React.useState(row.grantId || "");
   const [assignLineItemId, setAssignLineItemId] = React.useState(row.lineItemId || "");
   const [assignCardId, setAssignCardId] = React.useState(row.creditCardId || "");
+  const [amountDraft, setAmountDraft] = React.useState(String((row.amountCents / 100).toFixed(2)));
+  const [correctionReason, setCorrectionReason] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
   const patchQueue = usePatchPaymentQueueItem();
   const postQueue = usePostPaymentQueueToLedger();
   const reopenQueue = useReopenPaymentQueueItem();
+  const voidQueue = useVoidPaymentQueueItem();
+  const createLedger = useCreateLedgerEntry();
+  const [entryDialogOpen, setEntryDialogOpen] = React.useState(false);
 
   const queueId = String(row.paymentQueueItem?.id || "");
   const submissionId = String(row.paymentQueueItem?.submissionId || "");
@@ -969,7 +1194,8 @@ function InvoiceSpendCard({
   const queueStatus = String(row.paymentQueueItem?.queueStatus || "pending");
   const legacyInvoiceStatus = row.paymentQueueItem?.invoiceStatus ? String(row.paymentQueueItem.invoiceStatus) : "";
 
-  const anyMutating = patchQueue.isPending || postQueue.isPending || reopenQueue.isPending;
+  const anyMutating = patchQueue.isPending || postQueue.isPending || reopenQueue.isPending ||
+    voidQueue.isPending || createLedger.isPending;
 
   const handleSaveAssignment = async () => {
     setSaving(true);
@@ -980,6 +1206,8 @@ function InvoiceSpendCard({
           grantId: assignGrantId || null,
           lineItemId: assignLineItemId || null,
           creditCardId: assignCardId || null,
+          amount: Number(amountDraft || 0),
+          localModificationReason: correctionReason || undefined,
         },
       });
       toast("Assignment saved.", { type: "success" });
@@ -1000,6 +1228,8 @@ function InvoiceSpendCard({
             grantId: assignGrantId || null,
             lineItemId: assignLineItemId || null,
             creditCardId: assignCardId || null,
+            amount: Number(amountDraft || 0),
+            localModificationReason: correctionReason || undefined,
           },
         });
       }
@@ -1042,7 +1272,16 @@ function InvoiceSpendCard({
 
       {/* Customer link */}
       {row.customerId && (
-        <CustomerLink customerId={row.customerId} name={customerName} />
+        <div className="flex flex-wrap items-center gap-2">
+          <CustomerLink customerId={row.customerId} name={customerName} />
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={() => onOpenCustomerWorkspace(row.customerId, "details")}
+          >
+            Open Customer Workspace
+          </button>
+        </div>
       )}
 
       {/* View mode tabs */}
@@ -1104,6 +1343,7 @@ function InvoiceSpendCard({
             onChange={(v) => { setAssignGrantId(String(v || "")); setAssignLineItemId(""); }}
             includeUnassigned
           />
+          {assignGrantId && <GrantBudgetStrip grantId={assignGrantId} />}
           <LineItemSelect
             grantId={assignGrantId || null}
             value={assignLineItemId || null}
@@ -1116,6 +1356,22 @@ function InvoiceSpendCard({
             includeUnassigned
             inputClassName="w-full"
           />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              className="input text-sm"
+              type="number"
+              step="0.01"
+              value={amountDraft}
+              onChange={(e) => setAmountDraft(e.currentTarget.value)}
+              placeholder="Amount"
+            />
+            <input
+              className="input text-sm"
+              value={correctionReason}
+              onChange={(e) => setCorrectionReason(e.currentTarget.value)}
+              placeholder="Correction note"
+            />
+          </div>
           <button
             className="btn btn-ghost btn-sm w-full"
             disabled={anyMutating || saving}
@@ -1127,22 +1383,81 @@ function InvoiceSpendCard({
       </DetailSection>
 
       {/* Actions */}
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          className="btn btn-ghost btn-sm"
-          disabled={anyMutating || saving || row.workflowState === "open"}
-          onClick={handleReopen}
-        >
-          Reopen
-        </button>
-        <button
-          className="btn btn-sm"
-          disabled={anyMutating || saving || row.workflowState === "closed"}
-          onClick={handlePost}
-        >
-          Post to Ledger
-        </button>
-      </div>
+      <DetailSection title="Actions">
+        <div className="space-y-2">
+          {row.paymentQueueItem?.localModified ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              Local tracker edits are preserved during Jotform reconcile.
+            </div>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="btn btn-sm"
+              disabled={anyMutating || saving || row.workflowState === "closed"}
+              onClick={handlePost}
+            >
+              Post to Ledger
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={anyMutating || saving || row.workflowState === "open"}
+              onClick={handleReopen}
+            >
+              Reopen
+            </button>
+            <button
+              className="btn btn-ghost btn-sm text-rose-700 col-span-2"
+              disabled={anyMutating || saving || row.workflowState === "closed"}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await voidQueue.mutateAsync({ id: queueId });
+                  toast("Voided.", { type: "success" });
+                } catch (e: unknown) {
+                  toast(toApiError(e, "Void failed.").error, { type: "error" });
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              title="Void — this item will not be posted to ledger"
+            >
+              Void Item
+            </button>
+          </div>
+          <div className="border-t border-slate-100 pt-2 grid grid-cols-1 gap-1.5">
+            <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Manual Entry</div>
+            <button
+              className="btn btn-ghost btn-sm w-full text-left"
+              disabled={anyMutating}
+              onClick={() => setEntryDialogOpen(true)}
+            >
+              Record Invoice Payment (manual)
+            </button>
+          </div>
+        </div>
+      </DetailSection>
+
+      {entryDialogOpen && (
+        <CardInvoiceEntryDialog
+          open={entryDialogOpen}
+          mode="manual-invoice"
+          sourceGrantId={assignGrantId || row.grantId || undefined}
+          sourceLineItemId={assignLineItemId || row.lineItemId || undefined}
+          sourceCreditCardId={assignCardId || row.creditCardId || undefined}
+          sourceCustomerId={row.customerId || undefined}
+          busy={createLedger.isPending}
+          onCancel={() => setEntryDialogOpen(false)}
+          onSave={async (body) => {
+            try {
+              await createLedger.mutateAsync(body);
+              toast("Invoice ledger entry created.", { type: "success" });
+              setEntryDialogOpen(false);
+            } catch (e: unknown) {
+              toast(toApiError(e, "Create failed.").error, { type: "error" });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1161,6 +1476,11 @@ export function SpendDetailModal({
   cardBudget,
   workflowTask,
 }: ModalProps) {
+  const [customerWorkspace, setCustomerWorkspace] = React.useState<{
+    customerId: string;
+    initialTab: "details" | "payments";
+  } | null>(null);
+
   if (!row) return null;
 
   const isEnrollment = row.kind === "grant-ledger" || row.kind === "queue-projection";
@@ -1176,50 +1496,64 @@ export function SpendDetailModal({
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      title={
-        <div className="flex items-center gap-2">
-          <span>{titleMap[row.kind]}</span>
-          <span className="text-sm font-normal text-slate-500">{fmtCents(row.amountCents)}</span>
+    <>
+      <Modal
+        isOpen={isOpen}
+        title={
+          <div className="flex items-center gap-2">
+            <span>{titleMap[row.kind]}</span>
+            <span className="text-sm font-normal text-slate-500">{fmtCents(row.amountCents)}</span>
+          </div>
+        }
+        onClose={onClose}
+        disableEscClose={!!customerWorkspace}
+        widthClass="max-w-2xl"
+        footer={
+          <div className="flex justify-end">
+            <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+          </div>
+        }
+      >
+        <div className="overflow-y-auto max-h-[calc(90vh-160px)]">
+          {isEnrollment && (
+            <EnrollmentSpendCard
+              row={row}
+              grantNameById={grantNameById}
+              lineItemLookup={lineItemLookup}
+              customerNameById={customerNameById}
+              onOpenCustomerPayments={(customerId) => setCustomerWorkspace({ customerId, initialTab: "payments" })}
+            />
+          )}
+          {isCard && (
+            <CardSpendCard
+              row={row}
+              grantNameById={grantNameById}
+              lineItemLookup={lineItemLookup}
+              customerNameById={customerNameById}
+              cardBudget={cardBudget}
+              workflowTask={workflowTask}
+              onOpenCustomerWorkspace={(customerId, initialTab = "details") => setCustomerWorkspace({ customerId, initialTab })}
+            />
+          )}
+          {isInvoice && (
+            <InvoiceSpendCard
+              row={row}
+              grantNameById={grantNameById}
+              lineItemLookup={lineItemLookup}
+              customerNameById={customerNameById}
+              onOpenCustomerWorkspace={(customerId, initialTab = "details") => setCustomerWorkspace({ customerId, initialTab })}
+            />
+          )}
         </div>
-      }
-      onClose={onClose}
-      widthClass="max-w-2xl"
-      footer={
-        <div className="flex justify-end">
-          <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
-        </div>
-      }
-    >
-      <div className="overflow-y-auto max-h-[calc(90vh-160px)]">
-        {isEnrollment && (
-          <EnrollmentSpendCard
-            row={row}
-            grantNameById={grantNameById}
-            lineItemLookup={lineItemLookup}
-            customerNameById={customerNameById}
-          />
-        )}
-        {isCard && (
-          <CardSpendCard
-            row={row}
-            grantNameById={grantNameById}
-            lineItemLookup={lineItemLookup}
-            customerNameById={customerNameById}
-            cardBudget={cardBudget}
-            workflowTask={workflowTask}
-          />
-        )}
-        {isInvoice && (
-          <InvoiceSpendCard
-            row={row}
-            grantNameById={grantNameById}
-            lineItemLookup={lineItemLookup}
-            customerNameById={customerNameById}
-          />
-        )}
-      </div>
-    </Modal>
+      </Modal>
+
+      {customerWorkspace ? (
+        <CustomerWorkspaceModal
+          customerId={customerWorkspace.customerId}
+          initialTab={customerWorkspace.initialTab}
+          onClose={() => setCustomerWorkspace(null)}
+        />
+      ) : null}
+    </>
   );
 }

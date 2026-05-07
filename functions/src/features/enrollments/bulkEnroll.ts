@@ -15,6 +15,7 @@
 import { EnrollmentsBulkEnrollBody } from "./schemas";
 import type { TEnrollmentsBulkEnrollBody } from "./schemas";
 import { deriveEnrollmentNames } from "./derive";
+import { generateTaskScheduleForEnrollments } from "../tasks/generateScheduleWrite";
 
 export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
   const parsed = EnrollmentsBulkEnrollBody.safeParse(req.body ?? {});
@@ -122,7 +123,28 @@ export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
         ...derived,
       });
 
-      results.push({customerId, enrollmentId: ref.id});
+      let taskGeneration: unknown = null;
+      if ((merged as any)?.generateTaskSchedule !== false) {
+        try {
+          taskGeneration = await generateTaskScheduleForEnrollments(
+            {
+              enrollmentId: ref.id,
+              mode: "replaceManaged",
+              keepManual: true,
+              preserveCompletedManaged: true,
+              pinCompletedManaged: true,
+            },
+            user,
+          );
+        } catch (error: unknown) {
+          taskGeneration = {
+            ok: false,
+            error: String((error as { message?: unknown })?.message || error || "task_schedule_generation_failed"),
+          };
+        }
+      }
+
+      results.push({customerId, enrollmentId: ref.id, taskGeneration});
     } catch (e:any) {
       results.push({customerId, error: String(e?.message || e)});
     }

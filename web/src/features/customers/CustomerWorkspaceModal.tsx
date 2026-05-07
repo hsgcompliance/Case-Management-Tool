@@ -8,6 +8,7 @@ import CustomersModal from "./CustomersModal";
 type Props = {
   customerId: string | null;
   onClose: () => void;
+  initialTab?: "details" | "enrollments" | "case" | "assessments" | "tasks" | "payments" | "files";
 };
 
 function displayName(c: { name?: string; firstName?: string; lastName?: string } | null | undefined) {
@@ -19,7 +20,7 @@ function displayName(c: { name?: string; firstName?: string; lastName?: string }
   );
 }
 
-export default function CustomerWorkspaceModal({ customerId, onClose }: Props) {
+export default function CustomerWorkspaceModal({ customerId, onClose, initialTab }: Props) {
   const { data: customer } = useCustomer(customerId ?? undefined, {
     enabled: !!customerId && customerId !== "new",
   });
@@ -45,7 +46,7 @@ export default function CustomerWorkspaceModal({ customerId, onClose }: Props) {
       }
       rightPane={
         <div className="h-full overflow-y-auto p-6 md:p-8">
-          <CustomersModal customerId={customerId} onClose={onClose} pageMode />
+          <CustomersModal customerId={customerId} onClose={onClose} pageMode initialTab={initialTab} />
         </div>
       }
       disableOverlayClose={false}

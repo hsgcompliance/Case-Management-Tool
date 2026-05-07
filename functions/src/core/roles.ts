@@ -55,7 +55,7 @@ export function rolesFromClaims(c: LegacyClaims): string[] {
   const safe = toSafeClaims(c);
   const tr = topRoleFromClaims(safe);
   const tags = roleTagsFromClaims(safe);
-  const out = [];
+  const out: string[] = [];
   if (tr) out.push(tr);
   out.push(...tags);
   return Array.from(new Set(out));

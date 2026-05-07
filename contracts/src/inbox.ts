@@ -30,6 +30,18 @@ export type InboxAssignedGroup = z.infer<typeof InboxAssignedGroupEnum>;
 
 const YYYY_MM = z.string().regex(/^\d{4}-\d{2}$/);
 const UrlOrHash = z.union([z.url(), z.literal("#")]);
+export const InboxDigestTypeSchema = z.enum(["caseload", "budget", "enrollments", "caseManagers", "rentalAssistance"]);
+export type TInboxDigestType = z.infer<typeof InboxDigestTypeSchema>;
+export const InboxDigestSubRecordSchema = z.object({
+  uid: z.string().min(1),
+  email: z.email(),
+  displayName: z.string().optional(),
+  roles: z.array(z.string()),
+  topRole: z.string(),
+  subs: z.partialRecord(InboxDigestTypeSchema, z.boolean()),
+  effective: z.record(InboxDigestTypeSchema, z.boolean()),
+});
+export type TInboxDigestSubRecord = z.infer<typeof InboxDigestSubRecordSchema>;
 
 /**
  * Store uses ISO strings (isoNow()) for createdAtISO/updatedAtISO.
@@ -150,6 +162,7 @@ export type TInboxSendMonthlySummaryBody = z.infer<
 >;
 
 export const InboxSendDigestNowBodySchema = z.object({
+  digestType: InboxDigestTypeSchema.optional().default("caseload"),
   months: z.array(YYYY_MM).min(1),
   cmUid: z.string().optional(),
   combine: z.boolean().optional().default(false),
@@ -160,6 +173,7 @@ export const InboxSendDigestNowBodySchema = z.object({
 export type TInboxSendDigestNowBody = z.infer<typeof InboxSendDigestNowBodySchema>;
 
 export const InboxScheduleDigestBodySchema = z.object({
+  digestType: InboxDigestTypeSchema.optional().default("caseload"),
   months: z.array(YYYY_MM).min(1),
   cmUid: z.string().min(1),
   combine: z.boolean().optional().default(true),
@@ -207,6 +221,41 @@ export type TInboxMetricsMyResp = Ok<{
 ============================================================================= */
 
 export type TInboxEmailResp = Ok<{ id: string | null }>;
-export type TInboxSendDigestNowResp = Ok<{ targets: number; months: string[] }>;
+export type TInboxSendDigestNowResult = {
+  uid: string;
+  email: string;
+  month: string;
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+};
+export type TInboxSendDigestNowResp = Ok<{
+  sent: number;
+  skipped: number;
+  failed: number;
+  results: TInboxSendDigestNowResult[];
+}>;
 export type TInboxScheduleDigestResp = Ok<{ id: string; sendAt: string }>;
 export type TInboxDigestPreviewResp = Ok<{ items: TInboxItemEntity[] }>;
+export type TInboxDigestSubsGetResp = Ok<{ records: TInboxDigestSubRecord[] }>;
+export type TInboxDigestSubUpdateReq = {
+  uid: string;
+  digestType: TInboxDigestType;
+  subscribed: boolean;
+};
+export type TInboxDigestSubUpdateResp = Ok<{
+  uid: string;
+  digestType: TInboxDigestType;
+  subscribed: boolean;
+}>;
+export type TInboxDigestHtmlPreviewReq = {
+  digestType?: TInboxDigestType;
+  month?: string;
+  forUid?: string;
+};
+export type TInboxDigestHtmlPreviewResp = Ok<{
+  html: string;
+  subject: string;
+  digestType: TInboxDigestType;
+  month: string;
+}>;

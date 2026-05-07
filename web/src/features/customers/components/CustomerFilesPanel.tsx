@@ -7,6 +7,7 @@ import {
   useGDriveList,
   useGDriveCustomerFolderIndex,
   useGDriveBuildCustomerFolder,
+  useGDriveCustomerFolderSync,
   useGDriveUpload,
   ACTIVE_PARENT_ID,
   EXITED_PARENT_ID,
@@ -77,6 +78,32 @@ function buildFolderName(last: string, first: string, cwid?: string | null) {
   return cwid ? `${base}_${cwid.trim()}` : base;
 }
 
+function cleanLinkedFolders(folders: LinkedFolder[]): LinkedFolder[] {
+  return folders
+    .map((folder) => {
+      const id = String(folder.id || "").trim();
+      const alias = typeof folder.alias === "string" ? folder.alias.trim() : "";
+      const name = typeof folder.name === "string" ? folder.name.trim() : "";
+      const driveId = typeof folder.driveId === "string" ? folder.driveId.trim() : "";
+      return {
+        id,
+        ...(alias ? { alias } : {}),
+        ...(name ? { name } : {}),
+        ...(driveId ? { driveId } : {}),
+      };
+    })
+    .filter((folder) => !!folder.id);
+}
+
+function normalizeMatchText(value: string | null | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[_,-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 ]/g, "");
+}
+
 function renderDocName(tpl: string, first: string, last: string): string {
   return tpl
     .replace(/\{first\}/gi, first)
@@ -86,16 +113,68 @@ function renderDocName(tpl: string, first: string, last: string): string {
 }
 
 function scoreMatch(folder: TCustomerFolder, first: string, last: string, cwid?: string | null): number {
+  const folderLast = normalizeMatchText(folder.last);
+  const folderFirst = normalizeMatchText(folder.first);
+  const folderName = normalizeMatchText(folder.name);
+  const folderCwid = String(folder.cwid || "").trim().toLowerCase();
+  const customerLast = normalizeMatchText(last);
+  const customerFirst = normalizeMatchText(first);
+  const customerCwid = String(cwid || "").trim().toLowerCase();
+
   let score = 0;
-  const fl = folder.last?.toLowerCase() ?? "";
-  const ff = folder.first?.toLowerCase() ?? "";
-  const fc = folder.cwid?.toLowerCase() ?? "";
-  if (fl === last.toLowerCase()) score += 10;
-  else if (fl.startsWith(last.toLowerCase())) score += 5;
-  if (ff === first.toLowerCase()) score += 8;
-  else if (ff.startsWith(first.toLowerCase())) score += 3;
-  if (cwid && fc === cwid.toLowerCase()) score += 15;
-  return score;
+  if (customerCwid && folderCwid && customerCwid === folderCwid) score += 95;
+  else if (customerCwid && folderCwid) score -= 30;
+
+  if (customerLast && folderLast && customerLast === folderLast) score += 42;
+  else if (customerLast && folderLast && (folderLast.startsWith(customerLast) || customerLast.startsWith(folderLast))) score += 18;
+
+  if (customerFirst && folderFirst && customerFirst === folderFirst) score += 34;
+  else if (customerFirst && folderFirst && (folderFirst.startsWith(customerFirst) || customerFirst.startsWith(folderFirst))) score += 14;
+
+  const expectedFolderName = normalizeMatchText(buildFolderName(last, first, cwid || null));
+  if (expectedFolderName && expectedFolderName === folderName) score += 18;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+type FolderMatchCandidate = {
+  folder: TCustomerFolder;
+  score: number;
+  linked: boolean;
+  customerMissingCwId: boolean;
+  folderMissingCwId: boolean;
+};
+
+function scoreTone(score: number): string {
+  if (score >= 90) return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (score >= 70) return "bg-sky-50 text-sky-700 border-sky-200";
+  if (score >= 45) return "bg-amber-50 text-amber-700 border-amber-200";
+  return "bg-slate-50 text-slate-600 border-slate-200";
+}
+
+function buildFolderMatchCandidates(args: {
+  folders: TCustomerFolder[];
+  linkedFolderIds: string[];
+  first: string;
+  last: string;
+  cwid?: string | null;
+}) {
+  const linkedIds = new Set(args.linkedFolderIds.map((value) => String(value || "").trim()).filter(Boolean));
+  const customerCwId = String(args.cwid || "").trim();
+
+  return args.folders
+    .map((folder) => ({
+      folder,
+      score: scoreMatch(folder, args.first, args.last, customerCwId || null),
+      linked: linkedIds.has(String(folder.id || "").trim()),
+      customerMissingCwId: !customerCwId && !!String(folder.cwid || "").trim(),
+      folderMissingCwId: !!customerCwId && !String(folder.cwid || "").trim(),
+    }))
+    .filter((candidate) => candidate.linked || candidate.score > 0)
+    .sort((a, b) => {
+      if (a.linked !== b.linked) return a.linked ? -1 : 1;
+      return b.score - a.score;
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -162,8 +241,10 @@ export function BuildFolderDialog({
       const docName = renderDocName(tmpl.docNameTpl, customerFirst, customerLast);
       if ("variants" in tmpl) {
         const fileId = medicaid === "yes" ? tmpl.variants.payer : tmpl.variants.nonpayer;
+        if (fileId.length < 3) return [];
         return [{ fileId, name: docName }];
       }
+      if (tmpl.id.length < 3) return [];
       return [{ fileId: tmpl.id, name: docName }];
     });
   };
@@ -179,7 +260,7 @@ export function BuildFolderDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-[10010] flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
@@ -433,7 +514,7 @@ export function LinkFolderDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-[10010] flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div className="text-base font-semibold text-slate-900">Link Existing Folder</div>
@@ -524,6 +605,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   const { data: customer } = useCustomer(customerId, { enabled: !!customerId });
   const patchCustomer = usePatchCustomers();
   const upload = useGDriveUpload();
+  const folderSync = useGDriveCustomerFolderSync();
 
   const customerFirst = String((customer as any)?.firstName || "");
   const customerLast = String((customer as any)?.lastName || "");
@@ -553,6 +635,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   const [showLinkDialog, setShowLinkDialog] = React.useState(false);
   const [folderInput, setFolderInput] = React.useState("");
   const [aliasInput, setAliasInput] = React.useState("");
+  const [mapperBusyFolderId, setMapperBusyFolderId] = React.useState<string | null>(null);
   // Background build state: null = idle, "building" = in-progress
   const [buildingName, setBuildingName] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -574,6 +657,10 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
     { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
   );
   const indexFolders = indexData?.folders ?? [];
+  const linkedFolderIds = React.useMemo(
+    () => folders.map((folder) => String(folder.id || "").trim()).filter(Boolean),
+    [folders],
+  );
 
   const buildFolder = useGDriveBuildCustomerFolder(
     { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
@@ -595,7 +682,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
       patch: {
         meta: {
           ...((customer as any)?.meta || {}),
-          driveFolders: nextFolders,
+          driveFolders: cleanLinkedFolders(nextFolders),
         },
       },
     } as any);
@@ -650,6 +737,43 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
     setShowLinkDialog(false);
   };
 
+  const onCopyFolderCwIdToCustomer = async (folder: TCustomerFolder) => {
+    const nextCwId = String(folder.cwid || "").trim();
+    if (!nextCwId) return;
+    setMapperBusyFolderId(folder.id);
+    setError(null);
+    try {
+      await patchCustomer.mutateAsync({
+        id: customerId,
+        patch: { cwId: nextCwId },
+      } as any);
+      toast(`Set customer CW ID to ${nextCwId}.`, { type: "success" });
+    } catch (err) {
+      setError(toApiError(err).error || "Failed to update customer CW ID.");
+    } finally {
+      setMapperBusyFolderId(null);
+    }
+  };
+
+  const onCopyCustomerCwIdToFolder = async (folder: TCustomerFolder) => {
+    if (!customerCwid.trim()) return;
+    setMapperBusyFolderId(folder.id);
+    setError(null);
+    try {
+      await folderSync.mutateAsync({
+        mode: "folderCwIdFromCustomer",
+        customerId,
+        folderId: folder.id,
+        apply: true,
+      });
+      toast("Updated folder name with customer CW ID.", { type: "success" });
+    } catch (err) {
+      setError(toApiError(err).error || "Failed to update folder CW ID.");
+    } finally {
+      setMapperBusyFolderId(null);
+    }
+  };
+
   const onUpload = async (file: File) => {
     if (!activeFolder) return;
     if (file.size > 10 * 1024 * 1024) { setError("File must be 10MB or less."); return; }
@@ -670,7 +794,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
     await filesQ.refetch();
   };
 
-  const busy = patchCustomer.isPending || upload.isPending || filesQ.isFetching;
+  const busy = patchCustomer.isPending || upload.isPending || filesQ.isFetching || folderSync.isPending;
 
   const customerDisplayName =
     String((customer as any)?.name || "").trim() ||
@@ -678,15 +802,18 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
     null;
 
   // Match candidates for the initial empty state — pre-scored from the index
-  const matchCandidates = React.useMemo(() => {
-    if (!indexFolders.length || !customerLast) return [];
-    return indexFolders
-      .map((f) => ({ folder: f, score: scoreMatch(f, customerFirst, customerLast, customerCwid || null) }))
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6)
-      .map((x) => x.folder);
-  }, [indexFolders, customerFirst, customerLast, customerCwid]);
+  const matchCandidates = React.useMemo(
+    () =>
+      buildFolderMatchCandidates({
+        folders: indexFolders,
+        linkedFolderIds,
+        first: customerFirst,
+        last: customerLast,
+        cwid: customerCwid || null,
+      }).slice(0, 8),
+    [indexFolders, linkedFolderIds, customerFirst, customerLast, customerCwid],
+  );
+  const mapperCandidates = React.useMemo(() => matchCandidates.slice(0, 6), [matchCandidates]);
 
   // ── No folders linked — show smart setup view ──
   if (folders.length === 0 && !buildingName) {
@@ -748,18 +875,40 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
                 <div className="px-4 py-3 text-sm text-slate-500">Searching Drive…</div>
               ) : (
                 <ul className="divide-y divide-slate-100">
-                  {matchCandidates.map((f) => (
-                    <li key={f.id} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50">
+                  {matchCandidates.map((candidate) => (
+                    <li
+                      key={candidate.folder.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"
+                    >
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-slate-900">{f.name}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="truncate text-sm font-medium text-slate-900">{candidate.folder.name}</div>
+                          <span
+                            className={[
+                              "rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                              scoreTone(candidate.score),
+                            ].join(" ")}
+                          >
+                            {candidate.score}%
+                          </span>
+                        </div>
                         <div className="flex gap-2 mt-0.5 text-xs text-slate-500">
-                          <span className={f.status === "active" ? "text-emerald-600" : "text-slate-400"}>{f.status}</span>
-                          {f.cwid && <span>CWID: {f.cwid}</span>}
+                          <span
+                            className={
+                              candidate.folder.status === "active" ? "text-emerald-600" : "text-slate-400"
+                            }
+                          >
+                            {candidate.folder.status}
+                          </span>
+                          {candidate.folder.cwid && <span>CWID: {candidate.folder.cwid}</span>}
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-1.5">
                         <a
-                          href={f.url || `https://drive.google.com/drive/folders/${f.id}`}
+                          href={
+                            candidate.folder.url ||
+                            `https://drive.google.com/drive/folders/${candidate.folder.id}`
+                          }
                           target="_blank"
                           rel="noreferrer"
                           className="btn btn-ghost btn-xs"
@@ -770,7 +919,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
                           type="button"
                           className="btn btn-xs btn-primary"
                           disabled={busy}
-                          onClick={() => void onLinkConfirm(f.id, f.name)}
+                          onClick={() => void onLinkConfirm(candidate.folder.id, candidate.folder.name)}
                         >
                           Link
                         </button>
@@ -825,6 +974,99 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
             <div className="text-sm text-sky-900">
               Building <strong>{buildingName}</strong>… You can continue using the app.
             </div>
+          </div>
+        )}
+
+        {(indexLoading || mapperCandidates.length > 0) && (
+          <div className="rounded-xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-2.5">
+              <div className="text-sm font-medium text-slate-900">Auto Mapper</div>
+              <div className="text-xs text-slate-500">
+                Matches folders using linked ids first, then CWID, last name, and first name.
+              </div>
+            </div>
+            {indexLoading ? (
+              <div className="px-4 py-3 text-sm text-slate-500">Scanning indexed foldersâ€¦</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {mapperCandidates.map((candidate) => {
+                  const folder = candidate.folder;
+                  const mapperBusy = mapperBusyFolderId === folder.id;
+                  return (
+                    <div
+                      key={folder.id}
+                      className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-sm font-medium text-slate-900">{folder.name}</div>
+                          <span
+                            className={[
+                              "rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                              scoreTone(candidate.score),
+                            ].join(" ")}
+                          >
+                            Match {candidate.score}%
+                          </span>
+                          {candidate.linked && (
+                            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                              Linked
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-3 text-xs text-slate-500">
+                          <span className={folder.status === "active" ? "text-emerald-600" : "text-slate-400"}>
+                            {folder.status}
+                          </span>
+                          <span>Folder CWID: {folder.cwid || "None"}</span>
+                          <span>Customer CWID: {customerCwid || "None"}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        <a
+                          href={folder.url || `https://drive.google.com/drive/folders/${folder.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-ghost btn-xs"
+                        >
+                          Open â†—
+                        </a>
+                        {!candidate.linked && (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-primary"
+                            disabled={busy || mapperBusy}
+                            onClick={() => void onLinkConfirm(folder.id, folder.name)}
+                          >
+                            Link Folder
+                          </button>
+                        )}
+                        {candidate.customerMissingCwId && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            disabled={busy || mapperBusy}
+                            onClick={() => void onCopyFolderCwIdToCustomer(folder)}
+                          >
+                            Use Folder CWID
+                          </button>
+                        )}
+                        {candidate.folderMissingCwId && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            disabled={busy || mapperBusy}
+                            onClick={() => void onCopyCustomerCwIdToFolder(folder)}
+                          >
+                            Use Customer CWID
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

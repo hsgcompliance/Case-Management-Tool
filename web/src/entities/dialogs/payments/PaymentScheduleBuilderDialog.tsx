@@ -4,8 +4,36 @@ import React from "react";
 import { Modal } from "@entities/ui/Modal";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { PaymentScheduleBuildInput } from "@hooks/usePayments";
-import { isISO } from "@features/customers/components/paymentScheduleUtils";
-import { toISODate } from "@lib/date";
+import type { TPayment } from "@types";
+import { isISODate10, todayISO as libTodayISO } from "@lib/date";
+import { SpreadsheetBuilderView, type SSRow, newSSRow } from "./SpreadsheetBuilderView";
+import dynamic from "next/dynamic";
+const GrantBudgetStrip = dynamic(
+  () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
+  { ssr: false, loading: () => <div className="h-10 animate-pulse rounded bg-slate-100" /> },
+);
+
+function isISO(s: string): boolean { return isISODate10(s); }
+function lastDayOfMonth(y: number, mo: number): number {
+  return new Date(y, mo, 0).getDate(); // mo is 1-based; day 0 = last of prior month
+}
+function addMonthsISO(iso: string, m: number): string {
+  if (!isISO(iso)) return "";
+  const [y0, mo0, d0] = iso.split("-").map(Number);
+  const total = y0 * 12 + (mo0 - 1) + m;
+  const y = Math.floor(total / 12);
+  const mo = (total % 12) + 1;
+  const d = Math.min(d0, lastDayOfMonth(y, mo));
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function firstOfNextMonth(iso: string): string {
+  if (!isISO(iso)) return "";
+  const [y0, mo0] = iso.split("-").map(Number);
+  const total = y0 * 12 + (mo0 - 1) + 1;
+  const y = Math.floor(total / 12);
+  const mo = (total % 12) + 1;
+  return `${y}-${String(mo).padStart(2, "0")}-01`;
+}
 
 type EnrollmentOption = {
   id: string;
@@ -14,12 +42,14 @@ type EnrollmentOption = {
   statusLabel?: "open" | "closed";
   lineItemIds?: string[];
   scheduleMeta?: unknown;
+  payments?: TPayment[];
 };
 
 type Props = {
   open: boolean;
   enrollments: EnrollmentOption[];
   busy?: boolean;
+  customerName?: string;
   onCancel: () => void;
   onBuild: (payload: PaymentScheduleBuildInput) => void;
 };
@@ -80,28 +110,12 @@ type CertTaskPlan = {
 };
 
 function todayISO(): string {
-  return toISODate(new Date());
+  return libTodayISO();
 }
 
 function plusOneYearISO(iso?: string): string {
   const base = iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : todayISO();
-  const [y, m, d] = base.split("-").map(Number);
-  const dt = new Date(Date.UTC((y || 2000) + 1, (m || 1) - 1, d || 1));
-  return toISODate(dt);
-}
-
-function firstOfNextMonth(iso: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) return todayISO();
-  const [y, m] = String(iso).split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m || 1, 1));
-  return toISODate(dt);
-}
-
-function addMonthsISO(iso: string, monthsToAdd: number): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) return "";
-  const [y, m, d] = String(iso).split("-").map(Number);
-  const dt = new Date(Date.UTC(y, (m || 1) - 1 + monthsToAdd, d || 1));
-  return toISODate(dt);
+  return addMonthsISO(base, 12);
 }
 
 function money(v: number): string {
@@ -290,6 +304,7 @@ export default function PaymentScheduleBuilderDialog({
   open,
   enrollments,
   busy = false,
+  customerName,
   onCancel,
   onBuild,
 }: Props) {
@@ -312,6 +327,8 @@ export default function PaymentScheduleBuilderDialog({
     bucket: "compliance",
   });
   const [error, setError] = React.useState<string | null>(null);
+  const [viewMode, setViewMode] = React.useState<"builder" | "spreadsheet">("builder");
+  const [ssRows, setSsRows] = React.useState<SSRow[]>(() => [newSSRow()]);
 
   const seedFromEnrollment = React.useCallback((enr?: EnrollmentOption) => {
     const firstLineItem = enr?.lineItemIds?.[0] || "";
@@ -335,6 +352,9 @@ export default function PaymentScheduleBuilderDialog({
       bucket: "compliance",
     });
     setError(null);
+    const ssBase = newSSRow("monthly-rent", firstOfNextMonth(seedDate));
+    ssBase.lineItemId = firstLineItem;
+    setSsRows([ssBase]);
   }, []);
 
   React.useEffect(() => {
@@ -438,6 +458,107 @@ export default function PaymentScheduleBuilderDialog({
       });
   }, [previewRows]);
 
+  const ssTotals = React.useMemo(() => {
+    let grand = 0;
+    let monthlyCount = 0;
+    for (const r of ssRows) {
+      const amt = Number(r.amount) || 0;
+      if (!amt || !r.lineItemId) continue;
+      if (r.typeKey === "monthly-rent" || r.typeKey === "monthly-utility") {
+        const m = Math.max(1, Math.floor(Number(r.months) || 1));
+        grand += amt * m;
+        monthlyCount += m;
+      } else {
+        grand += amt;
+      }
+    }
+    return { grand, monthlyCount };
+  }, [ssRows]);
+
+  const budgetPreview = React.useMemo(() => {
+    const lineItemDeltas: Record<string, number> = {};
+    const add = (lineItemId: string, amount: number) => {
+      const key = cleanText(lineItemId);
+      if (!key || !Number.isFinite(amount) || amount <= 0) return;
+      lineItemDeltas[key] = (lineItemDeltas[key] || 0) + amount;
+    };
+
+    if (viewMode === "spreadsheet") {
+      for (const row of ssRows) {
+        const amount = asPositiveNumber(row.amount);
+        if (!amount || !row.lineItemId) continue;
+        const multiplier =
+          row.typeKey === "monthly-rent" || row.typeKey === "monthly-utility"
+            ? asPositiveInt(row.months, 120) || 1
+            : 1;
+        add(row.lineItemId, amount * multiplier);
+      }
+    } else {
+      for (const row of previewRows) add(row.lineItemId, row.amount);
+    }
+
+    if (replaceUnpaid) {
+      for (const payment of selectedEnrollment?.payments || []) {
+        if (payment?.paid) continue;
+        const lineItemId = cleanText(String(payment.lineItemId || ""));
+        const amount = Number(payment.amount || 0);
+        if (!lineItemId || !Number.isFinite(amount) || amount <= 0) continue;
+        lineItemDeltas[lineItemId] = (lineItemDeltas[lineItemId] || 0) - amount;
+      }
+    }
+
+    return {
+      total: Object.values(lineItemDeltas).reduce((sum, amount) => sum + amount, 0),
+      lineItemDeltas,
+    };
+  }, [previewRows, replaceUnpaid, selectedEnrollment?.payments, ssRows, viewMode]);
+
+  const ssSubmit = () => {
+    setError(null);
+    if (!enrollmentId) return setError("Select an enrollment.");
+    if (ssRows.length === 0) return setError("Add at least one row.");
+    const monthlyPlans: NonNullable<PaymentScheduleBuildInput["monthlyPlans"]> = [];
+    const additions: NonNullable<PaymentScheduleBuildInput["additions"]> = [];
+    for (let i = 0; i < ssRows.length; i++) {
+      const r = ssRows[i];
+      const amt = asPositiveNumber(r.amount);
+      if (!amt) return setError(`Row ${i + 1}: amount must be positive.`);
+      if (!isISO(r.date)) return setError(`Row ${i + 1}: date must be YYYY-MM-DD.`);
+      if (!r.lineItemId) return setError(`Row ${i + 1}: select a line item.`);
+      const vendor = cleanText(r.vendor);
+      const note = cleanText(r.note);
+      if (r.typeKey === "monthly-rent" || r.typeKey === "monthly-utility") {
+        const months = asPositiveInt(r.months, 120) || 1;
+        monthlyPlans.push({
+          kind: r.typeKey === "monthly-rent" ? "rent" : "utility",
+          startDate: r.date,
+          months,
+          monthlyAmount: amt,
+          lineItemId: r.lineItemId,
+          ...(vendor ? { vendor } : {}),
+          ...(note ? { comment: note } : {}),
+        });
+      } else {
+        const defaultNote: Record<string, string> = { prorated: "Prorated Rent", deposit: "Security Deposit" };
+        additions.push({
+          amount: amt,
+          dueDate: r.date,
+          lineItemId: r.lineItemId,
+          type: r.typeKey as "prorated" | "deposit" | "service",
+          note: note || defaultNote[r.typeKey] || r.typeKey,
+          ...(vendor ? { vendor } : {}),
+        });
+      }
+    }
+    onBuild({
+      enrollmentId,
+      replaceUnpaid,
+      monthlyPlans,
+      additions,
+      options: { updateGrantBudgets, recalcGrantProjected, activeOnly: true },
+    });
+  };
+
   const submit = () => {
     setError(null);
     if (!enrollmentId) return setError("Select an enrollment.");
@@ -503,28 +624,55 @@ export default function PaymentScheduleBuilderDialog({
     }
 
     const taskDefs: unknown[] = [];
+    const rentCertTaskPrefix = "payment_rent_cert_";
     if (certTask.enabled) {
       const certStart = certTask.startDate;
       const certEnd = certTask.endDate;
       if (!isISO(certStart)) return setError("Certification task start date must be YYYY-MM-DD.");
       if (certEnd && !isISO(certEnd)) return setError("Certification task end date must be YYYY-MM-DD.");
-      taskDefs.push({
-        id: `pay_cert_${String(certTask.cadenceMonths)}m_${String(certTask.title || "rent_cert").toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-        name: certTask.title.trim() || "Rent Certification",
-        kind: "recurring",
-        frequency: "every X months",
-        every: Number(certTask.cadenceMonths),
-        startDate: certStart,
-        ...(certEnd ? { endDate: certEnd } : {}),
-        bucket: certTask.bucket,
-        notify: true,
-        multiparty: {
-          mode: "sequential",
-          steps: [
-            { group: "casemanager", title: "Collect certification docs" },
-            { group: "compliance", title: "Update certification letter" },
-          ],
-        },
+
+      const cadence = Math.max(1, Number(certTask.cadenceMonths) || 3);
+      const monthLabel = (iso: string) => {
+        if (!isISO(iso)) return iso;
+        const [, month, day] = iso.split("-");
+        const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${names[Math.max(0, Math.min(11, Number(month) - 1))]} ${Number(day)}`;
+      };
+      rentPlans.forEach((plan, planIndex) => {
+        const months = asPositiveInt(plan.months);
+        const lineItemId = cleanText(plan.lineItemId) || `rent_${planIndex + 1}`;
+        for (let offset = cadence; offset < months; offset += cadence) {
+          const targetDate = addMonthsISO(plan.firstDue, offset);
+          const dueDate = addMonthsISO(targetDate, -1);
+          if (!isISO(targetDate) || !isISO(dueDate)) continue;
+          if (certEnd && dueDate > certEnd) continue;
+          const label = `${monthLabel(targetDate)} rent cert due ${monthLabel(dueDate)}`;
+          const idBase = `${rentCertTaskPrefix}${lineItemId}_${targetDate}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+          taskDefs.push(
+            {
+              id: `${idBase}_cm`,
+              name: label,
+              kind: "one-off",
+              dueDate,
+              bucket: certTask.bucket,
+              notify: true,
+              assignedToGroup: "casemanager",
+              notes: `Collect updated rent certification documents from the customer and landlord by ${monthLabel(dueDate)} for ${monthLabel(targetDate)} assistance.`,
+              description: certTask.title.trim() || "Rent Certification",
+            },
+            {
+              id: `${idBase}_compliance`,
+              name: label,
+              kind: "one-off",
+              dueDate,
+              bucket: certTask.bucket,
+              notify: true,
+              assignedToGroup: "compliance",
+              notes: `Prepare and send the updated rent certification / notice by ${monthLabel(dueDate)} for ${monthLabel(targetDate)} assistance.`,
+              description: certTask.title.trim() || "Rent Certification",
+            },
+          );
+        }
       });
     }
 
@@ -557,7 +705,8 @@ export default function PaymentScheduleBuilderDialog({
         recalcGrantProjected,
         activeOnly: true,
       },
-      ...(taskDefs.length ? { taskDefs } : {}),
+      taskDefs,
+      replaceTaskDefPrefixes: [rentCertTaskPrefix, "pay_cert_"],
     });
   };
 
@@ -565,15 +714,15 @@ export default function PaymentScheduleBuilderDialog({
     <Modal
       tourId="payment-schedule-builder-dialog"
       isOpen={open}
-      title="Payment Schedule Builder"
+      title={customerName ? `Build Payment Schedule - ${customerName}` : "Build Payment Schedule"}
       onClose={onCancel}
-      widthClass="max-w-5xl"
+      widthClass="max-w-6xl"
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-300">
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={replaceUnpaid} onChange={(e) => setReplaceUnpaid(e.currentTarget.checked)} />
-              Replace unpaid projected rows
+              Overwrite unpaid schedule, keep paid rows
             </label>
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={updateGrantBudgets} onChange={(e) => setUpdateGrantBudgets(e.currentTarget.checked)} />
@@ -586,7 +735,7 @@ export default function PaymentScheduleBuilderDialog({
           </div>
           <div className="flex items-center gap-2">
             <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
-            <button className="btn btn-sm" onClick={submit} disabled={busy}>{busy ? "Building..." : "Build Schedule"}</button>
+            <button className="btn btn-sm" onClick={viewMode === "spreadsheet" ? ssSubmit : submit} disabled={busy}>{busy ? "Building..." : "Build Schedule"}</button>
           </div>
         </div>
       }
@@ -613,8 +762,34 @@ export default function PaymentScheduleBuilderDialog({
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label className="text-sm">
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Schedule setup</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Build projected rows for one enrollment and preview grant impact before posting.
+              </div>
+            </div>
+            <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+              {(["builder", "spreadsheet"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  className={`rounded px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                    viewMode === mode
+                      ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100"
+                      : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  }`}
+                >
+                  {mode === "spreadsheet" ? "Spreadsheet" : "Guided Builder"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex-1 text-sm" style={{ minWidth: "220px" }}>
             <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Enrollment</div>
             <select
               className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
@@ -627,15 +802,41 @@ export default function PaymentScheduleBuilderDialog({
               ))}
             </select>
           </label>
+
           <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            <div>Rows: <b>{previewRows.length}</b></div>
-            <div>Total: <b>{money(totals.grandTotal)}</b></div>
-            {previewRows.length ? (
-              <div>Range: <b>{previewRows[0]?.dueDate}</b> {"->"} <b>{previewRows[previewRows.length - 1]?.dueDate}</b></div>
-            ) : null}
+            {viewMode === "spreadsheet" ? (
+              <>
+                <div>Overall Total: <b>{money(ssTotals.grand)}</b></div>
+                <div>Length of Assistance (months): <b>{ssTotals.monthlyCount}</b></div>
+              </>
+            ) : (
+              <>
+                <div>Rows: <b>{previewRows.length}</b></div>
+                <div>Total: <b>{money(totals.grandTotal)}</b></div>
+                {previewRows.length ? (
+                  <div>Range: <b>{previewRows[0]?.dueDate}</b> {"->"} <b>{previewRows[previewRows.length - 1]?.dueDate}</b></div>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
+        </div>
 
+        <GrantBudgetStrip
+          grantId={selectedEnrollment?.grantId}
+          projectionDelta={budgetPreview.total}
+          lineItemDeltas={budgetPreview.lineItemDeltas}
+        />
+
+        {viewMode === "spreadsheet" ? (
+          <SpreadsheetBuilderView
+            rows={ssRows}
+            setRows={setSsRows}
+            grantId={selectedEnrollment?.grantId}
+          />
+        ) : null}
+
+        {viewMode === "builder" ? (<>
         <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
           <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
             <input
@@ -826,8 +1027,12 @@ export default function PaymentScheduleBuilderDialog({
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Overall Total</span>
+            <span className="text-lg font-bold text-slate-900 dark:text-slate-100">{money(totals.grandTotal)}</span>
+          </div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-            <div>Monthly rows: <b>{totals.monthlyCount}</b></div>
+            <div>Length of Assistance (months): <b>{totals.monthlyCount}</b></div>
             <div>Monthly total: <b>{money(totals.monthlyTotal)}</b></div>
             <div>Deposit total: <b>{money(totals.depositTotal)}</b></div>
             <div>Prorated total: <b>{money(totals.proratedTotal)}</b></div>
@@ -866,6 +1071,7 @@ export default function PaymentScheduleBuilderDialog({
             </div>
           )}
         </div>
+        </>) : null}
       </div>
     </Modal>
   );

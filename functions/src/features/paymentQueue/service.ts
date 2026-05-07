@@ -1,7 +1,7 @@
 // functions/src/features/paymentQueue/service.ts
 import {db, isoNow, removeUndefinedDeep} from '../../core';
 import {writeLedgerEntry} from '../ledger/service';
-import {recordCustomerSpend} from '../grants/lineItemCaps';
+import {recordCustomerSpend, recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
 import {primarySubtype} from '../payments/utils';
 import {
   type TPaymentQueueItem,
@@ -13,6 +13,39 @@ import {
 
 const COLLECTION = 'paymentQueue';
 const FN = 'paymentQueueService';
+const LOCAL_RECONCILE_FIELDS = [
+  'amount',
+  'amountAbs',
+  'direction',
+  'merchant',
+  'expenseType',
+  'program',
+  'purpose',
+  'notes',
+  'note',
+  'card',
+  'cardBucket',
+  'grantId',
+  'lineItemId',
+  'customerId',
+  'enrollmentId',
+  'creditCardId',
+  'invoiceStatus',
+  'invoiceRef',
+] as const;
+
+function applyLocalOverrides<T extends Record<string, unknown>>(extracted: T, prev: Record<string, unknown> | null): T {
+  if (!prev) return extracted;
+  const localFields = new Set(Array.isArray(prev.localModifiedFields) ? prev.localModifiedFields.map(String) : []);
+  if (!localFields.size) return extracted;
+  const next: Record<string, unknown> = {...extracted};
+  for (const field of LOCAL_RECONCILE_FIELDS) {
+    if (localFields.has(field) && Object.prototype.hasOwnProperty.call(prev, field)) {
+      next[field] = prev[field];
+    }
+  }
+  return next as T;
+}
 
 function docToItem(doc: FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.QueryDocumentSnapshot): TPaymentQueueItem {
   return {...(doc.data() as TPaymentQueueItem), id: doc.id};
@@ -175,6 +208,13 @@ export async function listPaymentQueueItems(
     orgId: string,
     body: TPaymentQueueListBody,
 ): Promise<{ items: TPaymentQueueItem[]; count: number; hasMore: boolean }> {
+  return listVisiblePaymentQueueItemsForOrg(orgId, body);
+}
+
+export async function listVisiblePaymentQueueItemsForOrg(
+    orgId: string,
+    body: TPaymentQueueListBody,
+): Promise<{ items: TPaymentQueueItem[]; count: number; hasMore: boolean }> {
   let q: FirebaseFirestore.Query = db.collection(COLLECTION).where('orgId', '==', orgId);
 
   if (body.source) q = q.where('source', '==', body.source);
@@ -212,9 +252,74 @@ export async function listPaymentQueueItems(
   const snap = await q.get();
   const hasMore = snap.docs.length > body.limit;
   const docs = hasMore ? snap.docs.slice(0, body.limit) : snap.docs;
-  const items = docs.map(docToItem);
+  let items = docs.map(docToItem);
+
+  // Migration fallback: older queue docs may have been created before orgId was
+  // stamped on paymentQueue. Only include unscoped rows when the source
+  // submission/grant/customer/enrollment proves ownership by this org.
+  if (items.length < body.limit) {
+    let legacyQ: FirebaseFirestore.Query = db.collection(COLLECTION);
+    if (body.source) legacyQ = legacyQ.where('source', '==', body.source);
+    if (body.submissionId) legacyQ = legacyQ.where('submissionId', '==', body.submissionId);
+    if (body.queueStatus) legacyQ = legacyQ.where('queueStatus', '==', body.queueStatus);
+    if (body.okUnassigned !== undefined) legacyQ = legacyQ.where('okUnassigned', '==', body.okUnassigned);
+    if (body.isFlex !== undefined) legacyQ = legacyQ.where('isFlex', '==', body.isFlex);
+    if (body.unmatched) legacyQ = legacyQ.where('grantId', '==', null).where('okUnassigned', '==', false);
+    if (body.customerId !== undefined) legacyQ = legacyQ.where('customerId', '==', body.customerId);
+    if (body.grantId !== undefined) legacyQ = legacyQ.where('grantId', '==', body.grantId);
+    if (body.month) legacyQ = legacyQ.where('month', '==', body.month);
+    legacyQ = legacyQ.limit(Math.min(1000, Math.max(body.limit * 3, body.limit + 1)));
+
+    const legacySnap = await legacyQ.get();
+    const verified: TPaymentQueueItem[] = [];
+    const seen = new Set(items.map((item) => String(item.id || '')));
+    for (const doc of legacySnap.docs) {
+      const item = docToItem(doc);
+      if (seen.has(String(item.id || ''))) continue;
+      if (String(item.orgId || '') === orgId) {
+        verified.push(item);
+        seen.add(String(item.id || ''));
+        continue;
+      }
+      if (item.orgId) continue;
+      if (await unscopedQueueItemBelongsToOrg(item, orgId)) {
+        verified.push(item);
+        seen.add(String(item.id || ''));
+      }
+      if (items.length + verified.length > body.limit) break;
+    }
+    const merged = [...items, ...verified].slice(0, body.limit);
+    return {items: merged, count: merged.length, hasMore: hasMore || items.length + verified.length > body.limit};
+  }
 
   return {items, count: items.length, hasMore};
+}
+
+export async function unscopedQueueItemBelongsToOrg(item: TPaymentQueueItem, orgId: string): Promise<boolean> {
+  const target = String(orgId || '').trim();
+  if (!target) return false;
+
+  const submissionIds = Array.from(new Set([
+    String(item.submissionId || '').trim(),
+    String(item.baseId || '').trim(),
+  ].filter(Boolean)));
+  for (const id of submissionIds) {
+    const snap = await db.collection('jotformSubmissions').doc(id).get().catch(() => null);
+    if (snap?.exists && String((snap.data() || {}).orgId || '').trim() === target) return true;
+  }
+
+  const refs: Array<[string, string]> = [
+    ['grants', String(item.grantId || '').trim()],
+    ['customers', String(item.customerId || '').trim()],
+    ['customerEnrollments', String(item.enrollmentId || '').trim()],
+  ];
+  for (const [collection, id] of refs) {
+    if (!id) continue;
+    const snap = await db.collection(collection).doc(id).get().catch(() => null);
+    if (snap?.exists && String((snap.data() || {}).orgId || '').trim() === target) return true;
+  }
+
+  return false;
 }
 
 // ─── Get by ID ────────────────────────────────────────────────────────────────
@@ -238,16 +343,37 @@ export async function patchPaymentQueueItem(
 
   const now = isoNow();
   const update: Record<string, unknown> = {'updatedAtISO': now, 'system.lastWriteAt': now, 'system.lastWriter': FN};
+  const localFields: string[] = [];
+  const mark = (field: string, value: unknown) => {
+    update[field] = value;
+    localFields.push(field);
+  };
 
-  if (patch.grantId !== undefined) update.grantId = patch.grantId;
-  if (patch.lineItemId !== undefined) update.lineItemId = patch.lineItemId;
-  if (patch.customerId !== undefined) update.customerId = patch.customerId;
-  if (patch.enrollmentId !== undefined) update.enrollmentId = patch.enrollmentId;
-  if (patch.creditCardId !== undefined) update.creditCardId = patch.creditCardId;
-  if (patch.invoiceStatus !== undefined) update.invoiceStatus = patch.invoiceStatus;
-  if (patch.invoiceRef !== undefined) update.invoiceRef = patch.invoiceRef;
+  if (patch.amount !== undefined) {
+    const amount = Number(patch.amount || 0);
+    mark('amount', amount);
+    mark('amountAbs', patch.amountAbs !== undefined ? Number(patch.amountAbs || 0) : Math.abs(amount));
+    if (patch.direction === undefined) mark('direction', amount < 0 ? 'return' : 'charge');
+  }
+  if (patch.amountAbs !== undefined && patch.amount === undefined) mark('amountAbs', Number(patch.amountAbs || 0));
+  if (patch.direction !== undefined) mark('direction', patch.direction);
+  if (patch.merchant !== undefined) mark('merchant', patch.merchant);
+  if (patch.expenseType !== undefined) mark('expenseType', patch.expenseType);
+  if (patch.program !== undefined) mark('program', patch.program);
+  if (patch.purpose !== undefined) mark('purpose', patch.purpose);
+  if (patch.notes !== undefined) mark('notes', patch.notes);
+  if (patch.note !== undefined) mark('note', patch.note);
+  if (patch.card !== undefined) mark('card', patch.card);
+  if (patch.cardBucket !== undefined) mark('cardBucket', patch.cardBucket);
+  if (patch.grantId !== undefined) mark('grantId', patch.grantId);
+  if (patch.lineItemId !== undefined) mark('lineItemId', patch.lineItemId);
+  if (patch.customerId !== undefined) mark('customerId', patch.customerId);
+  if (patch.enrollmentId !== undefined) mark('enrollmentId', patch.enrollmentId);
+  if (patch.creditCardId !== undefined) mark('creditCardId', patch.creditCardId);
+  if (patch.invoiceStatus !== undefined) mark('invoiceStatus', patch.invoiceStatus);
+  if (patch.invoiceRef !== undefined) mark('invoiceRef', patch.invoiceRef);
   if (patch.okUnassigned !== undefined) {
-    update.okUnassigned = patch.okUnassigned;
+    mark('okUnassigned', patch.okUnassigned);
     if (patch.okUnassigned) {
       update.okUnassignedAt = now;
       update.okUnassignedBy = actorUid ?? null;
@@ -256,10 +382,42 @@ export async function patchPaymentQueueItem(
       update.okUnassignedBy = null;
     }
   }
+  if (localFields.length) {
+    const prev = snap.data() || {};
+    update.localModified = true;
+    update.localModifiedAt = now;
+    update.localModifiedBy = actorUid ?? null;
+    update.localModifiedFields = Array.from(new Set([...(Array.isArray((prev as any).localModifiedFields) ? (prev as any).localModifiedFields : []), ...localFields]));
+    update.localModificationReason = patch.localModificationReason ? String(patch.localModificationReason).trim() : ((prev as any).localModificationReason ?? null);
+  }
 
   await ref.update(removeUndefinedDeep(update) as any);
+  const prevItem = snap.data() as TPaymentQueueItem;
+  const changedBudgetFields = localFields.some((field) => ['amount', 'grantId', 'lineItemId', 'customerId'].includes(field));
+  if (prevItem?.queueStatus === 'posted' && prevItem.ledgerEntryId && changedBudgetFields) {
+    const ledgerUpdate: Record<string, unknown> = {
+      updatedAt: now,
+      'origin.localQueueCorrection': true,
+      'origin.localQueueCorrectionAt': now,
+      'origin.localQueueCorrectionBy': actorUid ?? null,
+    };
+    if (update.amount !== undefined) {
+      ledgerUpdate.amount = update.amount;
+      ledgerUpdate.amountCents = Math.round(Number(update.amount || 0) * 100);
+    }
+    if (update.grantId !== undefined) ledgerUpdate.grantId = update.grantId;
+    if (update.lineItemId !== undefined) ledgerUpdate.lineItemId = update.lineItemId;
+    if (update.customerId !== undefined) ledgerUpdate.customerId = update.customerId;
+    await db.collection('ledger').doc(prevItem.ledgerEntryId).set(removeUndefinedDeep(ledgerUpdate) as any, {merge: true});
+    const grantIds = Array.from(new Set([String(prevItem.grantId || ''), String(update.grantId || '')].filter(Boolean)));
+    await Promise.all(grantIds.map((gid) => recomputeCustomerSpendForGrant({grantId: gid}).catch(() => null)));
+  }
   const updated = await ref.get();
   return docToItem(updated);
+}
+
+export async function recomputePaymentQueueGrantAllocations(grantId: string, dryRun = false) {
+  return recomputeCustomerSpendForGrant({grantId, dryRun});
 }
 
 async function assertQueueGrantLineItem(item: TPaymentQueueItem): Promise<void> {
@@ -519,6 +677,9 @@ export async function postPaymentQueueToLedger(
         paymentQueueId: item.id,
         paymentQueueSource: item.source,
         jotformSubmissionId: item.submissionId || null,
+        direction: item.direction || null,
+        amountFieldId: item.amountFieldId || null,
+        extractionGroup: item.extractionGroup || null,
       },
     };
 
@@ -543,7 +704,7 @@ export async function postPaymentQueueToLedger(
   });
 
   // Update per-customer cap tracking outside the ledger transaction (best-effort, non-blocking)
-  if (txResult && item.grantId && item.customerId && item.amount > 0) {
+  if (txResult && item.grantId && item.customerId && item.amount !== 0) {
     recordCustomerSpend({
       grantId: item.grantId,
       customerId: item.customerId,
@@ -594,8 +755,8 @@ export async function reopenPaymentQueueItem(
       id: body.reversalEntryId || undefined,
       source: String(original.source || '') || (item.source === 'credit-card' ? 'card' : 'manual'),
       orgId: original.orgId ?? item.orgId ?? null,
-      amountCents: -Math.abs(Number(original.amountCents || Math.round(item.amount * 100))),
-      amount: -Math.abs(Number(original.amount || item.amount || 0)),
+      amountCents: -Number(original.amountCents ?? Math.round(item.amount * 100)),
+      amount: -Number(original.amount ?? item.amount ?? 0),
       grantId: original.grantId ?? item.grantId ?? null,
       lineItemId: original.lineItemId ?? item.lineItemId ?? null,
       creditCardId: original.creditCardId ?? item.creditCardId ?? null,
@@ -639,12 +800,12 @@ export async function reopenPaymentQueueItem(
     return {queueItem: docToItem(updatedSnap), reversalEntryId: String(reversal.id || '')};
   });
 
-  if (txResult && item.grantId && item.customerId && item.amount > 0) {
+  if (txResult && item.grantId && item.customerId && item.amount !== 0) {
     recordCustomerSpend({
       grantId: item.grantId,
       customerId: item.customerId,
       lineItemId: item.lineItemId || null,
-      amount: -Math.abs(item.amount),
+      amount: -Number(item.amount || 0),
     }).catch(() => {/* non-fatal */});
   }
 
@@ -684,7 +845,7 @@ export async function upsertPaymentQueueItems(
         lineItemId: prev.lineItemId ?? null,
         customerId: prev.customerId ?? null,
         enrollmentId: prev.enrollmentId ?? null,
-        creditCardId: prev.creditCardId ?? null,
+        creditCardId: prev.creditCardId ?? extracted.creditCardId ?? null,
         ledgerEntryId: prev.ledgerEntryId ?? null,
         reversalEntryId: prev.reversalEntryId ?? null,
         invoiceStatus: prev.invoiceStatus ?? null,
@@ -705,7 +866,7 @@ export async function upsertPaymentQueueItems(
         createdAtISO: prev.createdAtISO ?? now,
       } :
       {
-        paymentId: null, grantId: null, dueDate: null, lineItemId: null, customerId: null, enrollmentId: null, creditCardId: null, ledgerEntryId: null, reversalEntryId: null,
+        paymentId: null, grantId: null, dueDate: null, lineItemId: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
         invoiceStatus: null, invoicedAt: null, invoicedBy: null, invoiceRef: null,
         okUnassigned: false, okUnassignedAt: null, okUnassignedBy: null,
         queueStatus: 'pending' as const,
@@ -714,10 +875,20 @@ export async function upsertPaymentQueueItems(
         createdAtISO: now,
       };
 
+    const extractedWithLocal = applyLocalOverrides(
+        extracted as unknown as Record<string, unknown>,
+        prev as unknown as Record<string, unknown> | null,
+    ) as typeof extracted;
+
     const doc: TPaymentQueueItem = {
-      ...extracted,
+      ...extractedWithLocal,
       orgId,
       ...preserved,
+      localModified: prev?.localModified ?? false,
+      localModifiedAt: prev?.localModifiedAt ?? null,
+      localModifiedBy: prev?.localModifiedBy ?? null,
+      localModifiedFields: prev?.localModifiedFields ?? [],
+      localModificationReason: prev?.localModificationReason ?? null,
       updatedAtISO: now,
       system: {
         lastWriter: 'onPaymentQueueSync',

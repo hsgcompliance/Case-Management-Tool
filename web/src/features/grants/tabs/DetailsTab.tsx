@@ -14,6 +14,45 @@ import {
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 
+function normalizeEligibility(value: unknown): Record<string, string> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? { Notes: text } : {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return {};
+
+  return Object.entries(value as Record<string, unknown>).reduce(
+    (acc: Record<string, string>, [key, raw]) => {
+      const nextKey = String(key || "").trim();
+      const nextValue = String(raw ?? "").trim();
+      if (!nextKey || !nextValue) return acc;
+      acc[nextKey] = nextValue;
+      return acc;
+    },
+    {},
+  );
+}
+
+function eligibilityDraftObject(value: unknown): Record<string, string> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? { Notes: text } : {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return {};
+
+  return Object.entries(value as Record<string, unknown>).reduce(
+    (acc: Record<string, string>, [key, raw]) => {
+      const nextKey = String(key || "").trim();
+      if (!nextKey) return acc;
+      acc[nextKey] = String(raw ?? "");
+      return acc;
+    },
+    {},
+  );
+}
+
 /** normalize to either "" or YYYY-MM-DD (string) — only use on COMMIT */
 const toISOOrEmpty = (x: any): string => {
   if (!x) return "";
@@ -82,14 +121,14 @@ function PromotedField({
             className="input w-full"
             rows={3}
             value={value}
-            onChange={(e) => setModel((m) => ({ ...m, [fieldKey]: e.currentTarget.value }))}
+            onChange={(e) => { const v = e.currentTarget.value; setModel((m) => ({ ...m, [fieldKey]: v })); }}
           />
         ) : (
           <input
             className="input"
             type="text"
             value={value}
-            onChange={(e) => setModel((m) => ({ ...m, [fieldKey]: e.currentTarget.value }))}
+            onChange={(e) => { const v = e.currentTarget.value; setModel((m) => ({ ...m, [fieldKey]: v })); }}
           />
         )
       ) : (
@@ -153,8 +192,7 @@ function ServicesOfferedDisplay({ value }: { value: unknown }) {
 }
 
 function EligibilityDisplay({ value }: { value: unknown }) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  const entries = Object.entries(normalizeEligibility(value));
   if (entries.length === 0) return null;
   return (
     <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -164,6 +202,112 @@ function EligibilityDisplay({ value }: { value: unknown }) {
           <span className="text-slate-800">{String(v)}</span>
         </React.Fragment>
       ))}
+    </div>
+  );
+}
+
+function EligibilityEditor({
+  model,
+  setModel,
+  grant,
+}: {
+  model: Record<string, any>;
+  setModel: React.Dispatch<React.SetStateAction<Record<string, any>>>;
+  grant: Record<string, any> | null;
+}) {
+  const eligibility = eligibilityDraftObject(model.eligibility ?? grant?.eligibility);
+  const rows = Object.entries(eligibility);
+
+  const commit = (next: Record<string, string>) => {
+    const cleaned = eligibilityDraftObject(next);
+    setModel((m) => ({
+      ...(m || {}),
+      eligibility: Object.keys(cleaned).length ? cleaned : null,
+    }));
+  };
+
+  const updateKey = (oldKey: string, newKeyRaw: string) => {
+    const newKey = newKeyRaw.trim();
+    if (!newKey || newKey === oldKey) return;
+    if (eligibility[newKey]) return;
+    const next = { ...eligibility };
+    next[newKey] = next[oldKey] ?? "";
+    delete next[oldKey];
+    commit(next);
+  };
+
+  const updateValue = (key: string, value: string) => {
+    commit({ ...eligibility, [key]: value });
+  };
+
+  const remove = (key: string) => {
+    const next = { ...eligibility };
+    delete next[key];
+    commit(next);
+  };
+
+  const addRow = () => {
+    let idx = rows.length + 1;
+    let key = `Requirement ${idx}`;
+    while (eligibility[key]) {
+      idx += 1;
+      key = `Requirement ${idx}`;
+    }
+    commit({ ...eligibility, [key]: "" });
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div>
+        <div className="text-slate-500 dark:text-slate-400">Eligibility</div>
+        <p className="mt-1 text-xs text-slate-500">
+          Add structured eligibility criteria as key/value pairs.
+        </p>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-sm text-slate-500">
+          No eligibility criteria yet.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map(([key, value]) => (
+            <div key={key} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(180px,220px)_1fr_auto]">
+              <input
+                className="input"
+                type="text"
+                defaultValue={key}
+                onBlur={(e) => updateKey(key, e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    updateKey(key, e.currentTarget.value);
+                    (e.currentTarget as HTMLInputElement).blur();
+                  }
+                }}
+              />
+              <input
+                className="input"
+                type="text"
+                value={value}
+                placeholder="Example: Household income below 60% AMI"
+                onChange={(e) => updateValue(key, e.currentTarget.value)}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => remove(key)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button type="button" className="btn btn-secondary btn-sm" onClick={addRow}>
+        Add Criterion
+      </button>
     </div>
   );
 }
@@ -195,7 +339,7 @@ function GrantInfoPanel({
   const eligibility   = g.eligibility;
 
   const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
-  const hasEligibility = !!eligibility && typeof eligibility === "object" && Object.keys(eligibility).length > 0;
+  const hasEligibility = Object.keys(normalizeEligibility(eligibility)).length > 0;
   const hasMaxAmount  = !!maxAmount && maxAmount.toLowerCase() !== "n/a" && maxAmount !== "0";
 
   // Budget strip values
@@ -356,6 +500,8 @@ export function DetailsTab({
 
   const statusVal = String((grant?.status ?? model?.status ?? "draft") || "draft");
   const kindVal = String(grant?.kind || model?.kind || "grant");
+  const additionalFieldCount = Object.keys(dynamicValue || {}).length;
+  const [advancedOpen, setAdvancedOpen] = useState(additionalFieldCount > 0);
 
   const STATUS_CHIP: Record<string, string> = {
     active: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300",
@@ -488,7 +634,7 @@ export function DetailsTab({
             <PromotedField label="Description" fieldKey="description" multiline editing={editing} model={model} setModel={setModel} grant={grant as any} />
           </div>
           <div className="md:col-span-2">
-            <PromotedField label="Eligibility" fieldKey="eligibility" multiline editing={editing} model={model} setModel={setModel} grant={grant as any} />
+            <EligibilityEditor model={model} setModel={setModel} grant={grant as any} />
           </div>
           <div className="md:col-span-2">
             <PromotedField label="Length of Assistance" fieldKey="lengthOfAssistance" editing={editing} model={model} setModel={setModel} grant={grant as any} />
@@ -499,25 +645,49 @@ export function DetailsTab({
       {/* Dynamic fields */}
       <div className="mt-6">
         {editing ? (
-          <DynamicFieldsEditor
-            value={dynamicValue}
-            hiddenKeys={["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description"]}
-            onChange={(next) => {
-              const candidate = next as Record<string, any>;
-              const nonMeta: Record<string, any> = {};
-              const SKIP = new Set(["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description"]);
-              for (const [k, v] of Object.entries(candidate)) {
-                if (!META_KEYS.has(k) && !SKIP.has(k)) nonMeta[k] = v;
-              }
-              setModel((m) => {
-                const nextModel = { ...(m || {}) };
-                for (const key of Object.keys(nextModel)) {
-                  if (!META_KEYS.has(key) && !SKIP.has(key)) delete nextModel[key];
-                }
-                return { ...nextModel, ...nonMeta };
-              });
-            }}
-          />
+          <div className="rounded-xl border border-slate-200 bg-white">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-4 py-3 text-left"
+              onClick={() => setAdvancedOpen((v) => !v)}
+            >
+              <div>
+                <div className="text-sm font-semibold text-slate-800">Advanced Fields</div>
+                <div className="text-xs text-slate-500">
+                  Custom fields and schema-level grant metadata.
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5">
+                  {additionalFieldCount} field{additionalFieldCount === 1 ? "" : "s"}
+                </span>
+                <span>{advancedOpen ? "Hide" : "Show"}</span>
+              </div>
+            </button>
+            {advancedOpen && (
+              <div className="border-t border-slate-200 p-4">
+                <DynamicFieldsEditor
+                  value={dynamicValue}
+                  hiddenKeys={["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description"]}
+                  onChange={(next) => {
+                    const candidate = next as Record<string, any>;
+                    const nonMeta: Record<string, any> = {};
+                    const SKIP = new Set(["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description"]);
+                    for (const [k, v] of Object.entries(candidate)) {
+                      if (!META_KEYS.has(k) && !SKIP.has(k)) nonMeta[k] = v;
+                    }
+                    setModel((m) => {
+                      const nextModel = { ...(m || {}) };
+                      for (const key of Object.keys(nextModel)) {
+                        if (!META_KEYS.has(key) && !SKIP.has(key)) delete nextModel[key];
+                      }
+                      return { ...nextModel, ...nonMeta };
+                    });
+                  }}
+                />
+              </div>
+            )}
+          </div>
         ) : (
           <ReadOnlyDetails obj={grant ?? model} />
         )}

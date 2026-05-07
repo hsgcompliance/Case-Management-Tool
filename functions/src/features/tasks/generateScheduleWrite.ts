@@ -11,6 +11,7 @@ import {
   requireUid,
   resolveCaseManagerUid,
 } from "./utils";
+import { evaluateConditionalTaskRules } from "./conditionalRules";
 
 /**
  * Generate + write managed tasks for one or many enrollments.
@@ -41,6 +42,7 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
     pinCompletedManaged,
     taskDef,
     taskDefs,
+    replaceTaskDefPrefixes,
   } = parsed.data;
 
   const user: any = (req as any)?.user || {};
@@ -106,6 +108,7 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
 
       // Use incoming defs or grant.tasks (legacy)
       let defs: any[] = incomingDefs;
+      let grantForRules: any = null;
       if (!defs.length) {
         const gref = db
           .collection("grants")
@@ -122,12 +125,16 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
         }
 
         const grant: any = gsnap.data() || {};
+        grantForRules = grant;
         assertOrgAccess(user, grant);
 
         defs = Array.isArray(grant.tasks)
           ? grant.tasks
           : [];
-        if (!defs.length) {
+        const rules = Array.isArray(grant.conditionalTaskRules)
+          ? grant.conditionalTaskRules
+          : [];
+        if (!defs.length && !rules.length) {
           const existing = Array.isArray(enr.taskSchedule)
             ? enr.taskSchedule
             : [];
@@ -154,11 +161,14 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
         const existing = Array.isArray(enr.taskSchedule)
           ? enr.taskSchedule
           : [];
-        const defIds = new Set(
-          defs.map((d: any) =>
-            String(d.id || d.type || "custom")
-          )
-        );
+        const defIds = new Set([
+          ...defs.map((d: any) => String(d.id || d.type || "custom")),
+          ...(!incomingDefs.length && grantForRules
+            ? (Array.isArray(grantForRules.conditionalTaskRules)
+                ? grantForRules.conditionalTaskRules.map((r: any) => String(r.id || r.taskName || "conditional"))
+                : [])
+            : []),
+        ]);
         const manual = keepManual
           ? existing.filter((t: any) => {
               const did = String(t?.defId ?? "");
@@ -185,12 +195,22 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
       }
 
       // Build new managed set
-      const defIds = new Set(
-        defs.map((d: any) =>
-          String(d.id || d.type || "custom")
-        )
-      );
+      const defIds = new Set([
+        ...defs.map((d: any) => String(d.id || d.type || "custom")),
+        ...(!incomingDefs.length && grantForRules
+          ? (Array.isArray(grantForRules.conditionalTaskRules)
+              ? grantForRules.conditionalTaskRules.map((r: any) => String(r.id || r.taskName || "conditional"))
+              : [])
+          : []),
+      ]);
       const managedNew: any[] = [];
+      const replacedDefPrefixes = (replaceTaskDefPrefixes || [])
+        .map((p: any) => String(p || "").trim())
+        .filter(Boolean);
+      const isReplacedDefId = (defId: unknown) => {
+        const did = String(defId || "");
+        return replacedDefPrefixes.some((prefix: string) => did.startsWith(prefix));
+      };
       const customerRefId = String(enr.customerId || enr.clientId || "").trim();
       const customerSnap =
         customerRefId
@@ -246,6 +266,13 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
 
           if (!hasMultiSteps) {
             // Single-owner task (backwards compatible path)
+            const ownerGroup = String(
+              def.assignedToGroup || def.assignToGroup || def.group || "casemanager"
+            ).trim() || "casemanager";
+            const ownerUid =
+              String(def.assignedToUid || def.assignToUid || def.uid || "").trim() ||
+              (ownerGroup === "casemanager" ? cmUid : null);
+            const taskNotes = String(def.notes || def.note || "").trim();
             managedNew.push({
               id: baseId,
               type,
@@ -256,7 +283,7 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
               completedAt: null,
               byUid: null,
               notify: def.notify ?? true,
-              notes: "",
+              notes: taskNotes,
               description: String(def?.description || "").trim() || null,
               bucket: def.bucket || "task",
               managed: true,
@@ -265,12 +292,12 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
               caseManagerName,
               enrollmentName,
 
-              assignedToGroup: "casemanager",
-              assignedToUid: cmUid,
-              assignedAt: cmUid
+              assignedToGroup: ownerGroup,
+              assignedToUid: ownerUid,
+              assignedAt: ownerUid
                 ? new Date().toISOString()
                 : null,
-              assignedBy: cmUid ? "system" : null,
+              assignedBy: ownerUid ? "system" : null,
             });
           } else {
             const steps: any[] = Array.isArray(multiRaw.steps)
@@ -331,6 +358,27 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
         }
       }
 
+      if (!incomingDefs.length && grantForRules) {
+        const conditionalTasks = await evaluateConditionalTaskRules(
+          eid,
+          enr,
+          grantForRules,
+          new Date(effStart),
+          cmUid,
+        );
+        for (const ct of conditionalTasks) {
+          if (!managedNew.some((m: any) => m.id === ct.id)) {
+            managedNew.push({
+              ...ct,
+              customerName,
+              grantName,
+              caseManagerName,
+              enrollmentName,
+            });
+          }
+        }
+      }
+
       const existing = Array.isArray(enr.taskSchedule)
         ? enr.taskSchedule
         : [];
@@ -343,7 +391,7 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
         base = keepManual
           ? existing.filter((t: any) => {
               const did = String(t?.defId ?? "");
-              return !did || !defIds.has(did);
+              return !did || (!defIds.has(did) && !isReplacedDefId(did));
             })
           : [];
       }
@@ -397,6 +445,7 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
           const did = String(prev?.defId ?? "");
           const dd = String(prev?.dueDate ?? "");
           const wasManaged = !!did && defIds.has(did);
+          if (isReplacedDefId(did) && !defIds.has(did)) continue;
           if (!wasManaged) continue;
 
           const present =
@@ -453,4 +502,29 @@ export async function generateTaskScheduleWriteHandler(req: Request, res: Respon
   }
 
   res.status(200).json({ ok: true, results });
+}
+
+export async function generateTaskScheduleForEnrollments(
+  input: unknown,
+  user: Record<string, unknown>,
+): Promise<any[]> {
+  let statusCode = 200;
+  let payload: any = null;
+  const req = { body: input, user } as unknown as Request;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(body: unknown) {
+      payload = body;
+      return this;
+    },
+  } as unknown as Response;
+
+  await generateTaskScheduleWriteHandler(req, res);
+  if (statusCode >= 400 || payload?.ok === false) {
+    throw new Error(String(payload?.error || "task_schedule_generation_failed"));
+  }
+  return Array.isArray(payload?.results) ? payload.results : [];
 }

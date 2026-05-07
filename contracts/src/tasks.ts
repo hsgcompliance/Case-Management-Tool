@@ -8,17 +8,24 @@ export const AssignedGroup = z.union([
   z.literal("compliance"),
 ]);
 
-/** A single scheduled task item. */export const TaskScheduleItem = z
+/**
+ * A single reminder/note item.
+ *
+ * @deprecated Lifecycle fields (`completed`, `completedAt`, `status`, verification, reopen
+ * metadata) are kept for old records and screens. New product behavior should treat these as
+ * lightweight reminders/notes for customer pages and digest emails, not completion workflow.
+ */
+export const TaskScheduleItem = z
   .object({
     id: z.string(),
 
     // NOTE: schedule uses `type` (manual upsert maps title -> type)
     type: z.string().default("Task"),
 
-    dueDate: z.string(), // YYYY-MM-DD
+    dueDate: z.string().optional().default(""), // YYYY-MM-DD when date-based; optional for notes
     dueMonth: z.string().nullish(), // YYYY-MM
 
-    // --- status
+    // --- deprecated lifecycle/status fields
     completed: z.boolean().nullish(),
     completedAt: z.string().nullish(),
     completedBy: z.string().nullish(),
@@ -80,11 +87,12 @@ export type TTaskScheduleItem = z.infer<typeof TaskScheduleItem>;
 export type TTaskStats = z.infer<typeof TaskStats>;
 export type TAssignedGroup = z.infer<typeof AssignedGroup>;
 
+/** @deprecated Task completion lifecycle is deprecated; keep for back-compat only. */
 export const TasksBulkStatusBody = z.object({
   enrollmentId: z.string(),
   changes: z.array(z.object({
     taskId: z.string(),
-    action: z.enum(["complete", "reopen", "verify"]),
+    action: z.enum(["complete", "reopen", "verify"]).optional().default("complete"),
     reason: z.string().optional(),
     notes: z.string().optional(),
   }))
@@ -106,10 +114,11 @@ export const TasksAssignBody = z.object({
 });
 export type TTasksAssignBody = z.infer<typeof TasksAssignBody>;
 
+/** @deprecated Task completion lifecycle is deprecated; keep for back-compat only. */
 export const TasksUpdateStatusBody = z.object({
   enrollmentId: z.string(),
   taskId: z.string(),
-  action: z.enum(["complete", "reopen", "verify"]),
+  action: z.enum(["complete", "reopen", "verify"]).optional().default("complete"),
   reason: z.string().optional(),
   notes: z.string().optional(),
 });
@@ -133,9 +142,9 @@ export const TasksUpsertManualBody = z.object({
   enrollmentId: z.string(),
   task: z.object({
     id: z.string().optional(),
-    title: z.string().min(1).default("Task"),
+    title: z.string().min(1).default("Reminder"),
     notes: z.string().optional(),
-    dueDate: z.string(), // YYYY-MM-DD
+    dueDate: z.string().optional().default(""), // optional for note/reminder mode
     bucket: z.enum(["task", "assessment", "compliance", "other"]).optional().default("task"),
     notify: z.boolean().optional().default(true),
   }),
@@ -173,10 +182,11 @@ export const TasksListItem = z.object({
   multiStepCount: z.number().nullable(),
   multiMode: z.enum(["parallel", "sequential"]).nullable(),
 
-  dueDate: z.string(),
+  dueDate: z.string().optional().default(""),
   dueMonth: z.string().nullable(),
-  status: z.enum(["open", "done", "verified"]),
-  notify: z.boolean(),
+  /** @deprecated Use reminder visibility/notify fields instead of workflow status. */
+  status: z.enum(["open", "done", "verified"]).optional().default("open"),
+  notify: z.boolean().optional().default(true),
 
   assignedToUid: z.string().nullable(),
   assignedToGroup: AssignedGroup.nullable(),
@@ -248,7 +258,8 @@ export type TTasksOtherAssignBody = z.infer<typeof TasksOtherAssignBody>;
 
 export const TasksOtherStatusBody = z.object({
   id: z.string(),
-  action: z.enum(["complete", "reopen"]),
+  /** @deprecated Other-task completion lifecycle is deprecated; keep for back-compat only. */
+  action: z.enum(["complete", "reopen"]).optional().default("complete"),
 });
 export type TTasksOtherStatusBody = z.infer<typeof TasksOtherStatusBody>;
 
@@ -292,6 +303,7 @@ export const TasksGenerateScheduleWriteBody = z.object({
   pinCompletedManaged: z.boolean().optional().default(true),
   taskDef: z.union([TaskDefUnknown, z.array(TaskDefUnknown)]).optional(),
   taskDefs: z.array(TaskDefUnknown).optional(),
+  replaceTaskDefPrefixes: z.array(z.string()).optional().default([]),
 });
 export type TTasksGenerateScheduleWriteBody = z.infer<typeof TasksGenerateScheduleWriteBody>;
 

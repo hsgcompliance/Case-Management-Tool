@@ -15,10 +15,16 @@ export default function ActionMenu({
   items,
   disabled = false,
   tourId,
+  buttonLabel,
+  buttonClassName = "",
+  buttonAriaLabel,
 }: {
   items: ActionItem[];
   disabled?: boolean;
   tourId?: string;
+  buttonLabel?: string;
+  buttonClassName?: string;
+  buttonAriaLabel?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
@@ -83,7 +89,7 @@ export default function ActionMenu({
   const menu = open ? (
     <div
       ref={menuRef}
-      className="fixed z-[1000] min-w-44 rounded-md border border-slate-200 bg-white shadow-md"
+      className="fixed z-[1300] min-w-44 rounded-md border border-slate-200 bg-white shadow-md"
       style={{ top: menuPos.top, left: menuPos.left }}
       data-tour={tourId ? `${tourId}-menu` : undefined}
     >
@@ -114,13 +120,23 @@ export default function ActionMenu({
       <button
         ref={btnRef}
         type="button"
-        className="btn btn-ghost h-8 px-2"
-        aria-label="Open actions"
+        className={[
+          buttonLabel ? "btn btn-xs btn-ghost gap-1" : "btn btn-ghost h-8 px-2",
+          buttonClassName,
+        ].join(" ").trim()}
+        aria-label={buttonAriaLabel || (buttonLabel ? undefined : "Open actions")}
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
         data-tour={tourId ? `${tourId}-toggle` : undefined}
       >
-        <span className="text-lg leading-none" aria-hidden="true">&#8942;</span>
+        {buttonLabel ? (
+          <>
+            <span>{buttonLabel}</span>
+            <span className="text-[10px] leading-none" aria-hidden="true">{open ? "▲" : "▼"}</span>
+          </>
+        ) : (
+          <span className="text-lg leading-none" aria-hidden="true">&#8942;</span>
+        )}
       </button>
       {typeof document !== "undefined" && menu ? createPortal(menu, document.body) : null}
     </div>

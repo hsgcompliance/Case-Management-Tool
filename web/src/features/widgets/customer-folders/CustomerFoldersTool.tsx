@@ -46,7 +46,7 @@ export const CustomerFoldersTopbar: DashboardToolDefinition<
       activeParentId: ACTIVE_PARENT_ID,
       exitedParentId: EXITED_PARENT_ID,
     },
-    { staleTime: 5 * 60_000 }
+    { staleTime: 5 * 60_000, includeDriveToken: false }
   );
 
   return (
@@ -87,7 +87,7 @@ export function CustomerFoldersTool(props: CustomerFoldersToolProps = {}) {
       activeParentId: ACTIVE_PARENT_ID,
       exitedParentId: EXITED_PARENT_ID,
     },
-    { staleTime: 5 * 60_000 }
+    { staleTime: 5 * 60_000, includeDriveToken: false }
   );
 
   const folders: TCustomerFolder[] = React.useMemo(() => {
@@ -164,7 +164,7 @@ export function CustomerFoldersTool(props: CustomerFoldersToolProps = {}) {
           ) : isError ? (
             <tr>
               <td colSpan={6} className="py-4 text-center text-sm text-rose-600">
-                Failed to load folders. Check Drive access.
+                Failed to load folders. Check that you have access to the Rental Assistance Drive.
               </td>
             </tr>
           ) : folders.length === 0 ? (

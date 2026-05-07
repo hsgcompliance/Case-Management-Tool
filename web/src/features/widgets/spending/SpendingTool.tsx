@@ -1,26 +1,42 @@
 import React from "react";
 import { toApiError } from "@client/api";
+import UsersClient from "@client/users";
+import { useAuth } from "@app/auth/AuthProvider";
 import GrantSelect from "@entities/selectors/GrantSelect";
 import { useCreditCards } from "@hooks/useCreditCards";
 import { useAutoAssignLedgerEntries, useLedgerEntries } from "@hooks/useLedger";
 import {
   usePaymentQueueItems,
+  usePostPaymentQueueToLedger,
   type PaymentQueueItem,
 } from "@hooks/usePaymentQueue";
 import { useMyOtherTasks } from "@hooks/useTasks";
 import { useUsers } from "@hooks/useUsers";
+import { useSyncJotformSelection } from "@hooks/useJotform";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
 import type { CreditCardEntity } from "@types";
-import { SmartExportButton } from "@entities/ui/dashboardStyle/SmartExportButton";
-import { ToolCard } from "@entities/ui/dashboardStyle/ToolCard";
+import { buildCsv, downloadCsv } from "@entities/ui/dashboardStyle/SmartExportButton";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
+import ActionMenu from "@entities/ui/ActionMenu";
+import {
+  ComplexDateSelector,
+  complexDateMatchesIsoDate,
+  complexDatePrimaryMonth,
+  complexDateValueLabel,
+  normalizeComplexDateValue,
+  type ComplexDateValue,
+} from "@entities/ui/ComplexDateSelector";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@hooks/queryKeys";
+import { GrantBudgetStrip } from "@entities/grants/GrantBudgetStrip";
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
-import { useTableSort, SortableHeader, sortRows } from "@hooks/useTableSort";
+import { filterRows, SmartFilterHeader, sortRows, useTableColumnFilters, useTableSort, type TableColumnPart } from "@hooks/useTableSort";
 import { monthKeyOffsetDays } from "../utils";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 import { SpendDetailModal } from "./SpendDetailModal";
 import type { CardBudget } from "./SpendDetailModal";
+import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -33,6 +49,7 @@ import type { CardBudget } from "./SpendDetailModal";
  */
 export type SpendingFilterState = {
   month: string;
+  dateFilter: ComplexDateValue;
   typeFilter: "" | "enrollment" | "card" | "invoice";
   workflowFilter: "" | "open" | "closed";
   grantId: string;
@@ -46,6 +63,7 @@ export type SpendingFilterState = {
 
 export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   month: monthKeyOffsetDays(5),
+  dateFilter: { mode: "month", month: monthKeyOffsetDays(5) },
   typeFilter: "",
   workflowFilter: "",
   grantId: "",
@@ -56,6 +74,84 @@ export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   customerId: "",
   cmId: "",
 };
+
+type SpendingSavedView = {
+  id: string;
+  name: string;
+  filterState: SpendingFilterState;
+  builtIn?: boolean;
+};
+
+type SpendingViewsSettings = {
+  defaultViewId?: string;
+  views?: SpendingSavedView[];
+};
+
+const SPENDING_VIEWS_SETTINGS_KEY = "spendingViews";
+
+function cloneSpendingFilter(value: SpendingFilterState): SpendingFilterState {
+  return JSON.parse(JSON.stringify(value)) as SpendingFilterState;
+}
+
+function spendingFilterPatch(patch: Partial<SpendingFilterState>): SpendingFilterState {
+  return {
+    ...cloneSpendingFilter(DEFAULT_SPENDING_FILTER),
+    ...patch,
+    dateFilter: patch.dateFilter ?? cloneSpendingFilter(DEFAULT_SPENDING_FILTER).dateFilter,
+  };
+}
+
+function builtInSpendingViews(): SpendingSavedView[] {
+  return [
+    {
+      id: "builtin-current-month",
+      name: "Current Month",
+      filterState: cloneSpendingFilter(DEFAULT_SPENDING_FILTER),
+      builtIn: true,
+    },
+    {
+      id: "builtin-open-invoices",
+      name: "Open Invoices",
+      filterState: spendingFilterPatch({ typeFilter: "invoice", workflowFilter: "open" }),
+      builtIn: true,
+    },
+    {
+      id: "builtin-card-data-entry",
+      name: "Card Data Entry",
+      filterState: spendingFilterPatch({ typeFilter: "card", workflowFilter: "open" }),
+      builtIn: true,
+    },
+    {
+      id: "builtin-projected-enrollments",
+      name: "Projected Enrollments",
+      filterState: spendingFilterPatch({ typeFilter: "enrollment", workflowFilter: "open" }),
+      builtIn: true,
+    },
+    {
+      id: "builtin-reconciled",
+      name: "Reconciled",
+      filterState: spendingFilterPatch({ workflowFilter: "closed" }),
+      builtIn: true,
+    },
+  ];
+}
+
+function sanitizeSavedSpendingView(value: unknown): SpendingSavedView | null {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!raw) return null;
+  const id = String(raw.id || "").trim();
+  const name = String(raw.name || "").trim();
+  const filterState = raw.filterState && typeof raw.filterState === "object"
+    ? (raw.filterState as Partial<SpendingFilterState>)
+    : null;
+  if (!id || !name || !filterState) return null;
+  return {
+    id,
+    name,
+    filterState: spendingFilterPatch(filterState),
+    builtIn: false,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -152,6 +248,10 @@ function normalizeText(value: unknown) {
     .trim();
 }
 
+function fileSafeLabel(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "all";
+}
+
 function parseLast4(value: unknown) {
   return String(value || "").replace(/\D/g, "").slice(-4);
 }
@@ -209,11 +309,34 @@ function isCardRow(kind: SpendingRow["kind"]) {
   return kind === "card-ledger" || kind === "queue-credit-card";
 }
 
+function invoiceRowLooksLikeCreditCardSpend(row: SpendingRow) {
+  if (row.kind !== "queue-invoice" || !row.creditCardId) return false;
+  const queueItem = row.paymentQueueItem as Record<string, unknown> | undefined;
+  const haystack = [
+    row.expenseType,
+    row.title,
+    row.sourceLabel,
+    queueItem?.paymentMethod,
+    queueItem?.expenseType,
+    queueItem?.descriptor,
+    queueItem?.note,
+    queueItem?.notes,
+    queueItem?.purpose,
+    queueItem?.formTitle,
+    queueItem?.formAlias,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /\bcredit\s*card\b|\bcard\s*purchase\b|\bcc\b/.test(haystack);
+}
+
+function isCardBudgetRow(row: SpendingRow) {
+  return isCardRow(row.kind) || invoiceRowLooksLikeCreditCardSpend(row);
+}
+
 // ---------------------------------------------------------------------------
-// Credit card tile
+// Compact credit card row (no color, no shadow)
 // ---------------------------------------------------------------------------
 
-function CreditCardTile({
+function CompactCardRow({
   card,
   active,
   onClick,
@@ -223,66 +346,42 @@ function CreditCardTile({
   onClick: () => void;
 }) {
   const usage = Math.max(0, Math.min(100, Math.round(card.usagePct)));
-  const tone =
-    usage >= 100
-      ? "from-rose-500 to-orange-400"
-      : usage >= 85
-      ? "from-amber-400 to-orange-300"
-      : "from-sky-500 to-cyan-400";
+  const barColor = usage >= 100 ? "bg-rose-500" : usage >= 85 ? "bg-amber-400" : "bg-slate-400";
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={[
-        "group relative overflow-hidden rounded-[26px] border bg-white p-0 text-left shadow-[0_16px_40px_-24px_rgba(15,23,42,0.35)] transition",
+        "flex w-full items-center gap-3 rounded border px-3 py-2 text-left text-xs transition",
         active
-          ? "border-slate-900 ring-2 ring-slate-900/20"
-          : "border-slate-200 hover:-translate-y-0.5 hover:border-slate-300",
+          ? "border-slate-800 bg-slate-50"
+          : "border-slate-200 hover:border-slate-300 hover:bg-slate-50",
       ].join(" ")}
     >
-      <div className={`h-2 w-full bg-gradient-to-r ${tone}`} />
-      <div className="grid gap-4 p-5 lg:grid-cols-[1.2fr_0.9fr]">
-        <div className="space-y-4">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Credit Card</div>
-            <div className="mt-2 text-2xl font-black tracking-tight text-slate-950">{card.name}</div>
-            <div className="mt-1 text-sm text-slate-500">
-              {[card.code, card.last4 ? `**** ${card.last4}` : ""].filter(Boolean).join(" - ") || "Spend tracker"}
-            </div>
+      <div className="min-w-0 flex-1 truncate">
+        <span className="font-semibold text-slate-800">{card.name}</span>
+        {card.code ? <span className="ml-1.5 text-slate-400">{card.code}</span> : null}
+        {card.last4 ? <span className="ml-1 font-mono text-slate-400">···{card.last4}</span> : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-4">
+        <span className="text-slate-500">
+          Spent <b className="text-slate-700">{fmtCurrencyUSD(card.spentCents / 100)}</b>
+        </span>
+        <span className="text-slate-500">
+          Pending <b className="text-slate-700">{fmtCurrencyUSD(card.pendingCents / 100)}</b>
+        </span>
+        <span className="text-slate-500">
+          Remaining{" "}
+          <b className={card.remainingCents < 0 ? "text-rose-600" : "text-slate-700"}>
+            {fmtCurrencyUSD(card.remainingCents / 100)}
+          </b>
+        </span>
+        <div className="hidden items-center gap-1.5 md:flex">
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-200">
+            <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, usage)}%` }} />
           </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Remaining</div>
-            <div className="mt-1 text-3xl font-black tracking-tight text-slate-950">
-              {fmtCurrencyUSD(card.remainingCents / 100)}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              <span>Usage</span>
-              <span>{usage}%</span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-              <div className={`h-3 rounded-full bg-gradient-to-r ${tone}`} style={{ width: `${usage}%` }} />
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-[11px] uppercase tracking-wide text-slate-400">Spent</div>
-            <div className="mt-1 text-xl font-bold text-slate-950">{fmtCurrencyUSD(card.spentCents / 100)}</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-[11px] uppercase tracking-wide text-slate-400">Pending</div>
-            <div className="mt-1 text-xl font-bold text-slate-950">{fmtCurrencyUSD(card.pendingCents / 100)}</div>
-            <div className="mt-1 text-xs text-slate-500">{card.openCount} open</div>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="text-[11px] uppercase tracking-wide text-slate-400">Limit</div>
-            <div className="mt-1 text-xl font-bold text-slate-950">{fmtCurrencyUSD(card.limitCents / 100)}</div>
-            <div className="mt-1 text-xs text-slate-500">{card.rowCount} rows</div>
-          </div>
+          <span className="text-[10px] text-slate-400">{usage}%</span>
         </div>
       </div>
     </button>
@@ -302,195 +401,40 @@ const TYPE_OPTIONS = [
   { id: "invoice" as const, label: "Invoice" },
 ] satisfies { id: SpendingFilterState["typeFilter"]; label: string }[];
 
-export const SpendingTopbar: DashboardToolDefinition<SpendingFilterState, SpendingSelection>["ToolTopbar"] = ({
-  value,
-  onChange,
-}) => {
-  const [showMore, setShowMore] = React.useState(false);
-  const { customers } = useDashboardSharedData();
-  const { data: usersForFilter = [] } = useUsers({ limit: 300, status: "all" });
+const SPENDING_TABLE_PARTS = {
+  date: [
+    { id: "header", label: "Header (date)" },
+    { id: "subheader", label: "Sub header (type)" },
+    { id: "chip", label: "Chip" },
+  ],
+  customer: [
+    { id: "header", label: "Header (customer)" },
+    { id: "subheader", label: "Sub header (CM/purchaser)" },
+  ],
+  service: [
+    { id: "header", label: "Header (grant)" },
+    { id: "subheader", label: "Sub header (line item)" },
+    { id: "chip", label: "Chip (expense type)" },
+  ],
+  amount: [
+    { id: "header", label: "Header (amount)" },
+  ],
+  vendor: [
+    { id: "header", label: "Header (vendor)" },
+    { id: "subheader", label: "Sub header (purchaser)" },
+  ],
+  status: [
+    { id: "header", label: "Header (status)" },
+    { id: "subheader", label: "Sub header (workflow)" },
+    { id: "chip", label: "Chip (reason)" },
+  ],
+} satisfies Record<string, TableColumnPart[]>;
 
-  const month = /^\d{4}-\d{2}$/.test(String(value?.month ?? "")) ? value.month : monthKeyOffsetDays(5);
-
-  const setFilter = (patch: Partial<SpendingFilterState>) => onChange({ ...value, ...patch });
-
-  const hasSecondaryFilters =
-    !!value.workflowFilter || !!value.search || !!value.customerId || !!value.cmId || !!value.showReversals;
-
-  // Sort customers by name for the dropdown
-  const sortedCustomers = React.useMemo(() => {
-    return [...(customers as Array<Record<string, unknown>>)]
-      .map((c) => ({
-        id: String(c?.id || ""),
-        name: (String(c?.firstName || "").trim() + " " + String(c?.lastName || "").trim()).trim()
-          || String(c?.displayName || c?.id || ""),
-      }))
-      .filter((c) => c.id)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [customers]);
-
-  // Sort users for CM dropdown
-  const sortedUsers = React.useMemo(() => {
-    return (usersForFilter as Array<Record<string, unknown>>)
-      .map((u) => ({
-        uid: String(u?.uid || ""),
-        name: String(u?.displayName || u?.email || u?.uid || ""),
-      }))
-      .filter((u) => u.uid)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [usersForFilter]);
-
-  return (
-    <div className="w-full space-y-2 rounded-lg border border-slate-200 bg-white p-3">
-      {/* Primary row */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Type tabs */}
-        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-          {TYPE_OPTIONS.map((opt) => (
-            <button
-              key={opt.id || "all"}
-              type="button"
-              onClick={() =>
-                setFilter({ typeFilter: opt.id, cardFilterId: "", cardBucketFilter: "" })
-              }
-              className={[
-                "rounded-md px-3 py-1 text-xs font-semibold transition",
-                value.typeFilter === opt.id
-                  ? "bg-white border border-slate-200 text-slate-900 shadow-sm"
-                  : "text-slate-500 hover:text-slate-800",
-              ].join(" ")}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Grant select — not relevant in card-only mode */}
-        {value.typeFilter !== "card" && (
-          <GrantSelect
-            value={value.grantId || null}
-            onChange={(next) => setFilter({ grantId: String(next || "") })}
-            includeUnassigned
-            placeholderLabel="All grants"
-            className="w-[200px]"
-          />
-        )}
-
-        {/* Month with clear button */}
-        <div className="flex items-center gap-0.5">
-          <input
-            type="month"
-            className="input input-sm w-[130px]"
-            value={month}
-            onChange={(e) => setFilter({ month: e.currentTarget.value })}
-          />
-          {month && (
-            <button
-              type="button"
-              className="btn btn-xs btn-ghost text-slate-400 hover:text-slate-600 px-1"
-              title="Clear month filter (show all months)"
-              onClick={() => setFilter({ month: "" })}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        {/* Secondary toggle */}
-        <button
-          type="button"
-          className={[
-            "btn btn-sm btn-ghost gap-1",
-            hasSecondaryFilters ? "text-sky-700 border-sky-200 bg-sky-50" : "",
-          ].join(" ")}
-          onClick={() => setShowMore((v) => !v)}
-        >
-          Filters {hasSecondaryFilters ? "●" : "▾"}
-        </button>
-      </div>
-
-      {/* Secondary row (expandable) */}
-      {showMore && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-          {/* Workflow toggle */}
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-            {(["", "open", "closed"] as const).map((w) => (
-              <button
-                key={w || "all"}
-                type="button"
-                onClick={() => setFilter({ workflowFilter: w })}
-                className={[
-                  "rounded-md px-3 py-1 text-xs font-semibold transition",
-                  value.workflowFilter === w
-                    ? "bg-white border border-slate-200 text-slate-900 shadow-sm"
-                    : "text-slate-500 hover:text-slate-800",
-                ].join(" ")}
-              >
-                {w === "" ? "All Status" : w === "open" ? "Open" : "Closed"}
-              </button>
-            ))}
-          </div>
-
-          {/* Search */}
-          <input
-            type="search"
-            className="input input-sm w-[160px]"
-            value={value.search}
-            onChange={(e) => setFilter({ search: e.currentTarget.value })}
-            placeholder="Search…"
-          />
-
-          {/* Customer filter */}
-          <select
-            className="input input-sm w-[160px]"
-            value={value.customerId || ""}
-            onChange={(e) => setFilter({ customerId: e.currentTarget.value })}
-          >
-            <option value="">All Customers</option>
-            {sortedCustomers.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-
-          {/* CM filter */}
-          <select
-            className="input input-sm w-[150px]"
-            value={value.cmId || ""}
-            onChange={(e) => setFilter({ cmId: e.currentTarget.value })}
-          >
-            <option value="">All CMs</option>
-            {sortedUsers.map((u) => (
-              <option key={u.uid} value={u.uid}>{u.name}</option>
-            ))}
-          </select>
-
-          {/* Show reversals toggle */}
-          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="checkbox checkbox-xs"
-              checked={!!value.showReversals}
-              onChange={(e) => setFilter({ showReversals: e.currentTarget.checked })}
-            />
-            Show reversals
-          </label>
-
-          {/* Clear */}
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              onChange({ ...DEFAULT_SPENDING_FILTER, month });
-              setShowMore(false);
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
+// Filter panel is embedded inside LineItemSpendingTool so it has access to
+// filteredRows, stats, and action handlers. This topbar is kept as a no-op
+// for the DashboardToolDefinition registration.
+export const SpendingTopbar: DashboardToolDefinition<SpendingFilterState, SpendingSelection>["ToolTopbar"] = () =>
+  null;
 
 // ---------------------------------------------------------------------------
 // Row status badge — color-coded per kind + workflow state
@@ -538,16 +482,111 @@ type SpendingToolProps = {
 };
 
 export function LineItemSpendingTool(props: SpendingToolProps = {}) {
-  const { grants, enrollments, grantNameById, customerNameById, sharedDataLoading, sharedDataError } = useDashboardSharedData();
-  const { sort, onSort } = useTableSort();
+  const { profile, reloadProfile } = useAuth();
+  const { grants, enrollments, grantNameById, customerNameById, sharedDataLoading, sharedDataError, customers } = useDashboardSharedData();
+  const { sort, onSort, setSortDir } = useTableSort();
+  const { filters: columnFilters, setColumnFilter } = useTableColumnFilters();
 
   const [localFilter, setLocalFilter] = React.useState<SpendingFilterState>(DEFAULT_SPENDING_FILTER);
   const filterState = props.filterState ?? localFilter;
   const setFilterState = props.onFilterChange ?? setLocalFilter;
 
-  const { month, typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search } = filterState;
+  const [showFilters, setShowFilters] = React.useState(false);
+
+  const dateFilter = normalizeComplexDateValue(filterState.dateFilter, filterState.month);
+  const month = complexDatePrimaryMonth(dateFilter);
+  const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search } = filterState;
+  const [saveViewName, setSaveViewName] = React.useState("");
+  const [savingViews, setSavingViews] = React.useState(false);
   const [modalRow, setModalRow] = React.useState<SpendingRow | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
+
+  const spendingViewsSettings = React.useMemo<SpendingViewsSettings>(() => {
+    const settings = profile && typeof profile.settings === "object" && profile.settings
+      ? (profile.settings as Record<string, unknown>)
+      : {};
+    const raw = settings[SPENDING_VIEWS_SETTINGS_KEY] as Record<string, unknown> | undefined;
+    const saved = Array.isArray(raw?.views)
+      ? raw.views.map(sanitizeSavedSpendingView).filter((v): v is SpendingSavedView => !!v)
+      : [];
+    return {
+      defaultViewId: typeof raw?.defaultViewId === "string" ? raw.defaultViewId : undefined,
+      views: saved,
+    };
+  }, [profile]);
+
+  const spendingViews = React.useMemo(
+    () => [...builtInSpendingViews(), ...(spendingViewsSettings.views || [])],
+    [spendingViewsSettings.views]
+  );
+
+  const writeSpendingViewsSettings = React.useCallback(async (next: SpendingViewsSettings) => {
+    const baseSettings = profile && typeof profile.settings === "object" && profile.settings
+      ? (profile.settings as Record<string, unknown>)
+      : {};
+    setSavingViews(true);
+    try {
+      await UsersClient.meUpdate({
+        settings: {
+          ...baseSettings,
+          [SPENDING_VIEWS_SETTINGS_KEY]: next,
+        },
+      });
+      await reloadProfile();
+      toast("Spending views saved.", { type: "success" });
+    } catch (e: unknown) {
+      toast(toApiError(e, "Failed to save spending views.").error, { type: "error" });
+    } finally {
+      setSavingViews(false);
+    }
+  }, [profile, reloadProfile]);
+
+  const applySpendingView = React.useCallback((view: SpendingSavedView) => {
+    setFilterState(cloneSpendingFilter(view.filterState));
+  }, [setFilterState]);
+
+  const saveCurrentSpendingView = React.useCallback(async () => {
+    const name = saveViewName.trim();
+    if (!name) {
+      toast("Name the view first.", { type: "error" });
+      return;
+    }
+    const view: SpendingSavedView = {
+      id: `user-${Date.now()}`,
+      name,
+      filterState: cloneSpendingFilter(filterState),
+    };
+    await writeSpendingViewsSettings({
+      ...spendingViewsSettings,
+      views: [...(spendingViewsSettings.views || []), view],
+    });
+    setSaveViewName("");
+  }, [filterState, saveViewName, spendingViewsSettings, writeSpendingViewsSettings]);
+
+  const setDefaultSpendingView = React.useCallback(async (viewId: string) => {
+    await writeSpendingViewsSettings({
+      ...spendingViewsSettings,
+      defaultViewId: viewId,
+    });
+  }, [spendingViewsSettings, writeSpendingViewsSettings]);
+
+  const deleteSavedSpendingView = React.useCallback(async (viewId: string) => {
+    await writeSpendingViewsSettings({
+      defaultViewId: spendingViewsSettings.defaultViewId === viewId ? undefined : spendingViewsSettings.defaultViewId,
+      views: (spendingViewsSettings.views || []).filter((view) => view.id !== viewId),
+    });
+  }, [spendingViewsSettings, writeSpendingViewsSettings]);
+
+  const defaultViewAppliedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (defaultViewAppliedRef.current) return;
+    const defaultViewId = spendingViewsSettings.defaultViewId;
+    if (!defaultViewId) return;
+    const hit = spendingViews.find((view) => view.id === defaultViewId);
+    if (!hit) return;
+    defaultViewAppliedRef.current = true;
+    setFilterState(cloneSpendingFilter(hit.filterState));
+  }, [setFilterState, spendingViews, spendingViewsSettings.defaultViewId]);
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
@@ -583,9 +622,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const loading = sharedDataLoading || cardsLoading || ledgerLoading || queueLoading || otherTasksLoading;
   const error = sharedDataError || cardsError || ledgerError || queueError || otherTasksError;
 
+  // ── Selection ────────────────────────────────────────────────────────────
+
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [bulkPosting, setBulkPosting] = React.useState(false);
+  React.useEffect(() => { setSelectedIds(new Set()); }, [filterState]);
+
   // ── Mutations ────────────────────────────────────────────────────────────
 
   const autoAssignMutation = useAutoAssignLedgerEntries();
+  const postMutation = usePostPaymentQueueToLedger();
+  const syncJotformSelection = useSyncJotformSelection();
 
   // ── Derived lookups ──────────────────────────────────────────────────────
 
@@ -652,6 +699,52 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     return map;
   }, [enrollments]);
 
+  const sortedCustomers = React.useMemo(
+    () =>
+      [...(customers as Array<Record<string, unknown>>)]
+        .map((c) => ({
+          id: String(c?.id || ""),
+          name:
+            (String(c?.firstName || "").trim() + " " + String(c?.lastName || "").trim()).trim() ||
+            String(c?.displayName || c?.id || ""),
+        }))
+        .filter((c) => c.id)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [customers]
+  );
+
+  const sortedUsers = React.useMemo(
+    () =>
+      (usersRaw as Array<Record<string, unknown>>)
+        .map((u) => ({
+          uid: String(u?.uid || ""),
+          name: String(u?.displayName || u?.email || u?.uid || ""),
+        }))
+        .filter((u) => u.uid)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [usersRaw]
+  );
+
+  const setFilter = (patch: Partial<SpendingFilterState>) =>
+    setFilterState({ ...filterState, ...patch });
+
+  const setDateFilter = (next: ComplexDateValue) => {
+    const normalized = normalizeComplexDateValue(next, month);
+    setFilter({
+      dateFilter: normalized,
+      month: complexDatePrimaryMonth(normalized),
+    });
+  };
+
+  const hasActiveFilters =
+    !!filterState.typeFilter ||
+    !!filterState.grantId ||
+    !!filterState.workflowFilter ||
+    !!filterState.search ||
+    !!filterState.customerId ||
+    !!filterState.cmId ||
+    !!filterState.showReversals;
+
   // ── Row assembly ─────────────────────────────────────────────────────────
 
   const allRows = React.useMemo(() => {
@@ -671,6 +764,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       const amountCents = toCents(e?.amountCents, e?.amount);
       const date = dateIso10(e?.dueDate || e?.date || e?.createdAt || e?.ts);
       const rowMonth = monthFromDate(date);
+      if (month && rowMonth !== month) continue;
       // Clean vendor: use only vendor field, not comment/notes
       const vendor = String(e?.vendor || "").trim();
       const displayTitle = vendor || String(e?.description || e?.comment || entryId || "-");
@@ -749,6 +843,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           .join(" ")
       );
       const queueStatus = String(queueItem.queueStatus || "pending").toLowerCase();
+      const amountCents = Math.round(Number(queueItem.amount || 0) * 100);
       const workflowState: SpendingWorkflowState = queueStatus === "posted" ? "closed" : "open";
       const isProjection = source === "projection";
       const queueVendor = String(queueItem.merchant || "").trim();
@@ -763,7 +858,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         subtitle: submissionId || queueId,
         date,
         month: rowMonth,
-        amountCents: Math.round(Math.max(0, Number(queueItem.amount || 0)) * 100),
+        amountCents,
         completed: workflowState === "closed",
         workflowState,
         workflowReason:
@@ -783,7 +878,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         vendor: queueVendor,
         expenseType: queueExpenseType,
         purchaser: queuePurchaser,
-        isReversal: false,
+        isReversal: amountCents < 0 || String((queueItem as any).direction || "").toLowerCase() === "return",
         searchText: [merchant, queueVendor, queueExpenseType, queueItem.grantId, queueItem.lineItemId, queueItem.customerId].join(" ").toLowerCase(),
         linkedLedgerId: String(queueItem.ledgerEntryId || "") || undefined,
         reversalLedgerId: String(queueItem.reversalEntryId || "") || undefined,
@@ -815,13 +910,11 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     return creditCardList
       .map((card) => {
         const rowsForCard = allRows.filter(
-          (row) => row.creditCardId === String(card.id || "") && isCardRow(row.kind)
+          (row) => row.creditCardId === String(card.id || "") && isCardBudgetRow(row)
         );
-        const spentCents = rowsForCard
-          .filter((row) => row.kind === "card-ledger" || (row.kind === "queue-credit-card" && row.workflowState === "closed"))
-          .reduce((sum, row) => sum + row.amountCents, 0);
+        const spentCents = rowsForCard.reduce((sum, row) => sum + row.amountCents, 0);
         const pendingCents = rowsForCard
-          .filter((row) => row.kind === "queue-credit-card" && row.workflowState === "open")
+          .filter((row) => (row.kind === "queue-credit-card" || invoiceRowLooksLikeCreditCardSpend(row)) && row.workflowState === "open")
           .reduce((sum, row) => sum + row.amountCents, 0);
         const limitCents = Number(card.monthlyLimitCents || 0);
         const remainingCents = limitCents - spentCents;
@@ -852,12 +945,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     for (const card of creditCardList) {
       const cid = String(card.id || "");
       if (!cid) continue;
-      const rowsForCard = allRows.filter((r) => r.creditCardId === cid && isCardRow(r.kind));
-      const spentCents = rowsForCard
-        .filter((r) => r.kind === "card-ledger" || (r.kind === "queue-credit-card" && r.workflowState === "closed"))
-        .reduce((s, r) => s + r.amountCents, 0);
+      const rowsForCard = allRows.filter((r) => r.creditCardId === cid && isCardBudgetRow(r));
+      const spentCents = rowsForCard.reduce((s, r) => s + r.amountCents, 0);
       const pendingCents = rowsForCard
-        .filter((r) => r.kind === "queue-credit-card" && r.workflowState === "open")
+        .filter((r) => (r.kind === "queue-credit-card" || invoiceRowLooksLikeCreditCardSpend(r)) && r.workflowState === "open")
         .reduce((s, r) => s + r.amountCents, 0);
       const limitCents = Number(card.monthlyLimitCents || 0);
       map.set(cid, {
@@ -884,28 +975,70 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     return Array.from(buckets).sort();
   }, [creditCardSummaries]);
 
+  const getSpendingColumnValue = React.useCallback((row: SpendingRow, col: string, part = "header") => {
+    const info = lineItemLookup.get(`${row.grantId}:${row.lineItemId}`);
+    const isEnrollment = row.kind === "grant-ledger" || row.kind === "queue-projection";
+    const isProjection = row.kind === "queue-projection";
+    const rawCmId = String(
+      (row.paymentQueueItem as Record<string, unknown> | undefined)?.caseManagerId
+      || (row.ledgerEntry as Record<string, unknown> | undefined)?.caseManagerId
+      || cmIdByCustomerId.get(row.customerId)
+      || ""
+    );
+    const cmName = rawCmId ? (userDisplayNameByUid.get(rawCmId) || "") : "";
+    const cardType = row.cardBucket
+      || (row.creditCardName ? row.creditCardName.split(" - ")[0]?.trim() : "")
+      || row.sourceLabel;
+
+    if (col === "date") {
+      if (part === "subheader") return isEnrollment ? (isProjection ? "Projected" : "Enrollment") : row.kind === "queue-invoice" ? "Invoice" : "Card";
+      if (part === "chip") return row.isReversal ? "Reversal" : cardType;
+      return row.date;
+    }
+    if (col === "customer") {
+      if (part === "subheader") return cmName || row.purchaser || "";
+      return customerNameById.get(row.customerId) ?? "";
+    }
+    if (col === "service") {
+      if (part === "subheader") return info?.lineItemLabel ?? "";
+      if (part === "chip") return row.expenseType || "";
+      return info?.grantName ?? grantNameById.get(row.grantId) ?? "";
+    }
+    if (col === "amount") return row.amountCents;
+    if (col === "vendor") {
+      if (part === "subheader") return row.purchaser || "";
+      return row.vendor || row.title;
+    }
+    if (col === "status") {
+      if (part === "subheader") return row.workflowState;
+      if (part === "chip") return row.workflowReason;
+      return row.complianceStatus;
+    }
+    return null;
+  }, [cmIdByCustomerId, customerNameById, grantNameById, lineItemLookup, userDisplayNameByUid]);
+
   // ── Filtering ────────────────────────────────────────────────────────────
 
-  const filteredRows = React.useMemo(() => {
+  const baseFilteredRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     const { showReversals, customerId: filterCustomerId, cmId: filterCmId } = filterState;
     return allRows.filter((row) => {
       const typePass =
         !typeFilter ? true
         : typeFilter === "enrollment" ? (row.kind === "grant-ledger" || row.kind === "queue-projection")
-        : typeFilter === "card" ? isCardRow(row.kind)
+        : typeFilter === "card" ? isCardBudgetRow(row)
         : typeFilter === "invoice" ? row.kind === "queue-invoice"
         : true;
       const workflowPass =
         !workflowFilter ? true
         : workflowFilter === "open" ? row.workflowState === "open"
         : row.workflowState === "closed";
-      const monthPass = !month || row.month === month || !row.month;
+      const datePass = !row.date || complexDateMatchesIsoDate(dateFilter, row.date);
       const searchPass = !q || row.searchText.includes(q) || row.title.toLowerCase().includes(q);
       const cardPass = !cardFilterId || row.creditCardId === cardFilterId;
       const grantPass = !grantId || row.grantId === grantId;
       const bucketPass =
-        !cardBucketFilter || !isCardRow(row.kind) || row.cardBucket === cardBucketFilter;
+        !cardBucketFilter || !isCardBudgetRow(row) || row.cardBucket === cardBucketFilter;
       const reversalPass = showReversals || !row.isReversal;
       const customerIdPass = !filterCustomerId || row.customerId === filterCustomerId;
       const rawRowCmId = String(
@@ -915,34 +1048,28 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         || ""
       );
       const cmIdPass = !filterCmId || rawRowCmId === filterCmId;
-      return typePass && workflowPass && monthPass && searchPass && cardPass && grantPass
+      return typePass && workflowPass && datePass && searchPass && cardPass && grantPass
         && bucketPass && reversalPass && customerIdPass && cmIdPass;
     });
-  }, [allRows, cardBucketFilter, cardFilterId, month, search, typeFilter, workflowFilter, grantId, filterState, cmIdByCustomerId]);
+  }, [allRows, cardBucketFilter, cardFilterId, dateFilter, search, typeFilter, workflowFilter, grantId, filterState, cmIdByCustomerId]);
 
   // ── Sort + Pagination ────────────────────────────────────────────────────
 
+  const filteredRows = React.useMemo(
+    () => filterRows(baseFilteredRows, columnFilters, getSpendingColumnValue),
+    [baseFilteredRows, columnFilters, getSpendingColumnValue]
+  );
+
   const sortedRows = React.useMemo(
-    () =>
-      sortRows(filteredRows, sort, (row, col) => {
-        if (col === "date") return row.date;
-        if (col === "customer") return customerNameById.get(row.customerId) ?? "";
-        if (col === "service") {
-          const info = lineItemLookup.get(`${row.grantId}:${row.lineItemId}`);
-          return info?.grantName ?? grantNameById.get(row.grantId) ?? "";
-        }
-        if (col === "amount") return row.amountCents;
-        if (col === "vendor") return row.vendor || row.title;
-        if (col === "status") return row.complianceStatus;
-        return null;
-      }),
-    [filteredRows, sort, customerNameById, lineItemLookup, grantNameById]
+    () => sortRows(filteredRows, sort, getSpendingColumnValue),
+    [filteredRows, sort, getSpendingColumnValue]
   );
 
   const PAGE_SIZE = 50;
   const [page, setPage] = React.useState(1);
   React.useEffect(() => { setPage(1); }, [filterState]);
   React.useEffect(() => { setPage(1); }, [sort]);
+  React.useEffect(() => { setPage(1); }, [columnFilters]);
   const pagedRows = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
 
@@ -959,7 +1086,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       totalCents += row.amountCents;
       if (row.workflowState === "open") {
         openCount++;
-        if (isCardRow(row.kind) && !row.grantId) unallocatedCount++;
+        if (isCardBudgetRow(row) && !row.grantId) unallocatedCount++;
       }
       if (row.kind === "queue-projection" && row.workflowState === "open") projectedCount++;
     }
@@ -969,22 +1096,68 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   // ── Export ───────────────────────────────────────────────────────────────
 
   type ExportRow = { source: string; card: string; date: string; title: string; grant: string; lineItem: string; amount: number; status: string };
-  const exportRows = React.useMemo<ExportRow[]>(
-    () =>
-      filteredRows.map((r) => ({
-        source: r.sourceLabel,
-        card: r.creditCardName || r.creditCardId || "-",
-        date: r.date,
-        title: r.title,
-        grant: grantNameById.get(r.grantId) || r.grantId || "-",
-        lineItem: lineItemLookup.get(`${r.grantId}:${r.lineItemId}`)?.lineItemLabel || r.lineItemId || "-",
-        amount: r.amountCents / 100,
-        status: r.complianceStatus,
-      })),
-    [filteredRows, grantNameById, lineItemLookup]
+
+  const toExportRow = React.useCallback(
+    (r: SpendingRow): ExportRow => ({
+      source: r.sourceLabel,
+      card: r.creditCardName || r.creditCardId || "-",
+      date: r.date,
+      title: r.title,
+      grant: grantNameById.get(r.grantId) || r.grantId || "-",
+      lineItem: lineItemLookup.get(`${r.grantId}:${r.lineItemId}`)?.lineItemLabel || r.lineItemId || "-",
+      amount: r.amountCents / 100,
+      status: r.complianceStatus,
+    }),
+    [grantNameById, lineItemLookup]
   );
 
+  const EXPORT_COLUMNS = [
+    { key: "source", label: "Source", value: (r: ExportRow) => r.source },
+    { key: "card", label: "Card", value: (r: ExportRow) => r.card },
+    { key: "date", label: "Date", value: (r: ExportRow) => r.date },
+    { key: "title", label: "Title", value: (r: ExportRow) => r.title },
+    { key: "grant", label: "Grant", value: (r: ExportRow) => r.grant },
+    { key: "lineItem", label: "Line Item", value: (r: ExportRow) => r.lineItem },
+    { key: "amount", label: "Amount", value: (r: ExportRow) => r.amount },
+    { key: "status", label: "Status", value: (r: ExportRow) => r.status },
+  ];
+
+  const exportRows = React.useMemo<ExportRow[]>(
+    () => filteredRows.map(toExportRow),
+    [filteredRows, toExportRow]
+  );
+
+  // ── Selection helpers ─────────────────────────────────────────────────────
+
+  const toggleRow = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const allPageSelected =
+    pagedRows.length > 0 && pagedRows.every((r) => selectedIds.has(r.id));
+
+  const toggleAllPage = () => {
+    if (allPageSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const r of pagedRows) next.delete(r.id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const r of pagedRows) next.add(r.id);
+        return next;
+      });
+    }
+  };
+
   // ── Handlers ─────────────────────────────────────────────────────────────
+
+  const queryClient = useQueryClient();
 
   async function onAutoAssign() {
     try {
@@ -995,65 +1168,401 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     }
   }
 
+  async function onRefreshEnrollments() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+      queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
+    ]);
+    toast("Enrollments refreshed.", { type: "success" });
+  }
+
+  async function onRefreshJotforms() {
+    try {
+      const result = await syncJotformSelection.mutateAsync({
+        mode: "formIds",
+        formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
+        limit: 50,
+        maxPages: 1,
+        includeRaw: false,
+      });
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.jotform.root }),
+        queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
+      ]);
+
+      toast(`Jotforms refreshed (${Number(result?.count || 0)} recent submission${Number(result?.count || 0) === 1 ? "" : "s"} synced).`, {
+        type: "success",
+      });
+    } catch (e: unknown) {
+      toast(toApiError(e).error, { type: "error" });
+    }
+  }
+
+  async function onReconcileJotforms() {
+    try {
+      const result = await syncJotformSelection.mutateAsync({
+        mode: "formIds",
+        formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
+        limit: 500,
+        maxPages: 10,
+        includeRaw: true,
+      });
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.jotform.root }),
+        queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
+      ]);
+
+      toast(`Jotforms reconciled (${Number(result?.count || 0)} submission${Number(result?.count || 0) === 1 ? "" : "s"} synced).`, {
+        type: "success",
+      });
+    } catch (e: unknown) {
+      toast(toApiError(e).error, { type: "error" });
+    }
+  }
+
+  function onExport() {
+    downloadCsv(buildCsv(exportRows, EXPORT_COLUMNS), `spending-${fileSafeLabel(complexDateValueLabel(dateFilter))}`);
+  }
+
+  async function onBulkPost() {
+    const postable = filteredRows.filter(
+      (r) =>
+        selectedIds.has(r.id) &&
+        r.paymentQueueItem &&
+        r.workflowState === "open" &&
+        r.grantId &&
+        r.lineItemId
+    );
+    if (!postable.length) {
+      toast("No selected rows are ready to post — each needs a grant and line item assigned.", { type: "error" });
+      return;
+    }
+    setBulkPosting(true);
+    let success = 0;
+    let failed = 0;
+    for (const row of postable) {
+      try {
+        await postMutation.mutateAsync({ id: row.paymentQueueItem!.id });
+        success++;
+      } catch {
+        failed++;
+      }
+    }
+    setBulkPosting(false);
+    setSelectedIds(new Set());
+    toast(
+      `Posted ${success} row(s)${failed ? `, ${failed} failed` : ""}.`,
+      { type: success > 0 ? "success" : "error" }
+    );
+  }
+
+  function onBulkExport() {
+    const rows = filteredRows.filter((r) => selectedIds.has(r.id)).map(toExportRow);
+    downloadCsv(buildCsv(rows, EXPORT_COLUMNS), `spending-selected-${fileSafeLabel(complexDateValueLabel(dateFilter))}`);
+  }
+
+  const columnValues = React.useCallback(
+    (col: string) => (part: string) => baseFilteredRows.map((row) => getSpendingColumnValue(row, col, part)),
+    [baseFilteredRows, getSpendingColumnValue]
+  );
+
+  const renderSmartHeader = (col: keyof typeof SPENDING_TABLE_PARTS, label: React.ReactNode, defaultDir: "asc" | "desc" = "asc", align?: "right") => (
+    <SmartFilterHeader
+      key={col}
+      label={label}
+      col={col}
+      sort={sort}
+      onSort={onSort}
+      setSortDir={setSortDir}
+      defaultDir={defaultDir}
+      align={align}
+      parts={SPENDING_TABLE_PARTS[col]}
+      filter={columnFilters[col]}
+      onFilterChange={(next) => setColumnFilter(col, next)}
+      values={columnValues(col)}
+    />
+  );
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <ToolCard
-      title="Spending"
-      actions={
-        <>
-          <button
-            className="btn btn-sm btn-ghost"
-            onClick={() => void onAutoAssign()}
-            disabled={autoAssignMutation.isPending}
-            title="Automatically match unclassified ledger entries to grants and line items based on existing patterns. Applies up to 400 entries for the selected month."
-          >
-            Auto Assign
-          </button>
-          <SmartExportButton
-            allRows={exportRows}
-            activeRows={exportRows}
-            filenameBase={`spending-${month || "all"}`}
-            buttonLabel="Export"
-            columns={[
-              { key: "source", label: "Source", value: (r: ExportRow) => r.source },
-              { key: "card", label: "Card", value: (r: ExportRow) => r.card },
-              { key: "date", label: "Date", value: (r: ExportRow) => r.date },
-              { key: "title", label: "Title", value: (r: ExportRow) => r.title },
-              { key: "grant", label: "Grant", value: (r: ExportRow) => r.grant },
-              { key: "lineItem", label: "Line Item", value: (r: ExportRow) => r.lineItem },
-              { key: "amount", label: "Amount", value: (r: ExportRow) => r.amount },
-              { key: "status", label: "Status", value: (r: ExportRow) => r.status },
-            ]}
-          />
-        </>
-      }
-    >
-      {/* ── Stats row ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <div className="rounded border border-slate-200 px-3 py-3 text-xs">
-          <div className="text-slate-500">Total ({filteredRows.length} rows)</div>
-          <div className="font-semibold text-base">{fmtCurrencyUSD(stats.totalCents / 100)}</div>
-        </div>
-        <div className="rounded border border-slate-200 px-3 py-3 text-xs">
-          <div className="text-slate-500">Open</div>
-          <div className={`font-semibold text-base ${stats.openCount > 0 ? "text-amber-700" : ""}`}>
-            {stats.openCount} rows
+    <div className="space-y-3">
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Views</span>
+          {spendingViews.map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className={[
+                "btn btn-xs btn-ghost",
+                spendingViewsSettings.defaultViewId === view.id ? "border-sky-200 bg-sky-50 text-sky-700" : "",
+              ].join(" ")}
+              onClick={() => applySpendingView(view)}
+              title={spendingViewsSettings.defaultViewId === view.id ? "Default view" : undefined}
+            >
+              {view.name}
+            </button>
+          ))}
+          <div className="ml-auto flex min-w-[260px] flex-wrap items-center justify-end gap-2">
+            <input
+              className="input input-xs w-[150px]"
+              value={saveViewName}
+              onChange={(e) => setSaveViewName(e.currentTarget.value)}
+              placeholder="View name"
+            />
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              disabled={savingViews}
+              onClick={() => void saveCurrentSpendingView()}
+            >
+              Save View
+            </button>
+            <select
+              className="input input-xs w-[150px]"
+              value={spendingViewsSettings.defaultViewId || ""}
+              disabled={savingViews}
+              onChange={(e) => void setDefaultSpendingView(e.currentTarget.value)}
+              title="Default spending view"
+            >
+              <option value="">No default</option>
+              {spendingViews.map((view) => (
+                <option key={view.id} value={view.id}>{view.name}</option>
+              ))}
+            </select>
+            {(spendingViewsSettings.views || []).length > 0 ? (
+              <select
+                className="input input-xs w-[130px]"
+                disabled={savingViews}
+                value=""
+                onChange={(e) => {
+                  const viewId = e.currentTarget.value;
+                  if (viewId) void deleteSavedSpendingView(viewId);
+                }}
+                title="Delete saved view"
+              >
+                <option value="">Delete...</option>
+                {(spendingViewsSettings.views || []).map((view) => (
+                  <option key={view.id} value={view.id}>{view.name}</option>
+                ))}
+              </select>
+            ) : null}
           </div>
-        </div>
-        <div className="rounded border border-slate-200 px-3 py-3 text-xs">
-          <div className="text-slate-500">Unallocated (card)</div>
-          <div className={`font-semibold text-base ${stats.unallocatedCount > 0 ? "text-rose-700" : ""}`}>
-            {stats.unallocatedCount} rows
-          </div>
-          <div className="text-slate-400 text-[10px]">Card rows with no grant</div>
-        </div>
-        <div className="rounded border border-slate-200 px-3 py-3 text-xs">
-          <div className="text-slate-500">Projected Spend</div>
-          <div className="font-semibold text-base">{stats.projectedCount} rows</div>
-          <div className="text-slate-400 text-[10px]">Not yet paid</div>
         </div>
       </div>
+      {/* ── Unified filter panel ──────────────────────────────────────────── */}
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+        {/* Always-visible bar: month + toggle */}
+        <div className="flex flex-wrap items-center gap-2">
+          <ComplexDateSelector value={dateFilter} onChange={setDateFilter} />
+          <button
+            type="button"
+            className={["btn btn-sm btn-ghost gap-1", hasActiveFilters ? "border-sky-200 bg-sky-50 text-sky-700" : ""].join(" ")}
+            onClick={() => setShowFilters((v) => !v)}
+          >
+            Filters {hasActiveFilters ? "●" : showFilters ? "▴" : "▾"}
+          </button>
+        </div>
+
+        {/* Collapsible: filter controls + actions + results */}
+        {showFilters && (
+          <div className="space-y-3 border-t border-slate-100 pt-2">
+            {/* Filter controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                {TYPE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id || "all"}
+                    type="button"
+                    onClick={() => setFilter({ typeFilter: opt.id, cardFilterId: "", cardBucketFilter: "" })}
+                    className={[
+                      "rounded-md px-3 py-1 text-xs font-semibold transition",
+                      filterState.typeFilter === opt.id
+                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-800",
+                    ].join(" ")}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {filterState.typeFilter !== "card" && (
+                <GrantSelect
+                  value={filterState.grantId || null}
+                  onChange={(next) => setFilter({ grantId: String(next || "") })}
+                  includeUnassigned
+                  placeholderLabel="All grants"
+                  className="w-[200px]"
+                />
+              )}
+
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                {(["", "open", "closed"] as const).map((w) => (
+                  <button
+                    key={w || "all"}
+                    type="button"
+                    onClick={() => setFilter({ workflowFilter: w })}
+                    className={[
+                      "rounded-md px-3 py-1 text-xs font-semibold transition",
+                      filterState.workflowFilter === w
+                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-800",
+                    ].join(" ")}
+                  >
+                    {w === "" ? "All Status" : w === "open" ? "Open" : "Closed"}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="search"
+                className="input input-sm w-[160px]"
+                value={filterState.search}
+                onChange={(e) => setFilter({ search: e.currentTarget.value })}
+                placeholder="Search…"
+              />
+
+              <select
+                className="input input-sm w-[160px]"
+                value={filterState.customerId || ""}
+                onChange={(e) => setFilter({ customerId: e.currentTarget.value })}
+              >
+                <option value="">All Customers</option>
+                {sortedCustomers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+
+              <select
+                className="input input-sm w-[150px]"
+                value={filterState.cmId || ""}
+                onChange={(e) => setFilter({ cmId: e.currentTarget.value })}
+              >
+                <option value="">All CMs</option>
+                {sortedUsers.map((u) => (
+                  <option key={u.uid} value={u.uid}>{u.name}</option>
+                ))}
+              </select>
+
+              <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-xs"
+                  checked={!!filterState.showReversals}
+                  onChange={(e) => setFilter({ showReversals: e.currentTarget.checked })}
+                />
+                Show reversals
+              </label>
+
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setFilterState({ ...DEFAULT_SPENDING_FILTER, month, dateFilter }); setShowFilters(false); }}
+              >
+                Clear
+              </button>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400">Actions</span>
+              <ActionMenu
+                disabled={syncJotformSelection.isPending}
+                buttonLabel={syncJotformSelection.isPending ? "Refreshing..." : "Refresh"}
+                buttonAriaLabel="Refresh options"
+                items={[
+                  {
+                    key: "enrollments",
+                    label: "Refresh Enrollments",
+                    onSelect: () => void onRefreshEnrollments(),
+                  },
+                  {
+                    key: "jotforms",
+                    label: "Refresh Jotforms",
+                    onSelect: () => void onRefreshJotforms(),
+                  },
+                  {
+                    key: "jotforms-reconcile",
+                    label: "Reconcile with Jotform",
+                    onSelect: () => void onReconcileJotforms(),
+                  },
+                ]}
+              />
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost"
+                disabled={autoAssignMutation.isPending}
+                onClick={() => void onAutoAssign()}
+              >
+                {autoAssignMutation.isPending ? "Auto Assigning…" : "Auto Assign"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost"
+                disabled={exportRows.length === 0}
+                onClick={onExport}
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {/* Filter results */}
+            <div className="flex flex-wrap items-center gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400">Results</span>
+              <span className="text-slate-600">
+                {filteredRows.length} rows · <b>{fmtCurrencyUSD(stats.totalCents / 100)}</b>
+              </span>
+              {stats.openCount > 0 && (
+                <span className="text-amber-700">{stats.openCount} open</span>
+              )}
+              {stats.unallocatedCount > 0 && (
+                <span className="text-rose-700">{stats.unallocatedCount} unallocated</span>
+              )}
+              {stats.projectedCount > 0 && (
+                <span className="text-violet-700">{stats.projectedCount} projected</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Grant budget strip (when grant filter is active) ──────────────── */}
+      {filterState.grantId && <GrantBudgetStrip grantId={filterState.grantId} />}
+
+      {/* ── Bulk action bar ───────────────────────────────────────────────── */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-xs">
+          <span className="font-medium text-sky-800">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            disabled={bulkPosting}
+            onClick={() => void onBulkPost()}
+          >
+            {bulkPosting ? "Posting…" : "Post to Ledger"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost"
+            onClick={onBulkExport}
+          >
+            Export Selected
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost text-slate-500"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* ── Card mode: bucket pills + CC tiles ────────────────────────────── */}
       {typeFilter === "card" && (
@@ -1084,13 +1593,13 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             </div>
           )}
 
-          {/* CC tiles */}
+          {/* CC rows */}
           {creditCardSummaries.length > 0 ? (
-            <div className="grid gap-4 xl:grid-cols-2">
+            <div className="space-y-1.5">
               {creditCardSummaries
                 .filter((card) => !cardBucketFilter || card.cardBuckets.has(cardBucketFilter))
                 .map((card) => (
-                  <CreditCardTile
+                  <CompactCardRow
                     key={card.id}
                     card={card}
                     active={cardFilterId === card.id}
@@ -1104,7 +1613,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 ))}
             </div>
           ) : (
-            <div className="rounded-[24px] border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
+            <div className="rounded border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
               {loading ? "Loading card data…" : "No card activity for this month."}
             </div>
           )}
@@ -1114,20 +1623,40 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       {/* ── Table ─────────────────────────────────────────────────────────── */}
       <ToolTable
         headers={[
-          <SortableHeader key="date" label="Date · Type" col="date" sort={sort} onSort={onSort} defaultDir="desc" />,
-          <SortableHeader key="customer" label="Customer / CM" col="customer" sort={sort} onSort={onSort} />,
-          <SortableHeader key="service" label="Service" col="service" sort={sort} onSort={onSort} />,
-          <SortableHeader key="amount" label="Amount" col="amount" sort={sort} onSort={onSort} defaultDir="desc" align="right" />,
-          <SortableHeader key="vendor" label="Vendor / Purchaser" col="vendor" sort={sort} onSort={onSort} />,
-          <SortableHeader key="status" label="Status" col="status" sort={sort} onSort={onSort} />,
+          <input
+            key="select-all"
+            type="checkbox"
+            className="checkbox checkbox-xs"
+            checked={allPageSelected}
+            onChange={toggleAllPage}
+            title="Select all on this page"
+          />,
+          renderSmartHeader("date", "Date / Type", "desc"),
+          renderSmartHeader("customer", "Customer / CM"),
+          renderSmartHeader("service", "Service"),
+          renderSmartHeader("amount", "Amount", "desc", "right"),
+          renderSmartHeader("vendor", "Vendor / Purchaser"),
+          renderSmartHeader("status", "Status"),
         ]}
         rows={
           loading ? (
-            <tr><td colSpan={6} className="text-center py-4 text-slate-400">Loading…</td></tr>
+            <>
+              {[...Array(5)].map((_, i) => (
+                <tr key={i} className="animate-pulse">
+                  <td className="w-8 px-2"><div className="h-3 w-3 rounded bg-slate-200" /></td>
+                  <td className="py-2.5 px-3"><div className="h-3 w-16 rounded bg-slate-200" /><div className="mt-1 h-3 w-14 rounded bg-slate-100" /></td>
+                  <td className="py-2.5 px-3"><div className="h-3 w-24 rounded bg-slate-200" /></td>
+                  <td className="py-2.5 px-3"><div className="h-3 w-32 rounded bg-slate-200" /></td>
+                  <td className="py-2.5 px-3 text-right"><div className="ml-auto h-3 w-16 rounded bg-slate-200" /></td>
+                  <td className="py-2.5 px-3"><div className="h-3 w-20 rounded bg-slate-200" /></td>
+                  <td className="py-2.5 px-3"><div className="h-4 w-16 rounded bg-slate-100" /></td>
+                </tr>
+              ))}
+            </>
           ) : error ? (
-            <tr><td colSpan={6} className="text-center py-4 text-rose-500">Failed to load spending rows.</td></tr>
+            <tr><td colSpan={7} className="text-center py-4 text-rose-500">Failed to load spending rows.</td></tr>
           ) : filteredRows.length === 0 ? (
-            <tr><td colSpan={6} className="text-center py-4 text-slate-400">No rows for current filters.</td></tr>
+            <tr><td colSpan={7} className="text-center py-4 text-slate-400">No rows for current filters.</td></tr>
           ) : (
             <>
               {pagedRows.map((r) => {
@@ -1153,9 +1682,22 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                     className={[
                       "cursor-pointer hover:bg-slate-50/80 transition-colors",
                       r.isReversal ? "opacity-60" : "",
+                      selectedIds.has(r.id) ? "bg-sky-50/60" : "",
                     ].join(" ")}
                     onClick={() => { setModalRow(r); setModalOpen(true); }}
                   >
+                    {/* Checkbox */}
+                    <td
+                      className="w-8 px-2"
+                      onClick={(e) => { e.stopPropagation(); toggleRow(r.id); }}
+                    >
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-xs"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleRow(r.id)}
+                      />
+                    </td>
                     {/* Date · Type — compact combined column */}
                     <td className="w-28 min-w-[6rem]">
                       <div className="text-xs text-slate-500 whitespace-nowrap">{fmtDateOrDash(r.date)}</div>
@@ -1231,7 +1773,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
               })}
               {/* Totals footer */}
               <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-sm">
-                <td colSpan={3} className="text-slate-600 text-xs px-3 py-2">
+                <td colSpan={4} className="text-slate-600 text-xs px-3 py-2">
                   {filteredRows.length} rows{totalPages > 1 ? ` · page ${page}/${totalPages}` : ""}
                 </td>
                 <td className="text-right font-mono px-3 py-2">{fmtCurrencyUSD(stats.totalCents / 100)}</td>
@@ -1267,6 +1809,6 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         cardBudget={modalRow?.creditCardId ? (cardBudgetById.get(modalRow.creditCardId) ?? null) : null}
         workflowTask={modalRow?.taskToken ? (openTaskByToken.get(modalRow.taskToken) ?? null) : null}
       />
-    </ToolCard>
+    </div>
   );
 }
