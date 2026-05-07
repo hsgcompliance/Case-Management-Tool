@@ -159,6 +159,10 @@ export const PaymentQueueItem = z.object({
   /** ISO timestamp set when posted to ledger */
   postedAt: z.string().nullable(),
   postedBy: z.string().nullable(),
+  closedBypassLedger: z.boolean().optional(),
+  closedBypassLedgerAt: z.string().nullable().optional(),
+  closedBypassLedgerBy: z.string().nullable().optional(),
+  closedBypassLedgerReason: z.string().nullable().optional(),
   reopenedAt: z.string().nullable(),
   reopenedBy: z.string().nullable(),
   reopenReason: z.string().nullable(),
@@ -232,6 +236,13 @@ export const PaymentQueuePostToLedgerBody = z.object({
   postedBy: z.string().optional(),
 });
 export type TPaymentQueuePostToLedgerBody = z.infer<typeof PaymentQueuePostToLedgerBody>;
+
+export const PaymentQueueBypassCloseBody = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  reason: z.string().optional(),
+  postedBy: z.string().optional(),
+});
+export type TPaymentQueueBypassCloseBody = z.infer<typeof PaymentQueueBypassCloseBody>;
 
 export const PaymentQueueVoidBody = z.object({
   reason: z.string().optional(),

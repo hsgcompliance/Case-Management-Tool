@@ -219,7 +219,7 @@ export function computeRentCertDues(
       enrollmentLabel: opts?.enrollmentLabel,
       dueDate,
       targetPaymentDate,
-      asap: dueDate <= today,
+      asap: dueDate <= addMonthsISO(today, 1),
       label: `${fmtShortMonth(targetPaymentDate)} rent cert due ${fmtShortMonth(dueDate)}`,
     });
   }
@@ -239,7 +239,7 @@ export function nextRentCertDue(
     })
   );
   const sorted = dues.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  return sorted.find((due) => due.targetPaymentDate >= todayISO()) || sorted[sorted.length - 1] || null;
+  return sorted.find((due) => due.targetPaymentDate >= todayISO()) || null;
 }
 
 function fmtShortMonth(iso: string): string {

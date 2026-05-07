@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import PaymentQueue, {
   type PaymentQueueItem,
+  type PaymentQueueBypassCloseReq,
   type PaymentQueueListReq,
   type PaymentQueuePatchReq,
   type PaymentQueuePostReq,
@@ -13,6 +14,7 @@ import { useInvalidateMutation } from "./optimistic";
 
 export type {
   PaymentQueueItem,
+  PaymentQueueBypassCloseReq,
   PaymentQueueListReq,
   PaymentQueuePatchReq,
   PaymentQueuePostReq,
@@ -78,6 +80,20 @@ export function usePostPaymentQueueToLedger() {
       PaymentQueue.postToLedger(args.id, args.body || {}),
     onSuccess: async (_res, vars) => {
       await qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(vars.id) });
+    },
+  });
+}
+
+export function useBypassClosePaymentQueueItems() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.paymentQueue.root],
+    mutationFn: (body: PaymentQueueBypassCloseReq) => PaymentQueue.bypassClose(body),
+    onSuccess: async (_res, vars) => {
+      await Promise.all((vars.ids || []).map((id) =>
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(id) })
+      ));
     },
   });
 }

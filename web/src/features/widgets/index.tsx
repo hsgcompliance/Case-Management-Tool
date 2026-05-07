@@ -1789,7 +1789,7 @@ function createSpendingFilterState(): SpendingFilterState {
   return {
     month,
     dateFilter: { mode: "month", month },
-    typeFilter: "",
+    typeFilter: "forms",
     workflowFilter: "",
     cardFilterId: "",
     grantId: "",
@@ -1798,6 +1798,7 @@ function createSpendingFilterState(): SpendingFilterState {
     showReversals: false,
     customerId: "",
     cmId: "",
+    advancedQueueFilters: [],
   };
 }
 

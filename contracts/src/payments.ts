@@ -244,7 +244,8 @@ export type TPaymentsRecalcGrantProjectedBody = z.infer<
 // ---------------- Adjust Spend ----------------
 export const PaymentsAdjustSpendBody = z.object({
   enrollmentId: z.string().min(1),
-  spendId: z.string().min(1),
+  spendId: z.string().min(1).optional(),   // optional; backend resolves via paymentId if absent/stale
+  paymentId: z.string().min(1).optional(), // alternative to spendId for subcollection lookup
 
   patch: z
     .object({

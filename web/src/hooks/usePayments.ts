@@ -836,17 +836,6 @@ export function usePaymentsProjectionsAdjust() {
             reverse: true,
           });
         } else {
-          const spends = Array.isArray(enrollment.spends) ? enrollment.spends.slice() : [];
-          const latest = spends
-            .filter((s) => String(s?.paymentId || "") === paymentId)
-            .filter((s) => Number(s?.amount || 0) > 0)
-            .filter((s) => !s?.reversalOf)
-            .sort((a, b) => spendTsNum(b?.ts) - spendTsNum(a?.ts))[0];
-
-          if (!latest?.id) {
-            throw new Error("No eligible spend record found for selected payment");
-          }
-
           const patch: PaymentsAdjustSpendReq["patch"] = {
             ...(input.spendAdjustment.newAmount != null ? { amount: input.spendAdjustment.newAmount } : {}),
             ...(input.spendAdjustment.lineItemId ? { lineItemId: input.spendAdjustment.lineItemId } : {}),
@@ -858,7 +847,7 @@ export function usePaymentsProjectionsAdjust() {
 
           await Payments.adjustSpend({
             enrollmentId,
-            spendId: String(latest.id),
+            paymentId,
             patch,
             ...(input.spendAdjustment.reason ? { reason: input.spendAdjustment.reason } : {}),
           });

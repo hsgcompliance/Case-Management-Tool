@@ -356,6 +356,11 @@ function CustomerCardInner({
   const enrollmentFinancials = activeEnrollments.map(computeEnrollmentFinancial);
   const hasAnyFinancialAssistance = enrollmentFinancials.some((f) => f.hasAnyMoney);
   const rentCertDue = nextRentCertDue(activeEnrollments);
+  const lastAssistanceDate = enrollmentFinancials
+    .filter((f) => f.hasAnyMoney && f.lastDate)
+    .map((f) => f.lastDate as string)
+    .sort()
+    .at(-1) ?? null;
 
   // Selected CM's relationship (only when a different CM is selected)
   const selectedCmRole = (selectedCmId && selectedCmId !== viewerId)
@@ -625,6 +630,19 @@ function CustomerCardInner({
                   <span className="opacity-75">Next Rent Cert Due: </span>
                   <span>{fmtShortDate(rentCertDue.dueDate)}</span>
                   {rentCertDue.asap ? <span> ASAP</span> : null}
+                </div>
+              ) : lastAssistanceDate ? (
+                <div
+                  className={[
+                    "rounded-lg border px-2 transition-all",
+                    colSpan > 1 ? "py-2.5 text-sm" : "py-1.5 text-[11px]",
+                    inactiveCustomer
+                      ? "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                      : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400",
+                  ].join(" ")}
+                >
+                  <span className="opacity-75">Last date of assistance: </span>
+                  <span>{fmtShortDate(lastAssistanceDate)}</span>
                 </div>
               ) : null}
               {enrollmentFinancials.filter((f) => f.hasAnyMoney).slice(0, 2).map((f) => (

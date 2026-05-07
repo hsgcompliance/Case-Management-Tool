@@ -4,9 +4,11 @@ import UsersClient from "@client/users";
 import { useAuth } from "@app/auth/AuthProvider";
 import GrantSelect from "@entities/selectors/GrantSelect";
 import { useCreditCards } from "@hooks/useCreditCards";
+import { usePaymentsUpdateCompliance } from "@hooks/usePayments";
 import { useAutoAssignLedgerEntries, useLedgerEntries } from "@hooks/useLedger";
 import {
   usePaymentQueueItems,
+  useBypassClosePaymentQueueItems,
   usePostPaymentQueueToLedger,
   type PaymentQueueItem,
 } from "@hooks/usePaymentQueue";
@@ -17,6 +19,7 @@ import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
 import type { CreditCardEntity } from "@types";
 import { buildCsv, downloadCsv } from "@entities/ui/dashboardStyle/SmartExportButton";
+import { useOrgConfig } from "@hooks/useOrgConfig";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import ActionMenu from "@entities/ui/ActionMenu";
 import {
@@ -37,6 +40,7 @@ import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/type
 import { SpendDetailModal } from "./SpendDetailModal";
 import type { CardBudget } from "./SpendDetailModal";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
+import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets/jotform/jotformSubmissionView";
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -47,10 +51,19 @@ import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap"
  *  card       → card-ledger + queue-credit-card
  *  invoice    → queue-invoice
  */
+export type AdvancedQueueFilterOperator = "contains" | "equals" | "empty";
+
+export type AdvancedQueueFilter = {
+  id: string;
+  fieldKey: string;
+  operator: AdvancedQueueFilterOperator;
+  value: string;
+};
+
 export type SpendingFilterState = {
   month: string;
   dateFilter: ComplexDateValue;
-  typeFilter: "" | "enrollment" | "card" | "invoice";
+  typeFilter: "" | "forms" | "enrollment" | "card" | "invoice";
   workflowFilter: "" | "open" | "closed";
   grantId: string;
   cardFilterId: string;
@@ -59,12 +72,13 @@ export type SpendingFilterState = {
   showReversals: boolean;
   customerId: string;
   cmId: string;
+  advancedQueueFilters: AdvancedQueueFilter[];
 };
 
 export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   month: monthKeyOffsetDays(5),
   dateFilter: { mode: "month", month: monthKeyOffsetDays(5) },
-  typeFilter: "",
+  typeFilter: "forms",
   workflowFilter: "",
   grantId: "",
   cardFilterId: "",
@@ -73,6 +87,7 @@ export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   showReversals: false,
   customerId: "",
   cmId: "",
+  advancedQueueFilters: [],
 };
 
 type SpendingSavedView = {
@@ -94,10 +109,24 @@ function cloneSpendingFilter(value: SpendingFilterState): SpendingFilterState {
 }
 
 function spendingFilterPatch(patch: Partial<SpendingFilterState>): SpendingFilterState {
+  const advancedQueueFilters = Array.isArray(patch.advancedQueueFilters)
+    ? patch.advancedQueueFilters
+        .map((filter) => ({
+          id: String(filter?.id || `advanced-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+          fieldKey: String(filter?.fieldKey || ""),
+          operator: (filter?.operator === "equals" || filter?.operator === "empty" ? filter.operator : "contains") as AdvancedQueueFilterOperator,
+          value: String(filter?.value || ""),
+        }))
+        .filter((filter) => filter.fieldKey)
+    : [];
   return {
     ...cloneSpendingFilter(DEFAULT_SPENDING_FILTER),
     ...patch,
     dateFilter: patch.dateFilter ?? cloneSpendingFilter(DEFAULT_SPENDING_FILTER).dateFilter,
+    typeFilter: ["", "forms", "enrollment", "card", "invoice"].includes(String(patch.typeFilter ?? ""))
+      ? (String(patch.typeFilter ?? "") as SpendingFilterState["typeFilter"])
+      : DEFAULT_SPENDING_FILTER.typeFilter,
+    advancedQueueFilters,
   };
 }
 
@@ -105,8 +134,14 @@ function builtInSpendingViews(): SpendingSavedView[] {
   return [
     {
       id: "builtin-current-month",
-      name: "Current Month",
+      name: "CC + Invoices",
       filterState: cloneSpendingFilter(DEFAULT_SPENDING_FILTER),
+      builtIn: true,
+    },
+    {
+      id: "builtin-all-current-month",
+      name: "All Spending",
+      filterState: spendingFilterPatch({ typeFilter: "" }),
       builtIn: true,
     },
     {
@@ -332,6 +367,81 @@ function isCardBudgetRow(row: SpendingRow) {
   return isCardRow(row.kind) || invoiceRowLooksLikeCreditCardSpend(row);
 }
 
+function isQueueTransactionRow(row: SpendingRow) {
+  return row.kind === "queue-credit-card" || row.kind === "queue-invoice";
+}
+
+type AdvancedQueueFieldOption = {
+  key: string;
+  label: string;
+  fieldId: string;
+  samples: string[];
+};
+
+const EXTRACTED_QUEUE_FIELDS = [
+  { key: "merchant", label: "Merchant" },
+  { key: "amount", label: "Amount" },
+  { key: "purchaser", label: "Purchaser" },
+  { key: "card", label: "Card" },
+  { key: "cardBucket", label: "Card Bucket" },
+  { key: "expenseType", label: "Expense Type" },
+  { key: "purpose", label: "Purpose" },
+  { key: "customer", label: "Customer" },
+  { key: "customerId", label: "Customer ID" },
+  { key: "grantId", label: "Grant ID" },
+  { key: "lineItemId", label: "Line Item ID" },
+  { key: "status", label: "Status" },
+  { key: "source", label: "Source" },
+  { key: "submissionId", label: "Submission ID" },
+  { key: "month", label: "Month" },
+] as const;
+
+function rawAnswerFields(item?: PaymentQueueItem): ReturnType<typeof buildNormalizedAnswerFields> {
+  const rawAnswers = item?.rawAnswers && typeof item.rawAnswers === "object"
+    ? item.rawAnswers
+    : {};
+  return buildNormalizedAnswerFields(rawAnswers);
+}
+
+function advancedQueueFieldValue(row: SpendingRow, fieldKey: string): string {
+  const queueItem = row.paymentQueueItem;
+  if (!queueItem) return "";
+
+  if (fieldKey.startsWith("raw:")) {
+    const rawKey = fieldKey.slice(4);
+    return rawAnswerFields(queueItem).find((field) => field.key === rawKey)?.value || "";
+  }
+
+  const valueKey = fieldKey.startsWith("field:") ? fieldKey.slice(6) : fieldKey;
+  const extracted: Record<string, unknown> = {
+    merchant: queueItem.merchant || row.vendor || row.title,
+    amount: queueItem.amount ?? row.amountCents / 100,
+    purchaser: queueItem.purchaser || row.purchaser,
+    card: queueItem.card || row.creditCardName,
+    cardBucket: queueItem.cardBucket || row.cardBucket,
+    expenseType: queueItem.expenseType || row.expenseType,
+    purpose: queueItem.purpose,
+    customer: queueItem.customer || row.customerId,
+    customerId: queueItem.customerId || row.customerId,
+    grantId: queueItem.grantId || row.grantId,
+    lineItemId: queueItem.lineItemId || row.lineItemId,
+    status: [queueItem.queueStatus, row.workflowState, row.complianceStatus].filter(Boolean).join(" "),
+    source: queueItem.source || row.sourceLabel,
+    submissionId: queueItem.submissionId || queueItem.paymentId || row.subtitle,
+    month: queueItem.month || row.month,
+  };
+  return jotformValueText(extracted[valueKey]);
+}
+
+function advancedFilterMatches(row: SpendingRow, filter: AdvancedQueueFilter): boolean {
+  const actual = advancedQueueFieldValue(row, filter.fieldKey).trim();
+  if (filter.operator === "empty") return !actual;
+  const expected = filter.value.trim();
+  if (!expected) return true;
+  if (filter.operator === "equals") return actual.toLowerCase() === expected.toLowerCase();
+  return actual.toLowerCase().includes(expected.toLowerCase());
+}
+
 // ---------------------------------------------------------------------------
 // Compact credit card row (no color, no shadow)
 // ---------------------------------------------------------------------------
@@ -396,6 +506,7 @@ function CompactCardRow({
 
 const TYPE_OPTIONS = [
   { id: "" as const, label: "All" },
+  { id: "forms" as const, label: "CC + Invoices" },
   { id: "enrollment" as const, label: "Enrollment" },
   { id: "card" as const, label: "Card" },
   { id: "invoice" as const, label: "Invoice" },
@@ -476,6 +587,86 @@ function RowStatusBadge({ row }: { row: SpendingRow }) {
 // Always receives filterState/onFilterChange from SpendingMain (dashboard wrapper).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Row context menu
+// ---------------------------------------------------------------------------
+
+type ContextMenuState = { x: number; y: number; row: SpendingRow };
+type ContextAction = "invoice-submitted" | "data-entry-complete" | "hmis-complete" | "caseworthy-complete";
+
+function RowContextMenu({
+  menu,
+  acting,
+  onAction,
+}: {
+  menu: ContextMenuState;
+  acting: boolean;
+  onAction: (action: ContextAction) => void;
+}) {
+  const row = menu.row;
+  const ledger = row.ledgerEntry as Record<string, unknown> | undefined;
+  const enrollmentId = String(
+    (row.paymentQueueItem as Record<string, unknown> | undefined)?.enrollmentId ||
+    ledger?.enrollmentId || ""
+  );
+  const paymentId = String(ledger?.paymentId || "");
+  const canPost =
+    (row.kind === "grant-ledger" && !!enrollmentId && !!paymentId) ||
+    ((row.kind === "queue-invoice" || row.kind === "queue-credit-card") &&
+      row.workflowState === "open" &&
+      !!row.grantId &&
+      !!row.lineItemId);
+  const canCompliance = row.kind === "grant-ledger" && !!enrollmentId && !!paymentId;
+
+  const btnCls =
+    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40";
+
+  return (
+    <div
+      className="fixed z-50 min-w-[220px] rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+      style={{ top: menu.y, left: menu.x }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="border-b border-slate-100 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Quick Actions
+      </div>
+      {canPost && (
+        <button type="button" disabled={acting} className={btnCls} onClick={() => onAction("invoice-submitted")}>
+          Invoice Submitted
+        </button>
+      )}
+      {canCompliance && (
+        <>
+          <button type="button" disabled={acting} className={btnCls} onClick={() => onAction("data-entry-complete")}>
+            Data Entry Complete
+          </button>
+          <button type="button" disabled={acting} className={btnCls} onClick={() => onAction("hmis-complete")}>
+            HMIS Complete
+          </button>
+          <button type="button" disabled={acting} className={btnCls} onClick={() => onAction("caseworthy-complete")}>
+            Caseworthy Complete
+          </button>
+        </>
+      )}
+      {!canPost && !canCompliance && (
+        <div className="px-3 py-2 text-sm text-slate-400">No quick actions available</div>
+      )}
+    </div>
+  );
+}
+
+// Dot bg classes from BudgetConfigModal COLOR_DEFS — keyed by color name
+const BUDGET_COLOR_DOT: Record<string, string> = {
+  sky: "bg-sky-500", blue: "bg-blue-500", indigo: "bg-indigo-500",
+  violet: "bg-violet-500", purple: "bg-purple-500", pink: "bg-pink-500",
+  rose: "bg-rose-500", red: "bg-red-500", orange: "bg-orange-500",
+  amber: "bg-amber-500", lime: "bg-lime-500", green: "bg-green-500",
+  emerald: "bg-emerald-500", teal: "bg-teal-500", cyan: "bg-cyan-500",
+  slate: "bg-slate-400",
+};
+
+// ---------------------------------------------------------------------------
+
 type SpendingToolProps = {
   filterState?: SpendingFilterState;
   onFilterChange?: (next: SpendingFilterState) => void;
@@ -484,6 +675,24 @@ type SpendingToolProps = {
 export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const { profile, reloadProfile } = useAuth();
   const { grants, enrollments, grantNameById, customerNameById, sharedDataLoading, sharedDataError, customers } = useDashboardSharedData();
+  const { data: orgConfig } = useOrgConfig();
+
+  // Map grantId[:lineItemId] → color key from the budget display config
+  const grantColorById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of orgConfig?.budgetDisplay?.groups ?? []) {
+      const groupColor = group.color;
+      for (const item of group.items ?? []) {
+        const color = item.color ?? groupColor;
+        if (!color) continue;
+        // Specific line-item entry
+        if (item.lineItemId) map.set(`${item.grantId}:${item.lineItemId}`, color);
+        // Grant-level entry (also used as fallback for any line item of this grant)
+        if (!map.has(`${item.grantId}:`)) map.set(`${item.grantId}:`, color);
+      }
+    }
+    return map;
+  }, [orgConfig]);
   const { sort, onSort, setSortDir } = useTableSort();
   const { filters: columnFilters, setColumnFilter } = useTableColumnFilters();
 
@@ -495,7 +704,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const dateFilter = normalizeComplexDateValue(filterState.dateFilter, filterState.month);
   const month = complexDatePrimaryMonth(dateFilter);
-  const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search } = filterState;
+  const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search, advancedQueueFilters } = filterState;
   const [saveViewName, setSaveViewName] = React.useState("");
   const [savingViews, setSavingViews] = React.useState(false);
   const [modalRow, setModalRow] = React.useState<SpendingRow | null>(null);
@@ -626,13 +835,77 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [bulkPosting, setBulkPosting] = React.useState(false);
+  const [bulkBypassClosing, setBulkBypassClosing] = React.useState(false);
   React.useEffect(() => { setSelectedIds(new Set()); }, [filterState]);
 
   // ── Mutations ────────────────────────────────────────────────────────────
 
   const autoAssignMutation = useAutoAssignLedgerEntries();
+  const bypassCloseMutation = useBypassClosePaymentQueueItems();
   const postMutation = usePostPaymentQueueToLedger();
+  const updateCompliance = usePaymentsUpdateCompliance();
   const syncJotformSelection = useSyncJotformSelection();
+
+  // ── Context menu ──────────────────────────────────────────────────────────
+
+  const [contextMenu, setContextMenu] = React.useState<ContextMenuState | null>(null);
+  const [contextActing, setContextActing] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", onKey); };
+  }, [contextMenu]);
+
+  async function handleContextAction(action: ContextAction, row: SpendingRow) {
+    setContextMenu(null);
+    setContextActing(true);
+    try {
+      const ledger = row.ledgerEntry as Record<string, unknown> | undefined;
+      const enrollmentId = String(
+        (row.paymentQueueItem as Record<string, unknown> | undefined)?.enrollmentId ||
+        ledger?.enrollmentId || ""
+      );
+      const paymentId = String(ledger?.paymentId || "");
+
+      if (action === "invoice-submitted") {
+        if (row.kind === "grant-ledger") {
+          if (!enrollmentId || !paymentId) {
+            toast("Cannot mark invoice — open the row for details.", { type: "error" });
+            return;
+          }
+          await updateCompliance.mutateAsync({ enrollmentId, paymentId, patch: { status: "invoice-submitted" } });
+          toast("Invoice submitted.", { type: "success" });
+        } else {
+          if (!row.paymentQueueItem) { toast("No queue item to post.", { type: "error" }); return; }
+          await postMutation.mutateAsync({ id: row.paymentQueueItem.id });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+            queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
+          ]);
+          toast("Invoice submitted.", { type: "success" });
+        }
+      } else {
+        if (!enrollmentId || !paymentId) {
+          toast("Cannot update compliance — open the row for details.", { type: "error" });
+          return;
+        }
+        const patch: { hmisComplete?: boolean; caseworthyComplete?: boolean } =
+          action === "data-entry-complete" ? { hmisComplete: true, caseworthyComplete: true }
+          : action === "hmis-complete" ? { hmisComplete: true }
+          : { caseworthyComplete: true };
+        await updateCompliance.mutateAsync({ enrollmentId, paymentId, patch });
+        toast("Compliance updated.", { type: "success" });
+      }
+    } catch (e: unknown) {
+      toast(toApiError(e, "Action failed.").error, { type: "error" });
+    } finally {
+      setContextActing(false);
+    }
+  }
 
   // ── Derived lookups ──────────────────────────────────────────────────────
 
@@ -743,6 +1016,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     !!filterState.search ||
     !!filterState.customerId ||
     !!filterState.cmId ||
+    filterState.advancedQueueFilters.length > 0 ||
     !!filterState.showReversals;
 
   // ── Row assembly ─────────────────────────────────────────────────────────
@@ -845,10 +1119,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       const queueStatus = String(queueItem.queueStatus || "pending").toLowerCase();
       const amountCents = Math.round(Number(queueItem.amount || 0) * 100);
       const workflowState: SpendingWorkflowState = queueStatus === "posted" ? "closed" : "open";
+      const bypassClosed = !!queueItem.closedBypassLedger;
       const isProjection = source === "projection";
       const queueVendor = String(queueItem.merchant || "").trim();
       const queueExpenseType = String((queueItem as any).expenseType || (queueItem as any).descriptor || "").trim();
       const queuePurchaser = String((queueItem as any).purchaser || "").trim();
+      const queueRawSearch = rawAnswerFields(queueItem).map((field) => `${field.label} ${field.key} ${field.value}`).join(" ");
 
       rows.push({
         id: `queue:${queueId}`,
@@ -863,7 +1139,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         workflowState,
         workflowReason:
           workflowState === "closed"
-            ? "Posted to ledger"
+            ? bypassClosed ? "Closed without ledger" : "Posted to ledger"
             : isProjection
             ? "Projected spend, not yet paid"
             : "Waiting to post",
@@ -879,7 +1155,22 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         expenseType: queueExpenseType,
         purchaser: queuePurchaser,
         isReversal: amountCents < 0 || String((queueItem as any).direction || "").toLowerCase() === "return",
-        searchText: [merchant, queueVendor, queueExpenseType, queueItem.grantId, queueItem.lineItemId, queueItem.customerId].join(" ").toLowerCase(),
+        searchText: [
+          merchant,
+          queueVendor,
+          queueExpenseType,
+          queuePurchaser,
+          queueItem.card,
+          queueItem.cardBucket,
+          queueItem.purpose,
+          queueItem.customer,
+          queueItem.grantId,
+          queueItem.lineItemId,
+          queueItem.customerId,
+          queueItem.queueStatus,
+          queueItem.submissionId,
+          queueRawSearch,
+        ].join(" ").toLowerCase(),
         linkedLedgerId: String(queueItem.ledgerEntryId || "") || undefined,
         reversalLedgerId: String(queueItem.reversalEntryId || "") || undefined,
         paymentQueueItem: queueItem,
@@ -975,6 +1266,68 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     return Array.from(buckets).sort();
   }, [creditCardSummaries]);
 
+  const queueRowsForFieldDiscovery = React.useMemo(
+    () => allRows.filter((row) => isQueueTransactionRow(row) && (!row.date || complexDateMatchesIsoDate(dateFilter, row.date))),
+    [allRows, dateFilter]
+  );
+
+  const advancedQueueFieldOptions = React.useMemo<AdvancedQueueFieldOption[]>(() => {
+    const byKey = new Map<string, AdvancedQueueFieldOption>();
+    const addSample = (key: string, label: string, fieldId: string, value: unknown) => {
+      const text = jotformValueText(value).trim();
+      const option = byKey.get(key) || { key, label, fieldId, samples: [] };
+      if (text && !option.samples.includes(text) && option.samples.length < 3) option.samples.push(text);
+      byKey.set(key, option);
+    };
+
+    for (const row of queueRowsForFieldDiscovery) {
+      for (const field of EXTRACTED_QUEUE_FIELDS) {
+        addSample(`field:${field.key}`, field.label, field.key, advancedQueueFieldValue(row, `field:${field.key}`));
+      }
+      for (const field of rawAnswerFields(row.paymentQueueItem)) {
+        addSample(`raw:${field.key}`, field.label || field.key, field.key, field.value);
+      }
+    }
+
+    return Array.from(byKey.values()).sort((a, b) => {
+      const aRaw = a.key.startsWith("raw:");
+      const bRaw = b.key.startsWith("raw:");
+      if (aRaw !== bRaw) return aRaw ? 1 : -1;
+      return a.label.localeCompare(b.label);
+    });
+  }, [queueRowsForFieldDiscovery]);
+
+  const updateAdvancedQueueFilter = React.useCallback((id: string, patch: Partial<AdvancedQueueFilter>) => {
+    setFilter({
+      advancedQueueFilters: advancedQueueFilters.map((filter) =>
+        filter.id === id ? { ...filter, ...patch } : filter
+      ),
+    });
+  }, [advancedQueueFilters, setFilter]);
+
+  const addAdvancedQueueFilter = React.useCallback(() => {
+    const firstFieldKey = advancedQueueFieldOptions[0]?.key || "field:merchant";
+    setFilter({
+      advancedQueueFilters: [
+        ...advancedQueueFilters,
+        {
+          id: `advanced-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          fieldKey: firstFieldKey,
+          operator: "contains",
+          value: "",
+        },
+      ],
+      typeFilter: typeFilter || "forms",
+    });
+    setShowFilters(true);
+  }, [advancedQueueFieldOptions, advancedQueueFilters, setFilter, typeFilter]);
+
+  const removeAdvancedQueueFilter = React.useCallback((id: string) => {
+    setFilter({
+      advancedQueueFilters: advancedQueueFilters.filter((filter) => filter.id !== id),
+    });
+  }, [advancedQueueFilters, setFilter]);
+
   const getSpendingColumnValue = React.useCallback((row: SpendingRow, col: string, part = "header") => {
     const info = lineItemLookup.get(`${row.grantId}:${row.lineItemId}`);
     const isEnrollment = row.kind === "grant-ledger" || row.kind === "queue-projection";
@@ -1025,6 +1378,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     return allRows.filter((row) => {
       const typePass =
         !typeFilter ? true
+        : typeFilter === "forms" ? isQueueTransactionRow(row)
         : typeFilter === "enrollment" ? (row.kind === "grant-ledger" || row.kind === "queue-projection")
         : typeFilter === "card" ? isCardBudgetRow(row)
         : typeFilter === "invoice" ? row.kind === "queue-invoice"
@@ -1048,10 +1402,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         || ""
       );
       const cmIdPass = !filterCmId || rawRowCmId === filterCmId;
+      const advancedPass = !advancedQueueFilters.length
+        || (isQueueTransactionRow(row) && advancedQueueFilters.every((filter) => advancedFilterMatches(row, filter)));
       return typePass && workflowPass && datePass && searchPass && cardPass && grantPass
-        && bucketPass && reversalPass && customerIdPass && cmIdPass;
+        && bucketPass && reversalPass && customerIdPass && cmIdPass && advancedPass;
     });
-  }, [allRows, cardBucketFilter, cardFilterId, dateFilter, search, typeFilter, workflowFilter, grantId, filterState, cmIdByCustomerId]);
+  }, [allRows, advancedQueueFilters, cardBucketFilter, cardFilterId, dateFilter, search, typeFilter, workflowFilter, grantId, filterState, cmIdByCustomerId]);
 
   // ── Sort + Pagination ────────────────────────────────────────────────────
 
@@ -1229,35 +1585,114 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   }
 
   async function onBulkPost() {
-    const postable = filteredRows.filter(
-      (r) =>
-        selectedIds.has(r.id) &&
-        r.paymentQueueItem &&
-        r.workflowState === "open" &&
-        r.grantId &&
-        r.lineItemId
+    const selected = filteredRows.filter((r) => selectedIds.has(r.id));
+    const alreadyClosed = selected.filter((r) => r.workflowState === "closed" || !r.paymentQueueItem);
+    const postable = selected.filter(
+      (r) => r.paymentQueueItem && r.workflowState === "open" && r.grantId && r.lineItemId
     );
+    const unassigned = selected.filter(
+      (r) => r.paymentQueueItem && r.workflowState === "open" && (!r.grantId || !r.lineItemId)
+    );
+
     if (!postable.length) {
-      toast("No selected rows are ready to post — each needs a grant and line item assigned.", { type: "error" });
+      const parts = [
+        alreadyClosed.length ? `${alreadyClosed.length} already posted` : null,
+        unassigned.length ? `${unassigned.length} missing grant/line item` : null,
+      ].filter(Boolean).join(", ");
+      toast(
+        parts ? `Nothing to post — ${parts}.` : "No selected rows are ready to post — each needs a grant and line item assigned.",
+        { type: "error" }
+      );
       return;
     }
+
     setBulkPosting(true);
     let success = 0;
+    let skipped = alreadyClosed.length;
     let failed = 0;
+    let aborted = false;
+
     for (const row of postable) {
       try {
         await postMutation.mutateAsync({ id: row.paymentQueueItem!.id });
         success++;
-      } catch {
-        failed++;
+      } catch (e: unknown) {
+        const msg = String(toApiError(e).error || "").toLowerCase();
+        // Auth failures trigger the global logout handler — abort the loop immediately
+        // so we don't fire more requests into a broken auth state.
+        if (msg.includes("session") || msg.includes("sign in") || msg.includes("unauthenticated") || msg.includes("expired")) {
+          aborted = true;
+          break;
+        }
+        // Item already posted on the server (stale UI state) — skip gracefully
+        if (/already.post|already_exist|conflict|duplicate|posted/i.test(msg)) {
+          skipped++;
+        } else {
+          failed++;
+        }
       }
     }
+
     setBulkPosting(false);
-    setSelectedIds(new Set());
-    toast(
-      `Posted ${success} row(s)${failed ? `, ${failed} failed` : ""}.`,
-      { type: success > 0 ? "success" : "error" }
+    if (!aborted) setSelectedIds(new Set());
+
+    if (aborted) {
+      toast("Session error during bulk post — please refresh and try again.", { type: "error" });
+      return;
+    }
+
+    const parts = [
+      success > 0 ? `${success} posted` : null,
+      skipped > 0 ? `${skipped} skipped (already posted)` : null,
+      unassigned.length > 0 ? `${unassigned.length} skipped (no grant/line item)` : null,
+      failed > 0 ? `${failed} failed` : null,
+    ].filter(Boolean).join(", ");
+    toast(parts || "Nothing posted.", { type: success > 0 ? "success" : "error" });
+  }
+
+  async function onBulkBypassClose() {
+    const selected = filteredRows.filter((r) => selectedIds.has(r.id));
+    const closable = selected.filter((r) =>
+      isQueueTransactionRow(r) && r.paymentQueueItem && r.workflowState === "open"
     );
+    if (!closable.length) {
+      toast("No selected open credit-card or invoice queue rows can be bypass closed.", { type: "error" });
+      return;
+    }
+
+    const totalCents = closable.reduce((sum, row) => sum + row.amountCents, 0);
+    const creditCardCount = closable.filter((row) => row.kind === "queue-credit-card").length;
+    const invoiceCount = closable.filter((row) => row.kind === "queue-invoice").length;
+    const ignoredCount = selected.length - closable.length;
+    const confirmed = window.confirm([
+      `Bypass close ${closable.length} selected queue row${closable.length === 1 ? "" : "s"}?`,
+      `Total amount: ${fmtCurrencyUSD(totalCents / 100)}`,
+      `Sources: ${creditCardCount} credit card, ${invoiceCount} invoice`,
+      ignoredCount > 0 ? `${ignoredCount} selected row${ignoredCount === 1 ? "" : "s"} will be ignored.` : "",
+      "",
+      "Warning: this marks the queue rows closed without creating ledger entries, assigning grants or line items, or adjusting budgets.",
+    ].filter(Boolean).join("\n"));
+    if (!confirmed) return;
+
+    setBulkBypassClosing(true);
+    try {
+      const result = await bypassCloseMutation.mutateAsync({
+        ids: closable.map((row) => row.paymentQueueItem!.id),
+        reason: "Bypass closed from Spending tracker selected rows",
+      });
+      await queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root });
+      setSelectedIds(new Set());
+      const closed = Number(result?.closed?.length || 0);
+      const skipped = Number(result?.skipped?.length || 0);
+      toast(
+        `${closed} bypass closed${skipped ? `, ${skipped} skipped` : ""}.`,
+        { type: closed > 0 ? "success" : "error" }
+      );
+    } catch (e: unknown) {
+      toast(toApiError(e, "Failed to bypass close selected rows.").error, { type: "error" });
+    } finally {
+      setBulkBypassClosing(false);
+    }
   }
 
   function onBulkExport() {
@@ -1469,6 +1904,78 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
               </button>
             </div>
 
+            <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Advanced Filters</span>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-ghost"
+                  onClick={addAdvancedQueueFilter}
+                  disabled={advancedQueueFieldOptions.length === 0}
+                >
+                  Add field filter
+                </button>
+                <span className="text-[11px] text-slate-500">
+                  {queueRowsForFieldDiscovery.length} loaded CC/invoice row{queueRowsForFieldDiscovery.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {advancedQueueFilters.length > 0 ? (
+                <div className="space-y-1.5">
+                  {advancedQueueFilters.map((filter) => {
+                    const selectedOption = advancedQueueFieldOptions.find((option) => option.key === filter.fieldKey);
+                    return (
+                      <div key={filter.id} className="grid gap-1 md:grid-cols-[minmax(220px,1fr)_120px_minmax(160px,240px)_auto] md:items-start">
+                        <select
+                          className="input input-xs w-full"
+                          value={filter.fieldKey}
+                          onChange={(e) => updateAdvancedQueueFilter(filter.id, { fieldKey: e.currentTarget.value })}
+                        >
+                          {advancedQueueFieldOptions.map((option) => (
+                            <option key={option.key} value={option.key}>
+                              {option.label} [{option.fieldId}]{option.samples.length ? ` - ${option.samples.join(" | ")}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="input input-xs w-full"
+                          value={filter.operator}
+                          onChange={(e) => updateAdvancedQueueFilter(filter.id, { operator: e.currentTarget.value as AdvancedQueueFilterOperator })}
+                        >
+                          <option value="contains">contains</option>
+                          <option value="equals">equals</option>
+                          <option value="empty">is empty</option>
+                        </select>
+                        <input
+                          className="input input-xs w-full"
+                          value={filter.value}
+                          disabled={filter.operator === "empty"}
+                          onChange={(e) => updateAdvancedQueueFilter(filter.id, { value: e.currentTarget.value })}
+                          placeholder={filter.operator === "empty" ? "" : "Value"}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-ghost text-slate-500"
+                          onClick={() => removeAdvancedQueueFilter(filter.id)}
+                        >
+                          Remove
+                        </button>
+                        {selectedOption?.samples.length ? (
+                          <div className="text-[10px] text-slate-500 md:col-span-4">
+                            {selectedOption.key.startsWith("raw:") ? "Raw Jotform" : "Extracted"} field {selectedOption.fieldId}: {selectedOption.samples.join(" | ")}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-500">
+                  Add filters to search loaded credit-card and invoice queue fields.
+                </div>
+              )}
+            </div>
+
             {/* Actions */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[10px] uppercase tracking-wide text-slate-400">Actions</span>
@@ -1542,10 +2049,18 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            disabled={bulkPosting}
+            disabled={bulkPosting || bulkBypassClosing}
             onClick={() => void onBulkPost()}
           >
             {bulkPosting ? "Posting…" : "Post to Ledger"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost text-amber-700"
+            disabled={bulkPosting || bulkBypassClosing}
+            onClick={() => void onBulkBypassClose()}
+          >
+            {bulkBypassClosing ? "Closing..." : "Bypass Close"}
           </button>
           <button
             type="button"
@@ -1685,8 +2200,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                       selectedIds.has(r.id) ? "bg-sky-50/60" : "",
                     ].join(" ")}
                     onClick={() => { setModalRow(r); setModalOpen(true); }}
+                    onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, row: r }); }}
                   >
-                    {/* Checkbox */}
+                    {/* Checkbox — td onClick handles toggle; onChange is no-op to avoid double-fire */}
                     <td
                       className="w-8 px-2"
                       onClick={(e) => { e.stopPropagation(); toggleRow(r.id); }}
@@ -1695,7 +2211,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                         type="checkbox"
                         className="checkbox checkbox-xs"
                         checked={selectedIds.has(r.id)}
-                        onChange={() => toggleRow(r.id)}
+                        onChange={() => {}}
                       />
                     </td>
                     {/* Date · Type — compact combined column */}
@@ -1733,9 +2249,21 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
                     {/* Service — grant + line item + expense type chips */}
                     <td className="min-w-0">
-                      {grantName && (
-                        <div className="text-sm font-medium text-slate-800 truncate max-w-[200px]">{grantName}</div>
-                      )}
+                      {grantName && (() => {
+                        const colorKey =
+                          grantColorById.get(`${r.grantId}:${r.lineItemId}`) ??
+                          grantColorById.get(`${r.grantId}:`) ??
+                          null;
+                        const dotClass = colorKey ? (BUDGET_COLOR_DOT[colorKey] ?? "") : "";
+                        return (
+                          <div className="flex items-center gap-1.5 truncate">
+                            {dotClass && (
+                              <span className={`shrink-0 h-2 w-2 rounded-full ${dotClass}`} title={colorKey ?? ""} />
+                            )}
+                            <span className="text-sm font-medium text-slate-800 truncate max-w-[190px]">{grantName}</span>
+                          </div>
+                        );
+                      })()}
                       {lineItemLabel && (
                         <div className="text-[11px] text-slate-500 truncate max-w-[200px]">{lineItemLabel}</div>
                       )}
@@ -1809,6 +2337,15 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         cardBudget={modalRow?.creditCardId ? (cardBudgetById.get(modalRow.creditCardId) ?? null) : null}
         workflowTask={modalRow?.taskToken ? (openTaskByToken.get(modalRow.taskToken) ?? null) : null}
       />
+
+      {/* ── Row context menu ──────────────────────────────────────────────── */}
+      {contextMenu && (
+        <RowContextMenu
+          menu={contextMenu}
+          acting={contextActing}
+          onAction={(action) => void handleContextAction(action, contextMenu.row)}
+        />
+      )}
     </div>
   );
 }

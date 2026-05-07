@@ -6,6 +6,7 @@ import {primarySubtype} from '../payments/utils';
 import {
   type TPaymentQueueItem,
   type TPaymentQueueListBody,
+  type TPaymentQueueBypassCloseBody,
   type TPaymentQueuePatchBody,
   type TPaymentQueuePostToLedgerBody,
   type TPaymentQueueReopenBody,
@@ -493,7 +494,18 @@ export async function syncEnrollmentProjectionQueueItems(args: {
   const currentIds = new Set<string>();
   const batch = db.batch();
 
-  for (const raw of args.payments || []) {
+  // Batch-read all projection docs for this enrollment's payments in one round-trip.
+  const payments = (args.payments || []) as Array<Record<string, unknown>>;
+  const potentialRefs = payments
+    .map((p) => {
+      const pid = String(p.id || '').trim();
+      return pid ? db.collection(COLLECTION).doc(projectionQueueDocId(enrollmentId, pid)) : null;
+    })
+    .filter((r): r is FirebaseFirestore.DocumentReference => r !== null);
+  const existingSnaps = potentialRefs.length > 0 ? await db.getAll(...potentialRefs) : [];
+  const existingMap = new Map(existingSnaps.map((s) => [s.id, s]));
+
+  for (const raw of payments) {
     const payment = raw as Record<string, unknown>;
     const paymentId = String(payment.id || '').trim();
     const dueDate = String(payment.dueDate || payment.date || '').slice(0, 10);
@@ -509,8 +521,8 @@ export async function syncEnrollmentProjectionQueueItems(args: {
     currentIds.add(docId);
 
     const ref = db.collection(COLLECTION).doc(docId);
-    const existing = await ref.get();
-    const prev = existing.exists ? (existing.data() as TPaymentQueueItem) : null;
+    const existing = existingMap.get(docId);
+    const prev = existing?.exists ? (existing.data() as TPaymentQueueItem) : null;
     const doc = buildProjectionQueueItem({
       context: {
         orgId: args.orgId,
@@ -716,6 +728,64 @@ export async function postPaymentQueueToLedger(
   return txResult;
 }
 
+export async function bypassClosePaymentQueueItems(
+    body: TPaymentQueueBypassCloseBody,
+    actorUid?: string,
+): Promise<{ closed: string[]; skipped: Array<{ id: string; reason: string }> }> {
+  const ids = Array.from(new Set(body.ids.map((id) => String(id || '').trim()).filter(Boolean)));
+  if (!ids.length) return {closed: [], skipped: []};
+
+  const refs = ids.map((id) => db.collection(COLLECTION).doc(id));
+  const snaps = await db.getAll(...refs);
+  const now = isoNow();
+  const actor = actorUid ?? body.postedBy ?? null;
+  const reason = body.reason ? String(body.reason).trim() : null;
+  const batch = db.batch();
+  const closed: string[] = [];
+  const skipped: Array<{ id: string; reason: string }> = [];
+
+  snaps.forEach((snap, index) => {
+    const id = ids[index];
+    if (!snap.exists) {
+      skipped.push({id, reason: 'not_found'});
+      return;
+    }
+
+    const item = docToItem(snap);
+    if (item.source !== 'credit-card' && item.source !== 'invoice') {
+      skipped.push({id, reason: 'unsupported_source'});
+      return;
+    }
+    if (item.queueStatus === 'void') {
+      skipped.push({id, reason: 'void'});
+      return;
+    }
+    if (item.queueStatus === 'posted') {
+      skipped.push({id, reason: 'already_posted'});
+      return;
+    }
+
+    batch.update(snap.ref, removeUndefinedDeep({
+      'queueStatus': 'posted',
+      'postedAt': now,
+      'postedBy': actor,
+      'compliance.hmisComplete': true,
+      'compliance.caseworthyComplete': true,
+      'closedBypassLedger': true,
+      'closedBypassLedgerAt': now,
+      'closedBypassLedgerBy': actor,
+      'closedBypassLedgerReason': reason,
+      'updatedAtISO': now,
+      'system.lastWriter': 'paymentQueueBypassClose',
+      'system.lastWriteAt': now,
+    }) as any);
+    closed.push(id);
+  });
+
+  if (closed.length) await batch.commit();
+  return {closed, skipped};
+}
+
 export async function reopenPaymentQueueItem(
     id: string,
     body: TPaymentQueueReopenBody,
@@ -828,13 +898,19 @@ export async function upsertPaymentQueueItems(
   if (items.length === 0) return;
 
   const now = isoNow();
+
+  // Batch-read all existing docs in a single round-trip instead of N sequential gets.
+  const refs = items.map(({extracted}) => db.collection(COLLECTION).doc(extracted.id));
+  const existingSnaps = await db.getAll(...refs);
+  const existingMap = new Map(existingSnaps.map((s) => [s.id, s]));
+
   const batch = db.batch();
 
   for (const {extracted, orgId} of items) {
     const ref = db.collection(COLLECTION).doc(extracted.id);
-    const existing = await ref.get();
-    const isNew = !existing.exists;
-    const prev = isNew ? null : (existing.data() as TPaymentQueueItem);
+    const existing = existingMap.get(extracted.id);
+    const isNew = !existing?.exists;
+    const prev = isNew ? null : (existing!.data() as TPaymentQueueItem);
 
     // Preserve downstream linking & workflow fields from existing doc
     const preserved = prev ?

@@ -39,6 +39,9 @@ export type PaymentQueueItem = Record<string, unknown> & {
   queueStatus?: "pending" | "posted" | "void";
   createdAt?: string;
   postedAt?: string | null;
+  closedBypassLedger?: boolean;
+  closedBypassLedgerAt?: string | null;
+  rawAnswers?: Record<string, unknown>;
   reopenedAt?: string | null;
   rawMeta?: Record<string, unknown>;
   localModified?: boolean;
@@ -92,6 +95,18 @@ export type PaymentQueuePostReq = {
   postedBy?: string;
 };
 
+export type PaymentQueueBypassCloseReq = {
+  ids: string[];
+  reason?: string;
+  postedBy?: string;
+};
+
+export type PaymentQueueBypassCloseResp = {
+  ok: true;
+  closed: string[];
+  skipped: Array<{ id: string; reason: string }>;
+};
+
 export type PaymentQueueReopenReq = {
   reason?: string;
   reopenedBy?: string;
@@ -127,6 +142,12 @@ const PaymentQueue = {
       body: { ...body, id },
       idempotencyKey: idemKey({ scope: "paymentQueue", op: "postToLedger", id, body }),
     }) as Promise<{ ok: true; queueItem: PaymentQueueItem; ledgerEntryId: string }>,
+
+  bypassClose: (body: PaymentQueueBypassCloseReq) =>
+    api.call("paymentQueueBypassClose", {
+      body,
+      idempotencyKey: idemKey({ scope: "paymentQueue", op: "bypassClose", body }),
+    }) as Promise<PaymentQueueBypassCloseResp>,
 
   reopen: (id: string, body: PaymentQueueReopenReq = {}) =>
     api.call("paymentQueueReopen", {
