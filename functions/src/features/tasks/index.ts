@@ -70,7 +70,13 @@ export const tasksAdminRegenerateForGrant = secureHandler(
 export { tasksBulkStatus, tasksList, tasksReschedule, tasksUpsertManual };
 
 // Firestore triggers
-export { onEnrollmentBuildTasks, onEnrollmentAutoAssignCM, onOtherTaskWrite } from "./triggers";
+// Deprecated task lifecycle generators are intentionally no longer exported:
+// - onEnrollmentBuildTasks
+// - onEnrollmentAutoAssignCM
+//
+// Keep the lightweight otherTasks -> userTasks indexer. That path supports the
+// reminder/notification model used by digest emails and customer/workload flags.
+export { onOtherTaskWrite } from "./triggers";
 
 // Other tasks collection routes
 export const tasksOtherCreate = createOtherTask;

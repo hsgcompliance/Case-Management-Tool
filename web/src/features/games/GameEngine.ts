@@ -80,7 +80,7 @@ export const PLAYER_H = 26;
 export const BALL_RADIUS = 9;
 const GRAVITY = 0.48;
 const PLAYER_SPEED = 3.5;
-const PLAYER_JUMP_VY = -11;
+const PLAYER_JUMP_VY = -8;    // was -11; lower = jump clears balls but can't skip floors
 const CLIMB_SPEED = 2.8;
 const LADDER_GRAB_RANGE = 22; // px from ladder center to grab it
 const BOSS_WIN_RANGE = 60;    // px from boss to win level
@@ -91,9 +91,9 @@ const MIN_ROWS = 3;
 
 function levelParams(level: number) {
   return {
-    maxBalls: Math.min(1 + Math.floor((level - 1) * 0.7), 5),
-    throwInterval: Math.max(55, 200 - (level - 1) * 18),
-    ballSpeed: Math.min(1.8 + (level - 1) * 0.35, 5.0),
+    maxBalls: Math.min(2 + Math.floor((level - 1) * 0.8), 6), // start with 2 for immediate pressure
+    throwInterval: Math.max(45, 140 - (level - 1) * 12),      // faster cadence
+    ballSpeed: Math.min(3.0 + (level - 1) * 0.4, 6.5),       // was 1.8 — too slow to threaten
   };
 }
 
@@ -127,6 +127,45 @@ function platformAt(platforms: Platform[], x: number): Platform | null {
   return platforms.find((p) => x >= p.x && x <= p.x + p.width) ?? null;
 }
 
+// ─── Platform refinement ─────────────────────────────────────────────────────
+
+/**
+ * Inset every platform from its card rect and add per-platform jitter so the
+ * layout doesn't look like a CSS grid.
+ *
+ * Rules:
+ *   - Inset each side by max(INSET_MIN, width * INSET_PCT) — wider cards shrink more
+ *   - Add seeded-random x-offset and width variation per platform
+ *   - Clamp to viewport and filter anything too narrow to stand on
+ */
+export function refinePlatforms(platforms: Platform[], viewportW: number): Platform[] {
+  const INSET_MIN = 55;    // minimum px shaved from each horizontal edge
+  const INSET_PCT = 0.13;  // also inset by 13% of the card width per side
+  const X_JITTER  = 38;    // ± px random x shift
+  const W_JITTER  = 24;    // ± px random width adjustment
+  const MIN_W     = 90;    // discard platforms narrower than this after inset
+
+  return platforms
+    .map((p) => {
+      // Deterministic RNG seeded by card position — same card → same jitter every launch
+      let seed = ((Math.round(p.x) * 2654435761) ^ (Math.round(p.y) * 1013904223)) >>> 0;
+      const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
+
+      const inset = Math.max(INSET_MIN, p.width * INSET_PCT);
+      const xOff  = (rand() - 0.5) * X_JITTER * 2;
+      const wOff  = (rand() - 0.5) * W_JITTER * 2;
+
+      const rawX = p.x + inset + xOff;
+      const rawW = p.width - inset * 2 + wOff;
+
+      const x     = Math.round(Math.max(16, Math.min(viewportW - MIN_W - 16, rawX)));
+      const width = Math.round(Math.max(MIN_W, Math.min(viewportW - x - 16, rawW)));
+
+      return { ...p, x, width };
+    })
+    .filter((p) => p.width >= MIN_W);
+}
+
 // ─── Build ladders ────────────────────────────────────────────────────────────
 
 /**
@@ -150,17 +189,17 @@ export function buildLadders(platforms: Platform[]): Ladder[] {
     const up = rowExtent(upperPlatforms);
     const lo = rowExtent(lowerPlatforms);
 
-    // Shared X range between the two rows
-    const sharedLeft = Math.max(up.left, lo.left) + 40;
-    const sharedRight = Math.min(up.right, lo.right) - 40;
+    // Shared X range between the two rows — small margin so ladders don't sit at the very edge
+    const sharedLeft = Math.max(up.left, lo.left) + 20;
+    const sharedRight = Math.min(up.right, lo.right) - 20;
 
-    if (sharedRight - sharedLeft < 60) continue; // rows don't overlap enough
+    if (sharedRight - sharedLeft < 40) continue; // rows don't overlap enough
 
     const upperSurface = rowSurface(upperPlatforms);
     const lowerSurface = rowSurface(lowerPlatforms);
 
-    // Place 2 ladders at 30% and 70% of shared range
-    for (const frac of [0.30, 0.70]) {
+    // Place 3 ladders at 20%, 50%, 80% of shared range
+    for (const frac of [0.20, 0.50, 0.80]) {
       const lx = sharedLeft + (sharedRight - sharedLeft) * frac;
       ladders.push({
         id: id++,
@@ -313,12 +352,18 @@ export function tick(state: GameState, keys: Set<string>): GameState {
   }
   if (boss.animPhase === 'throw') {
     if (balls.length < maxBalls) {
-      // Spawn ball from boss position rolling right
+      // Throw toward the player's horizontal side so the ball is always a threat.
+      // Boss sits at the left; if player is to the right the ball rolls right (toward them).
+      // If the player has climbed up and is now left of boss, throw left instead.
+      const playerCx = player.x + PLAYER_W / 2;
+      const bossCx = boss.x + 22;
+      const throwDir = playerCx >= bossCx ? 1 : -1;
+      const spawnX = throwDir > 0 ? boss.x + 44 : boss.x - 2;
       const newBall: Ball = {
         id: boss.nextBallId++,
-        x: boss.x + 40,
+        x: spawnX,
         y: boss.y + 20,
-        vx: ballSpeed,
+        vx: throwDir * ballSpeed,
         vy: 0,
         row: -1, // will land on topmost row
         radius: BALL_RADIUS,

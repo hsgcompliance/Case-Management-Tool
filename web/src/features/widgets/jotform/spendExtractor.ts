@@ -52,6 +52,9 @@ export const SPEND_ERR = {
 
   /**  amount could not be parsed as a finite number; stored as 0 */
   AMOUNT_UNPARSEABLE: "SPEND_ERR_AMOUNT_UNPARSEABLE",
+
+  /** A summary/overall cost did not match extracted transaction lines. */
+  AMOUNT_MISMATCH: "SPEND_ERR_AMOUNT_MISMATCH",
 } as const;
 
 export type SpendErrCode = (typeof SPEND_ERR)[keyof typeof SPEND_ERR];
@@ -108,6 +111,16 @@ export type SpendLineItem = {
   // ── Amount ────────────────────────────────────────────────────────────────
   /** Dollar amount (not cents) */
   amount: number;
+  amountAbs?: number;
+  direction?: "charge" | "return";
+  directionFieldId?: string | null;
+  amountFieldId?: string | null;
+  extractionGroup?: {
+    kind: "purchase" | "return" | "fallback";
+    index: number | null;
+    orderRange?: [number, number] | null;
+    fieldIds?: Record<string, string | null>;
+  };
 
   // ── Counterparty / vendor ─────────────────────────────────────────────────
   merchant: string;
@@ -279,7 +292,7 @@ function getAns(answers: AnyObj, id: string | null | undefined): unknown {
   return entry.prettyFormat ?? "";
 }
 
-function getFiles(answers: AnyObj, ids: string[]): string[] {
+function getFiles(answers: AnyObj, ids: readonly string[]): string[] {
   const out: string[] = [];
   for (const id of ids) {
     const v = getAns(answers, id);
@@ -302,6 +315,10 @@ function parseMoney(v: unknown, errors?: SpendExtractionError[], fieldId?: strin
 
 function parseYes(v: unknown): boolean {
   return /^(y|yes|true)\b/i.test(asText(v));
+}
+
+function isReturnSubmission(answers: AnyObj): boolean {
+  return /made\s+a\s+return|return/i.test(asText(getAns(answers, CC_SCHEMA.globals.type)));
 }
 
 /** Canonical ISO datetime parser */
@@ -437,19 +454,22 @@ function extractCreditCard(
 ): SpendLineItem[] {
   const answers = ((sub.answers || {}) as AnyObj);
   const rawStatus = asText(sub.status || "");
+  const returnSubmission = isReturnSubmission(answers);
   const createdAt =
+    (returnSubmission ? toISO(getAns(answers, CC_SCHEMA.globals.returnDateTime)) : "") ||
     toISO(getAns(answers, CC_SCHEMA.globals.checkoutDateTime)) ||
     toISO(sub.created_at) ||
     new Date().toISOString();
   const month = toMonth(createdAt);
 
-  const cardUsed = canonicalCard(getAns(answers, CC_SCHEMA.globals.cardUsed));
+  const cardUsed = canonicalCard(getAns(answers, returnSubmission ? CC_SCHEMA.returnRecord.cardUsed : CC_SCHEMA.globals.cardUsed));
   const cardChoice = canonicalCard(getAns(answers, CC_SCHEMA.globals.cardChoice));
   const card = cardUsed || cardChoice || "Card";
   const cardBucket = bucketCard(card);
 
   const purchaser = asText(getAns(answers, CC_SCHEMA.globals.purchaserName));
-  const email = asText(getAns(answers, CC_SCHEMA.globals.email));
+  const email = (returnSubmission ? asText(getAns(answers, CC_SCHEMA.returnRecord.email)) : "") ||
+    asText(getAns(answers, CC_SCHEMA.globals.email));
 
   const uploadAll = getFiles(answers, [CC_SCHEMA.globals.uploadAllTxn1]);
 
@@ -462,11 +482,111 @@ function extractCreditCard(
   const items: Array<Omit<SpendLineItem, "submissionIsFlex" | "isFlex" | "flexReasons"> & { _txnFlex: boolean }> = [];
   const errors: SpendExtractionError[] = [];
 
+  if (returnSubmission) {
+    const tx = CC_SCHEMA.returnRecord;
+    const amountAbs = Math.abs(parseMoney(getAns(answers, tx.cost), errors, tx.cost));
+    const merchant = asText(getAns(answers, tx.merchant));
+    const expenseType = asText(getAns(answers, tx.expenseType));
+    const purpose = asText(getAns(answers, tx.purpose));
+    const supportiveProgram = asText(getAns(answers, tx.supportiveProgram));
+    const programOperations = asText(getAns(answers, tx.programOperations));
+    const tssCategory = asText(getAns(answers, tx.tssCategory));
+    const customer = asText(getAns(answers, tx.customerName));
+    const notes = asText(getAns(answers, tx.notes));
+    const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
+    const txnFiles = getFiles(answers, tx.files || []);
+    const program = programOperations || tssCategory || supportiveProgram;
+    anyFlex = anyFlex || isFlexTxn;
+
+    items.push({
+      id: `${sub.id}-return`,
+      baseId: asText(sub.id),
+      submissionId: asText(sub.id),
+      formId,
+      formAlias,
+      formTitle,
+      schemaVersion: SCHEMA_VERSION,
+      source: "credit-card",
+      createdAt,
+      month,
+      amount: -amountAbs,
+      amountAbs,
+      direction: "return",
+      directionFieldId: CC_SCHEMA.globals.type,
+      amountFieldId: tx.cost,
+      extractionGroup: {
+        kind: "return",
+        index: 1,
+        orderRange: [91, 109],
+        fieldIds: {
+          cardUsed: tx.cardUsed,
+          merchant: tx.merchant,
+          expenseType: tx.expenseType,
+          supportiveProgram: tx.supportiveProgram,
+          tssCategory: tx.tssCategory,
+          programOperations: tx.programOperations,
+          customerName: tx.customerName,
+          purpose: tx.purpose,
+          cost: tx.cost,
+          notes: tx.notes,
+        },
+      },
+      merchant,
+      expenseType,
+      program,
+      billedTo: "",
+      project: "",
+      purchasePath: "",
+      card,
+      cardBucket,
+      txnNumber: null,
+      purpose,
+      paymentMethod: "",
+      serviceType: "",
+      otherService: "",
+      serviceScope: "",
+      wex: "",
+      descriptor: "",
+      customer,
+      customerKey: makeCustomerKey(customer),
+      purchaser,
+      email,
+      files: txnFiles,
+      files_txn: txnFiles,
+      files_uploadAll: [],
+      files_typed: emptyTypedFiles(),
+      notes,
+      note: "",
+      rawStatus,
+      rawAnswers: answers,
+      rawMeta: rawMeta(sub),
+      extractionErrors: errors,
+      extractionPath: "hardcoded",
+      ...linkingDefaults(),
+      _txnFlex: isFlexTxn,
+    });
+
+    const subFlex = computeFlex(answers, { anyFlexTxn: anyFlex });
+    return items.map(({ _txnFlex, ...item }) => ({
+      ...item,
+      isFlex: _txnFlex || subFlex.isFlex,
+      submissionIsFlex: anyFlex,
+      flexReasons: Array.from(new Set([
+        ...(_txnFlex ? ["txn:flex"] : []),
+        ...subFlex.reasons,
+        "direction:return",
+      ])),
+    }));
+  }
+
+  const orderRanges: Array<[number, number]> = [[13, 25], [27, 41], [43, 56], [59, 71], [73, 85]];
+
   for (let i = 0; i < CC_SCHEMA.transactions.length; i++) {
     if (i >= txnLimit) break;
     const tx = CC_SCHEMA.transactions[i];
 
-    const amount = parseMoney(getAns(answers, tx.cost), errors, tx.cost);
+    const amountAbs = Math.abs(parseMoney(getAns(answers, tx.cost), errors, tx.cost));
+    const amount = amountAbs;
     const merchant = asText(getAns(answers, tx.merchant));
     const expenseType = asText(getAns(answers, tx.expenseType));
     const purpose = asText(getAns(answers, tx.purpose));
@@ -475,7 +595,7 @@ function extractCreditCard(
     const customer = asText(getAns(answers, tx.customerName));
     const notes = tx.notes ? asText(getAns(answers, tx.notes)) : "";
     const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
-    const txnFiles = getFiles(answers, (tx.files as string[]) || []);
+    const txnFiles = getFiles(answers, tx.files || []);
     const uploadAllForTxn = i === 0 ? uploadAll : [];
     const files = Array.from(new Set([...txnFiles, ...uploadAllForTxn]));
 
@@ -504,6 +624,25 @@ function extractCreditCard(
       createdAt,
       month,
       amount,
+      amountAbs,
+      direction: "charge",
+      directionFieldId: CC_SCHEMA.globals.type,
+      amountFieldId: tx.cost,
+      extractionGroup: {
+        kind: "purchase",
+        index: i + 1,
+        orderRange: orderRanges[i] ?? null,
+        fieldIds: {
+          merchant: tx.merchant,
+          expenseType: tx.expenseType,
+          supportiveProgram: tx.supportiveProgram,
+          programOperations: tx.programOperations ?? null,
+          customerName: tx.customerName,
+          purpose: tx.purpose,
+          cost: tx.cost,
+          notes: tx.notes ?? null,
+        },
+      },
       merchant,
       expenseType,
       program,
@@ -543,9 +682,10 @@ function extractCreditCard(
   // If every txn was empty, emit a single fallback row
   if (items.length === 0) {
     const tx0 = CC_SCHEMA.transactions[0];
-    const amount = parseMoney(getAns(answers, tx0.cost), errors, tx0.cost);
+    const amountAbs = Math.abs(parseMoney(getAns(answers, tx0.cost), errors, tx0.cost));
+    const amount = amountAbs;
     const isFlexTxn = parseYes(getAns(answers, tx0.flexToggle));
-    const txnFiles = getFiles(answers, (tx0.files as string[]) || []);
+    const txnFiles = getFiles(answers, tx0.files || []);
     const files = Array.from(new Set([...txnFiles, ...uploadAll]));
     const customer = asText(getAns(answers, tx0.customerName));
     anyFlex = anyFlex || isFlexTxn;
@@ -562,6 +702,25 @@ function extractCreditCard(
       createdAt,
       month,
       amount,
+      amountAbs,
+      direction: "charge",
+      directionFieldId: CC_SCHEMA.globals.type,
+      amountFieldId: tx0.cost,
+      extractionGroup: {
+        kind: "fallback",
+        index: 1,
+        orderRange: orderRanges[0],
+        fieldIds: {
+          merchant: tx0.merchant,
+          expenseType: tx0.expenseType,
+          supportiveProgram: tx0.supportiveProgram,
+          programOperations: tx0.programOperations ?? null,
+          customerName: tx0.customerName,
+          purpose: tx0.purpose,
+          cost: tx0.cost,
+          notes: tx0.notes ?? null,
+        },
+      },
       merchant: asText(getAns(answers, tx0.merchant)),
       expenseType: asText(getAns(answers, tx0.expenseType)),
       program: asText(getAns(answers, tx0.supportiveProgram)) || asText(getAns(answers, tx0.programOperations ?? null)),

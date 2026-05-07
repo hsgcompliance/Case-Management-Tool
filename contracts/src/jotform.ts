@@ -409,6 +409,30 @@ export const JotformDigestMap = z
             titleFieldKeys: [],
             subtitleFieldKeys: [],
           }),
+        spending: z
+          .object({
+            enabled: z.boolean().default(false),
+            schemaKind: z.enum(["credit-card", "invoice", "other"]).default("other"),
+            grantFieldKeys: z.array(z.string().trim().min(1)).default([]),
+            lineItemFieldKeys: z.array(z.string().trim().min(1)).default([]),
+            customerFieldKeys: z.array(z.string().trim().min(1)).default([]),
+            amountFieldKeys: z.array(z.string().trim().min(1)).default([]),
+            merchantFieldKeys: z.array(z.string().trim().min(1)).default([]),
+            keywordRules: z.array(z.unknown()).default([]),
+            notes: z.string().trim().nullish(),
+          })
+          .passthrough()
+          .default({
+            enabled: false,
+            schemaKind: "other",
+            grantFieldKeys: [],
+            lineItemFieldKeys: [],
+            customerFieldKeys: [],
+            amountFieldKeys: [],
+            merchantFieldKeys: [],
+            keywordRules: [],
+            notes: null,
+          }),
       })
       .passthrough()
       .default({
@@ -421,6 +445,17 @@ export const JotformDigestMap = z
           titlePrefix: null,
           titleFieldKeys: [],
           subtitleFieldKeys: [],
+        },
+        spending: {
+          enabled: false,
+          schemaKind: "other",
+          grantFieldKeys: [],
+          lineItemFieldKeys: [],
+          customerFieldKeys: [],
+          amountFieldKeys: [],
+          merchantFieldKeys: [],
+          keywordRules: [],
+          notes: null,
         },
       }),
     createdAt: TsLike.nullish(),

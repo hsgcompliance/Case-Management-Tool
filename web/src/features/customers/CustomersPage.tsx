@@ -12,7 +12,7 @@ import {
   useSoftDeleteCustomers,
   useHardDeleteCustomers,
 } from "@hooks/useCustomers";
-import { useGrantEnrolledCustomerIds } from "@hooks/useEnrollments";
+import { useGrantEnrollmentMap, type EnrollmentStatusBucket } from "@hooks/useEnrollments";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
 import { useOrgConfig } from "@hooks/useOrgConfig";
@@ -30,7 +30,7 @@ import ActionMenu from "@entities/ui/ActionMenu";
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
 import { statusChipClass } from "@lib/colorRegistry";
 import { fmtDateSmartOrDash } from "@lib/formatters";
-import { isAdminLike, isCaseManagerLike, isDevLike } from "@lib/roles";
+import { isAdminLike, isCaseManagerLike, isDevLike, isViewerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
 import { useSystemMetrics } from "@hooks/useMetrics";
 import { CustomersMetricsBar } from "./components/CustomersMetricsBar";
@@ -52,6 +52,7 @@ type PersistedFilters = {
   sortMode: CustomerSortMode;
   cardPoolMode: CardPoolMode;
   grantFilter: string;
+  enrollmentStatuses: EnrollmentStatusBucket[];
 };
 
 function readPersistedFilters(): Partial<PersistedFilters> {
@@ -225,6 +226,14 @@ export function CustomersPage() {
   const [grantFilter, _setGrantFilter] = React.useState<string>(persisted.current.grantFilter ?? "all");
   const setGrantFilter = React.useCallback((v: string) => { _setGrantFilter(v); writePersistedFilters({ grantFilter: v }); }, []);
 
+  const [enrollmentStatuses, _setEnrollmentStatuses] = React.useState<EnrollmentStatusBucket[]>(
+    persisted.current.enrollmentStatuses ?? ["active", "closed", "deleted"],
+  );
+  const setEnrollmentStatuses = React.useCallback((v: EnrollmentStatusBucket[]) => {
+    _setEnrollmentStatuses(v);
+    writePersistedFilters({ enrollmentStatuses: v });
+  }, []);
+
   const [pageMode, setPageMode] = React.useState<CustomersPageMode>("new");
   const [cardPoolMode, _setCardPoolMode] = React.useState<CardPoolMode>(persisted.current.cardPoolMode ?? "all");
   const setCardPoolMode = React.useCallback((v: CardPoolMode) => { _setCardPoolMode(v); writePersistedFilters({ cardPoolMode: v }); }, []);
@@ -237,6 +246,7 @@ export function CustomersPage() {
   const isCM = isCaseManagerLike(meUser);
   const isDevUser = isDevLike(meUser);
   const isAdminUser = isAdminLike(meUser);
+  const isViewer = isViewerLike(meUser);
   const didApplyInitialScope = React.useRef(false);
   const didApplyInitialCardPool = React.useRef(false);
   const defaultScope = defaultScopeMode(myUid, isCM);
@@ -341,7 +351,7 @@ export function CustomersPage() {
   );
 
   const grantFilterActive = grantFilter !== "all" && !!grantFilter;
-  const { data: enrolledCustomerIds, isFetching: isLoadingEnrolledIds } = useGrantEnrolledCustomerIds(
+  const { data: enrollmentMap, isFetching: isLoadingEnrolledIds } = useGrantEnrollmentMap(
     grantFilterActive ? grantFilter : undefined,
   );
 
@@ -380,8 +390,8 @@ export function CustomersPage() {
       const contactIds = contactCaseManagerIdsForCustomer(customer as Record<string, unknown>);
 
       if (scopeMode === "my") {
-        if (!myUid) return true;
-        return contactIds.includes(myUid);
+        if (!targetUid) return true;
+        return contactIds.includes(targetUid);
       }
 
       if (scopeMode === "primary") {
@@ -394,7 +404,7 @@ export function CustomersPage() {
         return secondaryUid === targetUid;
       }
 
-      if (cmFilter !== "all") return primaryUid === cmFilter;
+      if (cmFilter !== "all") return contactIds.includes(cmFilter);
       return true;
     });
   }, [activeCardPoolRows, cmFilter, myUid, scopeMode]);
@@ -405,9 +415,13 @@ export function CustomersPage() {
       .filter((customer) => matchesDeletedFilter(customer, effectiveDeletedMode))
       .filter((customer) => matchesPopulationFilter(customer, populationFilter));
 
-    // Enrollment filter: show only customers enrolled in the selected grant
-    if (grantFilterActive && enrolledCustomerIds) {
-      rows = rows.filter((customer) => enrolledCustomerIds.has(String(customer.id || "")));
+    // Enrollment filter: show only customers enrolled in the selected grant (with status filter)
+    if (grantFilterActive && enrollmentMap) {
+      const statusSet = new Set(enrollmentStatuses);
+      rows = rows.filter((customer) => {
+        const bucket = enrollmentMap.get(String(customer.id || ""));
+        return !!bucket && statusSet.has(bucket);
+      });
     }
 
     if (searchActive) return rows;
@@ -417,7 +431,17 @@ export function CustomersPage() {
     return rows.filter((customer) =>
       activeMode === "active" ? isActiveCustomer(customer) : !isActiveCustomer(customer),
     );
-  }, [activeMode, deletedMode, enrolledCustomerIds, grantFilterActive, isAdminUser, populationFilter, scopedRows, searchActive]);
+  }, [
+    activeMode,
+    deletedMode,
+    enrollmentMap,
+    enrollmentStatuses,
+    grantFilterActive,
+    isAdminUser,
+    populationFilter,
+    scopedRows,
+    searchActive,
+  ]);
 
   const newPageDisplayRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -557,6 +581,7 @@ export function CustomersPage() {
     setPopulationFilter("all");
     setSortMode("alphabetical");
     setGrantFilter("all");
+    setEnrollmentStatuses(["active", "closed", "deleted"]);
     setCardPoolMode(defaultCardPoolMode);
     setMenuOpen(false);
   };
@@ -726,9 +751,11 @@ export function CustomersPage() {
                 title="Refresh customers"
                 tourId="customers-refresh"
               />
-              <button className="btn btn-primary btn-sm rounded-lg" data-tour="customers-new" onClick={openNewModal}>
-                New Customer
-              </button>
+              {!isViewer && (
+                <button className="btn btn-primary btn-sm rounded-lg" data-tour="customers-new" onClick={openNewModal}>
+                  New Customer
+                </button>
+              )}
               {pageMode === "legacy" ? (
                 <div className="relative" ref={menuRef}>
                   <button
@@ -797,6 +824,7 @@ export function CustomersPage() {
             populationFilter={populationFilter}
             sortMode={sortMode}
             grantFilter={grantFilter}
+            enrollmentStatuses={enrollmentStatuses}
             caseManagerOptions={caseManagerOptions}
             onActiveModeChange={setActiveMode}
             onDeletedModeChange={setDeletedMode}
@@ -806,6 +834,7 @@ export function CustomersPage() {
             onPopulationFilterChange={setPopulationFilter}
             onSortModeChange={setSortMode}
             onGrantFilterChange={setGrantFilter}
+            onEnrollmentStatusesChange={setEnrollmentStatuses}
             onResetFilters={resetFilters}
             onSearchEnter={handleSearchEnter}
           />

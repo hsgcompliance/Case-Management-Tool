@@ -10,6 +10,8 @@ import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 type Props = {
   rows: CustomerPaymentRow[];
   onManage: (row: CustomerPaymentRow, key: string) => void;
+  onAdjustSchedule?: (row: CustomerPaymentRow, key: string) => void;
+  onDeleteRow?: (row: CustomerPaymentRow, key: string) => void;
   selectedKey?: string | null;
   renderSelectedRowDetail?: (row: CustomerPaymentRow, key: string) => React.ReactNode;
   onTogglePaid?: (row: CustomerPaymentRow, nextPaid: boolean) => void | Promise<void>;
@@ -41,6 +43,8 @@ function paymentTypeLabel(p: any): string {
 export default function CustomerPaymentsTable({
   rows,
   onManage,
+  onAdjustSchedule,
+  onDeleteRow,
   selectedKey = null,
   renderSelectedRowDetail,
   onTogglePaid,
@@ -211,6 +215,25 @@ export default function CustomerPaymentsTable({
                           label: isSelected ? "Manage (open)" : "Manage",
                           onSelect: () => onManage(row, key),
                         },
+                        ...(onAdjustSchedule
+                          ? [
+                              {
+                                key: "adjust",
+                                label: "Adjust schedule",
+                                onSelect: () => onAdjustSchedule(row, key),
+                              },
+                            ]
+                          : []),
+                        ...(onDeleteRow
+                          ? [
+                              {
+                                key: "delete",
+                                label: "Delete row",
+                                danger: true,
+                                onSelect: () => onDeleteRow(row, key),
+                              },
+                            ]
+                          : []),
                       ]}                    />
                   </td>
                 </tr>

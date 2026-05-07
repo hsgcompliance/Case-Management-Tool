@@ -2,17 +2,9 @@
 import api from './api';
 import type {
   InboxListMyResp, TSendInviteBody, TSendMonthlySummaryBody,
-  DigestSendNowReq, DigestSendNowResp, DigestScheduleReq, DigestScheduleResp, InboxEmailResp, InboxMetricsMyResp
+  DigestSendNowReq, DigestSendNowResp, DigestScheduleReq, DigestScheduleResp, InboxEmailResp, InboxMetricsMyResp,
+  RespOf, ReqOf
 } from '@types';
-
-// Local types for digest subscription (not yet in contracts)
-type DigestType = "caseload" | "budget" | "enrollments" | "caseManagers";
-type DigestSubRecord = {
-  uid: string; email: string; displayName?: string;
-  roles: string[]; topRole: string;
-  subs: Partial<Record<DigestType, boolean>>;
-  effective: Record<DigestType, boolean>;
-};
 
 export const Inbox = {
   listMy: (query?: { month?: string; includeOverdue?: boolean; includeGroup?: boolean }) =>
@@ -41,11 +33,11 @@ export const Inbox = {
   scheduleDigest: (body: DigestScheduleReq) =>
     api.post('inboxScheduleDigest', body) as Promise<DigestScheduleResp>,
   digestSubsGet: () =>
-    api.get('inboxDigestSubsGet') as Promise<{ ok: boolean; records: DigestSubRecord[] }>,
-  digestSubUpdate: (body: { uid: string; digestType: DigestType; subscribed: boolean }) =>
-    api.post('inboxDigestSubUpdate', body) as Promise<{ ok: boolean; uid: string; digestType: string; subscribed: boolean }>,
-  digestHtmlPreview: (query: { digestType: DigestType; month?: string; forUid?: string }) =>
-    api.get('inboxDigestHtmlPreview', query) as Promise<{ ok: boolean; html: string; subject: string; digestType: string; month: string }>,
+    api.get('inboxDigestSubsGet') as Promise<RespOf<"inboxDigestSubsGet">>,
+  digestSubUpdate: (body: ReqOf<"inboxDigestSubUpdate">) =>
+    api.post('inboxDigestSubUpdate', body) as Promise<RespOf<"inboxDigestSubUpdate">>,
+  digestHtmlPreview: (query: ReqOf<"inboxDigestHtmlPreview">) =>
+    api.get('inboxDigestHtmlPreview', query) as Promise<RespOf<"inboxDigestHtmlPreview">>,
 };
 
 export default Inbox;

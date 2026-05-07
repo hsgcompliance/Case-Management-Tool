@@ -11,6 +11,7 @@ import {
   isDev,
   newBulkWriter,
   toMonthKey,
+  addMonthsUtc,
   type Claims,
 } from "../../core";
 import {
@@ -21,6 +22,7 @@ import {
   TCreditCardsSummaryItem,
   toArray,
 } from "./schemas";
+import { listVisiblePaymentQueueItemsForOrg } from "../paymentQueue/service";
 
 const RESERVED = new Set<string>([
   "id",
@@ -294,6 +296,66 @@ export function effectiveLimitCents(card: Record<string, unknown>, month: string
   return Math.max(0, Number(card.monthlyLimitCents || 0) || 0);
 }
 
+function normalizedMatchText(value: unknown): string {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function cardMatchTerms(card: Record<string, unknown>): string[] {
+  const matching = (card.matching || {}) as Record<string, unknown>;
+  const rawTerms = [
+    card.id,
+    card.name,
+    card.code,
+    card.last4,
+    ...(Array.isArray(matching.aliases) ? matching.aliases : []),
+    ...(Array.isArray(matching.cardAnswerValues) ? matching.cardAnswerValues : []),
+  ];
+  return rawTerms.map(normalizedMatchText).filter(Boolean);
+}
+
+function findCreditCardId(cards: Array<Record<string, unknown>>, savedId: unknown, text: string): string {
+  const id = String(savedId || "").trim();
+  if (id && cards.some((card) => String(card.id || "") === id)) return id;
+  const haystack = ` ${normalizedMatchText(text)} `;
+  for (const card of cards) {
+    const terms = cardMatchTerms(card);
+    if (terms.some((term) => haystack.includes(` ${term} `) || (term.length >= 4 && haystack.includes(term)))) {
+      return String(card.id || "");
+    }
+  }
+  return "";
+}
+
+export function isCardActive(card: Record<string, unknown>): boolean {
+  if (card.active === true) return true;
+  if (card.active === false) return false;
+  const status = String(card.status || "").toLowerCase();
+  if (status === "active") return true;
+  if (["closed", "deleted", "inactive"].includes(status)) return false;
+  return Boolean(card.active);
+}
+
+function paymentQueueIdFromSourcePath(value: unknown): string {
+  const path = String(value || "").trim();
+  const match = path.match(/^paymentQueue\/([^/]+)$/);
+  return match ? match[1] : "";
+}
+
+function invoiceLooksLikeCreditCardSpend(row: Record<string, unknown>): boolean {
+  if (String(row.source || "").toLowerCase() !== "invoice") return false;
+  const haystack = [
+    row.expenseType,
+    row.paymentMethod,
+    row.descriptor,
+    row.note,
+    row.notes,
+    row.purpose,
+    row.formTitle,
+    row.formAlias,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /\bcredit\s*card\b|\bcard\s*purchase\b|\bcc\b/.test(haystack);
+}
+
 export async function summarizeCreditCards(
   orgId: string,
   query: { id?: string | null; month?: string | null; active?: boolean | string | null }
@@ -319,47 +381,111 @@ export async function summarizeCreditCards(
   cards = cards.filter((card) => {
     if (String(card.orgId || "") !== orgId) return false;
     if (activeFilter === undefined) return true;
-    return Boolean(card.active) === activeFilter;
+    return isCardActive(card) === activeFilter;
   });
 
-  const ledgerSnap = await db.collection("ledger").where("orgId", "==", orgId).get();
-  const byCard = new Map<string, { spentCents: number; entryCount: number }>();
+  const lastMonth = toMonthKey(addMonthsUtc(`${month}-01`, -1));
+
+  const [ledgerSnap, ccThis, ccLast, invThis, invLast] = await Promise.all([
+    db.collection("ledger").where("orgId", "==", orgId).where("source", "==", "card").get(),
+    listVisiblePaymentQueueItemsForOrg(orgId, { source: "credit-card", month, limit: 1000 } as any),
+    listVisiblePaymentQueueItemsForOrg(orgId, { source: "credit-card", month: lastMonth, limit: 1000 } as any),
+    listVisiblePaymentQueueItemsForOrg(orgId, { source: "invoice", month, limit: 1000 } as any),
+    listVisiblePaymentQueueItemsForOrg(orgId, { source: "invoice", month: lastMonth, limit: 1000 } as any),
+  ]);
+
+  type MonthTotals = { spentCents: number; entryCount: number };
+  type CardTotals = { this: MonthTotals; last: MonthTotals };
+  const byCard = new Map<string, CardTotals>();
+  const emptyTotals = (): CardTotals => ({ this: { spentCents: 0, entryCount: 0 }, last: { spentCents: 0, entryCount: 0 } });
   let unassignedSpentCents = 0;
   let unassignedEntryCount = 0;
 
+  const thisQueueItems = [
+    ...(ccThis.items || []),
+    ...(invThis.items || []).filter((row) => invoiceLooksLikeCreditCardSpend(row as Record<string, unknown>)),
+  ];
+  const lastQueueItems = [
+    ...(ccLast.items || []),
+    ...(invLast.items || []).filter((row) => invoiceLooksLikeCreditCardSpend(row as Record<string, unknown>)),
+  ];
+  const allQueueItems = [...thisQueueItems, ...lastQueueItems];
+  const visibleQueueIds = new Set(allQueueItems.map((row) => String(row.id || "")).filter(Boolean));
+
   for (const doc of ledgerSnap.docs) {
     const row = doc.data() || {};
-    if (String(row.source || "").toLowerCase() !== "card") continue;
-    if (String(row.month || "") !== month) continue;
+    const rowMonth = String(row.month || "").slice(0, 7);
+    if (rowMonth !== month && rowMonth !== lastMonth) continue;
+    const queueId = paymentQueueIdFromSourcePath(((row.origin || {}) as Record<string, unknown>).sourcePath);
+    if (queueId && visibleQueueIds.has(queueId)) continue;
     const cents = Number(row.amountCents || Math.round((Number(row.amount || 0) || 0) * 100)) || 0;
-    const creditCardId = String(row.creditCardId || "");
+    const creditCardId = findCreditCardId(cards, row.creditCardId, [
+      row.vendor,
+      row.description,
+      row.comment,
+      Array.isArray(row.note) ? row.note.join(" ") : row.note,
+      Array.isArray(row.labels) ? row.labels.join(" ") : "",
+    ].filter(Boolean).join(" "));
     if (!creditCardId) {
       unassignedSpentCents += cents;
       unassignedEntryCount += 1;
       continue;
     }
-    const hit = byCard.get(creditCardId) || { spentCents: 0, entryCount: 0 };
-    hit.spentCents += cents;
-    hit.entryCount += 1;
+    const hit = byCard.get(creditCardId) || emptyTotals();
+    const bucket = rowMonth === month ? hit.this : hit.last;
+    bucket.spentCents += cents;
+    bucket.entryCount += 1;
     byCard.set(creditCardId, hit);
+  }
+
+  for (const [items, bucket] of [[thisQueueItems, "this"], [lastQueueItems, "last"]] as const) {
+    for (const row of items) {
+      const rawRow = row as Record<string, unknown>;
+      if (String(rawRow.queueStatus || "").toLowerCase() === "void") continue;
+      const cents = Number(rawRow.amountCents || Math.round((Number(rawRow.amount || 0) || 0) * 100)) || 0;
+      const creditCardId = findCreditCardId(cards, row.creditCardId, [
+        row.card,
+        row.cardBucket,
+        row.merchant,
+        row.descriptor,
+        row.note,
+        row.notes,
+        row.purpose,
+        row.formTitle,
+        row.formAlias,
+      ].filter(Boolean).join(" "));
+      if (String(row.source || "").toLowerCase() === "invoice" && !creditCardId) continue;
+      if (!creditCardId) {
+        unassignedSpentCents += cents;
+        unassignedEntryCount += 1;
+        continue;
+      }
+      const hit = byCard.get(creditCardId) || emptyTotals();
+      hit[bucket].spentCents += cents;
+      hit[bucket].entryCount += 1;
+      byCard.set(creditCardId, hit);
+    }
   }
 
   const items: TCreditCardsSummaryItem[] = cards.map((card) => {
     const creditCardId = String(card.id || "");
-    const totals = byCard.get(creditCardId) || { spentCents: 0, entryCount: 0 };
+    const totals = byCard.get(creditCardId) || emptyTotals();
     const monthlyLimitCents = effectiveLimitCents(card, month);
-    const remainingCents = monthlyLimitCents - totals.spentCents;
-    const usagePct = monthlyLimitCents > 0 ? Math.max(0, Math.min(999, (totals.spentCents / monthlyLimitCents) * 100)) : 0;
+    const remainingCents = monthlyLimitCents - totals.this.spentCents;
+    const usagePct = monthlyLimitCents > 0 ? Math.max(0, Math.min(999, (totals.this.spentCents / monthlyLimitCents) * 100)) : 0;
     return {
       id: creditCardId,
       name: String(card.name || creditCardId || "Credit Card"),
       status: (String(card.status || "draft") as TCreditCard["status"]) || "draft",
       month,
+      lastMonth,
       monthlyLimitCents,
-      spentCents: totals.spentCents,
+      spentCents: totals.this.spentCents,
       remainingCents,
       usagePct,
-      entryCount: totals.entryCount,
+      entryCount: totals.this.entryCount,
+      lastMonthSpentCents: totals.last.spentCents,
+      lastMonthEntryCount: totals.last.entryCount,
       cycleType: (String(card.cycleType || "calendar_month") as "calendar_month" | "statement_cycle"),
       statementCloseDay: Number.isFinite(Number(card.statementCloseDay)) ? Number(card.statementCloseDay) : null,
       last4: card.last4 ? String(card.last4) : null,

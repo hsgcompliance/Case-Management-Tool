@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@entities/ui/Modal";
 import { useCreditCards, usePatchCreditCards, useUpsertCreditCards } from "@hooks/useCreditCards";
-import { useJotformSubmissionsLite } from "@hooks/useJotform";
 import { useLedgerEntries } from "@hooks/useLedger";
+import { usePaymentQueueItems, type PaymentQueueItem } from "@hooks/usePaymentQueue";
 import { qk } from "@hooks/queryKeys";
 import {
   metricCardClass,
@@ -16,15 +16,8 @@ import {
   toneProgressClass,
 } from "@lib/colorRegistry";
 import { toast } from "@lib/toast";
-import {
-  LINE_ITEMS_FORM_IDS,
-  CC_SCHEMA,
-  getAns,
-  lineItemsAmountEstimate,
-  lineItemsCounterparty,
-  lineItemsFormKind,
-} from "@widgets/jotform/lineItemsFormMap";
-import type { CreditCardEntity, TLedgerEntry, TJotformSubmissionEntity } from "@types";
+import { LINE_ITEMS_FORM_IDS } from "@widgets/jotform/lineItemsFormMap";
+import type { CreditCardEntity, TLedgerEntry } from "@types";
 
 type CardHealth = "active" | "warning" | "over";
 
@@ -44,6 +37,7 @@ type LedgerRow = {
 
 type PendingSubmission = {
   id: string;
+  queueId: string;
   formId: string;
   date: string;
   amount: number;
@@ -51,11 +45,11 @@ type PendingSubmission = {
   formKind: "credit-card" | "invoice";
   formTitle: string;
   cardLabel: string;
+  creditCardId: string;
+  cardBucket: string;
+  queueStatus: string;
   grantId: string;
   linkedLedgerId: string;
-  submissionUrl: string;
-  editUrl: string;
-  pdfUrl: string;
 };
 
 type CreditCardView = {
@@ -208,11 +202,6 @@ const extractSubmissionToken = (entry: Record<string, unknown>): string => {
   return match?.[1] || "";
 };
 
-const cardLabelFromSubmission = (submission: Record<string, unknown>) => {
-  const answers = ((submission.answers || {}) as Record<string, unknown>) || {};
-  return asText(getAns(answers, CC_SCHEMA.globals.cardUsed)) || asText(getAns(answers, CC_SCHEMA.globals.cardChoice)) || "";
-};
-
 function matchingTerms(card: CreditCardEntity) {
   const last4 = parseLast4(card.last4);
   const aliases = Array.isArray(card.matching?.aliases) ? card.matching.aliases : [];
@@ -234,6 +223,7 @@ function ledgerEntryMatchesCard(entry: LedgerRow, card: CreditCardEntity) {
 }
 
 function pendingSubmissionMatchesCard(submission: PendingSubmission, card: CreditCardEntity) {
+  if (submission.creditCardId && submission.creditCardId === card.id) return true;
   const cardLabel = normalizeText(submission.cardLabel);
   if (!cardLabel) return false;
   return matchingTerms(card).some((term) => cardLabel.includes(term));
@@ -347,17 +337,23 @@ export function CreditCardsPanel() {
     { staleTime: 30_000 }
   );
   const { data: ledgerEntries = [], isLoading: ledgerLoading } = useLedgerEntries(
-    { month: currentMonth, source: "card", limit: 500, sortBy: "createdAt", sortOrder: "desc" },
+    { month: currentMonth, limit: 500, sortBy: "createdAt", sortOrder: "desc" },
     { staleTime: 30_000 }
   );
-  const { data: jotformSubmissions = [], isLoading: jotformLoading } = useJotformSubmissionsLite(
-    { limit: 500, active: true },
-    { staleTime: 60_000 }
+  const { data: paymentQueueItems = [], isLoading: queueLoading } = usePaymentQueueItems(
+    { month: currentMonth, limit: 500 },
+    { staleTime: 30_000 }
   );
 
   const cardLedgerRows = React.useMemo(() => {
     return (ledgerEntries as TLedgerEntry[])
-      .filter((entry) => String(entry.source || "").toLowerCase() === "card")
+      .filter((entry) => {
+        const source = String(entry.source || "").toLowerCase();
+        const labels = Array.isArray((entry as Record<string, unknown>).labels)
+          ? ((entry as Record<string, unknown>).labels as unknown[]).map((value) => String(value || "").toLowerCase())
+          : [];
+        return source === "card" || !!entry.creditCardId || labels.includes("credit-card");
+      })
       .map((entry) => ({
         id: String(entry.id || ""),
         creditCardId: String(entry.creditCardId || ""),
@@ -383,34 +379,38 @@ export function CreditCardsPanel() {
   }, [cardLedgerRows]);
 
   const pendingRows = React.useMemo(() => {
-    return (jotformSubmissions as TJotformSubmissionEntity[])
-      .map((submission) => {
-        const formKind = lineItemsFormKind(submission as unknown as Record<string, unknown>);
+    return (paymentQueueItems as PaymentQueueItem[])
+      .map((item) => {
+        const source = String(item.source || "").toLowerCase();
+        const formKind = source === "credit-card" ? "credit-card" : source === "invoice" ? "invoice" : null;
         if (!formKind) return null;
-        const id = String(submission.submissionId || submission.id || "").trim();
+        const queueStatus = String(item.queueStatus || "pending").toLowerCase();
+        if (queueStatus === "void" || queueStatus === "posted") return null;
+        const id = String(item.submissionId || item.paymentId || item.id || "").trim();
         if (!id) return null;
-        const date = dateIso10(submission.createdAt || submission.updatedAt);
+        const date = dateIso10(item.dueDate || item.createdAt || item.postedAt);
         if (monthFromDate(date) !== currentMonth) return null;
-        const linkedLedgerId = linkedLedgerBySubmissionId.get(id) || "";
+        const linkedLedgerId = String(item.ledgerEntryId || "") || linkedLedgerBySubmissionId.get(id) || "";
         if (linkedLedgerId) return null;
         return {
           id,
-          formId: String(submission.formId || ""),
+          queueId: String(item.id || ""),
+          formId: String(item.formId || ""),
           date,
-          amount: lineItemsAmountEstimate(submission as unknown as Record<string, unknown>),
-          vendor: lineItemsCounterparty(submission as unknown as Record<string, unknown>) || String(submission.formTitle || submission.formAlias || id),
+          amount: Number(item.amount || 0),
+          vendor: String(item.merchant || item.descriptor || item.formTitle || item.formAlias || id),
           formKind,
-          formTitle: String(submission.formTitle || submission.formAlias || "Jotform Submission"),
-          cardLabel: cardLabelFromSubmission(submission as unknown as Record<string, unknown>),
-          grantId: String(submission.grantId || ""),
+          formTitle: String(item.formTitle || item.formAlias || "Payment queue item"),
+          cardLabel: String(item.card || item.cardBucket || ""),
+          creditCardId: String(item.creditCardId || ""),
+          cardBucket: String(item.cardBucket || ""),
+          queueStatus,
+          grantId: String(item.grantId || ""),
           linkedLedgerId,
-          submissionUrl: String(submission.submissionUrl || ""),
-          editUrl: String(submission.editUrl || ""),
-          pdfUrl: String(submission.pdfUrl || ""),
         } as PendingSubmission;
       })
       .filter(Boolean) as PendingSubmission[];
-  }, [currentMonth, jotformSubmissions, linkedLedgerBySubmissionId]);
+  }, [currentMonth, linkedLedgerBySubmissionId, paymentQueueItems]);
 
   const cardViews = React.useMemo(() => {
     return (cards as CreditCardEntity[])
@@ -589,7 +589,7 @@ export function CreditCardsPanel() {
     }
   };
 
-  const loading = cardsLoading || ledgerLoading || jotformLoading;
+  const loading = cardsLoading || ledgerLoading || queueLoading;
 
   return (
     <>
@@ -598,7 +598,7 @@ export function CreditCardsPanel() {
           <div>
             <h2 className="text-xl font-black tracking-tight text-slate-950 dark:text-slate-50">Credit Cards</h2>
             <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {monthLabel(currentMonth)} spend pulled from ledger, with unposted Jotform card and invoice forms surfaced for follow-up.
+              {monthLabel(currentMonth)} spend pulled from ledger and payment queue staging, with open card and invoice items surfaced for follow-up.
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -628,9 +628,9 @@ export function CreditCardsPanel() {
             <div className="mt-1 text-3xl font-black tracking-tight text-slate-950 dark:text-slate-50">{fmtUsd0(totals.limit - totals.spent)}</div>
           </div>
           <div className={["rounded-2xl border px-4 py-3 shadow-sm", metricCardClass("pending-jotform")].join(" ")}>
-            <div className="text-xs uppercase tracking-wide text-slate-400">Pending Jotform</div>
+            <div className="text-xs uppercase tracking-wide text-slate-400">Pending Queue</div>
             <div className="mt-1 text-3xl font-black tracking-tight text-slate-950 dark:text-slate-50">{fmtUsd0(totals.pending)}</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">{totals.pendingCount} forms not in ledger yet</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">{totals.pendingCount} queue items not in ledger yet</div>
           </div>
         </div>
 
@@ -957,12 +957,12 @@ export function CreditCardsPanel() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-950 dark:border-slate-700 dark:text-slate-50">
-                  Pending Jotform Submissions
+                  <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-950 dark:border-slate-700 dark:text-slate-50">
+                  Open Payment Queue Items
                 </div>
                 {selectedCard.pendingRows.length === 0 ? (
                   <div className="p-4 text-sm text-slate-500 dark:text-slate-400">
-                    No unposted Jotform rows matched this card for {monthLabel(currentMonth)}.
+                    No open queue rows matched this card for {monthLabel(currentMonth)}.
                   </div>
                 ) : (
                   <div className="space-y-3 p-4">
@@ -972,7 +972,7 @@ export function CreditCardsPanel() {
                           <div>
                             <div className="text-sm font-semibold text-slate-950 dark:text-slate-50">{row.vendor || row.formTitle}</div>
                             <div className="text-xs text-slate-500 dark:text-slate-400">
-                              {row.formKind === "credit-card" ? "Credit card form" : "Invoice form"} - {row.date || "-"}
+                              {row.formKind === "credit-card" ? "Credit card queue" : "Invoice queue"} - {row.date || "-"}
                             </div>
                           </div>
                           <div className="text-sm font-semibold text-slate-950 dark:text-slate-50">{fmtUsd2(row.amount)}</div>
@@ -983,28 +983,24 @@ export function CreditCardsPanel() {
                               Card: {row.cardLabel}
                             </span>
                           ) : null}
+                          {row.cardBucket ? (
+                            <span className="rounded-full border border-slate-200 px-2 py-1 text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                              Bucket: {row.cardBucket}
+                            </span>
+                          ) : null}
                           {row.grantId ? (
                             <span className="rounded-full border border-slate-200 px-2 py-1 text-slate-600 dark:border-slate-700 dark:text-slate-300">
                               Grant: {row.grantId}
                             </span>
                           ) : null}
+                          <span className="rounded-full border border-slate-200 px-2 py-1 text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                            Status: {row.queueStatus}
+                          </span>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {row.submissionUrl ? (
-                            <a className="btn btn-ghost btn-xs" href={row.submissionUrl} target="_blank" rel="noreferrer">
-                              Submission
-                            </a>
-                          ) : null}
-                          {row.editUrl ? (
-                            <a className="btn btn-ghost btn-xs" href={row.editUrl} target="_blank" rel="noreferrer">
-                              Edit
-                            </a>
-                          ) : null}
-                          {row.pdfUrl ? (
-                            <a className="btn btn-ghost btn-xs" href={row.pdfUrl} target="_blank" rel="noreferrer">
-                              PDF
-                            </a>
-                          ) : null}
+                          <button className="btn btn-ghost btn-xs" type="button" onClick={() => router.push("/tools/spending")}>
+                            Open Invoicing Tool
+                          </button>
                         </div>
                       </div>
                     ))}

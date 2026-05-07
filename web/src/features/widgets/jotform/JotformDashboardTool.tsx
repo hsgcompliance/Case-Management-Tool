@@ -26,7 +26,7 @@ import type {
   JotformSyncSelectionResp,
   JotformSyncSubmissionsResp,
 } from "@types";
-import { buildLineItemsDigestTemplate, isInvoiceFormId, isLineItemsFormId } from "./lineItemsFormMap";
+import { buildLineItemsDigestTemplate, isCreditCardFormId, isLineItemsFormId } from "./lineItemsFormMap";
 import {
   fileLabelFromUrl,
   stageLabelFromQueueSource,
@@ -682,7 +682,7 @@ export const JotformDashboardTopbar: DashboardToolDefinition<JotformDashboardFil
 
   const onSaveLineItemsTemplate = async () => {
     const id = String(selectedForm?.id || formId || "").trim();
-    if (!id || !isInvoiceFormId(id)) return;
+    if (!id || !isLineItemsFormId(id)) return;
     const template = buildLineItemsDigestTemplate({
       formId: id,
       formTitle: String(selectedForm?.title || selectedForm?.id || ""),
@@ -692,7 +692,7 @@ export const JotformDashboardTopbar: DashboardToolDefinition<JotformDashboardFil
     setActionsOpen(false);
     try {
       await upsertDigest.mutateAsync(template as JotformDigestUpsertReq);
-      toast("Invoice digest template saved.", { type: "success" });
+      toast(`${isCreditCardFormId(id) ? "Credit card" : "Invoice"} digest template saved.`, { type: "success" });
     } catch (error: unknown) {
       toast(toApiError(error).error, { type: "error" });
     }
@@ -769,8 +769,8 @@ export const JotformDashboardTopbar: DashboardToolDefinition<JotformDashboardFil
               </div>
             </button>
 
-            {/* Invoice digest template (conditional) */}
-            {selectedForm && isInvoiceFormId(selectedForm.id) ? (
+            {/* Spending digest template (conditional) */}
+            {selectedForm && isLineItemsFormId(selectedForm.id) ? (
               <button
                 type="button"
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-slate-50"
@@ -778,8 +778,8 @@ export const JotformDashboardTopbar: DashboardToolDefinition<JotformDashboardFil
               >
                 <span className="text-base">🗂</span>
                 <div>
-                  <div className="font-medium text-slate-900">Save Invoice Digest Template</div>
-                  <div className="text-xs text-slate-500">Write hardcoded field map for invoice form</div>
+                  <div className="font-medium text-slate-900">Save Spending Digest Template</div>
+                  <div className="text-xs text-slate-500">Write CC/invoice fields and spending map metadata</div>
                 </div>
               </button>
             ) : null}

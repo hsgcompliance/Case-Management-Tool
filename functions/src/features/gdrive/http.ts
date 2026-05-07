@@ -5,9 +5,12 @@ import {
   OAUTH_CLIENT_SECRET,
   OAUTH_REFRESH_TOKEN,
   DRIVE_SANDBOX_FOLDER_ID,
+  requireOrg,
 } from "../../core";
 import { GDriveListQuery, GDriveCreateFolderBody, GDriveUploadBody, GDriveBuildCustomerFolderBody } from "./schemas";
 import { listInFolder, createFolder, uploadSmallFile, buildCustomerFolder, type DriveListDiagnostics } from "./service";
+import { z } from "zod";
+import { getOrgGDriveConfig, patchOrgGDriveConfig } from "./orgConfig";
 
 function queryFlag(v: unknown): boolean {
   const raw = Array.isArray(v) ? v[0] : v;
@@ -18,7 +21,7 @@ function queryFlag(v: unknown): boolean {
 }
 
 function readGoogleAccessToken(req: { header(name: string): string | undefined }) {
-  return String(req.header("x-google-access-token") || "").trim() || undefined;
+  return String(req.header("x-drive-access-token") || "").trim() || undefined;
 }
 
 function inferStatusCode(message: string, diagnostics?: DriveListDiagnostics): number {
@@ -208,5 +211,83 @@ export const gdriveUpload = secureHandler(
     auth: "user",
     methods: ["POST", "OPTIONS"],
     secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+  }
+);
+
+const GDriveTemplateBody = z.object({
+  key: z.string().min(1).max(100),
+  fileId: z.string().min(1).max(300),
+  fileUrl: z.string().max(500).optional(),
+  type: z.enum(["doc", "sheet", "pdf", "folder", "other"]),
+  alias: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+  defaultChecked: z.boolean().optional(),
+});
+
+const GDriveBuildSettingsBody = z.object({
+  defaultSubfolders: z.array(z.string().min(1).max(200)).optional(),
+  defaultTemplateKeys: z.array(z.string().min(1)).optional(),
+});
+
+const GDriveConfigPatchBody = z.object({
+  activeParent: z.union([z.string(), z.null()]).optional(),
+  exitedParent: z.union([z.string(), z.null()]).optional(),
+  customerIndexSheet: z.union([z.string(), z.null()]).optional(),
+  orgId: z.string().optional(),
+  templates: z.array(GDriveTemplateBody).optional(),
+  buildSettings: GDriveBuildSettingsBody.optional(),
+});
+
+export const gdriveConfigGet = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const orgId = requireOrg(caller);
+    const config = await getOrgGDriveConfig(orgId);
+    res.status(200).json({ ok: true, orgId, config });
+  },
+  {
+    auth: "user",
+    methods: ["GET", "OPTIONS"],
+  }
+);
+
+export const gdriveConfigPatch = secureHandler(
+  async (req, res) => {
+    try {
+      const caller = (req as any).user;
+      const body = GDriveConfigPatchBody.parse(req.body ?? {});
+      const updated = await patchOrgGDriveConfig({
+        caller,
+        orgId: body.orgId,
+        patch: {
+          ...(Object.prototype.hasOwnProperty.call(body, "activeParent")
+            ? { activeParent: body.activeParent }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, "exitedParent")
+            ? { exitedParent: body.exitedParent }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, "customerIndexSheet")
+            ? { customerIndexSheet: body.customerIndexSheet }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, "templates")
+            ? { templates: body.templates as any }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, "buildSettings")
+            ? { buildSettings: body.buildSettings as any }
+            : {}),
+        },
+      });
+      res.status(200).json({ ok: true, ...updated });
+    } catch (e: any) {
+      const code = Number(e?.code);
+      res.status(Number.isFinite(code) ? code : 500).json({
+        ok: false,
+        error: String(e?.message || e || "gdrive_config_patch_failed"),
+      });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "PATCH", "OPTIONS"],
   }
 );

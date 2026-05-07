@@ -139,6 +139,7 @@ export type PaymentScheduleBuildInput = {
     activeOnly?: boolean;
   };
   taskDefs?: unknown[];
+  replaceTaskDefPrefixes?: string[];
 };
 
 function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<string, unknown> {
@@ -492,12 +493,16 @@ function buildProjectionPayload(
   generated: TPaymentProjectionInput[],
   replaceUnpaid: boolean,
 ): TPaymentProjectionInput[] {
-  if (!replaceUnpaid) return generated;
   const paidRows = existing
     .filter((p) => Boolean(p?.paid))
     .map(toProjectionInput)
     .filter((p): p is TPaymentProjectionInput => p !== null);
-  return [...paidRows, ...generated];
+  if (replaceUnpaid) return [...paidRows, ...generated];
+  const unpaidRows = existing
+    .filter((p) => !Boolean(p?.paid))
+    .map(toProjectionInput)
+    .filter((p): p is TPaymentProjectionInput => p !== null);
+  return [...paidRows, ...unpaidRows, ...generated];
 }
 
 async function resolveEnrollmentContext(
@@ -687,7 +692,15 @@ export function usePaymentsDeleteRows() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
-    queryKeys: [qk.enrollments.root, qk.payments.root, qk.inbox.root, qk.users.me(), qk.grants.root],
+    queryKeys: [
+      qk.enrollments.root,
+      qk.payments.root,
+      qk.inbox.root,
+      qk.users.me(),
+      qk.grants.root,
+      qk.paymentQueue.root,
+      qk.ledger.root,
+    ],
     mutationFn: (body: ReqOf<"paymentsDeleteRows">) =>
       Payments.deleteRows(body) as Promise<RespOf<"paymentsDeleteRows">>,
     onSuccess: async (_res, body) => {
@@ -912,22 +925,16 @@ export function usePaymentsProjectionsAdjust() {
           .filter((p) => !projectionDeleteIds.has(String(p?.id || "")))
           .filter((p) => {
             if (Boolean(p?.paid)) return true;
-            if (!replaceUnpaid) return true;
-            return !editedIds.has(String(p?.id || ""));
+            if (editedIds.has(String(p?.id || ""))) return false;
+            return replaceUnpaid;
           })
           .map((p) => requireProjectionInput(p, "Existing payment missing required projection fields"));
 
-        const nextPayments = replaceUnpaid
-          ? [
-              ...existingProjectedKept,
-              ...editedRows,
-              ...addedRows,
-            ]
-          : [
-              ...existingProjectedKept,
-              ...editedRows.filter((e) => !existing.find((p) => String(p?.id || "") === String(e?.id || ""))),
-              ...addedRows,
-            ];
+        const nextPayments = [
+          ...existingProjectedKept,
+          ...editedRows,
+          ...addedRows,
+        ];
 
         await Payments.upsertProjections({
           enrollmentId,
@@ -974,7 +981,11 @@ export function usePaymentsProjectionsAdjust() {
       };
     },
     onSuccess: async (context) => {
-      await invalidateEnrollmentContext(qc, context);
+      await Promise.all([
+        invalidateEnrollmentContext(qc, context),
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.ledger.root }),
+      ]);
     },
   });
 }
@@ -1089,7 +1100,10 @@ export function usePaymentsBuildSchedule() {
       } as unknown as Parameters<typeof Enrollments.upsert>[0]);
 
       const inputTaskDefs = Array.isArray(input.taskDefs) ? input.taskDefs.filter(Boolean) : [];
-      if (inputTaskDefs.length) {
+      const replaceTaskDefPrefixes = Array.isArray(input.replaceTaskDefPrefixes)
+        ? input.replaceTaskDefPrefixes.map((p) => String(p || "").trim()).filter(Boolean)
+        : [];
+      if (inputTaskDefs.length || replaceTaskDefPrefixes.length) {
         const prevTaskMeta =
           enrollment && typeof (enrollment as Record<string, unknown>).taskScheduleMeta === "object"
             ? ((enrollment as Record<string, unknown>).taskScheduleMeta as Record<string, unknown>)
@@ -1099,8 +1113,14 @@ export function usePaymentsBuildSchedule() {
           const o = d && typeof d === "object" ? (d as Record<string, unknown>) : {};
           return String(o.id || `${o.name || ""}|${o.frequency || ""}|${o.startDate || ""}`);
         };
+        const isReplacedDef = (d: unknown) => {
+          const key = keyOf(d);
+          return replaceTaskDefPrefixes.some((prefix) => key.startsWith(prefix));
+        };
         const nextDefsByKey = new Map<string, unknown>();
-        for (const d of prevDefs) nextDefsByKey.set(keyOf(d), d);
+        for (const d of prevDefs) {
+          if (!isReplacedDef(d)) nextDefsByKey.set(keyOf(d), d);
+        }
         for (const d of inputTaskDefs) nextDefsByKey.set(keyOf(d), d);
         const mergedTaskDefs = Array.from(nextDefsByKey.values());
 
@@ -1119,6 +1139,7 @@ export function usePaymentsBuildSchedule() {
           keepManual: true,
           preserveCompletedManaged: true,
           pinCompletedManaged: true,
+          replaceTaskDefPrefixes,
           taskDefs: mergedTaskDefs as unknown as ReqOf<"tasksGenerateScheduleWrite">["taskDefs"],
         } as ReqOf<"tasksGenerateScheduleWrite">);
       }

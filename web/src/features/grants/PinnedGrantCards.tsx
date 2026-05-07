@@ -106,7 +106,19 @@ const STATUS_COLORS: Record<string, string> = {
 type Page =
   | { kind: "enrollment" }
   | { kind: "lineItem"; item: ReturnType<typeof getBudgetLineItems>[number] }
-  | { kind: "details"; eligibility: string; description: string };
+  | { kind: "details"; eligibility: Array<[string, string]>; description: string };
+
+function eligibilityEntries(value: unknown): Array<[string, string]> {
+  if (!value) return [];
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? [["Notes", text]] : [];
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, raw]) => [String(key || "").trim(), String(raw ?? "").trim()] as [string, string])
+    .filter(([key, raw]) => !!key && !!raw);
+}
 
 function buildPages(g: Grant): Page[] {
   const pages: Page[] = [{ kind: "enrollment" }];
@@ -115,11 +127,11 @@ function buildPages(g: Grant): Page[] {
       pages.push({ kind: "lineItem", item });
     }
   }
-  const eligibility = String((g as any)?.eligibility || "").trim();
+  const eligibility = eligibilityEntries((g as any)?.eligibility);
   const description =
     String((g as any)?.description || "").trim() ||
     String((g as any)?.details?.description || "").trim();
-  if (eligibility || description) {
+  if (eligibility.length || description) {
     pages.push({ kind: "details", eligibility, description });
   }
   return pages;
@@ -162,7 +174,11 @@ function PinnedGrantCard({
     setPageIdx((p) => Math.max(0, Math.min(pages.length - 1, p + dir)));
 
   return (
-    <div className="relative flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900">
+    <div
+      data-block-id={`grant:${grantId}`}
+      data-block-name={String((g as any)?.name || grantId)}
+      className="relative flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-100 px-4 pt-4 pb-3 dark:border-slate-800">
         <div className="min-w-0 flex-1">
@@ -261,15 +277,20 @@ function PinnedGrantCard({
                 </p>
               </div>
             )}
-            {currentPage.eligibility && (
+            {currentPage.eligibility.length > 0 && (
               <div>
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Eligibility</div>
-                <p className="line-clamp-4 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
-                  {currentPage.eligibility}
-                </p>
+                <div className="space-y-1">
+                  {currentPage.eligibility.slice(0, 3).map(([key, value]) => (
+                    <div key={key} className="grid grid-cols-[auto_1fr] gap-x-2 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+                      <span className="font-semibold text-slate-500">{key}</span>
+                      <span className="line-clamp-2">{value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
-            {!currentPage.description && !currentPage.eligibility && (
+            {!currentPage.description && currentPage.eligibility.length === 0 && (
               <div className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center dark:border-slate-700">
                 <p className="text-xs text-slate-400">
                   Nothing present — consider adding eligibility or description details for other users.

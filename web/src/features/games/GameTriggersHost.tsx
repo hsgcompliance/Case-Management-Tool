@@ -1,21 +1,21 @@
 "use client";
 // web/src/features/games/GameTriggersHost.tsx
-// Renders ambient game triggers, gated by admin config + current route.
-// Each trigger maps to a specific game:
-//   Bug       → fullscreen Donkey Kong canvas game
-//   Asteroid  → Space Invaders (mini-player)
-//   Plant     → Tower Defense (mini-player)
-//   Snake     → Snake (mini-player)
+// Live ambient-trigger host for production routes.
+// The bug game is intentionally siloed out of this host: we keep its renderer
+// in the repo for later reuse, but we do not mount, scan, or launch it here.
+// That keeps the rest of the app disconnected from the old bug-specific logic
+// while preserving the cleaner overlay patterns for future immersive games.
 
 import React from "react";
 import { usePathname } from "next/navigation";
-import BugFloat from "./triggers/BugFloat";
-import BugGameCanvas from "./BugGameCanvas";
 import AsteroidFloat from "./triggers/AsteroidFloat";
 import PlantFloat from "./triggers/PlantSprout";
 import SnakeFloat from "./triggers/SnakeFloat";
-import { padPlatforms, type Platform } from "./GameEngine";
+import FarmFloat from "./triggers/FarmFloat";
+import AlertBadge from "./triggers/AlertBadge";
+import MoonRise from "./triggers/MoonRise";
 import { useLegacySecretGameLauncher } from "@features/secret-games";
+import { toast } from "@lib/toast";
 import { useOrgConfig } from "@hooks/useOrgConfig";
 import {
   readSecretGamesAdminConfig,
@@ -25,118 +25,28 @@ import {
 } from "@features/secret-games/adminConfig";
 import { useCardPhysics } from "./effects/CardPhysicsContext";
 import { computeAsteroidHits, type AsteroidTrajectory } from "./effects/cardPhysicsEngine";
-
-// ─── Route matching ───────────────────────────────────────────────────────────
+import NecromancerGame, { scanCustomersFromDOM } from "./necromancer/NecromancerGame";
 
 function routeMatchesPathname(routeId: SecretGameRouteId, pathname: string): boolean {
   switch (routeId) {
-    case "all":       return true;
-    case "home":      return pathname === "/";
-    case "customers": return pathname === "/customers" || pathname.startsWith("/customers/");
-    case "grants":    return pathname === "/grants" || pathname.startsWith("/grants/");
-    case "reports":   return pathname === "/reports" || pathname.startsWith("/reports/");
-    default:          return false;
+    case "all":
+      return true;
+    case "home":
+      return pathname === "/";
+    case "customers":
+      return pathname === "/customers" || pathname.startsWith("/customers/");
+    case "grants":
+      return pathname === "/grants" || pathname.startsWith("/grants/");
+    case "reports":
+      return pathname === "/reports" || pathname.startsWith("/reports/");
+    default:
+      return false;
   }
 }
 
-function isTriggerAllowedOnRoute(
-  entry: AmbientTriggerAdminEntry,
-  pathname: string,
-): boolean {
+function isTriggerAllowedOnRoute(entry: AmbientTriggerAdminEntry, pathname: string): boolean {
   return entry.allowedRoutes.some((routeId) => routeMatchesPathname(routeId, pathname));
 }
-
-// ─── DOM platform scanner (for bug's DK-style game) ──────────────────────────
-
-function scanPlatforms(): Platform[] {
-  try {
-    const VW = window.innerWidth;
-    const VH = window.innerHeight;
-    const els = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "[data-game-platform], .rounded-xl, .rounded-2xl, article, section",
-      ),
-    );
-    const rects = els
-      .map((el) => ({ el, rect: el.getBoundingClientRect() }))
-      .filter(
-        ({ rect }) =>
-          rect.width >= 120 &&
-          rect.height >= 36 &&
-          rect.top >= 20 &&
-          rect.bottom <= VH - 20 &&
-          rect.left >= 0 &&
-          rect.right <= VW,
-      );
-
-    if (rects.length < 3) return [];
-
-    const rows: Array<typeof rects> = [];
-    for (const item of rects) {
-      const existing = rows.find(
-        (row) => Math.abs(row[0].rect.top - item.rect.top) < 50,
-      );
-      if (existing) existing.push(item);
-      else rows.push([item]);
-    }
-
-    if (rows.length < 2) return [];
-    rows.sort((a, b) => a[0].rect.top - b[0].rect.top);
-
-    const platforms: Platform[] = [];
-    rows.forEach((row, rowIdx) => {
-      row.forEach(({ rect }) => {
-        platforms.push({
-          x: rect.left,
-          y: rect.top,
-          width: rect.width,
-          height: rect.height,
-          row: rowIdx,
-        });
-      });
-    });
-    return platforms;
-  } catch {
-    return [];
-  }
-}
-
-function syntheticPlatforms(): Platform[] {
-  const VW = window.innerWidth;
-  const VH = window.innerHeight;
-  const h = 56;
-  const gap = Math.round((VH - 120) / 4);
-  return [0, 1, 2, 3].map((row) => ({
-    x: 40,
-    y: 70 + row * gap,
-    width: VW - 80,
-    height: h,
-    row,
-  }));
-}
-
-// ─── Error boundary wrapping the bug canvas ───────────────────────────────────
-
-class BugCanvasErrorBoundary extends React.Component<
-  { children: React.ReactNode; onError: () => void },
-  { crashed: boolean }
-> {
-  constructor(props: { children: React.ReactNode; onError: () => void }) {
-    super(props);
-    this.state = { crashed: false };
-  }
-  static getDerivedStateFromError() {
-    return { crashed: true };
-  }
-  componentDidCatch() {
-    this.props.onError();
-  }
-  render() {
-    return this.state.crashed ? null : this.props.children;
-  }
-}
-
-// ─── Host ─────────────────────────────────────────────────────────────────────
 
 export default function GameTriggersHost() {
   const pathname = usePathname();
@@ -148,7 +58,6 @@ export default function GameTriggersHost() {
     [orgConfig],
   );
 
-  // Global gate: master must be on, kill switch off, ambient triggers enabled
   const globallyEnabled =
     config.flags.masterEnabled &&
     !config.flags.killSwitch &&
@@ -175,24 +84,9 @@ export default function GameTriggersHost() {
     [config.triggers],
   );
 
-  // Bug game state (fullscreen canvas)
-  const [bugGameOpen, setBugGameOpen] = React.useState(false);
-  const [platforms, setPlatforms] = React.useState<Platform[]>([]);
-
-  const handleBugActivate = React.useCallback(() => {
-    try {
-      const VW = window.innerWidth;
-      const VH = window.innerHeight;
-      const detected = scanPlatforms();
-      const base = detected.length >= 2 ? detected : syntheticPlatforms();
-      setPlatforms(padPlatforms(base, VW, VH));
-    } catch {
-      setPlatforms(syntheticPlatforms());
-    }
-    setBugGameOpen(true);
-  }, []);
-
-  const handleBugEnd = React.useCallback(() => setBugGameOpen(false), []);
+  // Necromancer still mounts as a zero-DOM-disruption overlay over the page.
+  const [necroOpen, setNecroOpen] = React.useState(false);
+  const [necroCustomers, setNecroCustomers] = React.useState<ReturnType<typeof scanCustomersFromDOM>>([]);
 
   const cardPhysics = useCardPhysics();
 
@@ -219,29 +113,27 @@ export default function GameTriggersHost() {
     () => launchLegacySecretGame("legacy-snake", { source: "hidden-ui" }),
     [launchLegacySecretGame],
   );
+  const handleFarmActivate = React.useCallback(() => {
+    toast("Farm game - prototype, not yet playable", { type: "info" });
+  }, []);
+  const handleAlertActivate = React.useCallback(() => {
+    toast("Broken Data - prototype, not yet playable", { type: "info" });
+  }, []);
+  const handleMoonActivate = React.useCallback(() => {
+    const customers = scanCustomersFromDOM();
+    setNecroCustomers(customers);
+    setNecroOpen(true);
+  }, []);
 
-  const bugMs = triggerMs("bug");
   const asteroidMs = triggerMs("asteroid");
   const plantMs = triggerMs("plant");
   const snakeMs = triggerMs("snake");
+  const moonMs = triggerMs("moon");
+  const farmMs = triggerMs("farm");
+  const alertMs = triggerMs("alert");
 
   return (
     <>
-      {/* 🪲 Bug → fullscreen DK-style canvas game */}
-      {triggerEnabled("bug") && !bugGameOpen && (
-        <BugFloat
-          onActivate={handleBugActivate}
-          minIntervalMs={bugMs.minIntervalMs}
-          jitterMs={bugMs.jitterMs}
-        />
-      )}
-      {bugGameOpen && platforms.length > 0 && (
-        <BugCanvasErrorBoundary onError={handleBugEnd}>
-          <BugGameCanvas platforms={platforms} onEnd={handleBugEnd} />
-        </BugCanvasErrorBoundary>
-      )}
-
-      {/* ☄️ Asteroid → Space Invaders + card physics */}
       {triggerEnabled("asteroid") && (
         <AsteroidFloat
           onActivate={handleAsteroidActivate}
@@ -251,7 +143,6 @@ export default function GameTriggersHost() {
         />
       )}
 
-      {/* 🌱 Plant → Tower Defense */}
       {triggerEnabled("plant") && (
         <PlantFloat
           onActivate={handlePlantActivate}
@@ -260,12 +151,42 @@ export default function GameTriggersHost() {
         />
       )}
 
-      {/* 🐍 Snake → Snake */}
       {triggerEnabled("snake") && (
         <SnakeFloat
           onActivate={handleSnakeActivate}
           minIntervalMs={snakeMs.minIntervalMs}
           jitterMs={snakeMs.jitterMs}
+        />
+      )}
+
+      {triggerEnabled("moon") && (
+        <MoonRise
+          onActivate={handleMoonActivate}
+          minIntervalMs={moonMs.minIntervalMs}
+          jitterMs={moonMs.jitterMs}
+        />
+      )}
+
+      {triggerEnabled("farm") && (
+        <FarmFloat
+          onActivate={handleFarmActivate}
+          minIntervalMs={farmMs.minIntervalMs}
+          jitterMs={farmMs.jitterMs}
+        />
+      )}
+
+      {triggerEnabled("alert") && (
+        <AlertBadge
+          onActivate={handleAlertActivate}
+          minIntervalMs={alertMs.minIntervalMs}
+          jitterMs={alertMs.jitterMs}
+        />
+      )}
+
+      {necroOpen && (
+        <NecromancerGame
+          customers={necroCustomers}
+          onEnd={() => setNecroOpen(false)}
         />
       )}
     </>

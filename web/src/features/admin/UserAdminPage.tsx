@@ -19,14 +19,14 @@ import { useAuth } from "@app/auth/AuthProvider";
 import Inbox from "@client/inbox";
 
 const PAGE_SIZE = 50;
-const TAGS = ["casemanager", "compliance"] as const;
+const TAGS = ["casemanager", "compliance", "viewer"] as const;
 type Tag = (typeof TAGS)[number];
 
 function normalizeTags(input: unknown): Tag[] {
   const raw = Array.isArray(input) ? input : [];
   const out = raw
     .map((x) => String(x || "").toLowerCase())
-    .filter((x): x is Tag => x === "casemanager" || x === "compliance");
+    .filter((x): x is Tag => x === "casemanager" || x === "compliance" || x === "viewer");
   return Array.from(new Set(out));
 }
 
@@ -57,6 +57,28 @@ function EmailName({ user }: { user: CompositeUser }) {
   );
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+}
+
+function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 min-h-5 break-words text-sm text-slate-900 dark:text-slate-100">{value || "-"}</div>
+    </div>
+  );
+}
+
 export default function AdminUsersPage() {
   const { user: authedUser, profile } = useAuth();
   const viewerTopRole = String(profile?.topRole || "").toLowerCase();
@@ -80,6 +102,8 @@ export default function AdminUsersPage() {
 
   const [rowTags, setRowTags] = React.useState<Record<string, Tag[]>>({});
   const [sendingDigest, setSendingDigest] = React.useState(false);
+  const [detailUser, setDetailUser] = React.useState<CompositeUser | null>(null);
+  const [editDisplayName, setEditDisplayName] = React.useState("");
 
   const {
     data,
@@ -100,7 +124,10 @@ export default function AdminUsersPage() {
 
   const items = data?.users || [];
   const next = data?.nextPageToken || null;
-  const busy = inviteMut.isPending || setRoleMut.isPending || setActiveMut.isPending;
+  const busy =
+    inviteMut.isPending ||
+    setRoleMut.isPending ||
+    setActiveMut.isPending;
 
   React.useEffect(() => {
     setRowTags((prev) => {
@@ -113,6 +140,10 @@ export default function AdminUsersPage() {
   }, [items]);
 
   const pendingUsers = React.useMemo(() => items.filter(isPendingApproval), [items]);
+  const selectedUser = React.useMemo(
+    () => (detailUser ? items.find((u) => u.uid === detailUser.uid) || detailUser : null),
+    [detailUser, items]
+  );
 
   const onNext = () => {
     if (!next) return;
@@ -137,6 +168,11 @@ export default function AdminUsersPage() {
 
   const isSelf = (u: CompositeUser) => authedUser?.uid && u.uid === authedUser.uid;
 
+  const openUserDetail = (u: CompositeUser) => {
+    setDetailUser(u);
+    setEditDisplayName(String(u.displayName || ""));
+  };
+
   const persistTags = async (u: CompositeUser, tags: Tag[]) => {
     if (tags.length === 0) {
       toast("At least one role tag is required.", { type: "error" });
@@ -156,10 +192,6 @@ export default function AdminUsersPage() {
   const onTagToggle = (u: CompositeUser, tag: Tag, checked: boolean) => {
     const current = rowTags[u.uid] || normalizeTags(u.roles);
     const nextTags = checked ? Array.from(new Set([...current, tag])) : current.filter((t) => t !== tag);
-    if (nextTags.length === 0) {
-      toast("At least one role tag is required.", { type: "error" });
-      return;
-    }
     setRowTags((prev) => ({ ...prev, [u.uid]: nextTags }));
     void persistTags(u, nextTags);
   };
@@ -175,7 +207,7 @@ export default function AdminUsersPage() {
       return;
     }
     try {
-      await inviteMut.mutateAsync({
+      const result = await inviteMut.mutateAsync({
         email,
         name: inviteName.trim(),
         roles: inviteTags,
@@ -192,7 +224,11 @@ export default function AdminUsersPage() {
           : {}),
         ...(continueUrl.trim() ? { continueUrl: continueUrl.trim() } : {}),
       } as any);
-      toast("User invited.", { type: "success" });
+      if ((result as any)?.user?.inviteEmail?.ok === false) {
+        toast("User added, but invite email was not sent.", { type: "warning" });
+      } else {
+        toast("User invited.", { type: "success" });
+      }
       setInviteOpen(false);
       setInviteEmail("");
       setInviteName("");
@@ -202,6 +238,47 @@ export default function AdminUsersPage() {
       setInviteTags(["casemanager"]);
       setInviteOrgId("");
       setInviteTeamIds("");
+      void refetch();
+    } catch (e: unknown) {
+      toast(toApiError(e).error, { type: "error" });
+    }
+  };
+
+  const resendInvite = async (u: CompositeUser) => {
+    if (!u.email) {
+      toast("This user does not have an email address.", { type: "error" });
+      return;
+    }
+    try {
+      const result = await inviteMut.mutateAsync({
+        email: u.email,
+        name: u.displayName || "",
+        roles: Array.isArray(u.roles) ? u.roles : [],
+        topRole: (u.topRole as any) || "user",
+        sendEmail: true,
+      } as any);
+      if ((result as any)?.user?.inviteEmail?.ok === false) {
+        toast("Invite email was not sent.", { type: "warning" });
+      } else {
+        toast("Invite email sent.", { type: "success" });
+      }
+      void refetch();
+    } catch (e: unknown) {
+      toast(toApiError(e).error, { type: "error" });
+    }
+  };
+
+  const saveDisplayName = async () => {
+    if (!selectedUser) return;
+    try {
+      const result = await setRoleMut.mutateAsync({
+        uid: selectedUser.uid,
+        displayName: editDisplayName.trim() || null,
+      } as any);
+      const nextUser = ((result as any)?.user || selectedUser) as CompositeUser;
+      setDetailUser(nextUser);
+      setEditDisplayName(String(nextUser.displayName || ""));
+      toast("Display name saved.", { type: "success" });
       void refetch();
     } catch (e: unknown) {
       toast(toApiError(e).error, { type: "error" });
@@ -403,6 +480,91 @@ export default function AdminUsersPage() {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={!!selectedUser}
+        onClose={() => setDetailUser(null)}
+        title={<span className="text-sm font-semibold text-slate-800 dark:text-slate-100">User Details</span>}
+        widthClass="max-w-3xl"
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            {selectedUser && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => void resendInvite(selectedUser)}
+                disabled={busy || !selectedUser.email}
+              >
+                {inviteMut.isPending ? "Sending..." : "Send Invite Email Again"}
+              </button>
+            )}
+            <button className="btn btn-secondary" onClick={() => setDetailUser(null)} disabled={busy}>
+              Close
+            </button>
+          </div>
+        }
+      >
+        {selectedUser && (
+          <div className="space-y-4">
+            <div className="rounded border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+              <div className="text-lg font-semibold text-slate-950 dark:text-slate-50">
+                {selectedUser.displayName || selectedUser.email || selectedUser.uid}
+              </div>
+              <div className="mt-1 text-sm text-slate-500">{selectedUser.email || selectedUser.uid}</div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <DetailField label="UID" value={selectedUser.uid} />
+              <DetailField label="Email" value={selectedUser.email || "-"} />
+              <DetailField label="Top Role" value={topRoleOf(selectedUser)} />
+              <DetailField label="Status" value={selectedUser.active ? "active" : "inactive"} />
+              <DetailField label="Created" value={formatDateTime(selectedUser.createdAt)} />
+              <DetailField label="Last Login" value={formatDateTime(selectedUser.lastLogin)} />
+              <DetailField label="Org ID" value={(selectedUser as any).orgId || "-"} />
+              <DetailField
+                label="Teams"
+                value={Array.isArray((selectedUser as any).teamIds) && (selectedUser as any).teamIds.length
+                  ? (selectedUser as any).teamIds.join(", ")
+                  : "-"}
+              />
+            </div>
+
+            <div className="rounded border border-slate-200 p-3 dark:border-slate-700">
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Role Tags</div>
+              <div className="flex flex-wrap gap-2">
+                {TAGS.map((tag) => (
+                  <label key={tag} className="inline-flex items-center gap-1 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={(rowTags[selectedUser.uid] || normalizeTags(selectedUser.roles)).includes(tag)}
+                      onChange={(e) => onTagToggle(selectedUser, tag, e.currentTarget.checked)}
+                      disabled={busy}
+                    />
+                    {tag}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded border border-slate-200 p-3 dark:border-slate-700">
+              <label className="text-sm">
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Display Name</span>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    className="input"
+                    value={editDisplayName}
+                    onChange={(e) => setEditDisplayName(e.currentTarget.value)}
+                    placeholder="Display name"
+                    disabled={busy}
+                  />
+                  <button className="btn btn-sm" onClick={() => void saveDisplayName()} disabled={busy}>
+                    {setRoleMut.isPending ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <section className="card space-y-3 p-4">
         <h2 className="text-sm font-semibold text-slate-800">Pending Approvals</h2>
         {pendingUsers.length === 0 ? (
@@ -482,21 +644,30 @@ export default function AdminUsersPage() {
               <th className="p-2">Top Role</th>
               <th className="p-2">Tags</th>
               <th className="p-2">Status</th>
+              <th className="p-2">Last Login</th>
               <th className="p-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="p-3" colSpan={5}>Loading...</td></tr>}
+            {loading && <tr><td className="p-3" colSpan={6}>Loading...</td></tr>}
             {isError && !loading && (
-              <tr><td className="p-3 text-red-600" colSpan={5}>Error: {(error as Error)?.message || "failed"}</td></tr>
+              <tr><td className="p-3 text-red-600" colSpan={6}>Error: {(error as Error)?.message || "failed"}</td></tr>
             )}
-            {!loading && !isError && items.length === 0 && <tr><td className="p-3" colSpan={5}>No results.</td></tr>}
+            {!loading && !isError && items.length === 0 && <tr><td className="p-3" colSpan={6}>No results.</td></tr>}
             {items.map((u) => {
               const top = topRoleOf(u);
               const tags = rowTags[u.uid] || normalizeTags(u.roles);
               return (
                 <tr key={u.uid} className="border-t align-top">
-                  <td className="p-2"><EmailName user={u} /></td>
+                  <td className="p-2">
+                    <button
+                      type="button"
+                      className="block max-w-full text-left hover:underline"
+                      onClick={() => openUserDetail(u)}
+                    >
+                      <EmailName user={u} />
+                    </button>
+                  </td>
                   <td className="p-2">
                     <span className={["inline-flex rounded-full border px-2 py-0.5 text-xs", roleBadgeClass(top)].join(" ")}>
                       {top}
@@ -518,10 +689,13 @@ export default function AdminUsersPage() {
                     </div>
                   </td>
                   <td className="p-2">{u.active ? "active" : "inactive"}</td>
+                  <td className="p-2 text-xs text-slate-600">{formatDateTime(u.lastLogin)}</td>
                   <td className="p-2 text-right">
                     <ActionMenu
                       disabled={busy}
                       items={[
+                        { key: "details", label: "View Details", onSelect: () => openUserDetail(u) },
+                        { key: "resend-invite", label: "Send Invite Email Again", onSelect: () => resendInvite(u), disabled: !u.email },
                         { key: "set-user", label: "Set User", onSelect: () => setTopRole(u, "user"), disabled: !!isSelf(u) },
                         { key: "set-admin", label: "Escalate Admin", onSelect: () => setTopRole(u, "admin"), disabled: !!isSelf(u) },
                         ...(canCrossOrgManage

@@ -7,7 +7,7 @@ import {
   requireOrgId,
   canAccessDoc,
   type AuthedRequest,
-  cursorToTimestamp,
+  toDate,
 } from "../../core";
 
 import {
@@ -35,13 +35,13 @@ type FsTimestamp = FirebaseFirestore.Timestamp;
 
 const parseCursorTs = (v: unknown): FsTimestamp => {
   if (typeof v === "string" || typeof v === "number") {
-    try {
-      return cursorToTimestamp(v) as unknown as FsTimestamp;
-    } catch {
-      const err = new Error("invalid_cursor_timestamp") as Error & { code?: number };
-      err.code = 400;
-      throw err;
-    }
+    // Handle numeric strings as epoch millis
+    const num = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+    const d = toDate(num as string | number | Date);
+    if (d) return Timestamp.fromDate(d) as unknown as FsTimestamp;
+    const err = new Error("invalid_cursor_timestamp") as Error & { code?: number };
+    err.code = 400;
+    throw err;
   }
   if (!v || typeof v !== "object") {
     const err = new Error("invalid_cursor_timestamp") as Error & { code?: number };

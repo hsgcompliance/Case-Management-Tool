@@ -7,10 +7,12 @@ export {
   paymentQueueReopen,
   paymentQueueVoid,
   paymentQueueAdminSync,
+  paymentQueueRecomputeGrantAllocations,
 } from './http';
 
 export {
   onPaymentQueueSyncCreate,
   onPaymentQueueSyncUpdate,
   onPaymentQueueSyncDelete,
+  onPaymentQueueBudgetProjection,
 } from './triggers';

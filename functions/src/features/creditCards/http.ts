@@ -28,6 +28,7 @@ import {
   softDeleteCreditCards,
   hardDeleteCreditCards,
   summarizeCreditCards,
+  isCardActive,
 } from "./service";
 
 function explicitOrgFromReq(req: AuthedRequest, src: unknown): string {
@@ -134,14 +135,24 @@ export const creditCardsList = secureHandler(
 
     const statusStr = typeof status === "string" ? normStr(status) : undefined;
     if (statusStr) q = q.where("status", "==", statusStr);
-    if (active === "true" || active === true) q = q.where("active", "==", true);
-    if (active === "false" || active === false) q = q.where("active", "==", false);
 
-    q = q.orderBy("updatedAt", "desc").orderBy(FieldPath.documentId(), "desc").limit(lim);
+    const activeFilter =
+      active === "true" || active === true
+        ? true
+        : active === "false" || active === false
+        ? false
+        : undefined;
+    const fetchLimit = activeFilter === undefined ? lim : 500;
+
+    q = q.orderBy("updatedAt", "desc").orderBy(FieldPath.documentId(), "desc").limit(fetchLimit);
 
     const parseCursorTs = (v: unknown): FirebaseFirestore.Timestamp => {
-      const d = toDate(v as string | number | Date);
-      if (d) return Timestamp.fromDate(d);
+      if (typeof v === "string" || typeof v === "number") {
+        // Handle numeric strings as epoch millis
+        const num = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+        const d = toDate(num as string | number | Date);
+        if (d) return Timestamp.fromDate(d);
+      }
       const ts =
         (v as
           | {
@@ -163,7 +174,10 @@ export const creditCardsList = secureHandler(
 
     const snap = await q.get();
     const docs = snap.docs;
-    const items = docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+    const items = docs
+      .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+      .filter((card) => activeFilter === undefined || isCardActive(card as Record<string, unknown>) === activeFilter)
+      .slice(0, lim);
     items.forEach((card) => assertCreditCardOrgAccess(caller, targetOrg, card as Record<string, unknown>));
 
     const last = docs.length ? docs[docs.length - 1] : null;

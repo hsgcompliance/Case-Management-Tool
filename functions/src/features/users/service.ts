@@ -1,12 +1,15 @@
 // functions/src/features/users/service.ts
-import { authAdmin, db, FieldValue, orgIdFromClaims} from "../../core";
+import { authAdmin, db, FieldValue, orgIdFromClaims, WEB_BASE_URL} from "../../core";
 import type { UserRecord } from "firebase-admin/auth";
+import * as logger from "firebase-functions/logger";
 import { ensureOrgConfigDefaults } from "../orgs/service";
 import {
   CreateUserBody,
   InviteUserBody,
   SetRoleBody,
   SetActiveBody,
+  UpdateUserProfileBody,
+  ResendInviteBody,
   RevokeSessionsBody,
   ListUsersBody,
   OrgManagerListOrgsBody,
@@ -21,6 +24,8 @@ import type {
   InviteUserBodyIn,
   SetRoleBodyIn,
   SetActiveBodyIn,
+  UpdateUserProfileBodyIn,
+  ResendInviteBodyIn,
   RevokeSessionsBodyIn,
   ListUsersBodyIn,
   OrgManagerOrgT,
@@ -42,6 +47,12 @@ function normalizeTags(input?: unknown): Tag[] {
   const arr = Array.isArray(input) ? input : input != null ? [input] : undefined;
   const parsed = RolesArray.parse(arr as any); // default handles undefined
   return Array.from(new Set(parsed)) as Tag[];
+}
+
+function inviteContinueUrl(input?: string | null) {
+  if (input) return input;
+  const base = String(WEB_BASE_URL.value() || "https://housing-db-v2.web.app").replace(/\/+$/, "");
+  return `${base}/login`;
 }
 
 function claimsFromShape(shape: {
@@ -186,20 +197,94 @@ export async function inviteUserService(input: InviteUserBodyIn) {
 
   let sent: any = null;
   if (body.sendEmail) {
-    const resetLink = await authAdmin.generatePasswordResetLink(body.email, {
-      url: body.continueUrl || "https://household-database.app/login",
-      handleCodeInApp: false,
-    });
-    const { sendInviteService } = await import("../inbox/emailer.js");
-    sent = await sendInviteService({
-      to: body.email,
-      name: body.name || "",
-      resetLink,
-    });
+    try {
+      const resetLink = await authAdmin.generatePasswordResetLink(body.email, {
+        url: inviteContinueUrl(body.continueUrl),
+        handleCodeInApp: false,
+      });
+      const { sendInviteService } = await import("../inbox/emailer.js");
+      sent = await sendInviteService({
+        to: body.email,
+        name: body.name || "",
+        resetLink,
+      });
+    } catch (err: any) {
+      logger.warn("usersInvite_email_failed", {
+        email: body.email,
+        code: err?.code || null,
+        message: err?.message || String(err || "unknown_error"),
+      });
+      sent = {
+        ok: false,
+        error: "invite_email_failed",
+        message: err?.message || "Invite email was not sent.",
+      };
+    }
   }
 
   const composite = await toComposite(rec.uid);
   return { ...composite, inviteEmail: sent };
+}
+
+export async function updateUserProfileService(input: UpdateUserProfileBodyIn) {
+  const body = UpdateUserProfileBody.parse(input);
+  const displayName =
+    body.displayName == null || String(body.displayName).trim() === ""
+      ? null
+      : String(body.displayName).trim();
+
+  await authAdmin.updateUser(body.uid, { displayName });
+  await db.collection("userExtras").doc(body.uid).set(
+    {
+      displayName,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return toComposite(body.uid);
+}
+
+export async function resendInviteService(input: ResendInviteBodyIn) {
+  const body = ResendInviteBody.parse(input);
+  const rec = body.uid
+    ? await authAdmin.getUser(body.uid)
+    : await authAdmin.getUserByEmail(body.email!);
+
+  if (!rec.email) {
+    const e = new Error("missing_email") as Error & { code: number };
+    e.code = 400;
+    throw e;
+  }
+
+  let sent: any;
+  try {
+    const resetLink = await authAdmin.generatePasswordResetLink(rec.email, {
+      url: inviteContinueUrl(body.continueUrl),
+      handleCodeInApp: false,
+    });
+    const { sendInviteService } = await import("../inbox/emailer.js");
+    sent = await sendInviteService({
+      to: rec.email,
+      name: rec.displayName || "",
+      resetLink,
+    });
+  } catch (err: any) {
+    logger.warn("usersResendInvite_email_failed", {
+      uid: rec.uid,
+      email: rec.email,
+      code: err?.code || null,
+      message: err?.message || String(err || "unknown_error"),
+    });
+    sent = {
+      ok: false,
+      error: "invite_email_failed",
+      message: err?.message || "Invite email was not sent.",
+    };
+  }
+
+  const user = await toComposite(rec.uid);
+  return { user, inviteEmail: sent };
 }
 
 /* -------------------------------------------
@@ -242,6 +327,21 @@ export async function setUserRoleService(input: SetRoleBodyIn) {
   });
 
   await setClaimsMerged(body.uid, nextClaims);
+
+  if ("displayName" in body) {
+    const displayName =
+      body.displayName == null || String(body.displayName).trim() === ""
+        ? null
+        : String(body.displayName).trim();
+    await authAdmin.updateUser(body.uid, { displayName });
+    await db.collection("userExtras").doc(body.uid).set(
+      {
+        displayName,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
 
   await db.collection("userTasks").doc(`userverify|${body.uid}`).delete().catch(() => {});
   return toComposite(body.uid);

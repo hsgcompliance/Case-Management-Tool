@@ -10,7 +10,7 @@ import MyProfileDropdown from "@app/auth/MyProfileDropdown";
 import AdminMenu from "./AdminMenu";
 import DevMenu from "./DevMenu";
 import { shouldUseEmulators } from "@lib/runtimeEnv";
-import { isAdminLike, isDevLike } from "@lib/roles";
+import { isAdminLike, isDevLike, isViewerLike } from "@lib/roles";
 
 const nav = [
   { to: "/reports", label: "Reports" },
@@ -40,6 +40,7 @@ export function Topbar() {
 
   const isAdmin = isAdminLike(profile as { topRole?: unknown; role?: unknown } | null);
   const isDev = isDevLike(profile as { topRole?: unknown; role?: unknown } | null);
+  const isViewer = isViewerLike(profile as { roles?: unknown } | null);
 
   // Landing page can show nav affordances even for signed-out users.
   // Actual route security remains enforced by each protected page.
@@ -117,7 +118,7 @@ export function Topbar() {
 
         {showNav ? (
           <nav aria-label="Primary" className="hidden md:flex items-center gap-1" data-tour="topbar-nav">
-            {nav.map((n) => {
+            {(isViewer ? nav.filter((n) => n.to === "/customers" || n.to === "/budget") : nav).map((n) => {
               const active = isRouteActive(pathname, n.to);
               return (
                 <Link

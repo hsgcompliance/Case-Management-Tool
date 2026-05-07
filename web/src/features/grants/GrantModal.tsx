@@ -290,6 +290,7 @@ export default function GrantDetailModal({
                       amount: 0,
                       spent: 0,
                       projected: 0,
+                      type: null,
                     },
                   ],
                 },
@@ -713,7 +714,7 @@ export default function GrantDetailModal({
           <select
             className="select"
             onChange={async (e) => {
-              const prefillId = e.target.value;
+              const prefillId = e.currentTarget.value;
               if (!prefillId) return;
               try {
                 const source = await fetchGrantById(prefillId);
@@ -979,6 +980,9 @@ function TabsRouter(props: {
         <AllocationTab
           grantId={String(props.grant.id)}
           perCustomerCap={(props.grant?.budget as Record<string, unknown> | undefined)?.perCustomerCap as number | null | undefined}
+          lineItems={Array.isArray((props.grant?.budget as Record<string, unknown> | undefined)?.lineItems)
+            ? ((props.grant?.budget as Record<string, unknown>).lineItems as any)
+            : []}
         />
       )}
     </>

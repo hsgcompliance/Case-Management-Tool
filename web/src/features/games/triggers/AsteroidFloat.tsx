@@ -1,7 +1,9 @@
 "use client";
 // web/src/features/games/triggers/AsteroidFloat.tsx
-// Flaming asteroid that streaks diagonally across the screen.
+// Flaming asteroid that plunges from the top of the screen downward.
 // Clicking it opens Space Invaders via the mini-player.
+// Trajectory is broadcast via onTrajectory so GameTriggersHost can schedule
+// card-physics hits on any [data-card-physics-id] elements in the path.
 
 import React from "react";
 import type { AsteroidTrajectory } from "../effects/cardPhysicsEngine";
@@ -12,66 +14,67 @@ interface Props {
   jitterMs?: number;
   /** Called at streak start with the asteroid's computed viewport path */
   onTrajectory?: (t: AsteroidTrajectory) => void;
+  /** Dev sandbox: immediately spawn the floater without waiting for the timer */
+  forceShow?: boolean;
 }
 
 const DEFAULT_INTERVAL_MS = 14 * 60_000;
-const DEFAULT_JITTER_MS = 5 * 60_000;
-const STREAK_MS = 2_400;
+const DEFAULT_JITTER_MS   = 5 * 60_000;
+const STREAK_MS           = 2_800; // slightly slower than horizontal — feels like gravity
 
 type Phase = "hidden" | "streaking";
 
-export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onTrajectory }: Props) {
-  const intervalMs = minIntervalMs ?? DEFAULT_INTERVAL_MS;
+export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onTrajectory, forceShow }: Props) {
+  const intervalMs  = minIntervalMs ?? DEFAULT_INTERVAL_MS;
   const jitterMsVal = jitterMs ?? DEFAULT_JITTER_MS;
 
-  const [phase, setPhase] = React.useState<Phase>("hidden");
-  const [fromRight, setFromRight] = React.useState(false);
-  const [yFrac, setYFrac] = React.useState(0.2);
+  const [phase, setPhase]       = React.useState<Phase>("hidden");
+  const [xFrac, setXFrac]       = React.useState(0.5);   // 0–1 across viewport width
+  const [driftPx, setDriftPx]   = React.useState(0);     // px of horizontal drift during fall
+
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onTrajectoryRef = React.useRef(onTrajectory);
   React.useEffect(() => { onTrajectoryRef.current = onTrajectory; }, [onTrajectory]);
 
-  /** Compute and broadcast the trajectory for the given streak params. */
-  const fireTrajectory = React.useCallback((fr: boolean, yf: number) => {
+  /** Compute and broadcast the top-down trajectory. */
+  const fireTrajectory = React.useCallback((xf: number, drift: number) => {
     if (!onTrajectoryRef.current || typeof window === "undefined") return;
     const VW = window.innerWidth;
     const VH = window.innerHeight;
-    const r = 22; // half of the 44px asteroid SVG
-    // Asteroid center start/end derived from the CSS animation values
-    const startX = fr ? VW + r : -r;
-    const startY = yf * VH + r;
-    const endX   = fr ? -r - 258 : VW + r + 258;
-    const endY   = startY + 0.18 * VH;
+    const r  = 22; // half of the 44px asteroid SVG
+    const startX = xf * VW;
+    const startY = -r;          // above viewport
+    const endX   = startX + drift;
+    const endY   = VH + r;      // below viewport — full vertical sweep hits everything in path
     onTrajectoryRef.current({ startX, startY, endX, endY, durationMs: STREAK_MS });
   }, []);
 
+  const pickAndFire = React.useCallback(() => {
+    const xf    = 0.1 + Math.random() * 0.8;           // keep away from edges
+    const drift = (Math.random() - 0.5) * 0.25 * (typeof window !== "undefined" ? window.innerWidth : 1200);
+    setXFrac(xf);
+    setDriftPx(drift);
+    setPhase("streaking");
+    fireTrajectory(xf, drift);
+  }, [fireTrajectory]);
+
   const scheduleNext = React.useCallback(() => {
     const delay = intervalMs + Math.random() * jitterMsVal;
-    timerRef.current = setTimeout(() => {
-      const fr = Math.random() > 0.5;
-      const yf = 0.05 + Math.random() * 0.4;
-      setFromRight(fr);
-      setYFrac(yf);
-      setPhase("streaking");
-      fireTrajectory(fr, yf);
-    }, delay);
-  }, [intervalMs, jitterMsVal, fireTrajectory]);
+    timerRef.current = setTimeout(pickAndFire, delay);
+  }, [intervalMs, jitterMsVal, pickAndFire]);
 
+  // First appearance after 2–3.5 min
   React.useEffect(() => {
     const firstDelay = 2 * 60_000 + Math.random() * 90_000;
-    timerRef.current = setTimeout(() => {
-      const fr = Math.random() > 0.5;
-      const yf = 0.05 + Math.random() * 0.4;
-      setFromRight(fr);
-      setYFrac(yf);
-      setPhase("streaking");
-      fireTrajectory(fr, yf);
-    }, firstDelay);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
+    timerRef.current = setTimeout(pickAndFire, firstDelay);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  React.useEffect(() => {
+    if (!forceShow || phase !== "hidden") return;
+    pickAndFire();
+  }, [forceShow, phase, pickAndFire]);
 
   React.useEffect(() => {
     if (phase !== "streaking") return;
@@ -94,21 +97,18 @@ export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onT
 
   if (phase === "hidden") return null;
 
-  const dx = fromRight ? "calc(-100vw - 280px)" : "calc(100vw + 280px)";
-  const spinDir = fromRight ? "-" : "";
-
   return (
     <>
       <style>{`
-        @keyframes asteroidFly {
-          from { transform: translate(0, 0); opacity: 0; }
-          8%   { opacity: 1; }
-          85%  { opacity: 1; }
-          to   { transform: translate(${dx}, 18vh); opacity: 0; }
+        @keyframes asteroidFall {
+          from { transform: translate(0, 0);                                    opacity: 0; }
+          6%   { transform: translate(0, 0);                                    opacity: 1; }
+          88%  { transform: translate(${driftPx}px, calc(100vh + 80px));        opacity: 1; }
+          to   { transform: translate(${driftPx}px, calc(100vh + 120px));       opacity: 0; }
         }
         @keyframes asteroidSpin {
           from { transform: rotate(0deg); }
-          to   { transform: rotate(${spinDir}300deg); }
+          to   { transform: rotate(420deg); }
         }
       `}</style>
 
@@ -118,8 +118,8 @@ export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onT
         title="Space game 🚀"
         style={{
           position: "fixed",
-          top: `${yFrac * 100}vh`,
-          ...(fromRight ? { right: -60 } : { left: -60 }),
+          top: -80,                      // starts just above viewport
+          left: `calc(${xFrac * 100}% - 22px)`, // center the 44px rock on xFrac; no transform needed
           zIndex: 9990,
           background: "none",
           border: "none",
@@ -128,12 +128,15 @@ export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onT
           userSelect: "none",
           outline: "none",
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
-          animation: `asteroidFly ${STREAK_MS}ms cubic-bezier(0.2, 0.1, 0.3, 1) forwards`,
+          animation: `asteroidFall ${STREAK_MS}ms cubic-bezier(0.3, 0.05, 0.5, 1) forwards`,
         }}
       >
-        {!fromRight && <AsteroidTrail side="left" />}
+        {/* Comet tail — streams upward above the falling rock */}
+        <AsteroidTail />
 
+        {/* Rock */}
         <svg
           width={44}
           height={44}
@@ -143,7 +146,7 @@ export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onT
             flexShrink: 0,
             animation: `asteroidSpin ${STREAK_MS}ms linear forwards`,
             filter:
-              "drop-shadow(0 0 10px rgba(251,146,60,1)) drop-shadow(0 0 5px rgba(239,68,68,0.9))",
+              "drop-shadow(0 0 12px rgba(251,146,60,1)) drop-shadow(0 0 6px rgba(239,68,68,0.9))",
           }}
         >
           <ellipse cx="22" cy="22" rx="21" ry="21" fill="rgba(239,68,68,0.18)" />
@@ -154,25 +157,21 @@ export default function AsteroidFloat({ onActivate, minIntervalMs, jitterMs, onT
           <circle cx="13" cy="27" r="2" fill="#57534e" />
           <ellipse cx="22" cy="22" rx="7" ry="7" fill="rgba(251,146,60,0.4)" />
         </svg>
-
-        {fromRight && <AsteroidTrail side="right" />}
       </button>
     </>
   );
 }
 
-function AsteroidTrail({ side }: { side: "left" | "right" }) {
-  const gradient =
-    side === "left"
-      ? "linear-gradient(to left, rgba(251,146,60,0.95), rgba(239,68,68,0.55), rgba(250,204,21,0.15), transparent)"
-      : "linear-gradient(to right, rgba(251,146,60,0.95), rgba(239,68,68,0.55), rgba(250,204,21,0.15), transparent)";
+/** Vertical comet tail that streams upward behind the falling asteroid. */
+function AsteroidTail() {
   return (
     <div
       style={{
-        width: 120,
-        height: 13,
-        background: gradient,
-        filter: "blur(3px)",
+        width: 14,
+        height: 110,
+        background:
+          "linear-gradient(to bottom, transparent, rgba(250,204,21,0.15), rgba(239,68,68,0.5), rgba(251,146,60,0.9))",
+        filter: "blur(3.5px)",
         borderRadius: 8,
         flexShrink: 0,
       }}

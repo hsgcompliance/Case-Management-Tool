@@ -2,6 +2,37 @@
 "use client";
 import React, { useMemo } from "react";
 
+const DEFAULT_LINE_ITEM_TYPES = [
+  { id: "rental-assistance", label: "Rental Assistance" },
+  { id: "program-spending", label: "Program Spending" },
+  { id: "customer-support-service", label: "Customer Support Service" },
+] as const;
+
+function slugifyLineItemType(label: string) {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function lineItemTypeLabel(value: unknown) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    const raw = value as Record<string, unknown>;
+    return String(raw.label ?? raw.name ?? raw.id ?? "").trim();
+  }
+  return "";
+}
+
+function normalizeLineItemTypeInput(value: string) {
+  const label = value.trim();
+  if (!label || ["na", "n/a", "none", "null"].includes(label.toLowerCase())) return null;
+  const preset = DEFAULT_LINE_ITEM_TYPES.find((type) => type.label.toLowerCase() === label.toLowerCase());
+  return preset ? { ...preset } : { id: slugifyLineItemType(label), label };
+}
+
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
 }
@@ -67,6 +98,7 @@ export function BudgetTab({
       spent: 0,
       projected: 0,
       locked: false,
+      type: null,
     });
     commit(next);
   };
@@ -103,7 +135,7 @@ export function BudgetTab({
     return { liAmount, liSpent, liProjected };
   }, [budget.lineItems]);
 
-  const colCount = editing ? 12 : 10;
+  const colCount = editing ? 13 : 11;
 
   return (
     <div className="space-y-4 mt-4">
@@ -238,6 +270,7 @@ export function BudgetTab({
           <thead>
             <tr>
               <th>Label</th>
+              <th className="w-44" title="Reporting category for grouping line item totals across grants">Type</th>
               <th className="text-right">Amount</th>
               <th className="text-right">Spent</th>
               <th className="text-right">Proj.</th>
@@ -278,6 +311,30 @@ export function BudgetTab({
                         />
                       ) : (
                         <span className="text-slate-800 dark:text-slate-200">{li.label ?? li.id}</span>
+                      )}
+                    </td>
+                    <td>
+                      {editing ? (
+                        <>
+                          <input
+                            className="input"
+                            list="grant-line-item-type-options-legacy"
+                            placeholder="N/A"
+                            value={lineItemTypeLabel(li.type)}
+                            onChange={(e) => updateLineItem(i, { type: normalizeLineItemTypeInput(e.currentTarget.value) })}
+                            title="Use a default type or type a new category. Blank, NA, or N/A stores no type."
+                          />
+                          {i === 0 && (
+                            <datalist id="grant-line-item-type-options-legacy">
+                              {DEFAULT_LINE_ITEM_TYPES.map((type) => (
+                                <option key={type.id} value={type.label} />
+                              ))}
+                              <option value="N/A" />
+                            </datalist>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-slate-600 dark:text-slate-300">{lineItemTypeLabel(li.type) || "N/A"}</span>
                       )}
                     </td>
                     <td className="text-right">
@@ -389,6 +446,7 @@ export function BudgetTab({
             <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-700">
               <tr>
                 <td>Totals</td>
+                <td />
                 <td className="text-right">{currency(liTotals.liAmount)}</td>
                 <td className="text-right">{currency(liTotals.liSpent)}</td>
                 <td className="text-right">{currency(liTotals.liProjected)}</td>

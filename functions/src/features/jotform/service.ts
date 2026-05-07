@@ -31,6 +31,24 @@ import {
   TJotformDigestMap,
   toArray,
 } from "./schemas";
+import { isSpendingFormId, extractSpendItems, type ExtractedSpendItem } from "../paymentQueue/extractor";
+import { upsertPaymentQueueItems } from "../paymentQueue/service";
+import { refreshCreditCardBudgets } from "../creditCards/refreshBudget";
+
+const CC_FORM_ID = "251878265158166";
+
+function resolveCreditCardId(card: string, cards: Array<Record<string, unknown>>): string {
+  if (!card) return "";
+  const needle = card.trim().toLowerCase();
+  for (const c of cards) {
+    if (String(c.id || "").trim().toLowerCase() === needle) return String(c.id);
+    if (c.code && String(c.code).trim().toLowerCase() === needle) return String(c.id);
+    const m = c.matching as Record<string, unknown> | null | undefined;
+    const vals = Array.isArray(m?.cardAnswerValues) ? (m!.cardAnswerValues as unknown[]) : [];
+    if (vals.some((v) => String(v || "").trim().toLowerCase() === needle)) return String(c.id);
+  }
+  return "";
+}
 
 /* ---------------- Jotform API helpers ---------------- */
 
@@ -649,8 +667,12 @@ export async function listJotformSubmissions(src: any, caller: Claims, targetOrg
     .limit(lim);
 
   const parseCursorTs = (v: unknown): FirebaseFirestore.Timestamp => {
-    const d = toDate(v as any);
-    if (d) return Timestamp.fromDate(d);
+    if (typeof v === "string" || typeof v === "number") {
+      // Handle numeric strings as epoch millis
+      const num = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+      const d = toDate(num as any);
+      if (d) return Timestamp.fromDate(d);
+    }
     const sec = Number((v as any)?.seconds ?? (v as any)?._seconds ?? 0) || 0;
     const ns = Number((v as any)?.nanoseconds ?? (v as any)?._nanoseconds ?? 0) || 0;
     return new Timestamp(sec, ns);
@@ -890,7 +912,7 @@ export async function syncJotformSelection(body: any, caller: Claims, targetOrg:
 
   if (!selected.length) return { forms: [], ids: [], count: 0 };
 
-  const outForms: Array<{ formId: string; alias: string | null; count: number }> = [];
+  const outForms: Array<{ formId: string; alias: string | null; count: number; jotformTotal: number; localTotal: number; countMismatch: boolean }> = [];
   const ids = new Set<string>();
 
   for (const f of selected) {
@@ -910,7 +932,24 @@ export async function syncJotformSelection(body: any, caller: Claims, targetOrg:
     } catch (error) {
       throw syncError(readSyncStageFromError(error), error, { formId: String(f.id), alias: f.alias || null });
     }
-    outForms.push({ formId: String(f.id), alias: f.alias || null, count: Number(r.count || 0) });
+    const jotformTotal = Number(f.count || 0);
+    let localTotal = 0;
+    try {
+      const countSnap = await db.collection("jotformSubmissions")
+        .where("orgId", "==", normId(targetOrg))
+        .where("formId", "==", String(f.id))
+        .count()
+        .get();
+      localTotal = countSnap.data().count;
+    } catch { /* count() may not be available in emulator */ }
+    outForms.push({
+      formId: String(f.id),
+      alias: f.alias || null,
+      count: Number(r.count || 0),
+      jotformTotal,
+      localTotal,
+      countMismatch: jotformTotal > 0 && localTotal !== jotformTotal,
+    });
     (r.ids || []).forEach((id) => ids.add(String(id)));
   }
 
@@ -954,6 +993,9 @@ function normalizeDigestMapInput(input: any, targetOrg: string): TJotformDigestM
         }))
         .filter((f) => !!f.key)
     : [];
+  const spending = (parsed.options as any)?.spending || {};
+  const asKeyArray = (value: unknown) =>
+    Array.isArray(value) ? value.map((k) => String(k || "").trim()).filter(Boolean) : [];
 
   return {
     ...parsed,
@@ -977,6 +1019,20 @@ function normalizeDigestMapInput(input: any, targetOrg: string): TJotformDigestM
         subtitleFieldKeys: Array.isArray(parsed.options?.task?.subtitleFieldKeys)
           ? parsed.options.task.subtitleFieldKeys.map((k: unknown) => String(k || "").trim()).filter(Boolean)
           : [],
+      },
+      spending: {
+        ...(spending || {}),
+        enabled: spending.enabled === true,
+        schemaKind: ["credit-card", "invoice", "other"].includes(String(spending.schemaKind || ""))
+          ? String(spending.schemaKind)
+          : "other",
+        grantFieldKeys: asKeyArray(spending.grantFieldKeys),
+        lineItemFieldKeys: asKeyArray(spending.lineItemFieldKeys),
+        customerFieldKeys: asKeyArray(spending.customerFieldKeys),
+        amountFieldKeys: asKeyArray(spending.amountFieldKeys),
+        merchantFieldKeys: asKeyArray(spending.merchantFieldKeys),
+        keywordRules: Array.isArray(spending.keywordRules) ? spending.keywordRules : [],
+        notes: spending.notes ? String(spending.notes).trim() : null,
       },
     },
     header: {
@@ -1141,6 +1197,13 @@ export async function syncJotformSubmissions(body: unknown, caller: Claims, targ
   const ids: string[] = [];
   let hasMore = false;
 
+  // Load credit cards once for CC form so we can resolve creditCardId at write time
+  let orgCreditCards: Array<Record<string, unknown>> = [];
+  if (String(formId) === CC_FORM_ID) {
+    const snap = await db.collection("creditCards").where("orgId", "==", normId(targetOrg)).get();
+    orgCreditCards = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  }
+
   while (page < pageMax) {
     let content: JotformSubmissionApi[];
     try {
@@ -1171,6 +1234,40 @@ export async function syncJotformSubmissions(body: unknown, caller: Claims, targ
         await writer.close();
       } catch (error) {
         throw syncError("write", error, { formId: String(formId), persisted: normalized.length });
+      }
+
+      // Keep the spending tool deterministic: do not wait for the Firestore
+      // trigger to backfill paymentQueue after this HTTP request returns.
+      if (isSpendingFormId(formId)) {
+        try {
+          const queueItems = normalized.flatMap((sub) =>
+            extractSpendItems(sub as any).map((extracted: ExtractedSpendItem) => {
+              if (extracted.source === "credit-card" && extracted.card && orgCreditCards.length) {
+                extracted.creditCardId = resolveCreditCardId(extracted.card, orgCreditCards) || null;
+              }
+              return { extracted, orgId: normId(targetOrg) };
+            })
+          );
+          await upsertPaymentQueueItems(queueItems);
+
+          // Write budget totals back to creditCards docs so the budget page
+          // doesn't need to do expensive queue/ledger fan-outs per load.
+          try {
+            const touchedCardIds = [
+              ...new Set(
+                queueItems
+                  .map(({ extracted }) => String(extracted.creditCardId || ""))
+                  .filter(Boolean)
+              ),
+            ];
+            await refreshCreditCardBudgets(normId(targetOrg), {
+              cardIds: touchedCardIds.length ? touchedCardIds : undefined,
+              updatedBy: "jotformSync",
+            });
+          } catch { /* budget refresh is best-effort; don't fail the sync */ }
+        } catch (error) {
+          throw syncError("write", error, { formId: String(formId), stage: "paymentQueue", persisted: normalized.length });
+        }
       }
     } else {
       // For non-spending forms, just return the IDs without persisting

@@ -7,6 +7,7 @@ import {
   PaymentQueuePostToLedgerBody,
   PaymentQueueReopenBody,
   PaymentQueueVoidBody,
+  PaymentQueueRecomputeGrantBody,
   PaymentQueueItemParams,
 } from './schemas';
 import {
@@ -16,6 +17,7 @@ import {
   postPaymentQueueToLedger,
   reopenPaymentQueueItem,
   voidPaymentQueueItems,
+  recomputePaymentQueueGrantAllocations,
 } from './service';
 
 /* ============================================================================
@@ -74,7 +76,7 @@ export const paymentQueuePatch = secureHandler(async (req, res): Promise<void> =
 ============================================================================ */
 
 export const paymentQueuePostToLedger = secureHandler(async (req, res): Promise<void> => {
-  const {id} = PaymentQueueItemParams.parse(req.query);
+  const {id} = PaymentQueueItemParams.parse({...((req.body || {}) as any), ...((req.query || {}) as any)});
   const body = PaymentQueuePostToLedgerBody.parse(req.body || {});
   const uid = requireUid(req as any);
 
@@ -137,4 +139,14 @@ export const paymentQueueVoid = secureHandler(async (req, res): Promise<void> =>
 
 export const paymentQueueAdminSync = secureHandler(async (req, res): Promise<void> => {
   await adminSyncPaymentQueueHandler(req as any, res as any);
+}, { auth: 'admin', methods: ['POST', 'OPTIONS'] });
+
+/* ============================================================================
+   POST /paymentQueueRecomputeGrantAllocations  (admin: rebuild paid allocation)
+============================================================================ */
+
+export const paymentQueueRecomputeGrantAllocations = secureHandler(async (req, res): Promise<void> => {
+  const body = PaymentQueueRecomputeGrantBody.parse(req.body || {});
+  const result = await recomputePaymentQueueGrantAllocations(body.grantId, body.dryRun);
+  res.json({ok: true, ...result});
 }, { auth: 'admin', methods: ['POST', 'OPTIONS'] });

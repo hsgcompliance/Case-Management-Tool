@@ -8,20 +8,41 @@ import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/Pinned
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 
 const POP_KEYS = ["youth", "individual", "family"] as const;
-const POP_LABELS: Record<string, string> = { youth: "Y", family: "F", individual: "I" };
+const POP_LABELS: Record<string, string> = { youth: "Youth", family: "Family", individual: "Individual" };
+
+function asObj(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function fmtUsd(n: number) {
+  if (!n) return "-";
+  return n.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+}
+
+function budgetTotal(grant: Grant) {
+  const budget = asObj(asObj(grant).budget);
+  const totals = asObj(budget.totals);
+  const total = Number(totals.total ?? budget.total ?? 0);
+  return Number.isFinite(total) ? total : 0;
+}
 
 function PopPill({ popKey, count }: { popKey: string; count: number }) {
   if (!count) return null;
-  const letter = POP_LABELS[popKey] ?? (popKey[0]?.toUpperCase() ?? "?");
   return (
     <span
       className={[
-        "inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+        "inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
         populationChipClass(popKey),
       ].join(" ")}
-      title={`${popKey[0].toUpperCase() + popKey.slice(1)}: ${count}`}
+      title={`${POP_LABELS[popKey] ?? popKey}: ${count}`}
     >
-      {letter} {count}
+      {POP_LABELS[popKey] ?? popKey} {count}
     </span>
   );
 }
@@ -42,112 +63,143 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
   const gid = String(grant.id);
   const isPinned = pinnedIds.includes(gid);
   const isDashPinned = dashPinnedItems.some((x) => x.type === "grant" && x.id === gid);
-  const isGrant = String((grant as any)?.kind || "").toLowerCase() !== "program";
+  const grantRecord = asObj(grant);
+  const allMetrics = asObj(grantRecord.metrics);
+  const embeddedCounts = asObj(allMetrics.enrollmentCounts);
+  const embeddedCustomers = asObj(allMetrics.customers);
+  const embeddedCaseManagers = asObj(allMetrics.caseManagers);
+  const isGrant = String(grantRecord.kind || "").toLowerCase() !== "program";
+  const totalBudget = budgetTotal(grant);
 
-  const enrollActive = gm?.enrollments.active ?? (grant as any)?.metrics?.enrollmentCounts?.active ?? "—";
-  const uniqueClients = gm?.customers.uniqueTotal ?? "—";
-  const cmCount = gm?.caseManagers.total ?? "—";
+  const enrollActive = gm?.enrollments.active ?? embeddedCounts.active ?? "-";
+  const enrollInactive = gm?.enrollments.inactive ?? embeddedCounts.inactive ?? "-";
+  const uniqueClients = gm?.customers.uniqueTotal ?? embeddedCustomers.uniqueTotal ?? "-";
+  const cmCount = gm?.caseManagers.total ?? embeddedCaseManagers.total ?? "-";
   const cmNames = gm?.caseManagers.refs?.map((r) => r.name ?? r.id).join(", ");
 
   const pop = gm?.enrollments.byPopulation;
-  const embeddedPop = (grant as any)?.metrics?.enrollmentCounts?.population as
-    | Record<string, number>
-    | undefined;
+  const embeddedPop = asObj(embeddedCounts.population);
+  const hasEmbeddedPop = Object.keys(embeddedPop).length > 0;
   const displayPop =
     pop ??
-    (embeddedPop
+    (hasEmbeddedPop
       ? {
-          youth: embeddedPop.Youth ?? 0,
-          family: embeddedPop.Family ?? 0,
-          individual: embeddedPop.Individual ?? 0,
-          unknown: embeddedPop.unknown ?? 0,
+          youth: Number(embeddedPop.youth ?? embeddedPop.Youth ?? 0),
+          family: Number(embeddedPop.family ?? embeddedPop.Family ?? 0),
+          individual: Number(embeddedPop.individual ?? embeddedPop.Individual ?? 0),
         }
       : null);
 
   return (
-    <div className="group grid w-full grid-cols-12 items-center gap-3 border-b border-slate-200 dark:border-slate-700 last:border-b-0">
-      {/* Main clickable row */}
+    <div
+      className={[
+        "group grid w-full grid-cols-12 items-center gap-3 border-b border-slate-200 transition-colors last:border-b-0 dark:border-slate-700",
+        isGrant ? "border-l-4 border-l-amber-400" : "border-l-4 border-l-sky-400",
+      ].join(" ")}
+    >
       <button
         type="button"
         onClick={onClick}
-        className="col-span-10 grid grid-cols-10 items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
+        className="col-span-9 grid grid-cols-9 items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/40 md:col-span-11 md:grid-cols-12"
       >
-        {/* Name + kind chip */}
-        <div className="col-span-10 md:col-span-4">
-          <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-sky-700 dark:group-hover:text-sky-400 transition-colors truncate">
+        <div className="col-span-9 min-w-0 md:col-span-4">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate font-semibold text-slate-900 transition-colors group-hover:text-sky-700 dark:text-slate-100 dark:group-hover:text-sky-400">
               {labelOverride || String(grant.name || grant.id)}
             </span>
-            {isGrant && (
-              <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
-                Grant
-              </span>
-            )}
+            <span
+              className={[
+                "hidden shrink-0 text-[11px] font-semibold md:inline",
+                isGrant ? "text-amber-700 dark:text-amber-300" : "text-sky-700 dark:text-sky-300",
+              ].join(" ")}
+            >
+              {isGrant ? "Grant" : "Program"}
+            </span>
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            ID: {String(grant.id || "-")}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+            <span className="truncate">ID: {String(grant.id || "-")}</span>
+            {isGrant ? <span>{fmtUsd(totalBudget)} budget</span> : null}
           </div>
         </div>
 
-        {/* Active enrollments */}
         <div
           className={[
-            "col-span-4 text-right text-sm font-semibold md:col-span-2",
+            "col-span-3 text-right text-sm font-bold md:col-span-1",
             metricTextClass("grant-active-enrollments"),
           ].join(" ")}
-          title={gm?.enrollments.total != null ? `Active: ${enrollActive} · Total: ${gm.enrollments.total}` : undefined}
+          title={gm?.enrollments.total != null ? `Active: ${enrollActive} / Total: ${gm.enrollments.total}` : undefined}
         >
-          {isLoading ? "…" : enrollActive}
+          {isLoading ? "..." : enrollActive}
         </div>
 
-        {/* Unique clients */}
+        <div className="col-span-3 text-right text-sm font-semibold text-slate-500 dark:text-slate-400 md:col-span-1">
+          {isLoading ? "..." : enrollInactive}
+        </div>
+
         <div
           className={[
-            "col-span-4 text-right text-sm font-semibold md:col-span-2",
+            "col-span-3 text-right text-sm font-semibold md:col-span-1",
             metricTextClass("grant-unique-clients"),
           ].join(" ")}
           title={gm ? `Unique: ${gm.customers.uniqueTotal} (${gm.customers.activeUniqueTotal} active)` : undefined}
         >
-          {isLoading ? "…" : uniqueClients}
+          {isLoading ? "..." : uniqueClients}
         </div>
 
-        {/* Population pills */}
-        <div className="col-span-4 flex flex-wrap justify-end gap-1 md:col-span-1">
+        <div className="hidden flex-wrap justify-start gap-1 md:col-span-2 md:flex">
           {displayPop ? (
             POP_KEYS.map((k) => (
               <PopPill key={k} popKey={k} count={displayPop[k] ?? 0} />
             ))
           ) : (
-            <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+            <span className="text-xs text-slate-300 dark:text-slate-600">-</span>
           )}
         </div>
 
-        {/* CM count */}
         <div
-          className="hidden md:block text-right text-xs text-slate-500 dark:text-slate-400 md:col-span-1"
+          className="hidden text-right text-xs text-slate-500 dark:text-slate-400 md:col-span-1 md:block"
           title={cmNames}
         >
-          {isLoading ? "…" : cmCount !== "—" && cmCount > 0 ? `${cmCount} CMs` : "—"}
+          {isLoading ? "..." : cmCount !== "-" && Number(cmCount) > 0 ? `${cmCount}` : "-"}
+        </div>
+
+        <div className="hidden text-right text-xs font-semibold text-slate-600 dark:text-slate-300 md:col-span-2 md:block">
+          {isGrant ? fmtUsd(totalBudget) : "Program"}
         </div>
       </button>
 
-      {/* Pin buttons */}
-      <div className="col-span-2 flex items-center justify-end gap-0.5 pr-3">
+      <div className="col-span-3 flex items-center justify-end gap-1 pr-3 md:col-span-1">
         <button
           type="button"
           title={isDashPinned ? "Unpin from dashboard" : "Pin to dashboard"}
-          onClick={(e) => { e.stopPropagation(); toggleDashPin.mutate({ type: "grant", id: gid }); }}
-          className={`flex items-center justify-center rounded-full p-1 text-xs transition ${isDashPinned ? "text-sky-400 hover:text-sky-500" : "text-slate-300 hover:text-sky-400 dark:text-slate-600"}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleDashPin.mutate({ type: "grant", id: gid });
+          }}
+          className={[
+            "flex h-7 w-7 items-center justify-center rounded-md border text-xs font-bold transition",
+            isDashPinned
+              ? "border-sky-200 bg-sky-50 text-sky-600 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300"
+              : "border-transparent text-slate-300 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-500 dark:text-slate-600",
+          ].join(" ")}
         >
-          📌
+          D
         </button>
         <button
           type="button"
-          title={isPinned ? "Unpin" : "Pin to programs page"}
-          onClick={(e) => { e.stopPropagation(); togglePin.mutate(gid); }}
-          className={`flex items-center justify-center rounded-full p-1 text-sm transition ${isPinned ? "text-amber-400 hover:text-amber-500" : "text-slate-300 hover:text-amber-400 dark:text-slate-600"}`}
+          title={isPinned ? "Unpin from programs page" : "Pin to programs page"}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePin.mutate(gid);
+          }}
+          className={[
+            "flex h-7 w-7 items-center justify-center rounded-md border text-xs font-bold transition",
+            isPinned
+              ? "border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+              : "border-transparent text-slate-300 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-500 dark:text-slate-600",
+          ].join(" ")}
         >
-          {isPinned ? "★" : "☆"}
+          P
         </button>
       </div>
     </div>

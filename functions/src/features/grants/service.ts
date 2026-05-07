@@ -28,6 +28,34 @@ function sum(nums: number[]) {
   return nums.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
 }
 
+function slugifyLineItemType(label: string) {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeLineItemType(value: unknown) {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const label = value.trim();
+    if (!label || ["na", "n/a", "none", "null"].includes(label.toLowerCase())) return null;
+    return { id: slugifyLineItemType(label), label };
+  }
+  if (typeof value !== "object") return null;
+
+  const raw = value as Record<string, unknown>;
+  const label = String(raw.label ?? raw.name ?? raw.id ?? "").trim();
+  if (!label || ["na", "n/a", "none", "null"].includes(label.toLowerCase())) return null;
+  const id = String(raw.id ?? "").trim() || slugifyLineItemType(label);
+  return {
+    ...raw,
+    id,
+    label,
+  };
+}
+
 export function normalizeBudget(
   input?: TGrantBudget | null,
 ): TGrantBudget | null {
@@ -48,6 +76,8 @@ export function normalizeBudget(
       spentInWindow: Number(li.spentInWindow || 0),
 
       locked: li.locked ?? null,
+
+      type: normalizeLineItemType(li.type),
 
       // per-customer cap (optional, pass through as-is)
       ...(li.capEnabled !== undefined ? { capEnabled: li.capEnabled } : { capEnabled: false }),
@@ -421,6 +451,13 @@ export async function patchGrants(
           ...patchBudget,
           lineItems: mergedLineItems,
         };
+
+        // If line items were patched without an explicit total override, drop the
+        // stored total so normalizeBudget re-derives it from the new item amounts.
+        if (Array.isArray(patchBudget.lineItems) && !hasOwn(patchBudget, "total")) {
+          delete (mergedInput as Record<string, unknown>).total;
+        }
+
         nextBudget = normalizeBudget(
           Object.keys(mergedInput).length
             ? (mergedInput as TGrantBudget)

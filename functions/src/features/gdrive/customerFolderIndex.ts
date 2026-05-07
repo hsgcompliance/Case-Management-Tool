@@ -4,14 +4,22 @@ import {
   OAUTH_CLIENT_ID,
   OAUTH_CLIENT_SECRET,
   OAUTH_REFRESH_TOKEN,
+  requireOrg,
 } from "../../core";
-import { getDriveClient } from "./service";
+import { getDriveClient, getDriveClientWithDiagnostics } from "./service";
+import { getOrgGDriveConfig } from "./orgConfig";
 import { z } from "zod";
 import * as logger from "firebase-functions/logger";
 
+const OptionalParentId = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}, z.string().min(3).optional());
+
 const QuerySchema = z.object({
-  activeParentId: z.string().min(3).optional(),
-  exitedParentId: z.string().min(3).optional(),
+  activeParentId: OptionalParentId,
+  exitedParentId: OptionalParentId,
 });
 
 /** Parse "Last, First_CWID" convention used by the GAS folder builder */
@@ -26,7 +34,12 @@ function parseFolderName(name: string) {
 }
 
 function readGoogleAccessToken(req: { header(name: string): string | undefined }) {
-  return String(req.header("x-google-access-token") || "").trim() || undefined;
+  return String(req.header("x-drive-access-token") || "").trim() || undefined;
+}
+
+function queryFlag(v: unknown): boolean {
+  const raw = Array.isArray(v) ? v[0] : v;
+  return ["1", "true", "yes"].includes(String(raw ?? "").trim().toLowerCase());
 }
 
 function isLikelyPermissionOrVisibilityError(err: any) {
@@ -102,35 +115,103 @@ async function listFoldersInParent(
 
 export const gdriveCustomerFolderIndex = secureHandler(
   async (req, res) => {
+    const debug = queryFlag((req.query as Record<string, unknown>)?.debug);
+    const googleAccessToken = readGoogleAccessToken(req);
     try {
       const query = QuerySchema.parse(req.query ?? {});
+      const caller = (req as any).user;
+      const orgId = requireOrg(caller);
+      const orgConfig = await getOrgGDriveConfig(orgId);
+      const resolvedQuery = {
+        activeParentId:
+          query.activeParentId || orgConfig.customerFolderIndex.activeParentId,
+        exitedParentId:
+          query.exitedParentId || orgConfig.customerFolderIndex.exitedParentId,
+      };
 
-      if (!query.activeParentId && !query.exitedParentId) {
+      if (!resolvedQuery.activeParentId && !resolvedQuery.exitedParentId) {
         res.status(400).json({ ok: false, error: "missing_parent_ids" });
         return;
       }
 
+      // Collect auth diagnostics before listing (debug mode only)
+      let authDebug: Record<string, unknown> | undefined;
+      if (debug) {
+        try {
+          const ctx = await getDriveClientWithDiagnostics({ googleAccessToken });
+          authDebug = { authMode: ctx.authMode, auth: ctx.authDiagnostics, selection: ctx.selection };
+        } catch (e: any) {
+          authDebug = { error: String(e?.message || e) };
+        }
+      }
+
       const results: Awaited<ReturnType<typeof listFoldersInParent>> = [];
+      const warnings: Array<{ status: "active" | "exited"; parentId: string; error: string }> = [];
 
-      if (query.activeParentId) {
-        const folders = await listFoldersInParent(query.activeParentId, "active", {
-          googleAccessToken: readGoogleAccessToken(req),
-        });
-        results.push(...folders);
+      if (resolvedQuery.activeParentId) {
+        try {
+          const folders = await listFoldersInParent(resolvedQuery.activeParentId, "active", {
+            googleAccessToken,
+          });
+          results.push(...folders);
+        } catch (err: any) {
+          warnings.push({
+            status: "active",
+            parentId: resolvedQuery.activeParentId,
+            error: String(err?.message || err || "active_parent_index_failed"),
+          });
+        }
       }
 
-      if (query.exitedParentId) {
-        const folders = await listFoldersInParent(query.exitedParentId, "exited", {
-          googleAccessToken: readGoogleAccessToken(req),
-        });
-        results.push(...folders);
+      if (resolvedQuery.exitedParentId) {
+        try {
+          const folders = await listFoldersInParent(resolvedQuery.exitedParentId, "exited", {
+            googleAccessToken,
+          });
+          results.push(...folders);
+        } catch (err: any) {
+          warnings.push({
+            status: "exited",
+            parentId: resolvedQuery.exitedParentId,
+            error: String(err?.message || err || "exited_parent_index_failed"),
+          });
+        }
       }
 
-      res.status(200).json({ ok: true, folders: results });
+      if (!results.length && warnings.length) {
+        res.status(400).json({
+          ok: false,
+          error: warnings[0]?.error || "gdrive_folder_index_failed",
+          warnings,
+          ...(debug ? { debug: authDebug } : {}),
+        });
+        return;
+      }
+
+      res.status(200).json({
+        ok: true,
+        folders: results,
+        ...(warnings.length ? { warnings } : {}),
+        ...(debug ? { debug: authDebug } : {}),
+      });
     } catch (e: any) {
       const msg = String(e?.message || e || "gdrive_folder_index_failed");
-      const code = /not found|forbidden|permission/i.test(msg) ? 400 : 500;
-      res.status(code).json({ ok: false, error: msg });
+      const code = /not found|forbidden|permission|inaccessible/i.test(msg) ? 400 : 500;
+      // Attempt auth diagnostics even on error in debug mode
+      let authDebug: Record<string, unknown> | undefined;
+      if (debug) {
+        try {
+          const ctx = await getDriveClientWithDiagnostics({ googleAccessToken });
+          authDebug = { authMode: ctx.authMode, auth: ctx.authDiagnostics, selection: ctx.selection };
+        } catch (de: any) {
+          authDebug = { error: String(de?.message || de) };
+        }
+      }
+      res.status(code).json({
+        ok: false,
+        error: msg,
+        ...(debug ? { debug: authDebug } : {}),
+      });
     }
   },
   {

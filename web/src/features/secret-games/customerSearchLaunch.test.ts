@@ -22,7 +22,7 @@ describe("customer search secret launch", () => {
     expect(result.matched).toBe(false);
   });
 
-  it("routes card-native games into the sandbox cards surface", () => {
+  it("routes card-native games to the unified lab page", () => {
     const result = resolveCustomerSearchSecretLaunch({
       input: "flip",
       isDevUser: true,
@@ -33,10 +33,10 @@ describe("customer search secret launch", () => {
 
     expect(result.matched).toBe(true);
     if (!result.matched || !result.ok) throw new Error("Expected a successful launch.");
-    expect(result.href).toBe("/dev/secret-games/cards?game=flip&source=search-exact&triggerId=search-flip&command=flip&customer=cust-rivera");
+    expect(result.href).toBe("/dev/secret-games?game=flip&source=search-exact&triggerId=search-flip&command=flip&customer=cust-rivera");
   });
 
-  it("routes immersive games into the sandbox overlay surface", () => {
+  it("routes immersive games to the unified lab page", () => {
     const result = resolveCustomerSearchSecretLaunch({
       input: "necromancer",
       isDevUser: true,
@@ -47,7 +47,7 @@ describe("customer search secret launch", () => {
 
     expect(result.matched).toBe(true);
     if (!result.matched || !result.ok) throw new Error("Expected a successful launch.");
-    expect(result.href).toBe("/dev/secret-games/overlay?game=necromancer&source=search-exact&triggerId=search-necromancer&command=necromancer");
+    expect(result.href).toBe("/dev/secret-games?game=necromancer&source=search-exact&triggerId=search-necromancer&command=necromancer&customer=cust-rivera");
   });
 
   it("surfaces rollout blockers when the sandbox flag is disabled", () => {
@@ -80,7 +80,7 @@ describe("customer search secret launch", () => {
 
     expect(result.matched).toBe(true);
     if (!result.matched || !result.ok) throw new Error("Expected a dev-override launch.");
-    expect(result.href).toContain("/dev/secret-games/cards?");
+    expect(result.href).toContain("/dev/secret-games?");
     expect(result.href).toContain("dev=1");
   });
 });

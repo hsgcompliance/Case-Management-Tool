@@ -77,20 +77,21 @@ type GameState = {
 const WORLD_W = 900;
 const WORLD_H = 520;
 const PATH_WIDTH = 36;
-const START_MONEY = 250;
-const START_LIVES = 8;
+const START_MONEY = 300;
+const START_LIVES = 10;
 const MAX_UPGRADE_LEVEL = 3;
+const MAX_LIVES = 15;
 
 // Round at which old boss becomes a "normal heavy" and megaboss appears on boss waves
 const MEGABOSS_ROUND_THRESHOLD = 20;
 // Round at which the laser tower unlocks
-const LASER_UNLOCK_ROUND = 50;
+const LASER_UNLOCK_ROUND = 30;
 
 const BASE_BUILD_COST: Record<TowerType, number> = {
-  pulse: 90,
-  cannon: 160,
-  frost: 130,
-  laser: 280,
+  pulse: 75,
+  cannon: 140,
+  frost: 115,
+  laser: 260,
 };
 
 function buildCostForRound(type: TowerType, round: number): number {
@@ -491,6 +492,10 @@ function tickGame(state: GameState, dtReal: number): GameState {
   if (next.waveActive && !next.spawnQueue.length && !next.enemies.length) {
     const completedWave = next.round;
     next.money += waveClearBonus(completedWave);
+    // Bonus life on every boss wave (every 10 rounds), capped at MAX_LIVES
+    if (completedWave % 10 === 0) {
+      next.lives = Math.min(MAX_LIVES, next.lives + 1);
+    }
     next.waveActive = false;
     next.round += 1;
     next.autoTimer = 2.2;
@@ -691,40 +696,211 @@ function EnemySVG({ enemy, pos }: { enemy: Enemy; pos: Point }) {
   const hpPct = clamp(hp / maxHp, 0, 1);
   const fill = ENEMY_FILL[kind];
   const stroke = ENEMY_STROKE[kind];
-  const isBoss = kind === "boss";
-  const isMegaBoss = kind === "megaboss";
   const barColor = hpPct > 0.5 ? "#22c55e" : hpPct > 0.25 ? "#f59e0b" : "#ef4444";
+  const { x, y } = pos;
+
+  let sprite: React.ReactNode;
+  switch (kind) {
+
+    case "runner":
+      // Nimble dart/chevron pointing right — speed lines trailing behind
+      sprite = (
+        <g>
+          <polygon
+            points={`${x - r},${y - r * 0.65} ${x + r},${y} ${x - r},${y + r * 0.65}`}
+            fill={fill} stroke={stroke} strokeWidth={1.5} strokeLinejoin="round"
+          />
+          {/* Eye */}
+          <circle cx={x + r * 0.25} cy={y} r={r * 0.23} fill="white" />
+          <circle cx={x + r * 0.3} cy={y} r={r * 0.12} fill="#0f172a" />
+          {/* Speed dashes */}
+          <line x1={x - r * 0.3} y1={y - r * 0.32} x2={x - r * 0.85} y2={y - r * 0.32}
+            stroke={stroke} strokeWidth={1} strokeOpacity={0.55} strokeLinecap="round" />
+          <line x1={x - r * 0.3} y1={y + r * 0.32} x2={x - r * 0.85} y2={y + r * 0.32}
+            stroke={stroke} strokeWidth={1} strokeOpacity={0.55} strokeLinecap="round" />
+        </g>
+      );
+      break;
+
+    case "brute":
+      // Heavy armored hulk — thick body, shoulder pads, visor slit
+      sprite = (
+        <g>
+          {/* Body */}
+          <rect x={x - r * 0.68} y={y - r * 0.88} width={r * 1.36} height={r * 1.76} rx={3}
+            fill={fill} stroke={stroke} strokeWidth={1.8} />
+          {/* Shoulder pads */}
+          <rect x={x - r} y={y - r * 0.72} width={r * 0.46} height={r * 0.65} rx={2} fill={stroke} />
+          <rect x={x + r * 0.54} y={y - r * 0.72} width={r * 0.46} height={r * 0.65} rx={2} fill={stroke} />
+          {/* Chest seam */}
+          <line x1={x} y1={y - r * 0.55} x2={x} y2={y + r * 0.62}
+            stroke="rgba(0,0,0,0.3)" strokeWidth={1.2} />
+          {/* Visor slit */}
+          <rect x={x - r * 0.42} y={y - r * 0.38} width={r * 0.84} height={r * 0.24} rx={1}
+            fill="#fbbf24" fillOpacity={0.85} />
+          {/* Knee plates */}
+          <rect x={x - r * 0.52} y={y + r * 0.55} width={r * 0.46} height={r * 0.28} rx={1} fill={stroke} fillOpacity={0.7} />
+          <rect x={x + r * 0.06} y={y + r * 0.55} width={r * 0.46} height={r * 0.28} rx={1} fill={stroke} fillOpacity={0.7} />
+        </g>
+      );
+      break;
+
+    case "phase":
+      // Ghost — rounded dome top, wispy wavy bottom, spooky eyes
+      sprite = (
+        <g opacity={0.88}>
+          <path
+            d={`M${x - r},${y} A${r},${r * 1.1} 0 0,1 ${x + r},${y}
+                L${x + r},${y + r * 0.75}
+                Q${x + r * 0.62},${y + r * 0.35} ${x + r * 0.22},${y + r * 0.75}
+                Q${x},${y + r * 0.35} ${x - r * 0.22},${y + r * 0.75}
+                Q${x - r * 0.62},${y + r * 0.35} ${x - r},${y + r * 0.75} Z`}
+            fill={fill} stroke={stroke} strokeWidth={1.5}
+          />
+          {/* Eyes */}
+          <circle cx={x - r * 0.32} cy={y - r * 0.08} r={r * 0.26} fill="white" />
+          <circle cx={x + r * 0.32} cy={y - r * 0.08} r={r * 0.26} fill="white" />
+          <circle cx={x - r * 0.28} cy={y - r * 0.04} r={r * 0.13} fill="#1e1b4b" />
+          <circle cx={x + r * 0.36} cy={y - r * 0.04} r={r * 0.13} fill="#1e1b4b" />
+          {/* Glow eyes */}
+          <circle cx={x - r * 0.32} cy={y - r * 0.08} r={r * 0.08} fill="#818cf8" fillOpacity={0.85} />
+          <circle cx={x + r * 0.32} cy={y - r * 0.08} r={r * 0.08} fill="#818cf8" fillOpacity={0.85} />
+        </g>
+      );
+      break;
+
+    case "balloon":
+      // Hot air balloon with basket and ropes
+      sprite = (
+        <g>
+          {/* Balloon body */}
+          <ellipse cx={x} cy={y - r * 0.32} rx={r * 0.9} ry={r * 0.95} fill={fill} stroke={stroke} strokeWidth={1.5} />
+          {/* Stripe bands */}
+          <ellipse cx={x} cy={y - r * 0.32} rx={r * 0.9} ry={r * 0.25} fill={stroke} fillOpacity={0.35} />
+          <ellipse cx={x} cy={y + r * 0.3} rx={r * 0.78} ry={r * 0.18} fill={stroke} fillOpacity={0.25} />
+          {/* Top puff cap */}
+          <circle cx={x} cy={y - r * 1.22} r={r * 0.18} fill={fill} stroke={stroke} strokeWidth={1} />
+          {/* Ropes */}
+          <line x1={x - r * 0.55} y1={y + r * 0.58} x2={x - r * 0.3} y2={y + r * 0.68} stroke={stroke} strokeWidth={0.9} />
+          <line x1={x + r * 0.55} y1={y + r * 0.58} x2={x + r * 0.3} y2={y + r * 0.68} stroke={stroke} strokeWidth={0.9} />
+          {/* Basket */}
+          <rect x={x - r * 0.32} y={y + r * 0.68} width={r * 0.64} height={r * 0.5} rx={2}
+            fill="#92400e" stroke="#78350f" strokeWidth={1} />
+          <line x1={x - r * 0.14} y1={y + r * 0.68} x2={x - r * 0.14} y2={y + r * 1.18}
+            stroke="#78350f" strokeWidth={0.8} />
+          <line x1={x + r * 0.14} y1={y + r * 0.68} x2={x + r * 0.14} y2={y + r * 1.18}
+            stroke="#78350f" strokeWidth={0.8} />
+        </g>
+      );
+      break;
+
+    case "boss":
+      // Horned demon skull with glowing eye sockets
+      sprite = (
+        <g>
+          <circle cx={x} cy={y} r={r + 7} fill="#dc2626" fillOpacity={0.18} />
+          {/* Horns */}
+          <polygon
+            points={`${x - r * 0.52},${y - r * 0.72} ${x - r * 0.7},${y - r * 1.45} ${x - r * 0.18},${y - r * 0.82}`}
+            fill={stroke} />
+          <polygon
+            points={`${x + r * 0.52},${y - r * 0.72} ${x + r * 0.7},${y - r * 1.45} ${x + r * 0.18},${y - r * 0.82}`}
+            fill={stroke} />
+          {/* Skull dome */}
+          <ellipse cx={x} cy={y} rx={r * 0.88} ry={r * 0.94} fill={fill} stroke={stroke} strokeWidth={2} />
+          {/* Eye sockets */}
+          <ellipse cx={x - r * 0.36} cy={y - r * 0.18} rx={r * 0.24} ry={r * 0.3} fill="#450a0a" />
+          <ellipse cx={x + r * 0.36} cy={y - r * 0.18} rx={r * 0.24} ry={r * 0.3} fill="#450a0a" />
+          {/* Glowing pupils */}
+          <ellipse cx={x - r * 0.36} cy={y - r * 0.18} rx={r * 0.12} ry={r * 0.17} fill="#f97316" fillOpacity={0.9} />
+          <ellipse cx={x + r * 0.36} cy={y - r * 0.18} rx={r * 0.12} ry={r * 0.17} fill="#f97316" fillOpacity={0.9} />
+          {/* Nose cavity */}
+          <path d={`M${x - r * 0.1},${y + r * 0.1} L${x},${y + r * 0.3} L${x + r * 0.1},${y + r * 0.1}`}
+            fill="#450a0a" />
+          {/* Jaw + teeth */}
+          <path d={`M${x - r * 0.52},${y + r * 0.35} Q${x},${y + r * 0.75} ${x + r * 0.52},${y + r * 0.35}`}
+            stroke={stroke} strokeWidth={1.5} fill="none" strokeLinecap="round" />
+          {([-0.32, 0, 0.32] as const).map((ox, i) => (
+            <rect key={i} x={x + ox * r - r * 0.1} y={y + r * 0.36} width={r * 0.2} height={r * 0.24} rx={1} fill="white" />
+          ))}
+        </g>
+      );
+      break;
+
+    case "megaboss":
+      // Dragon head — crown, slitted eyes, fangs
+      sprite = (
+        <g>
+          <circle cx={x} cy={y} r={r + 12} fill="#7c3aed" fillOpacity={0.12} />
+          <circle cx={x} cy={y} r={r + 6} fill="#7c3aed" fillOpacity={0.22} />
+          {/* Crown spikes */}
+          {([-1, 0, 1] as const).map((i) => (
+            <polygon key={i}
+              points={`${x + i * r * 0.42 - r * 0.14},${y - r} ${x + i * r * 0.42},${y - r - 13 + Math.abs(i) * 3} ${x + i * r * 0.42 + r * 0.14},${y - r}`}
+              fill="#c4b5fd" stroke="#7c3aed" strokeWidth={1} />
+          ))}
+          {/* Scales / body */}
+          <circle cx={x} cy={y} r={r} fill={fill} stroke={stroke} strokeWidth={2.5} />
+          {/* Scale texture lines */}
+          {([-0.45, 0, 0.45] as const).map((ox, i) => (
+            <ellipse key={i} cx={x + ox * r * 0.6} cy={y - r * 0.3} rx={r * 0.22} ry={r * 0.14}
+              fill="none" stroke={stroke} strokeWidth={0.8} strokeOpacity={0.6} />
+          ))}
+          {/* Slit eyes */}
+          <ellipse cx={x - r * 0.33} cy={y - r * 0.22} rx={r * 0.27} ry={r * 0.32} fill="#1e1b4b" />
+          <ellipse cx={x + r * 0.33} cy={y - r * 0.22} rx={r * 0.27} ry={r * 0.32} fill="#1e1b4b" />
+          <ellipse cx={x - r * 0.33} cy={y - r * 0.22} rx={r * 0.1} ry={r * 0.22} fill="#a78bfa" fillOpacity={0.9} />
+          <ellipse cx={x + r * 0.33} cy={y - r * 0.22} rx={r * 0.1} ry={r * 0.22} fill="#a78bfa" fillOpacity={0.9} />
+          {/* Fangs */}
+          <polygon points={`${x - r * 0.42},${y + r * 0.22} ${x - r * 0.28},${y + r * 0.58} ${x - r * 0.12},${y + r * 0.22}`}
+            fill="white" stroke={stroke} strokeWidth={0.6} />
+          <polygon points={`${x + r * 0.12},${y + r * 0.22} ${x + r * 0.28},${y + r * 0.58} ${x + r * 0.42},${y + r * 0.22}`}
+            fill="white" stroke={stroke} strokeWidth={0.6} />
+          <text x={x} y={y - r - 18} textAnchor="middle"
+            fill="#c4b5fd" fontSize={8} fontFamily="monospace" fontWeight="bold">MEGA</text>
+        </g>
+      );
+      break;
+
+    case "miniboss":
+      // Armored knight helmet with plume and visor grill
+      sprite = (
+        <g>
+          <circle cx={x} cy={y} r={r + 4} fill="#be185d" fillOpacity={0.22} />
+          {/* Plume */}
+          <line x1={x} y1={y - r} x2={x} y2={y - r * 1.65}
+            stroke="#f9a8d4" strokeWidth={3.5} strokeLinecap="round" />
+          <line x1={x - r * 0.16} y1={y - r * 1.28} x2={x - r * 0.16} y2={y - r * 1.75}
+            stroke="#ec4899" strokeWidth={2} strokeLinecap="round" />
+          <line x1={x + r * 0.16} y1={y - r * 1.28} x2={x + r * 0.16} y2={y - r * 1.75}
+            stroke="#ec4899" strokeWidth={2} strokeLinecap="round" />
+          {/* Helm dome */}
+          <ellipse cx={x} cy={y - r * 0.14} rx={r * 0.88} ry={r} fill={fill} stroke={stroke} strokeWidth={2} />
+          {/* Eye slit */}
+          <rect x={x - r * 0.52} y={y - r * 0.36} width={r * 1.04} height={r * 0.21} rx={r * 0.1}
+            fill="#450a0a" fillOpacity={0.95} />
+          {/* Visor grill bars */}
+          {([-0.22, 0, 0.22] as const).map((dy, i) => (
+            <line key={i}
+              x1={x - r * 0.56} y1={y + dy * r}
+              x2={x + r * 0.56} y2={y + dy * r}
+              stroke={stroke} strokeWidth={1.3} strokeLinecap="round" />
+          ))}
+          {/* Cheek guards */}
+          <rect x={x - r * 0.88} y={y - r * 0.35} width={r * 0.32} height={r * 0.75} rx={2} fill={stroke} fillOpacity={0.6} />
+          <rect x={x + r * 0.56} y={y - r * 0.35} width={r * 0.32} height={r * 0.75} rx={2} fill={stroke} fillOpacity={0.6} />
+        </g>
+      );
+      break;
+  }
 
   return (
     <g>
-      {isMegaBoss && (
-        <>
-          {/* Pulsing aura for megaboss */}
-          <circle cx={pos.x} cy={pos.y} r={r + 12} fill="#7c3aed" fillOpacity={0.12} />
-          <circle cx={pos.x} cy={pos.y} r={r + 6} fill="#7c3aed" fillOpacity={0.20} />
-          {/* Crown spikes */}
-          {[-1, 0, 1].map((i) => (
-            <line key={i}
-              x1={pos.x + i * (r * 0.4)} y1={pos.y - r}
-              x2={pos.x + i * (r * 0.4)} y2={pos.y - r - 8 + Math.abs(i) * 2}
-              stroke="#c4b5fd" strokeWidth={2} strokeLinecap="round" />
-          ))}
-        </>
-      )}
-      {isBoss && <circle cx={pos.x} cy={pos.y} r={r + 7} fill="#dc2626" fillOpacity={0.18} />}
-      {kind === "miniboss" && <circle cx={pos.x} cy={pos.y} r={r + 4} fill="#be185d" fillOpacity={0.22} />}
-      {slowTime > 0 && <circle cx={pos.x} cy={pos.y} r={r + 4} fill="#67e8f9" fillOpacity={0.22} />}
-      <circle cx={pos.x} cy={pos.y} r={r} fill={fill} stroke={stroke} strokeWidth={1.5} />
-      {kind !== "balloon" && (
-        <circle cx={pos.x} cy={pos.y - r * 0.28} r={r * 0.32} fill="white" fillOpacity={0.28} />
-      )}
+      {slowTime > 0 && <circle cx={x} cy={y} r={r + 5} fill="#67e8f9" fillOpacity={0.25} />}
+      {sprite}
       {/* HP bar */}
-      <rect x={pos.x - r} y={pos.y + r + 2} width={r * 2} height={3} rx={1} fill="#1e293b" />
-      <rect x={pos.x - r} y={pos.y + r + 2} width={r * 2 * hpPct} height={3} rx={1} fill={barColor} />
-      {/* Megaboss label */}
-      {isMegaBoss && (
-        <text x={pos.x} y={pos.y - r - 14} textAnchor="middle" fill="#c4b5fd" fontSize={8} fontFamily="monospace" fontWeight="bold">MEGA</text>
-      )}
+      <rect x={x - r} y={y + r + 2} width={r * 2} height={3} rx={1} fill="#1e293b" />
+      <rect x={x - r} y={y + r + 2} width={r * 2 * hpPct} height={3} rx={1} fill={barColor} />
     </g>
   );
 }

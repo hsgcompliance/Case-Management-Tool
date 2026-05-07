@@ -16,15 +16,14 @@ import dynamic from "next/dynamic";
 import { useOrgConfig } from "@hooks/useOrgConfig";
 import { readSecretGamesAdminConfig } from "@features/secret-games/adminConfig";
 import CardPhysicsProvider from "./effects/CardPhysicsContext";
+import BlockLayerProvider from "./blocks/BlockLayerContext";
+import CardCharacterLayer from "./effects/CardCharacterLayer";
+import BlockOverlayLayer from "./blocks/BlockOverlayLayer";
+import GameTriggersHost from "./GameTriggersHost";
 
 // Dynamic imports — these chunks are only downloaded when `active` becomes true.
 const GameMiniPlayerFloatLazy = dynamic(
   () => import("./GameMiniPlayer").then((m) => ({ default: m.GameMiniPlayerFloat })),
-  { ssr: false },
-);
-
-const GameTriggersHostLazy = dynamic(
-  () => import("./GameTriggersHost"),
   { ssr: false },
 );
 
@@ -40,9 +39,13 @@ export default function GameSystemGate() {
   if (!active) return null;
 
   return (
-    <CardPhysicsProvider>
-      <GameMiniPlayerFloatLazy />
-      <GameTriggersHostLazy />
-    </CardPhysicsProvider>
+    <BlockLayerProvider>
+      <CardPhysicsProvider>
+        <GameMiniPlayerFloatLazy />
+        <GameTriggersHost />
+      </CardPhysicsProvider>
+      <CardCharacterLayer />
+      <BlockOverlayLayer />
+    </BlockLayerProvider>
   );
 }

@@ -1,13 +1,6 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { db, FieldValue, RUNTIME } from "../../core";
-
-type TaskKind = "assessment" | "compliance" | "other";
-
-type UserTaskTotals = {
-  openThisMonth: number;
-  openNextMonth: number;
-  byType: Record<TaskKind, { thisMonth: number; nextMonth: number }>;
-};
+import { refreshAllCreditCardBudgets } from "../creditCards/refreshBudget";
 
 type UserPaymentTotals = {
   unpaidThisMonth: number;
@@ -73,24 +66,6 @@ function monthKeysUTC() {
   const pp = new Date(Date.UTC(y, m - 2, 1));
   const prev2 = `${pp.getUTCFullYear()}-${String(pp.getUTCMonth() + 1).padStart(2, "0")}`;
   return { cur, next, prev, prev2 };
-}
-
-function classifyTaskKind(row: any): TaskKind {
-  const src = String(row?.source || "").toLowerCase();
-  const bucket = String(row?.bucket || "").toLowerCase();
-  const group = String(row?.assignedToGroup || "").toLowerCase();
-  const title = String(row?.title || "").toLowerCase();
-
-  if (src === "payment" || src === "paymentcompliance" || group === "compliance") return "compliance";
-  if (bucket === "assessment" || title.includes("assessment")) return "assessment";
-  if (src === "other" || bucket === "other") return "other";
-  return "other";
-}
-
-function dueMonthOfTask(row: any): string {
-  const dueMonth = String(row?.dueMonth || "").slice(0, 7);
-  if (dueMonth) return dueMonth;
-  return String(row?.dueDate || "").slice(0, 7);
 }
 
 function statusOfCustomer(c: any): string {
@@ -161,18 +136,6 @@ async function forEachDoc(
     for (const doc of snap.docs) cb(doc.id, doc.data());
     cursor = snap.docs[snap.docs.length - 1] || null;
   }
-}
-
-function emptyTaskTotals(): UserTaskTotals {
-  return {
-    openThisMonth: 0,
-    openNextMonth: 0,
-    byType: {
-      assessment: { thisMonth: 0, nextMonth: 0 },
-      compliance: { thisMonth: 0, nextMonth: 0 },
-      other: { thisMonth: 0, nextMonth: 0 },
-    },
-  };
 }
 
 function emptyPaymentTotals(): UserPaymentTotals {
@@ -379,7 +342,6 @@ export const reconcileMetricsWeekly = onSchedule(
     let enrollmentInactive = 0;
     let enrollmentDeleted = 0;
     const grantEnrollmentCounts = new Map<string, GrantEnrollCounts>();
-    const taskByUser = new Map<string, UserTaskTotals>();
     const paymentByUser = new Map<string, UserPaymentTotals>();
     const caseloadByUser = new Map<string, { caseloadActive: number; enrollmentCount: number }>();
     const enrollPopByUser = new Map<string, PopByLower>(); // per-CM enrollment population counts
@@ -491,65 +453,6 @@ export const reconcileMetricsWeekly = onSchedule(
 
     // ── 5. UserTasks scan: per-user month task counts + system month totals ─
     // Month-scoped task totals (all months in window)
-    type MonthTaskRow = { total: number; open: number; done: number };
-    const systemMonthTasks = new Map<string, MonthTaskRow>(); // month → totals
-    const cmMonthTasks = new Map<string, Map<string, MonthTaskRow>>(); // uid → month → totals
-
-    await forEachDoc(
-      "userTasks",
-      ["assignedToUid", "status", "dueMonth", "dueDate", "source", "bucket", "assignedToGroup", "title"],
-      (_id, row) => {
-        const uid = String(row?.assignedToUid || "").trim();
-        if (!uid) return;
-        const taskStatus = String(row?.status || "").toLowerCase();
-        const dueMonth = dueMonthOfTask(row);
-        const isCur = dueMonth === cur;
-        const isNext = dueMonth === next;
-
-        // Per-user open task totals (this/next month only — existing logic)
-        if (taskStatus === "" || taskStatus === "open") {
-          if (isCur || isNext) {
-            const kind = classifyTaskKind(row);
-            const t = taskByUser.get(uid) || emptyTaskTotals();
-            if (isCur) {
-              t.openThisMonth += 1;
-              t.byType[kind].thisMonth += 1;
-            }
-            if (isNext) {
-              t.openNextMonth += 1;
-              t.byType[kind].nextMonth += 1;
-            }
-            taskByUser.set(uid, t);
-          }
-        }
-
-        // Month-scoped totals (all relevant months: prev2, prev, cur, next)
-        const relevantMonths = new Set([prev2, prev, cur, next]);
-        if (!relevantMonths.has(dueMonth)) return;
-
-        const isDone = taskStatus === "done" || taskStatus === "completed";
-        const isOpen = taskStatus === "" || taskStatus === "open";
-
-        // System month tasks
-        const smt = systemMonthTasks.get(dueMonth) || { total: 0, open: 0, done: 0 };
-        smt.total += 1;
-        if (isDone) smt.done += 1;
-        if (isOpen) smt.open += 1;
-        systemMonthTasks.set(dueMonth, smt);
-
-        // CM month tasks
-        if (uid) {
-          if (!cmMonthTasks.has(uid)) cmMonthTasks.set(uid, new Map());
-          const umap = cmMonthTasks.get(uid)!;
-          const umt = umap.get(dueMonth) || { total: 0, open: 0, done: 0 };
-          umt.total += 1;
-          if (isDone) umt.done += 1;
-          if (isOpen) umt.open += 1;
-          umap.set(dueMonth, umt);
-        }
-      },
-    );
-
     // ── 6. Jotform scan: monthly submission counts ────────────────────────
     let jotformCurMonthCount = 0;
     await forEachDoc("jotformSubmissions", ["createdAt", "status", "active"], (_id, row) => {
@@ -628,11 +531,9 @@ export const reconcileMetricsWeekly = onSchedule(
     // userExtras scan avoids reading every doc just for its ID, and prevents
     // incorrectly zeroing out caseloadActive/enrollmentCount for users whose
     // uid doesn't appear in caseloadByUser (e.g. non-CM staff, or CMs whose
-    // enrollments store a legacy caseManagerId). Real-time triggers
-    // (caseloadMetrics.ts, taskMetrics.ts, etc.) keep per-user counts current
-    // between reconcile runs.
+    // enrollments store a legacy caseManagerId). Real-time triggers keep
+    // non-task per-user counts current between reconcile runs.
     const userExtrasIds = new Set<string>([
-      ...taskByUser.keys(),
       ...paymentByUser.keys(),
       ...caseloadByUser.keys(),
       ...acuityByUser.keys(),
@@ -642,7 +543,6 @@ export const reconcileMetricsWeekly = onSchedule(
 
     const userWriter = db.bulkWriter();
     for (const uid of userExtrasIds) {
-      const t = taskByUser.get(uid) || emptyTaskTotals();
       const p = paymentByUser.get(uid) || emptyPaymentTotals();
       const hasCaseload = caseloadByUser.has(uid);
       const cl = caseloadByUser.get(uid) ?? { caseloadActive: 0, enrollmentCount: 0 };
@@ -655,13 +555,7 @@ export const reconcileMetricsWeekly = onSchedule(
       userWriter.set(
         db.doc(`userExtras/${uid}`),
         {
-          taskMetrics: {
-            openThisMonth: t.openThisMonth,
-            openNextMonth: t.openNextMonth,
-            byType: t.byType,
-            updatedAt: FieldValue.serverTimestamp(),
-            reconciledAt: FieldValue.serverTimestamp(),
-          },
+          taskMetrics: FieldValue.delete(),
           paymentMetrics: {
             ...p,
             updatedAt: FieldValue.serverTimestamp(),
@@ -763,14 +657,12 @@ export const reconcileMetricsWeekly = onSchedule(
     // System month docs (prev2, prev, cur, next)
     const systemMonthWriter = db.bulkWriter();
     for (const month of [prev2, prev, cur, next]) {
-      const mt = systemMonthTasks.get(month) || { total: 0, open: 0, done: 0 };
       systemMonthWriter.set(
         db.doc(`metrics/systemSummary/months/${month}`),
         {
           month,
           updatedAt: FieldValue.serverTimestamp(),
           reconciledAt: FieldValue.serverTimestamp(),
-          tasks: mt,
           payments: {
             total: 0, // not scanned per-month yet; derived from CM totals in UI
             unpaid: 0,
@@ -805,7 +697,6 @@ export const reconcileMetricsWeekly = onSchedule(
     const cmSummaryWriter = db.bulkWriter();
     for (const uid of allCmUids) {
       const name = userNames.get(uid) ?? null;
-      const t = taskByUser.get(uid) || emptyTaskTotals();
       const p = paymentByUser.get(uid) || emptyPaymentTotals();
       const hasCaseload = caseloadByUser.has(uid);
       const cl = caseloadByUser.get(uid) ?? { caseloadActive: 0, enrollmentCount: 0 };
@@ -870,20 +761,13 @@ export const reconcileMetricsWeekly = onSchedule(
               scoreAvg: acuityAvg,
             },
           } : {}),
-          tasks: {
-            openThisMonth: t.openThisMonth,
-            openNextMonth: t.openNextMonth,
-            byType: t.byType,
-          },
+          tasks: FieldValue.delete(),
           payments: p,
         },
         { merge: true },
       );
 
-      // CM month subdocs
-      const cmMonthMap = cmMonthTasks.get(uid) || new Map<string, MonthTaskRow>();
       for (const month of [prev2, prev, cur, next]) {
-        const mt = cmMonthMap.get(month) || { total: 0, open: 0, done: 0 };
         const isThisMonth = month === cur;
         cmSummaryWriter.set(
           db.doc(`caseManagerMetrics/${uid}/months/${month}`),
@@ -893,7 +777,6 @@ export const reconcileMetricsWeekly = onSchedule(
             name,
             updatedAt: FieldValue.serverTimestamp(),
             reconciledAt: FieldValue.serverTimestamp(),
-            tasks: mt,
             payments: {
               unpaidCount: isThisMonth ? p.unpaidThisMonth : 0,
               unpaidAmount: isThisMonth ? p.amountThisMonth : 0,
@@ -1008,5 +891,10 @@ export const reconcileMetricsWeekly = onSchedule(
       }
     }
     await grantMetricWriter.close();
+
+    // ── 12. Refresh stored credit card budgets ────────────────────────────
+    // Writes budget.* back to each creditCards/{id} doc so the budget page
+    // reads O(n cards) docs instead of O(months × queue size) per load.
+    await refreshAllCreditCardBudgets();
   },
 );

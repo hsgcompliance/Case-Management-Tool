@@ -13,6 +13,11 @@ function taskHttpErr(message: string, code: number, meta?: Record<string, unknow
 
 /**
  * Update task status with limited actions.
+ *
+ * @deprecated Task completion/status workflow is no longer a core product
+ * surface. Keep this endpoint for old screens and historical data only; new
+ * reminder/note flows should update note/notify fields instead.
+ *
  * Body: { enrollmentId, taskId, action: 'complete'|'reopen'|'verify', reason?: string, notes?: string }
  */
 export async function updateTaskStatusHandler( req: Request, res: Response ): Promise<void> {

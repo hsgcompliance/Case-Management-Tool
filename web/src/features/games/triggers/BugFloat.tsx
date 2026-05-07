@@ -9,6 +9,8 @@ interface Props {
   onActivate: () => void;
   minIntervalMs?: number;
   jitterMs?: number;
+  /** Dev sandbox: immediately spawn the floater without waiting for the timer */
+  forceShow?: boolean;
 }
 
 const DEFAULT_INTERVAL_MS = 600_000; // 10 minutes
@@ -18,7 +20,7 @@ const WALK_DURATION_MS = 18_000;
 
 type BugPhase = "hidden" | "flying-in" | "walking" | "flying-out";
 
-export default function BugFloat({ onActivate, minIntervalMs, jitterMs }: Props) {
+export default function BugFloat({ onActivate, minIntervalMs, jitterMs, forceShow }: Props) {
   const intervalMs = minIntervalMs ?? DEFAULT_INTERVAL_MS;
   const jitterMsVal = jitterMs ?? DEFAULT_JITTER_MS;
 
@@ -51,6 +53,13 @@ export default function BugFloat({ onActivate, minIntervalMs, jitterMs }: Props)
       if (walkTimerRef.current) clearTimeout(walkTimerRef.current);
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!forceShow || phase !== "hidden") return;
+    setFromLeft(Math.random() > 0.5);
+    setYPos(0.5 + Math.random() * 0.3);
+    setPhase("flying-in");
+  }, [forceShow, phase]);
 
   React.useEffect(() => {
     if (phase !== "flying-in") return;

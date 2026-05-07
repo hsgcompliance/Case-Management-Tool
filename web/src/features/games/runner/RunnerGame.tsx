@@ -127,7 +127,7 @@ function clamp(n: number, min: number, max: number) { return Math.max(min, Math.
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 function rand(min: number, max: number) { return min + Math.random() * (max - min); }
 function pick<T>(items: T[]): T { return items[Math.floor(Math.random() * items.length)]; }
-function difficultyFromScore(score: number) { return clamp(1 - Math.exp(-score / 28), 0, 1); }
+function difficultyFromScore(score: number) { return clamp(1 - Math.exp(-score / 38), 0, 1); }
 function shuffle<T>(arr: T[]) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -519,6 +519,7 @@ export function RunnerGame({ embedded = false, title = "Quick Break", onSessionS
 
           // Near-miss feedback only when this obstacle was actually close.
           if (nextObstacle.nearMiss) {
+            nextScore += 3; // near-miss bonus points
             shakeFramesRef.current = 10;
             // Spark burst
             for (let i = 0; i < 10; i++) {
@@ -898,58 +899,138 @@ export function RunnerGame({ embedded = false, title = "Quick Break", onSessionS
             />
           )}
 
-          {/* Dino — fixed at ground position, GPU-translated upward while airborne */}
-          <div
-            className={`absolute rounded-sm ${theme.dino}`}
+          {/* Dino — SVG pixel-art dinosaur */}
+          <svg
             style={{
-              left: `${WORLD.dinoX}px`,
-              width: `${WORLD.dinoWidth}px`,
-              height: `${WORLD.dinoHeight}px`,
-              top: `${GROUND_TOP - WORLD.dinoHeight}px`,
+              position: "absolute",
+              left: `${WORLD.dinoX - 2}px`,
+              width: `${WORLD.dinoWidth + 4}px`,
+              height: `${WORLD.dinoHeight + 6}px`,
+              top: `${GROUND_TOP - WORLD.dinoHeight - 5}px`,
               transform: `translateY(${(-dinoY).toFixed(2)}px) scaleX(${dinoScale.x.toFixed(3)}) scaleY(${dinoScale.y.toFixed(3)})`,
               transformOrigin: "center bottom",
               willChange: "transform",
+              overflow: "visible",
             }}
-          />
+            viewBox="0 0 36 40"
+          >
+            {/* Tail */}
+            <polygon points="2,38 12,34 8,28" fill="#334155" />
+            {/* Body */}
+            <ellipse cx="19" cy="30" rx="12" ry="9" fill="#334155" />
+            {/* Neck */}
+            <rect x="22" y="14" width="8" height="16" rx="4" fill="#334155" />
+            {/* Head */}
+            <ellipse cx="27" cy="12" rx="8" ry="6" fill="#334155" />
+            {/* Jaw */}
+            <path d="M20 14 Q26 18 34 14" stroke="#475569" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            {/* Eye */}
+            <circle cx="30" cy="10" r="2.5" fill="white" />
+            <circle cx="31" cy="10" r="1.3" fill="#0f172a" />
+            <circle cx="30.5" cy="9.3" r="0.6" fill="white" />
+            {/* Back spike */}
+            <polygon points="14,22 18,14 20,22" fill="#1e293b" />
+            <polygon points="18,26 22,18 24,26" fill="#1e293b" />
+            {/* Legs */}
+            <rect x="14" y="37" width="5" height="3" rx="1.5" fill="#1e293b" />
+            <rect x="21" y="37" width="5" height="3" rx="1.5" fill="#1e293b" />
+            {/* Belly highlight */}
+            <ellipse cx="18" cy="32" rx="7" ry="5" fill="#475569" fillOpacity="0.45" />
+            {/* Nostril */}
+            <circle cx="33" cy="11" r="0.8" fill="#1e293b" />
+          </svg>
 
-          {/* Obstacles — fixed top/size, GPU-translated horizontally */}
+          {/* Obstacles */}
           {obstacles.map(obstacle => {
             const isNew = !spawnedObsIdsRef.current.has(obstacle.id);
             if (isNew) spawnedObsIdsRef.current.add(obstacle.id);
+            const obsTop = Math.round(GROUND_TOP - obstacle.height);
+            const w = Math.round(obstacle.width);
+            const h = Math.round(obstacle.height);
+
+            if (obstacle.kind === "normal") {
+              // Cactus — SVG with spines
+              return (
+                <svg
+                  key={obstacle.id}
+                  className={isNew ? "dino-obs-spawn" : ""}
+                  style={{ position: "absolute", left: 0, top: obsTop, width: w, height: h, overflow: "visible",
+                    transform: `translateX(${obstacle.x.toFixed(2)}px)`, willChange: "transform" }}
+                  viewBox={`0 0 ${w} ${h}`}
+                >
+                  <rect x={w * 0.35} y={0} width={w * 0.3} height={h} rx={2} fill="#15803d" />
+                  {h > 28 && <><rect x={0} y={h * 0.35} width={w * 0.38} height={h * 0.22} rx={2} fill="#15803d" />
+                  <rect x={0} y={h * 0.35} width={w * 0.1} height={h * 0.32} rx={1} fill="#15803d" /></>}
+                  {h > 28 && <><rect x={w * 0.62} y={h * 0.25} width={w * 0.38} height={h * 0.22} rx={2} fill="#15803d" />
+                  <rect x={w * 0.9} y={h * 0.25} width={w * 0.1} height={h * 0.3} rx={1} fill="#15803d" /></>}
+                  {/* Spine highlights */}
+                  <line x1={w * 0.5} y1={h * 0.08} x2={w * 0.5} y2={0} stroke="#4ade80" strokeWidth={1} />
+                </svg>
+              );
+            }
+
+            if (obstacle.kind === "dash") {
+              // Lightning bolt — fast, electric
+              const mx = w / 2;
+              return (
+                <svg
+                  key={obstacle.id}
+                  className={isNew ? "dino-obs-spawn" : ""}
+                  style={{ position: "absolute", left: 0, top: obsTop, width: w, height: h, overflow: "visible",
+                    transform: `translateX(${obstacle.x.toFixed(2)}px)`, willChange: "transform" }}
+                  viewBox={`0 0 ${w} ${h}`}
+                >
+                  {/* Glow */}
+                  <polygon points={`${mx + 4},0 ${mx - 2},${h * 0.5} ${mx + 3},${h * 0.5} ${mx - 4},${h} ${mx + 5},${h * 0.48} ${mx - 1},${h * 0.48}`}
+                    fill="#fde68a" fillOpacity={0.35} />
+                  {/* Bolt */}
+                  <polygon points={`${mx + 3},0 ${mx - 2},${h * 0.48} ${mx + 2},${h * 0.48} ${mx - 4},${h} ${mx + 4},${h * 0.52} ${mx - 1},${h * 0.52}`}
+                    fill="#dc2626" stroke="#ef4444" strokeWidth={0.5} />
+                </svg>
+              );
+            }
+
+            // shark — fin + body
             return (
-              <div
+              <svg
                 key={obstacle.id}
-                className={`absolute ${obstacle.color}${isNew ? " dino-obs-spawn" : ""}`}
-                style={{
-                  left: 0,
-                  width: `${Math.round(obstacle.width)}px`,
-                  height: `${Math.round(obstacle.height)}px`,
-                  top: `${Math.round(GROUND_TOP - obstacle.height)}px`,
-                  transform: `translateX(${obstacle.x.toFixed(2)}px)`,
-                  borderRadius: obstacle.kind === "shark" ? "3px 3px 0 0" : "2px 2px 0 0",
-                  willChange: "transform",
-                }}
-              />
+                className={isNew ? "dino-obs-spawn" : ""}
+                style={{ position: "absolute", left: 0, top: obsTop, width: w, height: h, overflow: "visible",
+                  transform: `translateX(${obstacle.x.toFixed(2)}px)`, willChange: "transform" }}
+                viewBox={`0 0 ${w} ${h}`}
+              >
+                {/* Body */}
+                <ellipse cx={w / 2} cy={h * 0.72} rx={w / 2} ry={h * 0.28} fill="#b45309" />
+                {/* Fin */}
+                <polygon points={`${w * 0.42},${h * 0.72} ${w * 0.52},${0} ${w * 0.62},${h * 0.72}`} fill="#92400e" />
+                {/* Eye */}
+                <circle cx={w * 0.72} cy={h * 0.68} r={Math.max(1.5, w * 0.1)} fill="white" />
+                <circle cx={w * 0.74} cy={h * 0.7} r={Math.max(0.8, w * 0.05)} fill="#0f172a" />
+              </svg>
             );
           })}
 
-          {/* Floating +10 pickup */}
+          {/* Floating bonus — star pickup */}
           {bonusItem && (
-            <div
+            <svg
               style={{
-                position: "absolute",
-                left: 0,
-                top: 0,
-                width: `${Math.round(bonusItem.size)}px`,
-                height: `${Math.round(bonusItem.size)}px`,
+                position: "absolute", left: 0, top: 0, overflow: "visible",
+                width: `${Math.round(bonusItem.size)}px`, height: `${Math.round(bonusItem.size)}px`,
                 transform: `translate(${bonusItem.x.toFixed(2)}px, ${bonusItem.y.toFixed(2)}px)`,
-                borderRadius: "999px",
-                background: "radial-gradient(circle at 30% 30%, #fde68a 0%, #f59e0b 60%, #b45309 100%)",
-                boxShadow: "0 0 10px rgba(245,158,11,0.45)",
-                pointerEvents: "none",
-                willChange: "transform",
+                pointerEvents: "none", willChange: "transform",
+                filter: "drop-shadow(0 0 6px rgba(251,191,36,0.7))",
               }}
-            />
+              viewBox="0 0 24 24"
+            >
+              <polygon
+                points="12,1 15.1,8.3 23,9.3 17.5,14.6 19.1,22.5 12,18.4 4.9,22.5 6.5,14.6 1,9.3 8.9,8.3"
+                fill="#fbbf24" stroke="#f59e0b" strokeWidth="1" strokeLinejoin="round"
+              />
+              <polygon
+                points="12,4 14.3,9.8 20.5,10.5 16.3,14.5 17.6,20.7 12,17.6 6.4,20.7 7.7,14.5 3.5,10.5 9.7,9.8"
+                fill="#fde68a"
+              />
+            </svg>
           )}
 
           {/* Particles */}

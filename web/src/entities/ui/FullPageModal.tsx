@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
+import { useModalRuntime } from "./modalRuntime";
 
 type FullPageModalProps = {
   isOpen: boolean;
@@ -31,26 +32,13 @@ export function FullPageModal({
 }: FullPageModalProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const prevFocusRef = useRef<HTMLElement | null>(null);
 
   const attemptClose = async () => {
     const ok = (await onBeforeClose?.()) ?? true;
     if (ok) onClose();
   };
 
-  useEffect(() => {
-    if (!isOpen) return;
-    prevFocusRef.current = document.activeElement as HTMLElement | null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const t = window.setTimeout(() => panelRef.current?.focus(), 0);
-    return () => {
-      window.clearTimeout(t);
-      document.body.style.overflow = prevOverflow;
-      prevFocusRef.current?.focus?.();
-      prevFocusRef.current = null;
-    };
-  }, [isOpen]);
+  useModalRuntime(isOpen, panelRef);
 
   useEffect(() => {
     if (!isOpen || disableEscClose) return;
@@ -66,7 +54,7 @@ export function FullPageModal({
 
   return (
     <div
-      className="fixed inset-0 z-[1000] bg-black/40 p-2 backdrop-blur-sm md:p-4"
+      className="workspace-modal-overlay"
       data-tour={tourId ? `${tourId}-overlay` : undefined}
       ref={overlayRef}
       onMouseDown={(e) => {

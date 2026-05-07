@@ -15,6 +15,7 @@
   import { EnrollmentsEnrollCustomerBody } from "./schemas";
   import type { TEnrollmentsEnrollCustomerBody } from "./schemas";
   import { deriveEnrollmentNames } from "./derive";
+  import { generateTaskScheduleForEnrollments } from "../tasks/generateScheduleWrite";
 
 const isReservedRouteId = (raw: unknown) => {
   const s = String(raw ?? "").trim().toLowerCase();
@@ -106,7 +107,28 @@ export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
     ...derived,
   });
 
-  res.status(201).json({ ok: true, id });
+  let taskGeneration: unknown = null;
+  if ((extra as any)?.generateTaskSchedule !== false) {
+    try {
+      taskGeneration = await generateTaskScheduleForEnrollments(
+        {
+          enrollmentId: id,
+          mode: "replaceManaged",
+          keepManual: true,
+          preserveCompletedManaged: true,
+          pinCompletedManaged: true,
+        },
+        user,
+      );
+    } catch (error: unknown) {
+      taskGeneration = {
+        ok: false,
+        error: String((error as { message?: unknown })?.message || error || "task_schedule_generation_failed"),
+      };
+    }
+  }
+
+  res.status(201).json({ ok: true, id, taskGeneration });
 }, {
   auth: "user",
   requireOrg: true,

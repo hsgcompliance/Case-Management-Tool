@@ -5,6 +5,8 @@
 
 import React, { useState } from "react";
 import { useGrantCustomerAllocations } from "@hooks/useGrantCustomerAllocations";
+import { useRecomputeGrantAllocations } from "@hooks/usePaymentQueue";
+import { toast } from "@lib/toast";
 
 const PAGE_SIZE = 15;
 
@@ -19,15 +21,32 @@ interface AllocationTabProps {
   grantId: string;
   /** Optional grant-level cap per customer (USD). */
   perCustomerCap?: number | null;
+  lineItems?: Array<{
+    id?: string | null;
+    label?: string | null;
+    name?: string | null;
+    title?: string | null;
+    capEnabled?: boolean | null;
+    perCustomerCap?: number | null;
+  }>;
 }
 
-export function AllocationTab({ grantId, perCustomerCap }: AllocationTabProps) {
-  const { data: rows = [], isLoading, error } = useGrantCustomerAllocations(grantId);
+export function AllocationTab({ grantId, perCustomerCap, lineItems = [] }: AllocationTabProps) {
+  const { data: rows = [], isLoading, error, refetch } = useGrantCustomerAllocations(grantId);
+  const recompute = useRecomputeGrantAllocations();
   const [page, setPage] = useState(0);
+  const lineItemById = React.useMemo(() => {
+    const map = new Map<string, NonNullable<AllocationTabProps["lineItems"]>[number]>();
+    for (const item of lineItems) {
+      const id = String(item.id || "");
+      if (id) map.set(id, item);
+    }
+    return map;
+  }, [lineItems]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const showPaidProjected = rows.some((r) => r.projected > 0);
+  const showPaidProjected = rows.some((r) => r.projected !== 0);
 
   if (isLoading) {
     return (
@@ -65,6 +84,22 @@ export function AllocationTab({ grantId, perCustomerCap }: AllocationTabProps) {
             Cap: {fmtUsd(perCustomerCap)} / customer
           </span>
         )}
+        <button
+          type="button"
+          className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+          disabled={recompute.isPending}
+          onClick={async () => {
+            try {
+              const result = await recompute.mutateAsync({ grantId });
+              await refetch();
+              toast(`Allocations recomputed (${result.customers} customers, ${result.ledgerRows} ledger rows).`, { type: "success" });
+            } catch (e) {
+              toast("Allocation recompute failed.", { type: "error" });
+            }
+          }}
+        >
+          {recompute.isPending ? "Recomputing..." : "Recompute"}
+        </button>
       </div>
 
       {/* Table */}
@@ -110,15 +145,41 @@ export function AllocationTab({ grantId, perCustomerCap }: AllocationTabProps) {
                   className="border-b border-slate-100 last:border-0 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/30"
                 >
                   <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">
-                    {row.customerName}
+                    <div>{row.customerName}</div>
+                    {Object.keys(row.lineItemTotal || {}).length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {Object.entries(row.lineItemTotal)
+                          .sort((a, b) => Math.abs(Number(b[1] || 0)) - Math.abs(Number(a[1] || 0)))
+                          .slice(0, 5)
+                          .map(([lineItemId, amount]) => {
+                            const line = lineItemById.get(lineItemId);
+                            const label = String(line?.label || line?.name || line?.title || lineItemId);
+                            const cap = line?.capEnabled && line?.perCustomerCap != null ? Number(line.perCustomerCap) : null;
+                            const over = cap != null && Number(amount || 0) > cap;
+                            return (
+                            <span
+                              key={lineItemId}
+                              className={[
+                                "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-normal dark:bg-slate-900",
+                                over
+                                  ? "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:text-red-300"
+                                  : "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:text-slate-400",
+                              ].join(" ")}
+                              title={lineItemId}
+                            >
+                              {label}: {fmtUsd(Number(amount || 0))}{cap != null ? ` / ${fmtUsd(cap)}` : ""}
+                            </span>
+                          );})}
+                      </div>
+                    )}
                   </td>
                   {showPaidProjected && (
                     <>
                       <td className="px-4 py-2.5 text-right tabular-nums text-amber-700 dark:text-amber-400">
-                        {row.paid > 0 ? fmtUsd(row.paid) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                        {row.paid !== 0 ? fmtUsd(row.paid) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-blue-700 dark:text-blue-400">
-                        {row.projected > 0 ? fmtUsd(row.projected) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                        {row.projected !== 0 ? fmtUsd(row.projected) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
                     </>
                   )}

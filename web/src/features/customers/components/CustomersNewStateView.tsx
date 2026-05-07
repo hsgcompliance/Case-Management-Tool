@@ -3,6 +3,7 @@
 
 import React from "react";
 import type { TCustomerEntity } from "@types";
+import type { EnrollmentStatusBucket } from "@hooks/useEnrollments";
 import type { CaseManagerOption } from "@entities/selectors/CaseManagerSelect";
 import { CustomerCardView } from "./CustomerCardView";
 import type { CustomerViewFeatureFlags } from "./customerViewFlags";
@@ -35,6 +36,7 @@ type CustomersNewStateViewProps = {
   populationFilter: PopulationFilter;
   sortMode: CustomerSortMode;
   grantFilter: string;
+  enrollmentStatuses: EnrollmentStatusBucket[];
   caseManagerOptions: CaseManagerOption[];
   onActiveModeChange: (mode: ActiveMode) => void;
   onDeletedModeChange: (mode: DeletedMode) => void;
@@ -44,6 +46,7 @@ type CustomersNewStateViewProps = {
   onPopulationFilterChange: (value: PopulationFilter) => void;
   onSortModeChange: (value: CustomerSortMode) => void;
   onGrantFilterChange: (value: string) => void;
+  onEnrollmentStatusesChange: (value: EnrollmentStatusBucket[]) => void;
   onResetFilters: () => void;
   onSearchEnter?: () => void;
   onCustomerOpen?: (customerId: string, options?: { tab?: "tasks" }) => void;
@@ -65,6 +68,7 @@ export function CustomersNewStateView({
   populationFilter,
   sortMode,
   grantFilter,
+  enrollmentStatuses,
   caseManagerOptions,
   onActiveModeChange,
   onDeletedModeChange,
@@ -74,6 +78,7 @@ export function CustomersNewStateView({
   onPopulationFilterChange,
   onSortModeChange,
   onGrantFilterChange,
+  onEnrollmentStatusesChange,
   onResetFilters,
   onSearchEnter,
   onCustomerOpen,
@@ -96,6 +101,7 @@ export function CustomersNewStateView({
         populationFilter={populationFilter}
         sortMode={sortMode}
         grantFilter={grantFilter}
+        enrollmentStatuses={enrollmentStatuses}
         caseManagerOptions={caseManagerOptions}
         onActiveModeChange={onActiveModeChange}
         onDeletedModeChange={onDeletedModeChange}
@@ -105,6 +111,7 @@ export function CustomersNewStateView({
         onPopulationFilterChange={onPopulationFilterChange}
         onSortModeChange={onSortModeChange}
         onGrantFilterChange={onGrantFilterChange}
+        onEnrollmentStatusesChange={onEnrollmentStatusesChange}
         onResetFilters={onResetFilters}
         onSearchEnter={onSearchEnter}
         onCustomerOpen={onCustomerOpen}

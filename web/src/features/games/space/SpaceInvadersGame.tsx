@@ -144,7 +144,7 @@ function enemyFill(kind: EnemyKind, hpFrac: number, flash: boolean): string {
 
 // Wave scaling
 function waveHpScale(wave: number) {
-  return 1 + wave * 0.18 + Math.pow(Math.max(0, wave - 3) / 8, 2) * 0.3;
+  return 1 + wave * 0.13 + Math.pow(Math.max(0, wave - 5) / 9, 2) * 0.22;
 }
 function waveSpawnInterval(wave: number) {
   return Math.max(18, 110 - wave * 5.5);
@@ -538,6 +538,10 @@ function updateGame(g: GState, input: InputState): void {
       g.bossAlive = false;
       g.spawnedThisWave = 0;
       g.targetSpawns = enemyCountForWave(g.wave);
+      // Bonus life every 5 waves (max 6)
+      if (g.wave % 5 === 0) {
+        g.lives = Math.min(6, g.lives + 1);
+      }
     }
   }
 }
@@ -748,18 +752,41 @@ function drawEnemyShip(ctx: CanvasRenderingContext2D, e: Enemy): void {
 }
 
 function drawFrame(ctx: CanvasRenderingContext2D, g: GState, stars: Star[], starOffset: number): void {
-  // Background
-  ctx.fillStyle = "#05050f";
+  // ── Background: deep space gradient + nebula clouds ──────────────────────
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, CH);
+  bgGrad.addColorStop(0, "#030712");
+  bgGrad.addColorStop(0.55, "#080820");
+  bgGrad.addColorStop(1, "#04041a");
+  ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, CW, CH);
 
-  // Stars (scrolling)
+  // Nebula 1 — blue/indigo upper left
+  ctx.globalAlpha = 0.055;
+  const neb1 = ctx.createRadialGradient(CW * 0.25, CH * 0.35, 0, CW * 0.25, CH * 0.35, CW * 0.42);
+  neb1.addColorStop(0, "#6366f1"); neb1.addColorStop(1, "transparent");
+  ctx.fillStyle = neb1; ctx.fillRect(0, 0, CW, CH);
+  // Nebula 2 — pink lower right
+  const neb2 = ctx.createRadialGradient(CW * 0.75, CH * 0.65, 0, CW * 0.75, CH * 0.65, CW * 0.38);
+  neb2.addColorStop(0, "#f472b6"); neb2.addColorStop(1, "transparent");
+  ctx.fillStyle = neb2; ctx.fillRect(0, 0, CW, CH);
+  ctx.globalAlpha = 1;
+
+  // ── Stars (scrolling, multi-size, twinkling) ─────────────────────────────
   for (const s of stars) {
-    const y = ((s.y + starOffset * s.speed) % CH + CH) % CH;
-    ctx.globalAlpha = s.brightness;
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(s.x, y, s.r, 0, Math.PI * 2);
-    ctx.fill();
+    const sy = ((s.y + starOffset * s.speed) % CH + CH) % CH;
+    const twinkle = 0.6 + 0.4 * Math.sin(starOffset * s.speed * 0.08 + s.x);
+    ctx.globalAlpha = s.brightness * twinkle;
+    // Large bright stars get a tiny cross flare
+    if (s.r > 1.4 && s.brightness > 0.75) {
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 0.4;
+      ctx.globalAlpha = s.brightness * twinkle * 0.5;
+      ctx.beginPath(); ctx.moveTo(s.x - s.r * 2.5, sy); ctx.lineTo(s.x + s.r * 2.5, sy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s.x, sy - s.r * 2.5); ctx.lineTo(s.x, sy + s.r * 2.5); ctx.stroke();
+      ctx.globalAlpha = s.brightness * twinkle;
+    }
+    ctx.fillStyle = s.brightness > 0.7 ? "#e0f2fe" : "#94a3b8";
+    ctx.beginPath(); ctx.arc(s.x, sy, s.r, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
 
@@ -768,44 +795,88 @@ function drawFrame(ctx: CanvasRenderingContext2D, g: GState, stars: Star[], star
     return;
   }
 
-  // Particles
+  // ── Particles ────────────────────────────────────────────────────────────
   for (const p of g.particles) {
-    ctx.globalAlpha = p.life;
+    ctx.globalAlpha = p.life * p.life; // quadratic fade
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 4;
     ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
 
-  // Enemy bullets
-  ctx.fillStyle = "#f97316";
+  // ── Enemy bullets — plasma orbs with trailing glow ───────────────────────
   for (const eb of g.enemyBullets) {
-    ctx.beginPath();
-    ctx.arc(eb.x, eb.y, 3, 0, Math.PI * 2);
-    ctx.fill();
+    // Trail
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#fb923c";
+    ctx.beginPath(); ctx.arc(eb.x - eb.vx * 3, eb.y - eb.vy * 3, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Outer plasma ring
+    ctx.shadowColor = "#f97316";
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = "rgba(251,146,60,0.45)";
+    ctx.beginPath(); ctx.arc(eb.x, eb.y, 5.5, 0, Math.PI * 2); ctx.fill();
+    // Core
+    ctx.fillStyle = "#fbbf24";
+    ctx.beginPath(); ctx.arc(eb.x, eb.y, 3, 0, Math.PI * 2); ctx.fill();
+    // Specular
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.beginPath(); ctx.arc(eb.x - 1, eb.y - 1, 1, 0, Math.PI * 2); ctx.fill();
   }
+  ctx.shadowBlur = 0;
 
-  // Player bullets
-  ctx.fillStyle = "#fde68a";
+  // ── Player bullets — neon plasma beams ───────────────────────────────────
+  const tripleShot = g.wave >= 5;
   for (const b of g.bullets) {
-    ctx.fillRect(b.x - 2, b.y - 7, 4, 14);
+    // Glow halo
+    ctx.shadowColor = tripleShot ? "#a78bfa" : "#fde68a";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = tripleShot ? "#c4b5fd" : "#fde68a";
+    // Pointed beam
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y - 11);
+    ctx.lineTo(b.x + 2, b.y - 5);
+    ctx.lineTo(b.x + 1.5, b.y + 3);
+    ctx.lineTo(b.x - 1.5, b.y + 3);
+    ctx.lineTo(b.x - 2, b.y - 5);
+    ctx.closePath();
+    ctx.fill();
+    // Bright core streak
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.fillRect(b.x - 0.5, b.y - 10, 1, 9);
   }
+  ctx.shadowBlur = 0;
 
-  // Enemies — drawn as typed ship sprites
-  for (const e of g.enemies) {
-    drawEnemyShip(ctx, e);
-  }
+  // ── Enemies ───────────────────────────────────────────────────────────────
+  for (const e of g.enemies) { drawEnemyShip(ctx, e); }
 
-  // Player
+  // ── Player ────────────────────────────────────────────────────────────────
   if (g.phase === "playing") {
     const flicker = g.invincible > 0 && Math.floor(g.frame / 5) % 2 === 0;
     if (!flicker) {
-      drawPlayer(ctx, g.px, g.py);
+      drawPlayer(ctx, g.px, g.py, g.frame);
+    }
+    // Invincibility shield ring
+    if (g.invincible > 20) {
+      const shieldAlpha = Math.min(0.8, (g.invincible / 90) * 0.8);
+      const pulseR = P_W / 2 + 6 + Math.sin(g.frame * 0.35) * 4;
+      ctx.strokeStyle = `rgba(96,165,250,${shieldAlpha})`;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = "#60a5fa";
+      ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(g.px, g.py, pulseR, 0, Math.PI * 2); ctx.stroke();
+      // Inner shimmer
+      ctx.strokeStyle = `rgba(186,230,253,${shieldAlpha * 0.5})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(g.px, g.py, pulseR - 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.shadowBlur = 0;
     }
   }
 
-  // HUD
+  // ── HUD ───────────────────────────────────────────────────────────────────
   drawHud(ctx, g);
 
   if (g.phase === "paused") {
@@ -816,49 +887,108 @@ function drawFrame(ctx: CanvasRenderingContext2D, g: GState, stars: Star[], star
   }
 }
 
-function drawPlayer(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  // Blue fighter plane shape
-  ctx.shadowColor = "#60a5fa60";
-  ctx.shadowBlur = 12;
-  ctx.fillStyle = "#3b82f6";
+function drawPlayer(ctx: CanvasRenderingContext2D, cx: number, cy: number, frame: number = 0): void {
+  // ── Engine exhaust flames (left + right, flicker with frame) ─────────────
+  const fl = 10 + Math.sin(frame * 0.45) * 4;
+  const fl2 = 8 + Math.cos(frame * 0.7) * 3;
+  const drawFlame = (fx: number, w: number, h: number) => {
+    const g = ctx.createLinearGradient(fx, cy + P_H / 2 - 4, fx, cy + P_H / 2 - 4 + h);
+    g.addColorStop(0,   "#fde68a");
+    g.addColorStop(0.4, "#f97316");
+    g.addColorStop(1,   "rgba(220,38,38,0)");
+    ctx.fillStyle = g;
+    ctx.shadowColor = "#f97316";
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.moveTo(fx - w / 2, cy + P_H / 2 - 4);
+    ctx.lineTo(fx + w / 2, cy + P_H / 2 - 4);
+    ctx.lineTo(fx, cy + P_H / 2 - 4 + h);
+    ctx.closePath();
+    ctx.fill();
+  };
+  drawFlame(cx - 6, 5, fl);
+  drawFlame(cx + 6, 5, fl2);
+  ctx.shadowBlur = 0;
 
-  // Fuselage
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - P_H / 2);          // nose
-  ctx.lineTo(cx + 5, cy - 2);
-  ctx.lineTo(cx + 4, cy + P_H / 2 - 4);
-  ctx.lineTo(cx - 4, cy + P_H / 2 - 4);
-  ctx.lineTo(cx - 5, cy - 2);
-  ctx.closePath();
-  ctx.fill();
+  // ── Body glow ────────────────────────────────────────────────────────────
+  ctx.shadowColor = "#3b82f680";
+  ctx.shadowBlur = 18;
 
-  // Wings
+  // ── Fuselage ─────────────────────────────────────────────────────────────
   ctx.fillStyle = "#2563eb";
   ctx.beginPath();
-  ctx.moveTo(cx - 5, cy);
-  ctx.lineTo(cx - P_W / 2, cy + 10);
-  ctx.lineTo(cx - 4, cy + 4);
+  ctx.moveTo(cx, cy - P_H / 2);
+  ctx.lineTo(cx + 6, cy - 2);
+  ctx.lineTo(cx + 5, cy + P_H / 2 - 5);
+  ctx.lineTo(cx - 5, cy + P_H / 2 - 5);
+  ctx.lineTo(cx - 6, cy - 2);
   ctx.closePath();
   ctx.fill();
 
+  // Hull sheen
+  ctx.fillStyle = "rgba(191,219,254,0.22)";
   ctx.beginPath();
-  ctx.moveTo(cx + 5, cy);
-  ctx.lineTo(cx + P_W / 2, cy + 10);
-  ctx.lineTo(cx + 4, cy + 4);
+  ctx.moveTo(cx, cy - P_H / 2);
+  ctx.lineTo(cx + 2.5, cy - 5);
+  ctx.lineTo(cx + 1.5, cy + 4);
+  ctx.lineTo(cx, cy + 4);
   ctx.closePath();
   ctx.fill();
 
-  // Cockpit window
-  ctx.fillStyle = "#93c5fd";
+  // ── Wings ────────────────────────────────────────────────────────────────
+  ctx.fillStyle = "#1d4ed8";
   ctx.beginPath();
-  ctx.ellipse(cx, cy - 6, 3, 5, 0, 0, Math.PI * 2);
+  ctx.moveTo(cx - 6,     cy - 2);
+  ctx.lineTo(cx - P_W/2 - 2, cy + 13);
+  ctx.lineTo(cx - 3,    cy + P_H/2 - 5);
+  ctx.lineTo(cx - 5,    cy - 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx + 6,     cy - 2);
+  ctx.lineTo(cx + P_W/2 + 2, cy + 13);
+  ctx.lineTo(cx + 3,    cy + P_H/2 - 5);
+  ctx.lineTo(cx + 5,    cy - 2);
+  ctx.closePath();
   ctx.fill();
 
-  // Engine glow
-  ctx.shadowColor = "#f97316";
+  // Wing-tip nav lights
+  ctx.shadowColor = "#f87171";
+  ctx.shadowBlur = 7;
+  ctx.fillStyle = Math.floor(frame / 20) % 2 === 0 ? "#f87171" : "#991b1b";
+  ctx.beginPath(); ctx.arc(cx - P_W/2 - 2, cy + 13, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + P_W/2 + 2, cy + 13, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // ── Tail fins ────────────────────────────────────────────────────────────
+  ctx.fillStyle = "#1e40af";
+  ctx.beginPath();
+  ctx.moveTo(cx - 4, cy + P_H / 2 - 5);
+  ctx.lineTo(cx - 8, cy + P_H / 2 + 2);
+  ctx.lineTo(cx - 5, cy + P_H / 2 - 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx + 4, cy + P_H / 2 - 5);
+  ctx.lineTo(cx + 8, cy + P_H / 2 + 2);
+  ctx.lineTo(cx + 5, cy + P_H / 2 - 5);
+  ctx.closePath();
+  ctx.fill();
+
+  // ── Cockpit ──────────────────────────────────────────────────────────────
+  ctx.shadowColor = "#bae6fd";
   ctx.shadowBlur = 8;
-  ctx.fillStyle = "#fdba74";
-  ctx.fillRect(cx - 3, cy + P_H / 2 - 4, 6, 4);
+  ctx.fillStyle = "#7dd3fc";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - 7, 3.5, 5.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Highlight
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.beginPath();
+  ctx.ellipse(cx - 1.2, cy - 9.5, 1.2, 2, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
 }

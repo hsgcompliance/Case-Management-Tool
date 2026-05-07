@@ -575,10 +575,21 @@ import type {
   TGDriveCreateFolderBody,
   TGDriveUploadBody,
   TGDriveCustomerFolderIndexQuery,
+  TGDriveConfigPatchBody,
+  TGDriveOrgConfig,
   TCustomerFolder,
   TGDriveBuildCustomerFolderBody,
+  TGDriveCustomerFolderSyncBody,
+  TGDriveSyncReconcileItem,
 } from "./gdrive";
-export type { TCustomerFolder, TGDriveBuildCustomerFolderBody } from "./gdrive";
+export type {
+  TCustomerFolder,
+  TGDriveBuildCustomerFolderBody,
+  TGDriveOrgConfig,
+  TGDriveCustomerFolderIndexConfig,
+  TGDriveCustomerFolderSyncBody,
+  TGDriveSyncReconcileItem,
+} from "./gdrive";
 
 export type GDriveFile = {
   id: string;
@@ -599,6 +610,26 @@ export type GDriveCreateFolderResp = Ok<{ folder: GDriveFile }>;
 export type GDriveUploadResp = Ok<{ file: GDriveFile }>;
 export type GDriveBuildCustomerFolderResp = Ok<{ folder: { id: string; name: string; url: string } }>;
 export type GDriveCustomerFolderIndexResp = Ok<{ folders: TCustomerFolder[] }>;
+export type GDriveConfigGetResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
+export type GDriveConfigPatchResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
+export type GDriveCustomerFolderSyncResp = Ok<{
+  applied?: boolean;
+  apply?: boolean;
+  reason?: string;
+  folderId?: string;
+  folderName?: string;
+  targetStatus?: string;
+  matchScore?: number;
+  linked?: boolean;
+  reasons?: string[];
+  nextName?: string;
+  customerId?: string;
+  cwId?: string;
+  direction?: string;
+  count?: number;
+  sheetConfigured?: boolean;
+  items?: TGDriveSyncReconcileItem[];
+}>;
 
 /* =============================================================================
    Inbox
@@ -630,6 +661,11 @@ import type {
   TInboxSendDigestNowResp,
   TInboxScheduleDigestBody,
   TInboxScheduleDigestResp,
+  TInboxDigestSubsGetResp,
+  TInboxDigestSubUpdateReq,
+  TInboxDigestSubUpdateResp,
+  TInboxDigestHtmlPreviewReq,
+  TInboxDigestHtmlPreviewResp,
 } from "./inbox";
 
 // ---------------- Inbox ----------------
@@ -652,6 +688,11 @@ export type InboxSendDigestNowReq = TInboxSendDigestNowBody;
 export type InboxSendDigestNowResp = TInboxSendDigestNowResp;
 export type InboxScheduleDigestReq = TInboxScheduleDigestBody;
 export type InboxScheduleDigestResp = TInboxScheduleDigestResp;
+export type InboxDigestSubsGetResp = TInboxDigestSubsGetResp;
+export type InboxDigestSubUpdateReq = TInboxDigestSubUpdateReq;
+export type InboxDigestSubUpdateResp = TInboxDigestSubUpdateResp;
+export type InboxDigestHtmlPreviewReq = TInboxDigestHtmlPreviewReq;
+export type InboxDigestHtmlPreviewResp = TInboxDigestHtmlPreviewResp;
 
 
 /* ============================================================================
@@ -712,6 +753,8 @@ import type {
   InviteUserBodyIn,
   SetRoleBodyIn,
   SetActiveBodyIn,
+  UpdateUserProfileBodyIn,
+  ResendInviteBodyIn,
   RevokeSessionsBodyIn,
   ListUsersBodyIn,
   OrgManagerListOrgsBodyIn,
@@ -732,6 +775,12 @@ export type UsersSetRoleResp = Ok<{ user: UserComposite }>;
 
 export type UsersSetActiveReq = SetActiveBodyIn;
 export type UsersSetActiveResp = Ok<{ user: UserComposite }>;
+
+export type UsersUpdateProfileReq = UpdateUserProfileBodyIn;
+export type UsersUpdateProfileResp = Ok<{ user: UserComposite }>;
+
+export type UsersResendInviteReq = ResendInviteBodyIn;
+export type UsersResendInviteResp = Ok<{ user: UserComposite; inviteEmail?: unknown }>;
 
 export type UsersRevokeSessionsReq = RevokeSessionsBodyIn;
 export type UsersRevokeSessionsResp = Ok<{
@@ -927,8 +976,9 @@ export interface EndpointMap {
   inboxDigestPreview: { req: InboxDigestPreviewQuery; resp: InboxDigestPreviewResp };
   inboxSendDigestNow: { req: InboxSendDigestNowReq; resp: InboxSendDigestNowResp };
   inboxScheduleDigest: { req: InboxScheduleDigestReq; resp: InboxScheduleDigestResp };
-  inboxDigestSubsGet: { req: Record<string, never>; resp: { ok: boolean; records: unknown[] } };
-  inboxDigestSubUpdate: { req: { uid: string; digestType: string; subscribed: boolean }; resp: { ok: boolean; uid: string; digestType: string; subscribed: boolean } };
+  inboxDigestSubsGet: { req: Record<string, never>; resp: InboxDigestSubsGetResp };
+  inboxDigestSubUpdate: { req: InboxDigestSubUpdateReq; resp: InboxDigestSubUpdateResp };
+  inboxDigestHtmlPreview: { req: InboxDigestHtmlPreviewReq; resp: InboxDigestHtmlPreviewResp };
 
   // DRIVE
   gdriveList: { req: TGDriveListQuery; resp: GDriveListResp };
@@ -936,6 +986,9 @@ export interface EndpointMap {
   gdriveUpload: { req: TGDriveUploadBody; resp: GDriveUploadResp };
   gdriveCustomerFolderIndex: { req: TGDriveCustomerFolderIndexQuery; resp: GDriveCustomerFolderIndexResp };
   gdriveBuildCustomerFolder: { req: TGDriveBuildCustomerFolderBody; resp: GDriveBuildCustomerFolderResp };
+  gdriveConfigGet: { req: void; resp: GDriveConfigGetResp };
+  gdriveConfigPatch: { req: TGDriveConfigPatchBody; resp: GDriveConfigPatchResp };
+  gdriveCustomerFolderSync: { req: TGDriveCustomerFolderSyncBody; resp: GDriveCustomerFolderSyncResp };
 
   // LEDGER
   ledgerList: { req: LedgerListReq; resp: LedgerListResp };
@@ -951,6 +1004,8 @@ export interface EndpointMap {
   usersInvite: { req: UsersInviteReq; resp: UsersInviteResp };
   usersSetRole: { req: UsersSetRoleReq; resp: UsersSetRoleResp };
   usersSetActive: { req: UsersSetActiveReq; resp: UsersSetActiveResp };
+  usersUpdateProfile: { req: UsersUpdateProfileReq; resp: UsersUpdateProfileResp };
+  usersResendInvite: { req: UsersResendInviteReq; resp: UsersResendInviteResp };
   usersRevokeSessions: { req: UsersRevokeSessionsReq; resp: UsersRevokeSessionsResp };
   usersList: { req: UsersListQuery; resp: UsersListResp };
   devOrgsList: { req: DevOrgsListReq; resp: DevOrgsListResp };

@@ -5,7 +5,12 @@ import { summarize, assertOrgAccess, requireUid } from "./utils";
 
 
 
-/** POST /tasksBulkStatus — apply status actions to many tasks in one transaction */
+/**
+ * POST /tasksBulkStatus — apply status actions to many tasks in one transaction.
+ *
+ * @deprecated Task completion/status workflow is no longer a core product
+ * surface. Keep for old screens and historical data only.
+ */
 export const tasksBulkStatus = secureHandler(async (req, res) => {
   const { enrollmentId, changes } = C.TasksBulkStatusBody.parse(req.body || {});
     const user: any = (req as any)?.user || {};

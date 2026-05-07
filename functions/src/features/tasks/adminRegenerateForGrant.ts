@@ -2,6 +2,7 @@
 import { z, db, FieldValue, FieldPath, rolesFromClaims } from "../../core";
 import type { Request, Response } from "express";
 import { generateOccurrences, carryStatus, summarize, slug, resolveCaseManagerUid } from "./utils";
+import { evaluateConditionalTaskRules } from "./conditionalRules";
 
 /**
  * Admin-only: regenerate managed tasks for all enrollments in a grant.
@@ -70,9 +71,13 @@ export async function adminRegenerateTasksForGrantHandler(
   const grant: any = gsnap.data() || {};
   const defs = Array.isArray(grant?.tasks) ? grant.tasks : [];
   
-  const defIds = new Set(
-    defs.map((d: any) => String(d.id || d.type || "custom"))
-  );
+  const conditionalRuleIds = Array.isArray(grant?.conditionalTaskRules)
+    ? grant.conditionalTaskRules.map((r: any) => String(r.id || r.taskName || "conditional"))
+    : [];
+  const defIds = new Set([
+    ...defs.map((d: any) => String(d.id || d.type || "custom")),
+    ...conditionalRuleIds,
+  ]);
 
   let q: FirebaseFirestore.Query = db
     .collection("customerEnrollments")
@@ -190,6 +195,13 @@ export async function adminRegenerateTasksForGrantHandler(
 
           if (!hasMultiSteps) {
             // Single-owner task (backwards compatible path)
+            const ownerGroup = String(
+              def.assignedToGroup || def.assignToGroup || def.group || "casemanager"
+            ).trim() || "casemanager";
+            const ownerUid =
+              String(def.assignedToUid || def.assignToUid || def.uid || "").trim() ||
+              (ownerGroup === "casemanager" ? cmUid : null);
+            const taskNotes = String(def.notes || def.note || "").trim();
             managedNew.push({
               id: baseId,
               type,
@@ -200,7 +212,7 @@ export async function adminRegenerateTasksForGrantHandler(
               completedAt: null,
               byUid: null,
               notify: def.notify ?? true,
-              notes: "",
+              notes: taskNotes,
               description: String((def as any)?.description || "").trim() || null,
               bucket: def.bucket || "task",
               managed: true,
@@ -209,11 +221,10 @@ export async function adminRegenerateTasksForGrantHandler(
               caseManagerName,
               enrollmentName,
 
-              // default routing
-              assignedToGroup: "casemanager",
-              assignedToUid: cmUid,
-              assignedAt: cmUid ? new Date().toISOString() : null,
-              assignedBy: cmUid ? "system" : null,
+              assignedToGroup: ownerGroup,
+              assignedToUid: ownerUid,
+              assignedAt: ownerUid ? new Date().toISOString() : null,
+              assignedBy: ownerUid ? "system" : null,
             });
           } else {
             const steps: any[] = Array.isArray(multiRaw.steps)
@@ -271,6 +282,25 @@ export async function adminRegenerateTasksForGrantHandler(
               });
             });
           }
+        }
+      }
+
+      const conditionalTasks = await evaluateConditionalTaskRules(
+        eid,
+        enr,
+        grant,
+        new Date(effStart),
+        cmUid,
+      );
+      for (const ct of conditionalTasks) {
+        if (!managedNew.some((m: any) => m.id === ct.id)) {
+          managedNew.push({
+            ...ct,
+            customerName,
+            grantName,
+            caseManagerName,
+            enrollmentName,
+          });
         }
       }
 

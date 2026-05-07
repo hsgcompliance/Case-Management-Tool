@@ -4,56 +4,156 @@ import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
 import type { TCustomerEntity } from "@types";
-import type { TPayment, ReqOf } from "@types";
-import EnrollmentsAPI, { type Enrollment } from "@client/enrollments";
-import TasksAPI from "@client/tasks";
-import PaymentsAPI from "@client/payments";
 import CaseManagerSelect, { type CaseManagerOption } from "@entities/selectors/CaseManagerSelect";
-import GrantSelect from "@entities/selectors/GrantSelect";
 import { useGrants } from "@hooks/useGrants";
 import { PageBulkActionsBar, PageFilterBar } from "@entities/Page";
 import { CardGrid, Modal } from "@entities/ui";
 import { FilterToggleGroup } from "@entities/ui";
-import { useHardDeleteCustomers, usePatchCustomers, useSoftDeleteCustomers } from "@hooks/useCustomers";
 import {
-  CUSTOMER_ENROLLMENTS_LIMIT,
   getStaleCustomerEnrollmentIds,
   preloadCustomerEnrollments,
-  useEnrollmentsBulkEnroll,
+  type EnrollmentStatusBucket,
 } from "@hooks/useEnrollments";
-import { qk } from "@hooks/queryKeys";
 import { toast } from "@lib/toast";
 import { CustomerCard } from "./CustomerCard";
 import {
   resolveCustomerViewFeatureFlags,
   type CustomerViewFeatureFlags,
 } from "./customerViewFlags";
+import CustomerBulkWorkspaceModal, { type CustomerBulkTool } from "../CustomerBulkWorkspaceModal";
 
 // ─── Enrollment grant filter dropdown ───────────────────────────────────────
 
-function EnrollmentGrantFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { data: grants = [] } = useGrants({ active: true, limit: 500 });
+const ENROLLMENT_STATUS_OPTIONS: Array<{ value: EnrollmentStatusBucket; label: string }> = [
+  { value: "active", label: "Active Enrollments" },
+  { value: "closed", label: "Closed Enrollments" },
+  { value: "deleted", label: "Deleted Enrollments" },
+];
+
+function EnrollmentGrantFilter({
+  value,
+  statuses,
+  onChange,
+  onStatusesChange,
+}: {
+  value: string;
+  statuses: EnrollmentStatusBucket[];
+  onChange: (v: string) => void;
+  onStatusesChange: (v: EnrollmentStatusBucket[]) => void;
+}) {
+  const { data: grants = [] } = useGrants({ limit: 500 });
+  const [open, setOpen] = React.useState(false);
+  const popoverRef = React.useRef<HTMLDivElement | null>(null);
   const sorted = React.useMemo(
-    () => [...grants].sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))),
+    () =>
+      [...grants]
+        .filter((g) => !g.deleted && String(g.status || "").toLowerCase() !== "deleted")
+        .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))),
     [grants],
   );
+  const selectedStatuses = React.useMemo(() => new Set(statuses), [statuses]);
+  const allStatusesSelected = statuses.length === ENROLLMENT_STATUS_OPTIONS.length;
+  const statusSummary = allStatusesSelected
+    ? "All enrollment statuses"
+    : ENROLLMENT_STATUS_OPTIONS
+        .filter((option) => selectedStatuses.has(option.value))
+        .map((option) => option.label.replace(" Enrollments", ""))
+        .join(", ") || "No statuses selected";
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!popoverRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const toggleStatus = React.useCallback(
+    (status: EnrollmentStatusBucket) => {
+      const next = new Set(statuses);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      onStatusesChange(ENROLLMENT_STATUS_OPTIONS.map((option) => option.value).filter((nextStatus) => next.has(nextStatus)));
+    },
+    [onStatusesChange, statuses],
+  );
+
   return (
-    <div className="min-w-[200px] space-y-1">
+    <div className="min-w-[240px] space-y-1">
       <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
         Enrollment
       </div>
-      <select
-        className="select w-full text-sm"
-        value={value}
-        onChange={(e) => onChange(e.currentTarget.value)}
-      >
-        <option value="all">All (no filter)</option>
-        {sorted.map((g) => (
-          <option key={String(g.id)} value={String(g.id)}>
-            {String(g.name || g.id || "")}
-          </option>
-        ))}
-      </select>
+      <div className="relative flex items-center gap-1" ref={popoverRef}>
+        <select
+          className="select min-w-0 flex-1 text-sm"
+          value={value}
+          onChange={(e) => onChange(e.currentTarget.value)}
+        >
+          <option value="all">All (no filter)</option>
+          {sorted.map((g) => (
+            <option key={String(g.id)} value={String(g.id)}>
+              {String(g.name || g.id || "")}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className={[
+            "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-slate-600 transition",
+            open
+              ? "border-slate-400 bg-slate-100 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100"
+              : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800",
+          ].join(" ")}
+          onClick={() => setOpen((prev) => !prev)}
+          title="Advanced enrollment filters"
+          aria-label="Advanced enrollment filters"
+          aria-expanded={open}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 7h16" />
+            <path d="M7 12h10" />
+            <path d="M10 17h4" />
+          </svg>
+        </button>
+        {open ? (
+          <div className="absolute right-0 top-10 z-30 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+            <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Enrollment Filters</div>
+            <div className="mb-3 text-xs text-slate-500 dark:text-slate-400">{statusSummary}</div>
+            <div className="space-y-2">
+              {ENROLLMENT_STATUS_OPTIONS.map((option) => (
+                <label key={option.value} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={selectedStatuses.has(option.value)}
+                    onChange={() => toggleStatus(option.value)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm rounded-lg"
+                onClick={() => onStatusesChange(ENROLLMENT_STATUS_OPTIONS.map((option) => option.value))}
+              >
+                All
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm rounded-lg" onClick={() => setOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -87,6 +187,7 @@ type CustomerCardViewProps = {
   populationFilter: PopulationFilter;
   sortMode: CustomerSortMode;
   grantFilter: string;
+  enrollmentStatuses: EnrollmentStatusBucket[];
   caseManagerOptions: CaseManagerOption[];
   onActiveModeChange: (mode: ActiveMode) => void;
   onDeletedModeChange: (mode: DeletedMode) => void;
@@ -96,6 +197,7 @@ type CustomerCardViewProps = {
   onPopulationFilterChange: (value: PopulationFilter) => void;
   onSortModeChange: (value: CustomerSortMode) => void;
   onGrantFilterChange: (value: string) => void;
+  onEnrollmentStatusesChange: (value: EnrollmentStatusBucket[]) => void;
   onResetFilters: () => void;
   /** Called when Enter is pressed in search — triggers full-pool search */
   onSearchEnter?: () => void;
@@ -105,49 +207,10 @@ type CustomerCardViewProps = {
 
 type FilterOption<T extends string> = { value: T; label: string };
 
-type BulkActionKind =
-  | "enroll"
-  | "mark-status"
-  | "soft-delete"
-  | "hard-delete"
-  | "complete-tasks"
-  | "complete-payments";
-
 const ENROLLMENT_PRELOAD_BATCH_SIZE = 8;
 const ENROLLMENT_DOC_ESTIMATE_PER_CUSTOMER = 4;
 const ENROLLMENT_ESTIMATED_COST_PER_DOC = 0.001;
 const ENROLLMENT_REFRESH_CONFIRM_THRESHOLD = 25;
-
-function toTodayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function isNonDeletedActiveEnrollment(enrollment: Enrollment): boolean {
-  const status = String(enrollment?.status || "").trim().toLowerCase();
-  if (enrollment?.deleted === true || status === "deleted") return false;
-  if (enrollment?.active === true || status === "active") return true;
-  return false;
-}
-
-function isOpenTask(row: Record<string, unknown>): boolean {
-  return String(row?.status || "open").trim().toLowerCase() === "open";
-}
-
-function isCompletablePayment(payment: TPayment | null | undefined): payment is TPayment & { id: string } {
-  const id = String(payment?.id || "").trim();
-  return !!id && payment?.paid !== true && payment?.void !== true && Number(payment?.amount || 0) > 0;
-}
-
-function isActiveCustomerRow(customer: TCustomerEntity | null | undefined): boolean {
-  if (typeof customer?.active === "boolean") return customer.active;
-  return String(customer?.status || "active").trim().toLowerCase() === "active";
-}
-
-function chunkArray<T>(rows: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
-  return out;
-}
 
 export function CustomerCardView({
   myUid,
@@ -164,6 +227,7 @@ export function CustomerCardView({
   populationFilter,
   sortMode,
   grantFilter,
+  enrollmentStatuses,
   caseManagerOptions,
   onActiveModeChange,
   onDeletedModeChange,
@@ -173,6 +237,7 @@ export function CustomerCardView({
   onPopulationFilterChange,
   onSortModeChange,
   onGrantFilterChange,
+  onEnrollmentStatusesChange,
   onResetFilters,
   onSearchEnter,
   onCustomerOpen,
@@ -182,30 +247,25 @@ export function CustomerCardView({
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const patchCustomers = usePatchCustomers();
-  const softDeleteCustomers = useSoftDeleteCustomers();
-  const hardDeleteCustomers = useHardDeleteCustomers();
-  const bulkEnroll = useEnrollmentsBulkEnroll();
   const displayRows = rows as CustomerRow[];
   const orderedIds = React.useMemo(
     () => displayRows.map((customer) => String(customer.id || "")).filter(Boolean),
     [displayRows],
   );
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [selectedCustomers, setSelectedCustomers] = React.useState<Record<string, CustomerRow>>({});
   const [lastSelectedId, setLastSelectedId] = React.useState<string | null>(null);
-  const [bulkGrantId, setBulkGrantId] = React.useState<string | null>(null);
-  const [busyAction, setBusyAction] = React.useState<BulkActionKind | null>(null);
+  const [bulkWorkspaceTool, setBulkWorkspaceTool] = React.useState<CustomerBulkTool | null>(null);
   const [isRefreshingEnrollments, setIsRefreshingEnrollments] = React.useState(false);
   const [showEnrollmentRefreshDialog, setShowEnrollmentRefreshDialog] = React.useState(false);
   const [pendingEnrollmentRefreshIds, setPendingEnrollmentRefreshIds] = React.useState<string[]>([]);
-  const [gridCols, setGridCols] = React.useState<1 | 2 | 3>(2);
+  const [gridCols, setGridCols] = React.useState<1 | 2 | 3>(3);
   const [pendingCardId, setPendingCardId] = React.useState<string | null>(null);
 
   // Clear loading state once the route actually changes (modal opened or closed)
   React.useEffect(() => {
     setPendingCardId(null);
   }, [pathname]);
-  const todayIso = React.useMemo(() => toTodayIso(), []);
   const customerIdsInScope = React.useMemo(
     () => Array.from(new Set(displayRows.map((customer) => String(customer.id || "").trim()).filter(Boolean))),
     [displayRows],
@@ -264,25 +324,30 @@ export function CustomerCardView({
 
   React.useEffect(() => {
     const visible = new Set(orderedIds);
-    setSelectedIds((prev) => {
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (visible.has(id)) next.add(id);
-      }
-      return next.size === prev.size ? prev : next;
-    });
     setLastSelectedId((prev) => (prev && visible.has(prev) ? prev : null));
   }, [orderedIds]);
 
+  React.useEffect(() => {
+    setSelectedCustomers((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const customer of displayRows) {
+        const id = String(customer.id || "");
+        if (!id || !selectedIds.has(id)) continue;
+        next[id] = customer;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [displayRows, selectedIds]);
+
   const selectedRows = React.useMemo(
-    () => displayRows.filter((customer) => selectedIds.has(String(customer.id || ""))),
-    [displayRows, selectedIds],
+    () =>
+      Array.from(selectedIds)
+        .map((id) => selectedCustomers[id] || displayRows.find((customer) => String(customer.id || "") === id))
+        .filter((customer): customer is CustomerRow => !!customer),
+    [displayRows, selectedCustomers, selectedIds],
   );
-  const bulkStatusTargetActive = React.useMemo(
-    () => selectedRows.length > 0 && selectedRows.every((customer) => !isActiveCustomerRow(customer)),
-    [selectedRows],
-  );
-  const bulkStatusActionLabel = bulkStatusTargetActive ? "Mark Active" : "Mark Inactive";
 
   const applySelectionGesture = React.useCallback(
     (
@@ -317,9 +382,22 @@ export function CustomerCardView({
         return new Set([customerId]);
       });
 
+      setSelectedCustomers((prev) => {
+        const row = displayRows.find((customer) => String(customer.id || "") === customerId);
+        if (!row) return prev;
+        const next = { ...prev };
+        const currentlySelected = selectedIds.has(customerId);
+        if ((source === "checkbox" || modifiers?.ctrlKey || modifiers?.metaKey) && currentlySelected && !modifiers?.shiftKey) {
+          delete next[customerId];
+          return next;
+        }
+        next[customerId] = row;
+        return next;
+      });
+
       setLastSelectedId(customerId);
     },
-    [lastSelectedId, orderedIds],
+    [displayRows, lastSelectedId, orderedIds, selectedIds],
   );
 
   const handleCardOpen = React.useCallback(
@@ -350,252 +428,9 @@ export function CustomerCardView({
 
   const clearSelection = React.useCallback(() => {
     setSelectedIds(new Set());
+    setSelectedCustomers({});
     setLastSelectedId(null);
   }, []);
-
-  const invalidateBulkCaches = React.useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: qk.customers.root }),
-      queryClient.invalidateQueries({ queryKey: qk.enrollments.root }),
-      queryClient.invalidateQueries({ queryKey: qk.tasks.root }),
-      queryClient.invalidateQueries({ queryKey: qk.payments.root }),
-      queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
-      queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
-      queryClient.invalidateQueries({ queryKey: qk.inbox.root }),
-      queryClient.invalidateQueries({ queryKey: qk.grants.root }),
-      queryClient.invalidateQueries({ queryKey: qk.metrics.system() }),
-      queryClient.invalidateQueries({ queryKey: qk.users.me() }),
-    ]);
-  }, [queryClient]);
-
-  const loadActiveEnrollmentsForCustomers = React.useCallback(async (customerIds: string[]) => {
-    const pages = await Promise.all(
-      customerIds.map((customerId) =>
-        EnrollmentsAPI.list({ customerId, active: "true", limit: CUSTOMER_ENROLLMENTS_LIMIT }),
-      ),
-    );
-
-    const seen = new Set<string>();
-    const enrollments: Enrollment[] = [];
-    for (const page of pages) {
-      for (const row of page || []) {
-        const id = String(row?.id || "").trim();
-        if (!id || seen.has(id) || !isNonDeletedActiveEnrollment(row)) continue;
-        seen.add(id);
-        enrollments.push(row);
-      }
-    }
-    return enrollments;
-  }, []);
-
-  const runBulkAction = React.useCallback(
-    async (action: BulkActionKind, work: () => Promise<void>) => {
-      setBusyAction(action);
-      try {
-        await work();
-      } finally {
-        setBusyAction((current) => (current === action ? null : current));
-      }
-    },
-    [],
-  );
-
-  const handleBulkEnroll = React.useCallback(async () => {
-    const customerIds = selectedRows.map((customer) => String(customer.id || "")).filter(Boolean);
-    if (!customerIds.length) {
-      toast("Select at least one customer.", { type: "error" });
-      return;
-    }
-    if (!bulkGrantId) {
-      toast("Select a grant or program first.", { type: "error" });
-      return;
-    }
-
-    await runBulkAction("enroll", async () => {
-      const resp = await bulkEnroll.mutateAsync({
-        grantId: bulkGrantId,
-        customerIds,
-        extra: { startDate: todayIso },
-      });
-
-      const results = Array.isArray((resp as { results?: unknown[] })?.results)
-        ? ((resp as { results?: Array<Record<string, unknown>> }).results || [])
-        : [];
-
-      const created = results.filter((row) => row?.enrollmentId && row?.existed !== true).length;
-      const existed = results.filter((row) => row?.existed === true).length;
-      const failed = results.filter((row) => !!row?.error).length;
-
-      toast(
-        `Enrollments: ${created} created${existed ? `, ${existed} already existed` : ""}${failed ? `, ${failed} failed` : ""}.`,
-        { type: failed ? "warn" : "success" },
-      );
-      clearSelection();
-    });
-  }, [bulkEnroll, bulkGrantId, clearSelection, runBulkAction, selectedRows, todayIso]);
-
-  const handleBulkUpdateStatus = React.useCallback(async () => {
-    const customerIds = selectedRows.map((customer) => String(customer.id || "")).filter(Boolean);
-    if (!customerIds.length) {
-      toast("Select at least one customer.", { type: "error" });
-      return;
-    }
-
-    await runBulkAction("mark-status", async () => {
-      const nextActive = bulkStatusTargetActive;
-      await patchCustomers.mutateAsync(
-        customerIds.map((id) => ({
-          id,
-          patch: { active: nextActive, status: nextActive ? "active" : "inactive" },
-        })),
-      );
-      toast(`Marked ${customerIds.length} customer${customerIds.length === 1 ? "" : "s"} ${nextActive ? "active" : "inactive"}.`, {
-        type: "success",
-      });
-      clearSelection();
-    });
-  }, [bulkStatusTargetActive, clearSelection, patchCustomers, runBulkAction, selectedRows]);
-
-  const handleBulkSoftDelete = React.useCallback(async () => {
-    const customerIds = selectedRows.map((customer) => String(customer.id || "")).filter(Boolean);
-    if (!customerIds.length) {
-      toast("Select at least one customer.", { type: "error" });
-      return;
-    }
-    if (!window.confirm(`Soft delete ${customerIds.length} selected customer${customerIds.length === 1 ? "" : "s"}?`)) {
-      return;
-    }
-
-    await runBulkAction("soft-delete", async () => {
-      await softDeleteCustomers.mutateAsync(customerIds);
-      toast(`Soft deleted ${customerIds.length} customer${customerIds.length === 1 ? "" : "s"}.`, {
-        type: "success",
-      });
-      clearSelection();
-    });
-  }, [clearSelection, runBulkAction, selectedRows, softDeleteCustomers]);
-
-  const handleBulkHardDelete = React.useCallback(async () => {
-    const customerIds = selectedRows.map((customer) => String(customer.id || "")).filter(Boolean);
-    if (!customerIds.length || !isAdminUser) {
-      toast("Select at least one customer.", { type: "error" });
-      return;
-    }
-    if (!window.confirm(`Hard delete ${customerIds.length} selected customer${customerIds.length === 1 ? "" : "s"} permanently?`)) {
-      return;
-    }
-
-    await runBulkAction("hard-delete", async () => {
-      await hardDeleteCustomers.mutateAsync(customerIds);
-      toast(`Hard deleted ${customerIds.length} customer${customerIds.length === 1 ? "" : "s"}.`, {
-        type: "success",
-      });
-      clearSelection();
-    });
-  }, [clearSelection, hardDeleteCustomers, isAdminUser, runBulkAction, selectedRows]);
-
-  const handleBulkCompleteTasks = React.useCallback(async () => {
-    const customerIds = selectedRows.map((customer) => String(customer.id || "")).filter(Boolean);
-    if (!customerIds.length) {
-      toast("Select at least one customer.", { type: "error" });
-      return;
-    }
-
-    await runBulkAction("complete-tasks", async () => {
-      const enrollments = await loadActiveEnrollmentsForCustomers(customerIds);
-      if (!enrollments.length) {
-        toast("No active enrollments found for the selected customers.", { type: "warn" });
-        return;
-      }
-
-      const taskRows: Array<Record<string, unknown>> = [];
-      for (const group of chunkArray(
-        enrollments.map((enrollment) => String(enrollment.id || "")).filter(Boolean),
-        100,
-      )) {
-        const resp = await TasksAPI.list({
-          enrollmentIds: group,
-          status: "open",
-          limit: 1000,
-        } as ReqOf<"tasksList">);
-        if (resp && typeof resp === "object" && Array.isArray((resp as { items?: unknown[] }).items)) {
-          taskRows.push(...(((resp as { items?: Array<Record<string, unknown>> }).items) || []));
-        }
-      }
-
-      const grouped = new Map<string, Array<{ taskId: string; action: "complete" }>>();
-      for (const row of taskRows) {
-        if (!isOpenTask(row)) continue;
-        const enrollmentId = String(row?.enrollmentId || "").trim();
-        const taskId = String(row?.taskId || "").trim();
-        if (!enrollmentId || !taskId) continue;
-        const changes = grouped.get(enrollmentId) || [];
-        changes.push({ taskId, action: "complete" });
-        grouped.set(enrollmentId, changes);
-      }
-
-      let updatedTasks = 0;
-      for (const [enrollmentId, changes] of grouped.entries()) {
-        for (const batch of chunkArray(changes, 500)) {
-          await TasksAPI.bulkStatus({ enrollmentId, changes: batch });
-          updatedTasks += batch.length;
-        }
-      }
-
-      if (!updatedTasks) {
-        toast("No open tasks found for the selected customers.", { type: "warn" });
-        return;
-      }
-
-      await invalidateBulkCaches();
-      toast(`Completed ${updatedTasks} task${updatedTasks === 1 ? "" : "s"}.`, { type: "success" });
-      clearSelection();
-    });
-  }, [clearSelection, invalidateBulkCaches, loadActiveEnrollmentsForCustomers, runBulkAction, selectedRows]);
-
-  const handleBulkCompletePayments = React.useCallback(async () => {
-    const customerIds = selectedRows.map((customer) => String(customer.id || "")).filter(Boolean);
-    if (!customerIds.length) {
-      toast("Select at least one customer.", { type: "error" });
-      return;
-    }
-
-    await runBulkAction("complete-payments", async () => {
-      const enrollments = await loadActiveEnrollmentsForCustomers(customerIds);
-      if (!enrollments.length) {
-        toast("No active enrollments found for the selected customers.", { type: "warn" });
-        return;
-      }
-
-      let completed = 0;
-      let failed = 0;
-      for (const enrollment of enrollments) {
-        const enrollmentId = String(enrollment?.id || "").trim();
-        const payments = Array.isArray(enrollment?.payments) ? enrollment.payments : [];
-        for (const payment of payments) {
-          if (!isCompletablePayment(payment)) continue;
-          try {
-            await PaymentsAPI.spend({ enrollmentId, paymentId: String(payment.id) } as ReqOf<"paymentsSpend">);
-            completed += 1;
-          } catch {
-            failed += 1;
-          }
-        }
-      }
-
-      if (!completed && !failed) {
-        toast("No unpaid payments found for the selected customers.", { type: "warn" });
-        return;
-      }
-
-      await invalidateBulkCaches();
-      toast(
-        `Payments marked complete: ${completed}${failed ? `, ${failed} failed` : ""}.`,
-        { type: failed ? "warn" : "success" },
-      );
-      if (completed > 0) clearSelection();
-    });
-  }, [clearSelection, invalidateBulkCaches, loadActiveEnrollmentsForCustomers, runBulkAction, selectedRows]);
 
   const runEnrollmentRefresh = React.useCallback(async (customerIds: string[]) => {
     if (!customerIds.length) {
@@ -659,19 +494,20 @@ export function CustomerCardView({
   }, [pendingEnrollmentRefreshIds, runEnrollmentRefresh]);
 
   const bulkStatusText = React.useMemo(() => {
-    if (!busyAction) return `${selectedRows.length} visible customer${selectedRows.length === 1 ? "" : "s"} in scope.`;
-    if (busyAction === "enroll") return "Creating enrollments with today's start date.";
-    if (busyAction === "mark-status") {
-      return bulkStatusTargetActive
-        ? "Marking selected customers active."
-        : "Marking selected customers inactive.";
+    if (!selectedIds.size) return null;
+    return "Selection persists while you search or change filters. Open a workspace to apply bulk actions.";
+  }, [selectedIds.size]);
+
+  const bulkButtonClass =
+    "inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50";
+
+  const openBulkWorkspace = React.useCallback((tool: CustomerBulkTool) => {
+    if (!selectedIds.size) {
+      toast("Select at least one customer.", { type: "error" });
+      return;
     }
-    if (busyAction === "soft-delete") return "Soft deleting selected customers.";
-    if (busyAction === "hard-delete") return "Hard deleting selected customers permanently.";
-    if (busyAction === "complete-tasks") return "Completing open tasks across selected customers.";
-    if (busyAction === "complete-payments") return "Marking unpaid payments complete across selected customers.";
-    return null;
-  }, [bulkStatusTargetActive, busyAction, selectedRows.length]);
+    setBulkWorkspaceTool(tool);
+  }, [selectedIds.size]);
 
   return (
     <div className="space-y-4">
@@ -739,7 +575,12 @@ export function CustomerCardView({
               allLabel="All"
             />
           </div>
-          <EnrollmentGrantFilter value={grantFilter} onChange={onGrantFilterChange} />
+          <EnrollmentGrantFilter
+            value={grantFilter}
+            statuses={enrollmentStatuses}
+            onChange={onGrantFilterChange}
+            onStatusesChange={onEnrollmentStatusesChange}
+          />
           <FilterToggleGroup
             label="Sort"
             value={sortMode}
@@ -751,69 +592,82 @@ export function CustomerCardView({
 
       {viewFlags.showBulkActions && selectedRows.length > 0 ? (
         <PageBulkActionsBar
-          selectedCount={selectedRows.length}
+          selectedCount={selectedIds.size}
           noun="customer"
           statusText={bulkStatusText}
-          onClear={busyAction ? undefined : clearSelection}
+          onClear={clearSelection}
         >
-          <div className="min-w-[240px]">
-            <GrantSelect
-              value={bulkGrantId}
-              onChange={setBulkGrantId}
-              placeholderLabel="Select grant for bulk enroll"
-              includeUnassigned
-              disabled={!!busyAction}
-            />
-          </div>
           <button
             type="button"
-            className="btn btn-sm rounded-lg"
-            onClick={() => void handleBulkEnroll()}
-            disabled={!!busyAction || !bulkGrantId}
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("enroll")}
           >
-            Enroll
+            Bulk Enroll
           </button>
           <button
             type="button"
-            className="btn btn-sm rounded-lg"
-            onClick={() => void handleBulkUpdateStatus()}
-            disabled={!!busyAction}
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("payments")}
           >
-            {bulkStatusActionLabel}
+            Bulk Payments
           </button>
           <button
             type="button"
-            className="btn btn-sm btn-error rounded-lg"
-            onClick={() => void handleBulkSoftDelete()}
-            disabled={!!busyAction}
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("case-managers")}
           >
-            Soft Delete
+            Assign Case Team
+          </button>
+          <button
+            type="button"
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("archive")}
+          >
+            Archive
+          </button>
+          <button
+            type="button"
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("delete")}
+          >
+            Delete
           </button>
           {isAdminUser ? (
             <button
               type="button"
-              className="btn btn-sm btn-error rounded-lg"
-              onClick={() => void handleBulkHardDelete()}
-              disabled={!!busyAction}
+              className={bulkButtonClass}
+              onClick={() => openBulkWorkspace("hard-delete")}
             >
               Hard Delete
             </button>
           ) : null}
           <button
             type="button"
-            className="btn btn-sm rounded-lg"
-            onClick={() => void handleBulkCompleteTasks()}
-            disabled={!!busyAction}
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("complete-past-tasks")}
           >
-            Mark Tasks Complete
+            Complete Past Tasks
           </button>
           <button
             type="button"
-            className="btn btn-sm rounded-lg"
-            onClick={() => void handleBulkCompletePayments()}
-            disabled={!!busyAction}
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("mark-projections-paid")}
           >
-            Mark Payments Complete
+            Mark Projections Paid
+          </button>
+          <button
+            type="button"
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("refresh-enrollments")}
+          >
+            Refresh Enrollments
+          </button>
+          <button
+            type="button"
+            className={bulkButtonClass}
+            onClick={() => openBulkWorkspace("reverse-payments")}
+          >
+            Reverse Payments
           </button>
         </PageBulkActionsBar>
       ) : null}
@@ -857,8 +711,9 @@ export function CustomerCardView({
             key={customer.id}
             customer={customer}
             viewerUid={myUid}
+            selectedCmUid={cmFilter !== "all" ? cmFilter : undefined}
             selected={selectedIds.has(String(customer.id || ""))}
-            selectionMode={selectedRows.length > 0}
+            selectionMode={selectedIds.size > 0}
             onSelectGesture={handleCardSelectGesture}
             onOpen={handleCardOpen}
             loading={pendingCardId === String(customer.id || "")}
@@ -908,6 +763,16 @@ export function CustomerCardView({
           </p>
         </div>
       </Modal>
+
+      <CustomerBulkWorkspaceModal
+        isOpen={!!bulkWorkspaceTool}
+        tool={bulkWorkspaceTool}
+        customers={selectedRows}
+        isAdminUser={isAdminUser}
+        caseManagerOptions={caseManagerOptions}
+        onClose={() => setBulkWorkspaceTool(null)}
+        onClearSelection={clearSelection}
+      />
     </div>
   );
 }

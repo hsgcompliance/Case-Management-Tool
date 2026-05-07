@@ -32,13 +32,13 @@ function toCsvCell(value: unknown): string {
   return raw;
 }
 
-function buildCsv<T>(rows: T[], columns: ExportColumn<T>[]) {
+export function buildCsv<T>(rows: T[], columns: ExportColumn<T>[]) {
   const header = columns.map((c) => toCsvCell(c.label)).join(",");
   const body = rows.map((row) => columns.map((c) => toCsvCell(c.value(row))).join(",")).join("\r\n");
   return `${header}\r\n${body}`;
 }
 
-function downloadCsv(contents: string, filenameBase: string) {
+export function downloadCsv(contents: string, filenameBase: string) {
   const safeBase = filenameBase.trim() || "export";
   const stamp = toISODate(new Date());
   const blob = new Blob(["\uFEFF", contents], { type: "text/csv;charset=utf-8" });

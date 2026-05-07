@@ -103,7 +103,11 @@ function GrantRow({
   const { data: gm } = useGrantMetrics(grant.id);
 
   return (
-    <div className="group grid w-full grid-cols-12 items-center gap-3 border-b border-slate-200 px-4 py-3 last:border-b-0 dark:border-slate-700">
+    <div
+      data-block-id={`grant:${grant.id}`}
+      data-block-name={String(grant.name || grant.id)}
+      className="group grid w-full grid-cols-12 items-center gap-3 border-b border-slate-200 px-4 py-3 last:border-b-0 dark:border-slate-700"
+    >
       <button
         type="button"
         onClick={onOpen}
@@ -186,7 +190,11 @@ function ProgramRow({
     : null);
 
   return (
-    <div className="group grid w-full grid-cols-12 items-center gap-3 border-b border-slate-200 px-4 py-3 last:border-b-0 dark:border-slate-700">
+    <div
+      data-block-id={`grant:${grant.id}`}
+      data-block-name={String(grant.name || grant.id)}
+      className="group grid w-full grid-cols-12 items-center gap-3 border-b border-slate-200 px-4 py-3 last:border-b-0 dark:border-slate-700"
+    >
       <button
         type="button"
         onClick={onOpen}

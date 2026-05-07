@@ -1,6 +1,7 @@
 // src/entities/Modal.tsx
 "use client";
 import React, { useEffect, useId, useRef } from "react";
+import { useModalRuntime } from "./modalRuntime";
 
 type ModalProps = {
   isOpen: boolean;
@@ -30,7 +31,6 @@ export function Modal({
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const prevFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
 
   const attemptClose = async () => {
@@ -38,24 +38,7 @@ export function Modal({
     if (ok) onClose();
   };
 
-  // body scroll lock + focus restore
-  useEffect(() => {
-    if (!isOpen) return;
-
-    prevFocusRef.current = document.activeElement as HTMLElement | null;
-
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const t = window.setTimeout(() => panelRef.current?.focus(), 0);
-
-    return () => {
-      window.clearTimeout(t);
-      document.body.style.overflow = prevOverflow;
-      prevFocusRef.current?.focus?.();
-      prevFocusRef.current = null;
-    };
-  }, [isOpen]);
+  useModalRuntime(isOpen, panelRef);
 
   // ESC closes
   useEffect(() => {

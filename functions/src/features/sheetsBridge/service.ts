@@ -8,6 +8,7 @@ import {
   toUtcIso,
 } from "../../core";
 import {normalizeBudget} from "../grants/service";
+import type {TGrantBudgetLineItem} from "../grants/schemas";
 import {
   getPaymentQueueItem,
   listPaymentQueueItems,
@@ -58,6 +59,22 @@ type ManifestColumn = {
   required?: boolean;
   notes?: string;
 };
+
+function normalizeLineItemsForBudget(items: Array<Record<string, unknown>>): TGrantBudgetLineItem[] {
+  return items.map((lineItem) => ({
+    ...lineItem,
+    id: str(lineItem.id) || randomUUID(),
+    label: lineItem.label == null ? null : str(lineItem.label),
+    amount: num(lineItem.amount),
+    projected: num(lineItem.projected),
+    spent: num(lineItem.spent),
+    projectedInWindow: num(lineItem.projectedInWindow),
+    spentInWindow: num(lineItem.spentInWindow),
+    locked: boolOrNull(lineItem.locked),
+    capEnabled: typeof lineItem.capEnabled === "boolean" ? lineItem.capEnabled : false,
+    ...(lineItem.perCustomerCap != null ? {perCustomerCap: num(lineItem.perCustomerCap)} : {}),
+  })) as TGrantBudgetLineItem[];
+}
 
 function str(value: unknown): string {
   return String(value ?? "").trim();
@@ -365,8 +382,10 @@ function buildGrantPatchPayload(grant: GrantDoc, patch: TSheetsGrantPatch) {
     null :
     normalizeBudget({
       ...(prevBudget || {total: 0, lineItems: []}),
+      total: num(prevBudget?.total),
+      totals: undefined,
       ...(patch.budgetTotal !== undefined ? {total: patch.budgetTotal ?? 0} : {}),
-      lineItems: Array.isArray(prevBudget?.lineItems) ? prevBudget.lineItems : [],
+      lineItems: normalizeLineItemsForBudget(Array.isArray(prevBudget?.lineItems) ? prevBudget.lineItems : []),
     });
 
   return removeUndefinedDeep({
@@ -426,7 +445,7 @@ function buildNextLineItems(
     });
   }
 
-  return {nextId, nextItems};
+  return {nextId, nextItems: normalizeLineItemsForBudget(nextItems)};
 }
 
 async function applyGrantLineItemUpsert(
@@ -442,6 +461,8 @@ async function applyGrantLineItemUpsert(
     const {nextId, nextItems} = buildNextLineItems(currentItems, lineItemId, patch);
     const budget = normalizeBudget({
       ...(grant.budget || {total: 0}),
+      total: num(grant.budget?.total),
+      totals: undefined,
       lineItems: nextItems,
     });
     if (!dryRun) {
@@ -458,9 +479,13 @@ async function applyGrantLineItemDelete(orgId: string, grantId: string, lineItem
   return db.runTransaction(async (tx) => {
     const {ref, grant} = await getGrantDocForWrite(orgId, grantId, tx);
     const currentItems = Array.isArray(grant.budget?.lineItems) ? grant.budget?.lineItems : [];
-    const nextItems = currentItems.filter((lineItem) => str(lineItem.id) !== str(lineItemId));
+    const nextItems = normalizeLineItemsForBudget(
+      currentItems.filter((lineItem) => str(lineItem.id) !== str(lineItemId)),
+    );
     const budget = normalizeBudget({
       ...(grant.budget || {total: 0}),
+      total: num(grant.budget?.total),
+      totals: undefined,
       lineItems: nextItems,
     });
     if (!dryRun) {

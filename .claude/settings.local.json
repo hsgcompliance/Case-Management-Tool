@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $2}')",
+      "Bash(npx tsc *)",
+      "PowerShell(cd \"C:\\\\Users\\\\gseyfried\\\\Desktop\\\\New_folder\\\\Households_DB_v2\"; $env:GCLOUD_PROJECT = \"housing-db-v2\"; node -e \"const m = require\\('./functions/build/index.js'\\); Object.keys\\(m\\).filter\\(k => k.toLowerCase\\(\\).includes\\('jotform'\\) || k.toLowerCase\\(\\).includes\\('reconcile'\\)\\).forEach\\(k => console.log\\(k\\)\\)\")"
+    ]
+  }
+}

@@ -1,7 +1,9 @@
 // web/src/features/budget/BudgetPage.tsx
 "use client";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toApiError } from "@client/api";
+import { useAuth } from "@app/auth/AuthProvider";
 import { ListStyleLayout } from "@entities/Page/listStyle";
 import PageShell from "@entities/Page/PageShell";
 import PageFilterBar from "@entities/Page/PageFilterBar";
@@ -9,11 +11,16 @@ import { FilterToggleGroup } from "@entities/ui";
 import RefreshButton from "@entities/ui/RefreshButton";
 import { useGrants } from "@hooks/useGrants";
 import { useOrgConfig } from "@hooks/useOrgConfig";
-import { useCreditCardsSummary } from "@hooks/useCreditCards";
+import { useCreditCards } from "@hooks/useCreditCards";
+import { useSyncJotformSelection } from "@hooks/useJotform";
 import { qk } from "@hooks/queryKeys";
-import type { TGrant as Grant } from "@types";
+import { hasAnyRole, isAdminLike } from "@lib/roles";
+import { toast } from "@lib/toast";
+import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
+import type { CreditCardEntity, CreditCardSummaryItem, TGrant as Grant } from "@types";
 import { BudgetGroupSection } from "./BudgetGroupSection";
 import { CreditCardBudgetCard } from "./CreditCardBudgetCard";
+import { CreditCardBudgetDetailModal } from "./CreditCardBudgetDetailModal";
 import { BudgetConfigModal } from "./BudgetConfigModal";
 import { NewCreditCardModal } from "./NewCreditCardModal";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
@@ -109,11 +116,65 @@ function buildSections(
   return { grantsById, sections };
 }
 
+// ─── Card entity → summary shape ─────────────────────────────────────────────
+
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function prevMonthKey() {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function cardToSummaryItem(card: CreditCardEntity): CreditCardSummaryItem {
+  const budget = (card as any).budget as {
+    month?: string; lastMonth?: string; spentCents?: number;
+    usagePct?: number; entryCount?: number;
+    lastMonthSpentCents?: number; lastMonthEntryCount?: number;
+  } | null | undefined;
+
+  const monthlyLimitCents = Number(card.monthlyLimitCents || 0);
+  const spentCents = Number(budget?.spentCents || 0);
+  // Recompute live using the card's current limit so limit edits are instant
+  const remainingCents = monthlyLimitCents - spentCents;
+  const usagePct =
+    monthlyLimitCents > 0
+      ? Math.max(0, Math.min(999, (spentCents / monthlyLimitCents) * 100))
+      : 0;
+
+  return {
+    id: String(card.id),
+    name: String(card.name || ""),
+    status: (card.status || "draft") as CreditCardSummaryItem["status"],
+    month: budget?.month || currentMonthKey(),
+    lastMonth: budget?.lastMonth || prevMonthKey(),
+    monthlyLimitCents,
+    spentCents,
+    remainingCents,
+    usagePct,
+    entryCount: Number(budget?.entryCount || 0),
+    lastMonthSpentCents: Number(budget?.lastMonthSpentCents || 0),
+    lastMonthEntryCount: Number(budget?.lastMonthEntryCount || 0),
+    cycleType: (card.cycleType || "calendar_month") as CreditCardSummaryItem["cycleType"],
+    statementCloseDay: card.statementCloseDay != null ? Number(card.statementCloseDay) : null,
+    last4: card.last4 || null,
+  };
+}
+
 // ─── Credit cards section ─────────────────────────────────────────────────────
 
-function CreditCardBudgetSection({ onNewCard }: { onNewCard: () => void }) {
-  const { data: summary } = useCreditCardsSummary({ active: true });
-  const cards = summary?.items ?? [];
+function CreditCardBudgetSection({
+  onNewCard,
+  onOpenCard,
+}: {
+  onNewCard: () => void;
+  onOpenCard: (card: CreditCardSummaryItem) => void;
+}) {
+  const { data: rawCards = [] } = useCreditCards({ active: true });
+  const cards = rawCards.map(cardToSummaryItem);
 
   return (
     <section className="space-y-3">
@@ -137,11 +198,14 @@ function CreditCardBudgetSection({ onNewCard }: { onNewCard: () => void }) {
       {cards.length === 0 ? (
         <p className="text-sm text-slate-400 dark:text-slate-500">No credit cards configured.</p>
       ) : (
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="flex flex-wrap justify-center gap-4">
           {cards.map((card) => (
-            <CreditCardBudgetCard key={card.id} card={card} />
+            <div key={card.id} className="w-full max-w-xs">
+              <CreditCardBudgetCard card={card} onClick={() => onOpenCard(card)} />
+            </div>
           ))}
         </div>
+
       )}
     </section>
   );
@@ -151,17 +215,22 @@ function CreditCardBudgetSection({ onNewCard }: { onNewCard: () => void }) {
 
 export function BudgetPage() {
   const qc = useQueryClient();
+  const { profile } = useAuth();
   const [filter, setFilter] = useState<FilterMode>("active");
   const [viewMode, setViewMode] = useState<ViewMode>("custom");
   const [search, setSearch] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
   const [selectedGrantId, setSelectedGrantId] = useState<string | null>(null);
+  const [selectedCreditCard, setSelectedCreditCard] = useState<CreditCardSummaryItem | null>(null);
   const [newCardOpen, setNewCardOpen] = useState(false);
   const [creatingGrant, setCreatingGrant] = useState(false);
 
   const { data: activeData = [], isLoading } = useGrants({ active: true, limit: 200 });
   const { data: inactiveData = [] } = useGrants({ active: false, limit: 200 });
   const { data: config } = useOrgConfig();
+  const syncSpendingForms = useSyncJotformSelection();
+  const canSyncSpendingForms = isAdminLike(profile) || hasAnyRole(profile?.roles, ["compliance", "org_dev", "super_dev"]);
+  const autoSyncFired = useRef(false);
 
   const sourceGrants = useMemo(() => {
     const source = filter === "active" ? activeData : inactiveData;
@@ -188,6 +257,39 @@ export function BudgetPage() {
       qc.invalidateQueries({ queryKey: qk.metrics.system() }),
     ]);
   };
+
+  const onLoadSpendingForms = async () => {
+    if (!canSyncSpendingForms) {
+      toast("You do not have permission to load Jotform spending forms.", { type: "error" });
+      return;
+    }
+    try {
+      const result = await syncSpendingForms.mutateAsync({
+        mode: "formIds",
+        formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
+        limit: 50,
+        maxPages: 1,
+        includeRaw: true,
+      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.jotform.root }),
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.creditCards.root }),
+        qc.invalidateQueries({ queryKey: qk.ledger.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+      ]);
+      toast(`Loaded ${Number(result?.count || 0)} spending submission${Number(result?.count || 0) === 1 ? "" : "s"}.`, { type: "success" });
+    } catch (error: unknown) {
+      toast(toApiError(error, "Failed to load spending forms.").error, { type: "error" });
+    }
+  };
+
+  useEffect(() => {
+    if (!canSyncSpendingForms || autoSyncFired.current) return;
+    autoSyncFired.current = true;
+    void onLoadSpendingForms();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSyncSpendingForms]);
 
   const onOpen = (id: string) => setSelectedGrantId(id);
 
@@ -248,11 +350,17 @@ export function BudgetPage() {
                 ⚙ Configure
               </button>
               <RefreshButton queryKeys={[qk.grants.root]} label="Refresh" onRefresh={onRefresh} />
+              {syncSpendingForms.isPending && (
+                <span className="text-xs text-slate-400 dark:text-slate-500 animate-pulse">Syncing card data…</span>
+              )}
             </div>
           </div>
 
           {/* Credit cards */}
-          <CreditCardBudgetSection onNewCard={() => setNewCardOpen(true)} />
+          <CreditCardBudgetSection
+            onNewCard={() => setNewCardOpen(true)}
+            onOpenCard={(card) => setSelectedCreditCard(card)}
+          />
 
           {/* Pinned grants */}
           <PinnedGrantCards />
@@ -335,6 +443,13 @@ export function BudgetPage() {
       <NewCreditCardModal
         isOpen={newCardOpen}
         onClose={() => setNewCardOpen(false)}
+      />
+
+      {/* Credit card activity */}
+      <CreditCardBudgetDetailModal
+        card={selectedCreditCard}
+        isOpen={!!selectedCreditCard}
+        onClose={() => setSelectedCreditCard(null)}
       />
 
       {/* New grant workspace */}

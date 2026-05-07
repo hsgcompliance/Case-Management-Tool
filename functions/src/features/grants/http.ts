@@ -183,8 +183,12 @@ export const grantsList = secureHandler(
       .limit(lim);
 
     const parseCursorTs = (v: unknown): FirebaseFirestore.Timestamp => {
-      const d = toDate(v as string | number | Date);
-      if (d) return Timestamp.fromDate(d);
+      if (typeof v === "string" || typeof v === "number") {
+        // Handle numeric strings as epoch millis
+        const num = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+        const d = toDate(num as string | number | Date);
+        if (d) return Timestamp.fromDate(d);
+      }
       const ts =
         (v as
           | {
@@ -206,7 +210,71 @@ export const grantsList = secureHandler(
     }
 
     const snap = await q.get();
-    const docs = snap.docs;
+    let docs = snap.docs;
+
+    const requestedActive =
+      active === "true" || active === true
+        ? true
+        : active === "false" || active === false
+          ? false
+          : null;
+
+    const updatedAtMillis = (value: unknown): number => {
+      const maybe = value as { toMillis?: () => number } | null | undefined;
+      if (typeof maybe?.toMillis === "function") {
+        const ms = maybe.toMillis();
+        if (Number.isFinite(ms)) return ms;
+      }
+      const d = toDate(value as string | number | Date);
+      return d ? d.getTime() : 0;
+    };
+
+    const matchesFallbackFilters = (g: Record<string, unknown>) => {
+      const docStatus = normStr(g.status);
+      const docDeleted = g.deleted === true || docStatus === "deleted";
+
+      if (statusStr && docStatus !== statusStr) return false;
+
+      if (requestedActive !== null) {
+        const docActive =
+          g.active === true ||
+          (g.active !== false && !docDeleted && (!docStatus || docStatus === "active"));
+        if (requestedActive && !docActive) return false;
+        if (!requestedActive && docActive) return false;
+      }
+
+      if (kindStr === "program") return normStr(g.kind) === "program";
+      if (kindStr === "grant") return normStr(g.kind) !== "program";
+
+      return true;
+    };
+
+    // Migration fallback: older grant docs can be missing `updatedAt` and/or
+    // `active`, and Firestore excludes such docs from orderBy/where results.
+    // Merge in org-scoped legacy docs and filter/sort in memory so budget tools
+    // do not collapse to zero while the collection is being normalized.
+    if (docs.length < lim) {
+      const legacySnap = await db
+        .collection("grants")
+        .where("orgId", "==", targetOrg)
+        .limit(1000)
+        .get();
+      const byId = new Map(docs.map((d) => [d.id, d]));
+      for (const d of legacySnap.docs) {
+        if (byId.has(d.id)) continue;
+        if (!matchesFallbackFilters(d.data() || {})) continue;
+        byId.set(d.id, d);
+      }
+      docs = Array.from(byId.values())
+        .sort((a, b) => {
+          const aMs = updatedAtMillis(a.get("updatedAt"));
+          const bMs = updatedAtMillis(b.get("updatedAt"));
+          if (aMs !== bMs) return bMs - aMs;
+          return String(b.id).localeCompare(String(a.id));
+        })
+        .slice(0, lim);
+    }
+
     const items = docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
 
     // Defensive: assert org access (legacy/unscoped tolerated elsewhere)

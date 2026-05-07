@@ -40,16 +40,8 @@ export function buildSandboxLaunchHref(args: {
   if (request.command) params.set("command", request.command);
   if (request.devOverrideRequested) params.set("dev", "1");
 
-  const prefersOverlay =
-    decision.game.presentation === "immersive" ||
-    decision.allowedContainerModes.includes("overlay");
-
-  if (prefersOverlay) {
-    return `/dev/secret-games/overlay?${params.toString()}`;
-  }
-
   if (fallbackCustomerId) {
     params.set("customer", fallbackCustomerId);
   }
-  return `/dev/secret-games/cards?${params.toString()}`;
+  return `/dev/secret-games?${params.toString()}`;
 }

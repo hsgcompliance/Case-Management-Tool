@@ -45,6 +45,21 @@ export const PaymentQueueItem = z.object({
 
   // ── Amount ────────────────────────────────────────────────────────────────
   amount: z.number(),
+  amountAbs: z.number().optional(),
+  direction: z.enum(['charge', 'return']).optional(),
+  directionFieldId: z.string().nullable().optional(),
+  amountFieldId: z.string().nullable().optional(),
+  extractionGroup: z.object({
+    kind: z.enum(['purchase', 'return', 'fallback']),
+    index: z.number().nullable(),
+    orderRange: z.tuple([z.number(), z.number()]).nullable().optional(),
+    fieldIds: z.record(z.string(), z.string().nullable()).optional(),
+  }).optional(),
+  localModified: z.boolean().optional(),
+  localModifiedAt: z.string().nullable().optional(),
+  localModifiedBy: z.string().nullable().optional(),
+  localModifiedFields: z.array(z.string()).optional(),
+  localModificationReason: z.string().nullable().optional(),
 
   // ── Counterparty / vendor ─────────────────────────────────────────────────
   merchant: z.string(),
@@ -127,6 +142,10 @@ export const PaymentQueueItem = z.object({
   okUnassigned: z.boolean(),
   okUnassignedAt: z.string().nullable(),
   okUnassignedBy: z.string().nullable(),
+  compliance: z.object({
+    hmisComplete: z.boolean().optional(),
+    caseworthyComplete: z.boolean().optional(),
+  }).optional(),
 
   // ── Extraction audit ──────────────────────────────────────────────────────
   extractionErrors: z.array(SpendExtractionError),
@@ -170,12 +189,23 @@ export const PaymentQueueListBody = z.object({
   unmatched: z.boolean().optional(),
   okUnassigned: z.boolean().optional(),
   isFlex: z.boolean().optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(200),
+  limit: z.coerce.number().int().min(1).max(1000).default(200),
   cursor: z.string().optional(),
 });
 export type TPaymentQueueListBody = z.infer<typeof PaymentQueueListBody>;
 
 export const PaymentQueuePatchBody = z.object({
+  amount: z.number().optional(),
+  amountAbs: z.number().optional(),
+  direction: z.enum(['charge', 'return']).optional(),
+  merchant: z.string().optional(),
+  expenseType: z.string().optional(),
+  program: z.string().optional(),
+  purpose: z.string().optional(),
+  notes: z.string().optional(),
+  note: z.string().optional(),
+  card: z.string().optional(),
+  cardBucket: z.enum(['Youth', 'Housing', 'MAD', '']).optional(),
   grantId: z.string().nullable().optional(),
   lineItemId: z.string().nullable().optional(),
   customerId: z.string().nullable().optional(),
@@ -185,8 +215,15 @@ export const PaymentQueuePatchBody = z.object({
   invoiceRef: z.string().nullable().optional(),
   okUnassigned: z.boolean().optional(),
   okUnassignedBy: z.string().optional(),
+  localModificationReason: z.string().optional(),
 });
 export type TPaymentQueuePatchBody = z.infer<typeof PaymentQueuePatchBody>;
+
+export const PaymentQueueRecomputeGrantBody = z.object({
+  grantId: z.string().min(1),
+  dryRun: z.boolean().optional().default(false),
+});
+export type TPaymentQueueRecomputeGrantBody = z.infer<typeof PaymentQueueRecomputeGrantBody>;
 
 export const PaymentQueuePostToLedgerBody = z.object({
   /** Force a specific ledger entry ID (idempotency) */

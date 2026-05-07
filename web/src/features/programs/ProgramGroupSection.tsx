@@ -9,6 +9,12 @@ interface ProgramGroupSectionProps {
   programs: Grant[];
   itemConfig: Record<string, { visible?: boolean; labelOverride?: string }>;
   onOpen: (id: string) => void;
+  renderHeader: (
+    col: string,
+    label: React.ReactNode,
+    defaultDir?: "asc" | "desc",
+    align?: "right",
+  ) => React.ReactNode;
 }
 
 export function ProgramGroupSection({
@@ -16,31 +22,34 @@ export function ProgramGroupSection({
   programs,
   itemConfig,
   onOpen,
+  renderHeader,
 }: ProgramGroupSectionProps) {
   if (programs.length === 0) return null;
 
   return (
     <section className="space-y-2">
-      {/* Section header */}
-      <div className="flex items-baseline justify-between gap-4 border-b border-slate-200 dark:border-slate-700 pb-2">
-        <h2 className="text-base font-semibold text-slate-700 dark:text-slate-300">{label}</h2>
-        <span className="text-xs text-slate-500 dark:text-slate-400">
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/60">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="h-5 w-1 rounded-full bg-sky-500" />
+          <h2 className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{label}</h2>
+        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
           {programs.length} {programs.length === 1 ? "entry" : "entries"}
         </span>
       </div>
 
-      {/* Column headers — 12 cols; 10 for content + 2 for pins */}
       <div className="grid grid-cols-12 gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        <div className="col-span-10 md:col-span-4">Name</div>
-        <div className="hidden md:block col-span-2 text-right">Active Enroll.</div>
-        <div className="hidden md:block col-span-2 text-right">Unique Clients</div>
-        <div className="hidden md:block col-span-1 text-right">Pop.</div>
-        <div className="hidden md:block col-span-1 text-right">CMs</div>
-        <div className="col-span-2" />
+        <div className="col-span-9 md:col-span-4">{renderHeader("name", "Name")}</div>
+        <div className="hidden text-right md:block md:col-span-1">{renderHeader("active", "Active", "desc", "right")}</div>
+        <div className="hidden text-right md:block md:col-span-1">{renderHeader("inactive", "Inactive", "desc", "right")}</div>
+        <div className="hidden text-right md:block md:col-span-1">{renderHeader("clients", "Clients", "desc", "right")}</div>
+        <div className="hidden md:block md:col-span-2">{renderHeader("population", "Population")}</div>
+        <div className="hidden text-right md:block md:col-span-1">{renderHeader("cms", "CMs", "desc", "right")}</div>
+        <div className="hidden text-right md:block md:col-span-1">{renderHeader("budget", "Budget", "desc", "right")}</div>
+        <div className="col-span-3 md:col-span-1" />
       </div>
 
-      {/* Rows */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         {programs.map((g) => {
           const cfg = itemConfig[String(g.id)] ?? {};
           return (

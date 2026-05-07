@@ -2,7 +2,7 @@
 //
 // Fetches per-customer allocation data for a grant:
 //   - paid:      from grantCustomerSpend (written by ledger posts)
-//   - projected: from paymentQueue (source=projection, queueStatus=pending)
+//   - projected: from pending paymentQueue rows (projection, invoice, credit-card)
 //   - names:     batch-fetched from customers collection
 //
 // Returns a sorted list of CustomerAllocation records for the AllocationTab.
@@ -18,6 +18,8 @@ export type CustomerAllocation = {
   projected: number;
   total: number;
   lineItemSpend: Record<string, number>;
+  lineItemProjected: Record<string, number>;
+  lineItemTotal: Record<string, number>;
 };
 
 async function fetchCustomerNames(customerIds: string[]): Promise<Record<string, string>> {
@@ -65,22 +67,31 @@ async function fetchGrantAllocations(grantId: string): Promise<CustomerAllocatio
     };
   }
 
-  // 2. Projected from paymentQueue (source=projection, queueStatus=pending)
+  // 2. Projected from pending paymentQueue rows that reserve grant/customer allocation.
   const projSnap = await getDocs(
     query(
       collection(db, "paymentQueue"),
       where("grantId", "==", grantId),
-      where("source", "==", "projection"),
       where("queueStatus", "==", "pending"),
     ),
   );
 
   const projMap: Record<string, number> = {};
+  const projLineMap: Record<string, Record<string, number>> = {};
+  const allocationSources = new Set(["projection", "invoice", "credit-card"]);
   for (const d of projSnap.docs) {
     const data = d.data();
+    const source = String(data.source || "").toLowerCase();
+    if (!allocationSources.has(source)) continue;
     const cid = String(data.customerId || "");
     if (!cid) continue;
-    projMap[cid] = (projMap[cid] || 0) + Number(data.amount || 0);
+    const amount = Number(data.amount || 0);
+    projMap[cid] = (projMap[cid] || 0) + amount;
+    const lineItemId = String(data.lineItemId || "");
+    if (lineItemId) {
+      projLineMap[cid] = projLineMap[cid] || {};
+      projLineMap[cid][lineItemId] = (projLineMap[cid][lineItemId] || 0) + amount;
+    }
   }
 
   // 3. Merge all customer IDs
@@ -90,13 +101,22 @@ async function fetchGrantAllocations(grantId: string): Promise<CustomerAllocatio
   const result: CustomerAllocation[] = allIds.map((customerId) => {
     const paid = paidMap[customerId]?.paid || 0;
     const projected = projMap[customerId] || 0;
+    const lineItemSpend = paidMap[customerId]?.lineItemSpend || {};
+    const lineItemProjected = projLineMap[customerId] || {};
+    const lineItemIds = new Set([...Object.keys(lineItemSpend), ...Object.keys(lineItemProjected)]);
+    const lineItemTotal = Array.from(lineItemIds).reduce<Record<string, number>>((acc, lineItemId) => {
+      acc[lineItemId] = (lineItemSpend[lineItemId] || 0) + (lineItemProjected[lineItemId] || 0);
+      return acc;
+    }, {});
     return {
       customerId,
       customerName: names[customerId] || customerId,
       paid,
       projected,
       total: paid + projected,
-      lineItemSpend: paidMap[customerId]?.lineItemSpend || {},
+      lineItemSpend,
+      lineItemProjected,
+      lineItemTotal,
     };
   });
 

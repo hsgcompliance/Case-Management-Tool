@@ -98,6 +98,7 @@ export const qk = {
       ["gdrive", "list", stable(filters || {})] as const,
     customerFolderIndex: (query?: Record<string, unknown>) =>
       ["gdrive", "customerFolderIndex", stable(query || {})] as const,
+    config: ["gdrive", "config"] as const,
   },
   users: {
     root: ["users"] as const,

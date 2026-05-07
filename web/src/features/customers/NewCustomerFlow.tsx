@@ -10,7 +10,7 @@ import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentSche
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
 import { TaskBuilder, type TaskTemplateDraft } from "@entities/tasks/TaskBuilder";
 import { useAssessmentTemplate, useAssessmentTemplates } from "@hooks/useAssessments";
-import { useUpsertCustomers, usePatchCustomers } from "@hooks/useCustomers";
+import { useCustomer, useUpsertCustomers, usePatchCustomers } from "@hooks/useCustomers";
 import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
 import {
   useGDriveBuildCustomerFolder,
@@ -106,6 +106,10 @@ function displayName(customer: Pick<TCustomerEntity, "firstName" | "lastName" | 
     [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim() ||
     "(Unnamed)"
   );
+}
+
+function formatHeaderValue(value: unknown): string {
+  return String(value || "").trim();
 }
 
 function grantLabel(grant: Record<string, unknown>): string {
@@ -391,6 +395,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     setPrimaryCaseManagerId((current) => current || (meIsCaseManager ? meUid : ""));
   }, [meIsCaseManager, meUid]);
 
+  const customerQ = useCustomer(customerId || undefined, { enabled: !!customerId, staleTime: 30_000 });
+  const customerRecord = customerQ.data || null;
   const enrollmentsQ = useCustomerEnrollments(customerId || undefined, { enabled: !!customerId });
   const enrollments = React.useMemo(() => enrollmentsQ.data || [], [enrollmentsQ.data]);
 
@@ -508,6 +514,37 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
       folderMode === "build" ||
       (folderMode === "link" && (!folderUrl.trim() || !!parseFlowFolderId(folderUrl)))) &&
     (!wantsFolderLink || !folderUrl.trim() || !!folderId);
+
+  const headerName = React.useMemo(
+    () =>
+      displayName({
+        firstName: formatHeaderValue(customerRecord?.firstName) || firstName.trim(),
+        lastName: formatHeaderValue(customerRecord?.lastName) || lastName.trim(),
+        name: formatHeaderValue(customerRecord?.name),
+      }),
+    [customerRecord?.firstName, customerRecord?.lastName, customerRecord?.name, firstName, lastName],
+  );
+  const headerDob = React.useMemo(
+    () => formatHeaderValue(customerRecord?.dob) || dob.trim(),
+    [customerRecord?.dob, dob],
+  );
+  const headerCwId = React.useMemo(
+    () => formatHeaderValue(customerRecord?.cwId) || cwId.trim(),
+    [customerRecord?.cwId, cwId],
+  );
+  const headerHmisId = React.useMemo(
+    () => formatHeaderValue(customerRecord?.hmisId),
+    [customerRecord?.hmisId],
+  );
+  const headerDetails = React.useMemo(
+    () =>
+      [
+        headerDob ? { label: "DOB", value: headerDob } : null,
+        headerCwId ? { label: "CW ID", value: headerCwId } : null,
+        headerHmisId ? { label: "HMIS ID", value: headerHmisId } : null,
+      ].filter((item): item is { label: string; value: string } => !!item),
+    [headerCwId, headerDob, headerHmisId],
+  );
 
   const openCustomerRecord = React.useCallback(
     (id: string) => {
@@ -1553,8 +1590,28 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
               This flow creates the customer first, then reuses the real enrollment, assessment, task, payment, and file tools as each step unlocks.
             </p>
           </div>
-          <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm">
-            {customerId ? `Customer ID ${customerId}` : "Record not created yet"}
+          <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            {customerId || headerName !== "(Unnamed)" ? (
+              <div className="space-y-1">
+                <div className="text-base font-semibold text-slate-900">{headerName}</div>
+                {headerDetails.length ? (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-medium text-slate-600">
+                    {headerDetails.map((item) => (
+                      <span key={item.label}>
+                        {item.label} {item.value}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {customerId ? (
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                    Customer ID {customerId}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="text-sm font-semibold text-slate-900">Record not created yet</div>
+            )}
           </div>
         </div>
 
@@ -1613,6 +1670,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         open={paymentBuilderOpen}
         busy={buildPayments.isPending}
         enrollments={builderEnrollments}
+        customerName={[firstName, lastName].filter(Boolean).join(" ").trim() || undefined}
         onCancel={() => setPaymentBuilderOpen(false)}
         onBuild={(payload) => void buildSchedule(payload)}
       />

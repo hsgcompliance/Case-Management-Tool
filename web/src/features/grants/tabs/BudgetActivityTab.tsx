@@ -1,120 +1,319 @@
-// src/features/grants/tabs/BudgetActivityTab.tsx
 "use client";
-import React, { useMemo, useState } from "react";
+
+import React, { useCallback, useDeferredValue, useMemo, useState } from "react";
+import ActionMenu, { type ActionItem } from "@entities/ui/ActionMenu";
+import { useEnrollments } from "@hooks/useEnrollments";
 import { useGrantActivity } from "@hooks/useGrants";
+import { type PaymentQueueItem, usePaymentQueueItems } from "@hooks/usePaymentQueue";
+import { useUsers } from "@hooks/useUsers";
+import { SpendDetailModal, type SpendRow } from "@features/widgets/spending/SpendDetailModal";
 import { fmtFromTsLike } from "@lib/date";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+type ActivityMode = "paid" | "projected" | "all";
+type ActivityKindFilter = "all" | "paid" | "projected" | "reversal";
+type GrantActivityRow = SpendRow & {
+  customerLabel: string;
+  userLabel: string;
+  noteText: string;
+  displayType: "Paid" | "Projected" | "Reversal";
+  sourceType: "paid" | "projected";
+  searchText: string;
+};
+
+const DEFAULT_LINE_ITEM_TYPES = [
+  { id: "rental-assistance", label: "Rental Assistance" },
+  { id: "program-spending", label: "Program Spending" },
+  { id: "customer-support-service", label: "Customer Support Service" },
+] as const;
+
+function slugifyLineItemType(label: string) {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function lineItemTypeLabel(value: unknown) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    const raw = value as Record<string, unknown>;
+    return String(raw.label ?? raw.name ?? raw.id ?? "").trim();
+  }
+  return "";
+}
+
+function normalizeLineItemTypeInput(value: string) {
+  const label = value.trim();
+  if (!label || ["na", "n/a", "none", "null"].includes(label.toLowerCase())) return null;
+  const preset = DEFAULT_LINE_ITEM_TYPES.find((type) => type.label.toLowerCase() === label.toLowerCase());
+  return preset ? { ...preset } : { id: slugifyLineItemType(label), label };
+}
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
 }
+
 function colorVal(v: number) {
   return v >= 0 ? "text-emerald-600" : "text-red-500";
 }
 
-// ── Spend bar ─────────────────────────────────────────────────────────────────
+function tip(text: string) {
+  return text;
+}
+
+function dateIso10(value: unknown) {
+  const s = String(value || "").trim();
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function monthFromDate(value: unknown) {
+  const iso10 = dateIso10(value);
+  return iso10 ? iso10.slice(0, 7) : "";
+}
+
+function normalizeText(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function SpendBar({
-  total, spent, projected, currency,
+  total,
+  spent,
+  projected,
+  currency,
 }: {
-  total: number; spent: number; projected: number; currency: (n: number) => string;
+  total: number;
+  spent: number;
+  projected: number;
+  currency: (n: number) => string;
 }) {
   const projectedBalance = total - spent - projected;
   const isOverspent = projectedBalance < 0;
   const denom = total > 0 ? total : 1;
   const spentPct = clamp((spent / denom) * 100, 0, 100);
-  const projPct  = clamp((projected / denom) * 100, 0, 100 - spentPct);
-  const remPct   = clamp(100 - spentPct - projPct, 0, 100);
+  const projPct = clamp((projected / denom) * 100, 0, 100 - spentPct);
+  const remPct = clamp(100 - spentPct - projPct, 0, 100);
 
   return (
     <div>
       <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100">
         <div className="h-full bg-amber-400 transition-all" style={{ width: `${spentPct}%` }} title={`Spent: ${currency(spent)}`} />
-        <div className="h-full bg-blue-400 transition-all"  style={{ width: `${projPct}%`  }} title={`Projected: ${currency(projected)}`} />
-        <div className={`h-full transition-all ${isOverspent ? "bg-red-400" : "bg-emerald-300"}`} style={{ width: `${remPct}%` }} title={`Remaining: ${currency(projectedBalance)}`} />
+        <div className="h-full bg-blue-400 transition-all" style={{ width: `${projPct}%` }} title={`Projected: ${currency(projected)}`} />
+        <div className={`h-full transition-all ${isOverspent ? "bg-red-400" : "bg-emerald-300"}`} style={{ width: `${remPct}%` }} title={`Available: ${currency(projectedBalance)}`} />
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400 inline-block" />Spent</span>
-        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-400 inline-block" />Projected</span>
-        <span className="flex items-center gap-1"><span className={`h-2 w-2 rounded-full inline-block ${isOverspent ? "bg-red-400" : "bg-emerald-300"}`} />Remaining</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-amber-400" />Spent</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-blue-400" />Projected</span>
+        <span className="flex items-center gap-1"><span className={`inline-block h-2 w-2 rounded-full ${isOverspent ? "bg-red-400" : "bg-emerald-300"}`} />Available</span>
         <span className="ml-auto font-medium text-slate-700">
-          {currency(spent)} spent of {currency(total)} total{" "}
-          •{" "}
-          <span className={colorVal(projectedBalance)}>{currency(projectedBalance)} projected balance</span>
+          {currency(spent)} spent of {currency(total)} total {" • "}
+          <span className={colorVal(projectedBalance)}>{currency(projectedBalance)} available</span>
         </span>
       </div>
     </div>
   );
 }
 
-// ── Mini line-item spend bar ───────────────────────────────────────────────────
-
 function MiniBar({ spent, amount }: { spent: number; amount: number }) {
   const denom = amount > 0 ? amount : 1;
   const pct = clamp((spent / denom) * 100, 0, 100);
   const overflow = spent > amount;
   return (
-    <div className="relative h-1.5 w-16 rounded-full bg-slate-100 overflow-hidden">
+    <div className="relative h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
       <div className={`absolute left-0 top-0 h-full ${overflow ? "bg-red-400" : "bg-amber-400"}`} style={{ width: `${pct}%` }} />
     </div>
   );
 }
 
-// ── Activity rows drawer ───────────────────────────────────────────────────────
+function StatusChip({
+  label,
+  active = false,
+  tone = "slate",
+  title,
+}: {
+  label: string;
+  active?: boolean;
+  tone?: "slate" | "amber";
+  title?: string;
+}) {
+  const cls =
+    tone === "amber"
+      ? active
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-slate-200 bg-white text-slate-400"
+      : active
+      ? "border-slate-300 bg-slate-100 text-slate-700"
+      : "border-slate-200 bg-white text-slate-400";
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`} title={title}>
+      {label}
+    </span>
+  );
+}
 
 function ActivityDrawer({
   items,
   currency,
   colSpan,
   onClose,
+  mode,
+  onModeChange,
+  onSelectItem,
 }: {
-  items: any[];
+  items: GrantActivityRow[];
   currency: (n: number) => string;
   colSpan: number;
   onClose: () => void;
+  mode: ActivityMode;
+  onModeChange: (mode: ActivityMode) => void;
+  onSelectItem: (item: SpendRow) => void;
 }) {
-  const net = items.reduce((acc: number, s: any) => acc + (Number(s.amount) || 0), 0);
+  const [search, setSearch] = useState("");
+  const [kindFilter, setKindFilter] = useState<ActivityKindFilter>("all");
+  const deferredSearch = useDeferredValue(search);
+
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = normalizeText(deferredSearch);
+    return items.filter((item) => {
+      const modePass =
+        mode === "all" ? true : mode === "paid" ? item.sourceType === "paid" : item.sourceType === "projected";
+      if (!modePass) return false;
+
+      const kindPass =
+        kindFilter === "all"
+          ? true
+          : kindFilter === "paid"
+          ? item.displayType === "Paid"
+          : kindFilter === "projected"
+          ? item.displayType === "Projected"
+          : item.displayType === "Reversal";
+      if (!kindPass) return false;
+
+      if (!normalizedQuery) return true;
+      return item.searchText.includes(normalizedQuery);
+    });
+  }, [deferredSearch, items, kindFilter, mode]);
+
+  const projectedCount = useMemo(
+    () => items.filter((item) => item.sourceType === "projected").length,
+    [items],
+  );
+  const paidCount = useMemo(
+    () => items.filter((item) => item.sourceType === "paid").length,
+    [items],
+  );
+  const net = filteredItems.reduce((acc, item) => acc + item.amountCents / 100, 0);
 
   return (
     <tr>
       <td colSpan={colSpan} className="p-0">
-        <div className="border-t border-b border-sky-100 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/20 px-4 py-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-wide">
-              {items.length > 0 ? `${items.length} ledger entr${items.length === 1 ? "y" : "ies"} · Net ${currency(net)}` : "No ledger activity"}
-            </span>
-            <button type="button" className="btn btn-ghost btn-xs text-slate-500" onClick={onClose}>Close ×</button>
+        <div className="space-y-2 border-y border-sky-100 bg-sky-50 px-4 py-3 dark:border-sky-900 dark:bg-sky-950/20">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                {filteredItems.length > 0
+                  ? `${filteredItems.length} activit${filteredItems.length === 1 ? "y" : "ies"} · Net ${currency(net)}`
+                  : "No matching activity"}
+              </span>
+              <div className="inline-flex rounded-lg border border-sky-200 bg-white/80 p-0.5 text-[11px]">
+                {([
+                  ["paid", "Paid", false, `Posted ledger rows only (${paidCount}).`],
+                  ["projected", "Projected", projectedCount === 0, projectedCount > 0 ? `Pending projected payments only (${projectedCount}).` : "No projected payments for this scope."],
+                  ["all", "All", false, "Posted and projected rows together for this grant scope."],
+                ] as const).map(([key, label, disabled, title]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={[
+                      "rounded-md px-2.5 py-1 font-semibold transition",
+                      mode === key ? "bg-sky-100 text-sky-800" : "text-slate-500 hover:text-slate-700",
+                      disabled ? "cursor-not-allowed opacity-45" : "",
+                    ].join(" ")}
+                    onClick={() => {
+                      if (disabled) return;
+                      onModeChange(key);
+                    }}
+                    title={tip(title)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button type="button" className="btn btn-ghost btn-xs text-slate-500" onClick={onClose} title={tip("Close this activity drawer.")}>
+              Close ×
+            </button>
           </div>
 
-          {items.length > 0 && (
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]">
+            <input
+              className="input text-sm"
+              value={search}
+              onChange={(e) => setSearch(e.currentTarget.value)}
+              placeholder="Search customer, note, payment, user..."
+              title={tip("Filter activity rows like the invoicing tool by customer, note, payment, or user.")}
+            />
+            <select
+              className="input text-sm"
+              value={kindFilter}
+              onChange={(e) => setKindFilter(e.currentTarget.value as ActivityKindFilter)}
+              title={tip("Filter rows by activity type.")}
+            >
+              <option value="all">All Types</option>
+              <option value="paid">Paid</option>
+              <option value="projected">Projected</option>
+              <option value="reversal">Reversal</option>
+            </select>
+          </div>
+
+          {filteredItems.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs border-separate" style={{ borderSpacing: 0 }}>
+              <table className="w-full border-separate text-xs" style={{ borderSpacing: 0 }}>
                 <thead>
                   <tr className="text-left text-slate-500">
                     <th className="pb-1 pr-4 font-medium">Date</th>
-                    <th className="pb-1 pr-4 font-medium text-right">Amount</th>
-                    <th className="pb-1 pr-4 font-medium">Line Item</th>
-                    <th className="pb-1 pr-4 font-medium">Enrollment</th>
+                    <th className="pb-1 pr-4 text-right font-medium">Amount</th>
+                    <th className="pb-1 pr-4 font-medium">Customer</th>
+                    <th className="pb-1 pr-4 font-medium">User</th>
                     <th className="pb-1 pr-4 font-medium">Note</th>
                     <th className="pb-1 font-medium">Type</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((s: any) => (
-                    <tr key={s.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
-                      <td className="py-1 pr-4 text-slate-700">{fmtFromTsLike(s.ts, s.dueDate ?? s.date)}</td>
-                      <td className={`py-1 pr-4 text-right font-medium ${Number(s.amount) < 0 ? "text-red-600" : "text-slate-900 dark:text-slate-100"}`}>
-                        {currency(Number(s.amount) || 0)}
+                  {filteredItems.map((item) => (
+                    <tr
+                      key={item.id}
+                      className="cursor-pointer border-b border-slate-100 transition hover:bg-white/80 last:border-0 dark:border-slate-800"
+                      onClick={() => onSelectItem(item)}
+                      title={tip("Open this row in the full spending detail modal.")}
+                    >
+                      <td className="py-1 pr-4 text-slate-700">{fmtFromTsLike(item.date)}</td>
+                      <td className={`py-1 pr-4 text-right font-medium ${item.amountCents < 0 ? "text-red-600" : "text-slate-900 dark:text-slate-100"}`}>
+                        {currency(item.amountCents / 100)}
                       </td>
-                      <td className="py-1 pr-4 text-slate-600">{s.lineItemLabelAtSpend ?? s.lineItemId ?? "—"}</td>
-                      <td className="py-1 pr-4 text-slate-600 font-mono text-[10px]">{s.enrollmentId ? s.enrollmentId.slice(0, 8) + "…" : "—"}</td>
-                      <td className="py-1 pr-4 text-slate-500">{Array.isArray(s.note) ? s.note.join(", ") : s.note || "—"}</td>
+                      <td className="py-1 pr-4 text-slate-600">{item.customerLabel || "—"}</td>
+                      <td className="py-1 pr-4 text-slate-600">{item.userLabel || "—"}</td>
+                      <td className="py-1 pr-4 text-slate-500">{item.noteText || item.title || "—"}</td>
                       <td className="py-1">
-                        {s.reversalOf ? (
-                          <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">Reversal</span>
+                        {item.displayType === "Reversal" ? (
+                          <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">Reversal</span>
+                        ) : item.displayType === "Projected" ? (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">Projected</span>
                         ) : (
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">Spend</span>
+                          <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-700">Paid</span>
                         )}
                       </td>
                     </tr>
@@ -123,13 +322,17 @@ function ActivityDrawer({
               </table>
             </div>
           )}
+
+          {filteredItems.length === 0 && (
+            <div className="rounded-lg border border-dashed border-sky-200 bg-white/70 px-3 py-4 text-xs text-slate-500">
+              No activity matches the current toggle and filters.
+            </div>
+          )}
         </div>
       </td>
     </tr>
   );
 }
-
-// ── Add Funds modal ───────────────────────────────────────────────────────────
 
 function AddFundsModal({
   targetIdx,
@@ -138,6 +341,7 @@ function AddFundsModal({
   currency,
   onCommit,
   onClose,
+  initialMode = "add",
 }: {
   targetIdx: number;
   lineItems: any[];
@@ -145,8 +349,9 @@ function AddFundsModal({
   currency: (n: number) => string;
   onCommit: (patch: { targetIdxAmountDelta: number; sourceIdx?: number }) => void;
   onClose: () => void;
+  initialMode?: "add" | "move";
 }) {
-  const [mode, setMode] = useState<"add" | "move">("add");
+  const [mode, setMode] = useState<"add" | "move">(initialMode);
   const [amount, setAmount] = useState("");
   const [sourceIdx, setSourceIdx] = useState<number>(-1);
 
@@ -163,29 +368,24 @@ function AddFundsModal({
 
   function handleCommit() {
     if (!canCommit) return;
-    if (mode === "add") {
-      onCommit({ targetIdxAmountDelta: parsedAmount });
-    } else {
-      onCommit({ targetIdxAmountDelta: parsedAmount, sourceIdx });
-    }
+    if (mode === "add") onCommit({ targetIdxAmountDelta: parsedAmount });
+    else onCommit({ targetIdxAmountDelta: parsedAmount, sourceIdx });
   }
 
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white shadow-2xl p-6 space-y-5 dark:border-slate-700 dark:bg-slate-900">
-        {/* Header */}
+      <div className="w-full max-w-md space-y-5 rounded-[24px] border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-sky-600 mb-1">Budget Adjustment</div>
-          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">Add Funds</h3>
-          <p className="text-sm text-slate-500 mt-1">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-sky-600">Budget Adjustment</div>
+          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">{mode === "add" ? "Add Funds" : "Move Funds"}</h3>
+          <p className="mt-1 text-sm text-slate-500">
             Target: <span className="font-medium text-slate-800 dark:text-slate-200">{String(target.label || target.id || "Line item")}</span>
             {" · "}Current: <span className="font-medium">{currency(num(target.amount, 0))}</span>
           </p>
         </div>
 
-        {/* Mode toggle */}
         <div>
-          <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Funding source</div>
+          <div className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">Funding source</div>
           <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
             <button
               type="button"
@@ -205,14 +405,13 @@ function AddFundsModal({
           <p className="mt-2 text-xs text-slate-400">
             {mode === "add"
               ? "New funds increase this line item and the grant total."
-              : "Moves budget between line items — grant total stays the same."}
+              : "Moves budget between line items. Grant total stays the same."}
           </p>
         </div>
 
-        {/* Move source select */}
         {mode === "move" && (
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Source line item</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Source line item</label>
             <select
               className="select w-full"
               value={sourceIdx >= 0 ? String(sourceIdx) : ""}
@@ -237,11 +436,8 @@ function AddFundsModal({
           </div>
         )}
 
-        {/* Amount input */}
         <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-            Amount ($)
-          </label>
+          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Amount ($)</label>
           <input
             type="number"
             min={0}
@@ -252,33 +448,11 @@ function AddFundsModal({
             value={amount}
             onChange={(e) => setAmount(e.currentTarget.value)}
           />
-          {parsedAmount > 0 && (
-            <p className="mt-1 text-xs text-slate-500">
-              {mode === "add" ? (
-                <>New line item total: <span className="font-medium text-emerald-700">{currency(num(target.amount, 0) + parsedAmount)}</span></>
-              ) : sourceItem && parsedAmount <= sourceBalance ? (
-                <>
-                  <span className="font-medium text-slate-700">{String(sourceItem.label || "Source")}</span>:{" "}
-                  {currency(sourceBalance)} → {currency(sourceBalance - parsedAmount)}{" · "}
-                  <span className="font-medium text-slate-700">{String(target.label || "Target")}</span>:{" "}
-                  {currency(num(target.amount, 0))} → {currency(num(target.amount, 0) + parsedAmount)}
-                </>
-              ) : parsedAmount > sourceBalance ? (
-                <span className="text-red-600">Amount exceeds available balance.</span>
-              ) : null}
-            </p>
-          )}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+        <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-2">
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            disabled={!canCommit}
-            onClick={handleCommit}
-          >
+          <button type="button" className="btn btn-primary btn-sm" disabled={!canCommit} onClick={handleCommit}>
             {mode === "add" ? "Add Funds" : "Move Funds"}
           </button>
         </div>
@@ -287,7 +461,55 @@ function AddFundsModal({
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+function SpendCapModal({
+  lineItem,
+  num,
+  onCommit,
+  onClose,
+}: {
+  lineItem: any;
+  num: (n: unknown, fallback?: number) => number;
+  onCommit: (patch: { capEnabled: boolean; perCustomerCap: number | null }) => void;
+  onClose: () => void;
+}) {
+  const [enabled, setEnabled] = useState(!!lineItem?.capEnabled);
+  const [value, setValue] = useState(lineItem?.perCustomerCap == null ? "" : String(num(lineItem.perCustomerCap, 0)));
+
+  return (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-md space-y-5 rounded-[24px] border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-sky-600">Line Item Cap</div>
+          <h3 className="text-xl font-bold text-slate-950 dark:text-slate-50">Edit Spend Cap</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Configure the per-customer cap for <span className="font-medium text-slate-800 dark:text-slate-200">{String(lineItem?.label || lineItem?.id || "Line item")}</span>.
+          </p>
+        </div>
+
+        <label className="flex cursor-pointer items-center gap-2">
+          <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-sky-600" checked={enabled} onChange={(e) => setEnabled(e.currentTarget.checked)} />
+          <span className="text-sm font-medium text-slate-700">Enable per-customer cap</span>
+        </label>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">Cap amount ($)</label>
+          <input type="number" min={0} step={1} disabled={!enabled} className="input w-full" placeholder="No limit" value={value} onChange={(e) => setValue(e.currentTarget.value)} />
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-2">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => onCommit({ capEnabled: enabled, perCustomerCap: enabled ? (value === "" ? null : Number(value)) : null })}
+          >
+            Save Cap
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function BudgetActivityTab({
   editing,
@@ -308,17 +530,28 @@ export function BudgetActivityTab({
   num: (n: unknown, fallback?: number) => number;
   grantId?: string;
 }) {
-  // ── Activity data ──────────────────────────────────────────────────────────
   const activityQ = useGrantActivity(grantId ?? "", 2000);
-  const allActivity: any[] = Array.isArray(activityQ.data) ? activityQ.data : [];
+  const allActivity: any[] = useMemo(() => (Array.isArray(activityQ.data) ? activityQ.data : []), [activityQ.data]);
+  const projectedQ = usePaymentQueueItems(
+    grantId ? { grantId, source: "projection", queueStatus: "pending", limit: 1000 } : undefined,
+    { enabled: !!grantId && !editing, staleTime: 30_000 },
+  );
+  const projectedQueueItems: PaymentQueueItem[] = useMemo(
+    () => (Array.isArray(projectedQ.data) ? projectedQ.data : []),
+    [projectedQ.data],
+  );
+  const { data: enrollments = [] } = useEnrollments(
+    grantId ? { grantId, limit: 1000 } : undefined,
+    { enabled: !!grantId && !editing },
+  );
+  const { data: users = [] } = useUsers({ status: "all", limit: 500 });
 
-  // ── Expanded drawer state (one open at a time) ────────────────────────────
   const [expandedId, setExpandedId] = useState<string | "all" | null>(null);
+  const [activityMode, setActivityMode] = useState<ActivityMode>("paid");
+  const [fundsState, setFundsState] = useState<{ index: number; mode: "add" | "move" } | null>(null);
+  const [spendCapIdx, setSpendCapIdx] = useState<number | null>(null);
+  const [selectedActivity, setSelectedActivity] = useState<SpendRow | null>(null);
 
-  // ── Add Funds modal state ─────────────────────────────────────────────────
-  const [addFundsIdx, setAddFundsIdx] = useState<number | null>(null);
-
-  // ── Budget model ───────────────────────────────────────────────────────────
   const budget = useMemo(() => {
     const b = JSON.parse(JSON.stringify(model.budget ?? {}));
     b.total = num(b.total, num(b.startAmount, derived.total));
@@ -327,7 +560,7 @@ export function BudgetActivityTab({
     b.totals.projected = num(b.totals.projected, derived.projected);
     b.lineItems = Array.isArray(b.lineItems) ? b.lineItems : [];
     return recomputeBudgetTotals(b);
-  }, [model.budget, derived.total, derived.spent, derived.projected]);
+  }, [derived.projected, derived.spent, derived.total, model.budget, num, recomputeBudgetTotals]);
 
   const commit = (next: any) => {
     const recomputed = recomputeBudgetTotals(next);
@@ -344,7 +577,7 @@ export function BudgetActivityTab({
     const next = JSON.parse(JSON.stringify(budget));
     const li = next.lineItems[index] ?? {};
     const after = { ...li, ...patch };
-    after.spent     = num(after.spent,     0);
+    after.spent = num(after.spent, 0);
     after.projected = num(after.projected, 0);
     next.lineItems[index] = after;
     commit(next);
@@ -352,7 +585,7 @@ export function BudgetActivityTab({
 
   const addLineItem = () => {
     const next = JSON.parse(JSON.stringify(budget));
-    next.lineItems.push({ id: `li_${Date.now().toString(36)}`, label: "New Item", amount: 0, spent: 0, projected: 0, locked: false });
+    next.lineItems.push({ id: `li_${Date.now().toString(36)}`, label: "New Item", amount: 0, spent: 0, projected: 0, locked: false, type: null });
     commit(next);
   };
 
@@ -362,81 +595,272 @@ export function BudgetActivityTab({
     commit(next);
   };
 
-  // ── Add Funds commit ───────────────────────────────────────────────────────
-  function handleAddFundsCommit({ targetIdxAmountDelta, sourceIdx }: { targetIdxAmountDelta: number; sourceIdx?: number }) {
-    if (addFundsIdx === null) return;
+  const handleFundsCommit = ({ targetIdxAmountDelta, sourceIdx }: { targetIdxAmountDelta: number; sourceIdx?: number }) => {
+    if (!fundsState) return;
     const next = JSON.parse(JSON.stringify(budget));
-    // Add to target
-    next.lineItems[addFundsIdx].amount = num(next.lineItems[addFundsIdx].amount, 0) + targetIdxAmountDelta;
-    // If move, subtract from source
+    next.lineItems[fundsState.index].amount = num(next.lineItems[fundsState.index].amount, 0) + targetIdxAmountDelta;
     if (sourceIdx !== undefined && sourceIdx >= 0) {
       next.lineItems[sourceIdx].amount = Math.max(0, num(next.lineItems[sourceIdx].amount, 0) - targetIdxAmountDelta);
     } else {
-      // Add new funds → also increase grant total
       next.total = num(next.total, 0) + targetIdxAmountDelta;
     }
     commit(next);
-    setAddFundsIdx(null);
-  }
+    setFundsState(null);
+  };
 
-  // ── Derived summary ────────────────────────────────────────────────────────
-  const total          = num(budget.total, 0);
-  const spent          = num(budget.totals?.spent, 0);
-  const projected      = num(budget.totals?.projected, 0);
+  const total = num(budget.total, 0);
+  const spent = num(budget.totals?.spent, 0);
+  const projected = num(budget.totals?.projected, 0);
   const projectedSpend = spent + projected;
   const projectedBalance = total - projectedSpend;
-  const spentBalance     = total - spent;
+  const spentBalance = total - spent;
 
   const liTotals = useMemo(() => {
-    let liAmount = 0, liSpent = 0, liProjected = 0;
+    let liAmount = 0;
+    let liSpent = 0;
+    let liProjected = 0;
     for (const li of budget.lineItems) {
-      liAmount    += num(li.amount,    0);
-      liSpent     += num(li.spent,     0);
+      liAmount += num(li.amount, 0);
+      liSpent += num(li.spent, 0);
       liProjected += num(li.projected, 0);
     }
     return { liAmount, liSpent, liProjected };
-  }, [budget.lineItems]);
+  }, [budget.lineItems, num]);
 
-  // ── Activity helpers ───────────────────────────────────────────────────────
-  function activityForLineItem(liId: string): any[] {
-    return allActivity.filter((s: any) => s.lineItemId === liId);
-  }
+  const enrollmentInfoById = useMemo(() => {
+    const map = new Map<string, { customerId: string; customerLabel: string }>();
+    for (const enrollment of enrollments as any[]) {
+      const id = String(enrollment?.id || "").trim();
+      if (!id) continue;
+      const customerId = String(enrollment?.customerId || enrollment?.clientId || "").trim();
+      const customerLabel =
+        String(
+          enrollment?.clientName ||
+          enrollment?.customerName ||
+          enrollment?.fullName ||
+          enrollment?.name ||
+          customerId ||
+          "",
+        ).trim() || id;
+      map.set(id, { customerId, customerLabel });
+    }
+    return map;
+  }, [enrollments]);
 
-  // ── Column count for colSpan ───────────────────────────────────────────────
-  // Non-edit: Label | Amount | Spent | Proj | Proj Bal | Spent Bal | Bar | Locked | Cap | Activity | Add Funds
-  // Edit:     + Cap$ | Delete
-  const colCount = editing ? 12 : 11;
+  const enrollmentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [id, info] of enrollmentInfoById.entries()) map.set(id, info.customerLabel);
+    return map;
+  }, [enrollmentInfoById]);
 
-  // ── Toggle expand helper ───────────────────────────────────────────────────
-  function toggleExpand(id: string | "all") {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }
+  const userNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const user of users as any[]) {
+      const uid = String(user?.uid || "").trim();
+      if (!uid) continue;
+      map.set(uid, String(user?.displayName || user?.email || uid).trim());
+    }
+    return map;
+  }, [users]);
+
+  const customerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const info of enrollmentInfoById.values()) {
+      if (info.customerId) map.set(info.customerId, info.customerLabel);
+    }
+    for (const item of projectedQueueItems) {
+      const customerId = String(item?.customerId || "").trim();
+      if (!customerId || map.has(customerId)) continue;
+      const label = String(item?.customer || item?.merchant || customerId).trim() || customerId;
+      map.set(customerId, label);
+    }
+    return map;
+  }, [enrollmentInfoById, projectedQueueItems]);
+
+  const grantNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    if (grantId) map.set(grantId, String(model?.name || grantId));
+    return map;
+  }, [grantId, model?.name]);
+
+  const lineItemLookup = useMemo(() => {
+    const map = new Map<string, { grantName: string; lineItemLabel: string }>();
+    const grantName = String(model?.name || grantId || "Grant");
+    for (const li of budget.lineItems as any[]) {
+      const lineItemId = String(li?.id || "").trim();
+      if (!lineItemId) continue;
+      map.set(`${grantId || ""}:${lineItemId}`, {
+        grantName,
+        lineItemLabel: String(li?.label || lineItemId),
+      });
+    }
+    return map;
+  }, [budget.lineItems, grantId, model?.name]);
+
+  const resolveUserLabel = useCallback((value: unknown) => {
+    if (!value) return "";
+    if (typeof value === "string") {
+      const raw = value.trim();
+      return userNameById.get(raw) || raw;
+    }
+    if (typeof value === "object") {
+      const raw = value as Record<string, unknown>;
+      const uid = String(raw.uid || raw.byUid || "").trim();
+      const name = String(raw.name || "").trim();
+      const email = String(raw.email || "").trim();
+      return name || (uid ? userNameById.get(uid) || uid : "") || email;
+    }
+    return "";
+  }, [userNameById]);
+
+  const activityRows = useMemo(() => {
+    const rows: GrantActivityRow[] = [];
+
+    for (const raw of allActivity) {
+      const enrollmentId = String(raw?.enrollmentId || "").trim();
+      const enrollmentInfo = enrollmentInfoById.get(enrollmentId);
+      const customerId = String(raw?.customerId || enrollmentInfo?.customerId || "").trim();
+      const customerLabel = String(
+        raw?.customerNameAtSpend ||
+          raw?.customerName ||
+          enrollmentInfo?.customerLabel ||
+          customerNameById.get(customerId) ||
+          customerId ||
+          "",
+      ).trim();
+      const noteText = Array.isArray(raw?.note) ? raw.note.join(", ") : String(raw?.note || "").trim();
+      const date = dateIso10(raw?.ts || raw?.date);
+      const isReversal = !!raw?.reversalOf || Number(raw?.amount || 0) < 0;
+      const userLabel = resolveUserLabel(raw?.by);
+
+      rows.push({
+        id: `ledger:${String(raw?.id || `${enrollmentId}:${raw?.paymentId || date}`)}`,
+        kind: "grant-ledger",
+        sourceLabel: "Enrollment",
+        title: noteText || (isReversal ? "Payment reversal" : "Posted payment"),
+        subtitle: String(raw?.paymentId || raw?.id || ""),
+        date,
+        month: monthFromDate(date),
+        amountCents: Math.round(Number(raw?.amount || 0) * 100),
+        completed: true,
+        workflowState: "closed",
+        workflowReason: isReversal ? "Reversal" : "Posted grant payment",
+        grantId: String(raw?.grantId || grantId || ""),
+        lineItemId: String(raw?.lineItemId || ""),
+        customerId,
+        creditCardId: "",
+        creditCardName: "",
+        cardBucket: "",
+        taskToken: "",
+        ledgerEntry: {
+          ...(raw as Record<string, unknown>),
+          customerId,
+          dueDate: raw?.ts || raw?.date || null,
+          date,
+        },
+        customerLabel,
+        userLabel,
+        noteText,
+        displayType: isReversal ? "Reversal" : "Paid",
+        sourceType: "paid",
+        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, raw?.paymentId, raw?.id].join(" ")),
+      });
+    }
+
+    for (const item of projectedQueueItems) {
+      const customerId = String(item?.customerId || "").trim();
+      const customerLabel = String(item?.customer || customerNameById.get(customerId) || customerId || "").trim();
+      const noteText = String(item?.note || item?.notes || item?.purpose || "").trim();
+      const date = dateIso10(item?.dueDate || item?.createdAt || item?.postedAt);
+      const userLabel = resolveUserLabel(item?.postedBy || item?.reopenedBy);
+
+      rows.push({
+        id: `queue:${String(item.id || `${item.enrollmentId || "projection"}:${item.paymentId || date}`)}`,
+        kind: "queue-projection",
+        sourceLabel: "Enrollment",
+        title: String(item?.merchant || item?.descriptor || noteText || "Projected payment"),
+        subtitle: String(item?.paymentId || item?.submissionId || item?.id || ""),
+        date,
+        month: monthFromDate(item?.month || date),
+        amountCents: Math.round(Math.max(0, Number(item?.amount || 0)) * 100),
+        completed: false,
+        workflowState: "open",
+        workflowReason: "Projected spend, not yet paid",
+        grantId: String(item?.grantId || grantId || ""),
+        lineItemId: String(item?.lineItemId || ""),
+        customerId,
+        creditCardId: "",
+        creditCardName: "",
+        cardBucket: "",
+        taskToken: "",
+        paymentQueueItem: item,
+        customerLabel,
+        userLabel,
+        noteText,
+        displayType: "Projected",
+        sourceType: "projected",
+        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, item?.merchant, item?.paymentId, item?.id].join(" ")),
+      });
+    }
+
+    rows.sort((a, b) => {
+      if (a.date !== b.date) return String(b.date).localeCompare(String(a.date));
+      return Math.abs(b.amountCents) - Math.abs(a.amountCents);
+    });
+
+    return rows;
+  }, [allActivity, customerNameById, enrollmentInfoById, grantId, projectedQueueItems, resolveUserLabel]);
+
+  const activityByLineItem = useMemo(() => {
+    const map = new Map<string, GrantActivityRow[]>();
+    for (const item of activityRows) {
+      const lineItemId = String(item.lineItemId || "").trim();
+      if (!lineItemId) continue;
+      const current = map.get(lineItemId);
+      if (current) current.push(item);
+      else map.set(lineItemId, [item]);
+    }
+    return map;
+  }, [activityRows]);
+
+  const resolveCustomer = (row: any) =>
+    String(
+      row?.customerNameAtSpend ||
+      row?.customerName ||
+      enrollmentNameById.get(String(row?.enrollmentId || "").trim()) ||
+      row?.customerId ||
+      "—",
+    );
+
+  const resolveUser = (row: any) => {
+    const raw = String(row?.by || "").trim();
+    if (!raw) return "—";
+    return userNameById.get(raw) || raw;
+  };
+
+  void resolveCustomer;
+  void resolveUser;
+  const activityForLineItem = (liId: string) => activityByLineItem.get(liId) || [];
+  const colCount = editing ? 11 : 10;
 
   return (
-    <div className="space-y-4 mt-4">
-      {/* ── Spend bar ──────────────────────────────────────────────────────── */}
+    <div className="mt-4 space-y-4">
       <SpendBar total={total} spent={spent} projected={projected} currency={currency} />
 
-      {/* ── Summary metric cards ───────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+      <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
         {[
-          { label: "Total", value: total, editable: true, colorFn: null },
-          { label: "Spent", value: spent, editable: false, colorFn: null },
-          { label: "Proj. Spend", value: projectedSpend, editable: false, colorFn: null },
-          { label: "Proj. Balance", value: projectedBalance, editable: false, colorFn: colorVal },
-          { label: "Spent Balance", value: spentBalance, editable: false, colorFn: colorVal },
-        ].map(({ label, value, editable, colorFn }) => (
-          <div key={label} className="rounded-[14px] border border-slate-200 px-3 py-2.5">
-            <div className="text-slate-500 text-xs mb-1">{label}</div>
+          { label: "Budget", value: total, editable: true, colorFn: null, title: tip("Total planned budget for this grant.") },
+          { label: "Spent", value: spent, editable: false, colorFn: null, title: tip("Posted ledger spend across all line items.") },
+          { label: "Balance", value: spentBalance, editable: false, colorFn: colorVal, title: tip("Budget minus posted spend.") },
+          { label: "Projected Spend", value: projectedSpend, editable: false, colorFn: null, title: tip("Posted spend plus projected obligations.") },
+          { label: "Available", value: projectedBalance, editable: false, colorFn: colorVal, title: tip("Most important number. Budget minus projected spend.") },
+        ].map(({ label, value, editable, colorFn, title }) => (
+          <div key={label} className="rounded-[14px] border border-slate-200 px-3 py-2.5" title={title}>
+            <div className="mb-1 text-xs text-slate-500">{label}</div>
             {editable && editing ? (
-              <input
-                className="input mt-0.5 text-sm font-semibold"
-                type="number"
-                value={budget.total}
-                onChange={(e) => setTotal(Number(e.currentTarget.value))}
-              />
+              <input className="input mt-0.5 text-sm font-semibold" type="number" value={budget.total} onChange={(e) => setTotal(Number(e.currentTarget.value))} />
             ) : (
-              <div className={`font-semibold ${colorFn ? colorFn(value) : "text-slate-900 dark:text-slate-100"}`}>
+              <div className={`${label === "Available" ? "text-base font-bold" : "font-semibold"} ${colorFn ? colorFn(value) : "text-slate-900 dark:text-slate-100"}`}>
                 {currency(value)}
               </div>
             )}
@@ -444,32 +868,43 @@ export function BudgetActivityTab({
         ))}
       </div>
 
-      {/* ── Allocation settings ────────────────────────────────────────────── */}
       {(editing || budget.allocationEnabled) && (
         <div className="rounded-[14px] border border-sky-200 bg-sky-50/60 px-4 py-3 dark:border-sky-800 dark:bg-sky-950/20">
           <div className="flex flex-wrap items-center gap-4">
             {editing ? (
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-slate-300 accent-sky-600"
                   checked={!!budget.allocationEnabled}
-                  onChange={(e) => { const next = JSON.parse(JSON.stringify(budget)); next.allocationEnabled = e.currentTarget.checked; commit(next); }}
+                  onChange={(e) => {
+                    const next = JSON.parse(JSON.stringify(budget));
+                    next.allocationEnabled = e.currentTarget.checked;
+                    commit(next);
+                  }}
                 />
                 <span className="text-sm font-medium text-sky-800 dark:text-sky-200">Client Allocation Tracking</span>
               </label>
             ) : (
               <span className="flex items-center gap-1.5 text-sm font-semibold text-sky-700 dark:text-sky-300">
-                <span className="h-2 w-2 rounded-full bg-sky-500 inline-block" />
+                <span className="inline-block h-2 w-2 rounded-full bg-sky-500" />
                 Client Allocation Mode
               </span>
             )}
             {editing && budget.allocationEnabled && (
               <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-500 whitespace-nowrap">Grant-level cap / customer ($):</label>
-                <input type="number" min={0} placeholder="No cap" className="input w-28 text-sm"
+                <label className="whitespace-nowrap text-xs text-slate-500">Grant-level cap / customer ($):</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="No cap"
+                  className="input w-28 text-sm"
                   value={budget.perCustomerCap ?? ""}
-                  onChange={(e) => { const next = JSON.parse(JSON.stringify(budget)); next.perCustomerCap = e.currentTarget.value === "" ? null : Number(e.currentTarget.value); commit(next); }}
+                  onChange={(e) => {
+                    const next = JSON.parse(JSON.stringify(budget));
+                    next.perCustomerCap = e.currentTarget.value === "" ? null : Number(e.currentTarget.value);
+                    commit(next);
+                  }}
                 />
               </div>
             )}
@@ -480,140 +915,176 @@ export function BudgetActivityTab({
         </div>
       )}
 
-      {/* ── Activity loading note ──────────────────────────────────────────── */}
-      {!editing && grantId && activityQ.isLoading && (
-        <div className="text-xs text-slate-400 italic">Loading ledger activity…</div>
+      {!editing && grantId && (activityQ.isLoading || projectedQ.isLoading) && (
+        <div className="text-xs italic text-slate-400">Loading grant activity…</div>
       )}
 
-      {/* ── Line items table ───────────────────────────────────────────────── */}
       <div className="table-wrap">
         <table className="table text-sm">
           <thead>
             <tr>
-              <th>Label</th>
-              <th className="text-right">Amount</th>
-              <th className="text-right">Spent</th>
-              <th className="text-right">Proj.</th>
-              <th className="text-right">Proj. Bal</th>
-              <th className="text-right">Spent Bal</th>
-              <th className="w-16">Bar</th>
-              <th>Locked</th>
-              <th title="Per-customer spending cap">Cap</th>
-              {editing && <th className="w-24">Cap $</th>}
-              {!editing && grantId && <th title="View ledger activity">Activity</th>}
-              {!editing && <th>Funds</th>}
+              <th title={tip("Line item label. Expand to review activity tied to this budget bucket.")}>Label</th>
+              <th className="w-44" title={tip("Reporting category for grouping line item totals across grants. Blank or N/A leaves it uncategorized.")}>Type</th>
+              <th className="text-right" title={tip("Planned dollars assigned to this line item.")}>Budget</th>
+              <th className="text-right" title={tip("Posted ledger spend recorded against this line item.")}>Spent</th>
+              <th className="text-right" title={tip("Budget minus posted spend.")}>Balance</th>
+              <th className="text-right" title={tip("Posted spend plus projected obligations.")}>Projected Spend</th>
+              <th className="text-right" title={tip("Most important number. Budget minus projected spend.")}>Available</th>
+              <th className="w-16" title={tip("Visual spend progress for this line item.")} />
+              <th className="w-28" title={tip("Compact status chips for lock and cap settings.")}>Status</th>
+              {!editing && <th className="w-14 text-right" title={tip("Line item actions.")}>Actions</th>}
+              {editing && <th className="w-24" title={tip("Per-customer cap amount when cap is enabled.")}>Cap $</th>}
               {editing && <th />}
             </tr>
           </thead>
           <tbody>
             {budget.lineItems.length === 0 ? (
               <tr>
-                <td className="text-slate-400 italic" colSpan={colCount}>No line items yet.</td>
+                <td className="italic text-slate-400" colSpan={colCount}>No line items yet.</td>
               </tr>
             ) : (
               budget.lineItems.flatMap((li: any, i: number) => {
-                const liId       = String(li.id ?? `idx_${i}`);
-                const liAmount   = num(li.amount, 0);
-                const liSpent    = num(li.spent, 0);
-                const liProj     = num(li.projected, 0);
-                const liProjBal  = liAmount - liSpent - liProj;
+                const liId = String(li.id ?? `idx_${i}`);
+                const liAmount = num(li.amount, 0);
+                const liSpent = num(li.spent, 0);
+                const liProj = num(li.projected, 0);
+                const liProjectedSpend = liSpent + liProj;
+                const liProjBal = liAmount - liProjectedSpend;
                 const liSpentBal = liAmount - liSpent;
                 const isExpanded = expandedId === liId;
                 const liActivity = grantId ? activityForLineItem(liId) : [];
 
+                const menuItems: ActionItem[] = [
+                  {
+                    key: "add-funds",
+                    label: "Add Funds",
+                    onSelect: () => setFundsState({ index: i, mode: "add" }),
+                  },
+                  {
+                    key: "move-funds",
+                    label: "Move Funds",
+                    onSelect: () => setFundsState({ index: i, mode: "move" }),
+                  },
+                  {
+                    key: "view-activity",
+                    label: "View Activity",
+                    onSelect: () => {
+                      setActivityMode("paid");
+                      setExpandedId(liId);
+                    },
+                  },
+                  {
+                    key: "edit-cap",
+                    label: "Edit Spend Cap",
+                    onSelect: () => setSpendCapIdx(i),
+                  },
+                  {
+                    key: "lock-line-item",
+                    label: li.locked ? "Unlock Line Item" : "Lock Line Item",
+                    onSelect: () => updateLineItem(i, { locked: !li.locked }),
+                  },
+                ];
+
                 const row = (
-                  <tr
-                    key={liId}
-                    className={isExpanded ? "bg-sky-50/60 dark:bg-sky-950/20" : "hover:bg-slate-50 dark:hover:bg-slate-800/40"}
-                  >
-                    {/* Label */}
+                  <tr key={liId} className={isExpanded ? "bg-sky-50/60 dark:bg-sky-950/20" : "hover:bg-slate-50 dark:hover:bg-slate-800/40"}>
                     <td>
                       {editing ? (
                         <input className="input text-sm" value={li.label ?? ""} onChange={(e) => updateLineItem(i, { label: e.currentTarget.value })} />
                       ) : (
-                        <span className="font-medium text-slate-800 dark:text-slate-200">{li.label ?? li.id}</span>
+                        <button
+                          type="button"
+                          className="group inline-flex items-center gap-2 text-left"
+                          onClick={() => setExpandedId((prev) => (prev === liId ? null : liId))}
+                          title={isExpanded ? tip("Collapse activity for this line item.") : tip(`Expand ${liActivity.length} activity row${liActivity.length === 1 ? "" : "s"} for this line item.`)}
+                        >
+                          <span className="text-xs text-slate-400 transition group-hover:text-sky-600">{isExpanded ? "▼" : "▶"}</span>
+                          <span className="font-medium text-slate-800 dark:text-slate-200">{li.label ?? li.id}</span>
+                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                            {liActivity.length}
+                          </span>
+                        </button>
                       )}
                     </td>
-                    {/* Amount */}
+                    <td>
+                      {editing ? (
+                        <>
+                          <input
+                            className="input text-sm"
+                            list="grant-line-item-type-options"
+                            placeholder="N/A"
+                            value={lineItemTypeLabel(li.type)}
+                            onChange={(e) => updateLineItem(i, { type: normalizeLineItemTypeInput(e.currentTarget.value) })}
+                            title={tip("Use a default type or type a new category. Blank, NA, or N/A stores no type.")}
+                          />
+                          {i === 0 && (
+                            <datalist id="grant-line-item-type-options">
+                              {DEFAULT_LINE_ITEM_TYPES.map((type) => (
+                                <option key={type.id} value={type.label} />
+                              ))}
+                              <option value="N/A" />
+                            </datalist>
+                          )}
+                        </>
+                      ) : (
+                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                          {lineItemTypeLabel(li.type) || "N/A"}
+                        </span>
+                      )}
+                    </td>
                     <td className="text-right">
                       {editing ? (
-                        <input className="input w-28 text-right text-sm" type="number" value={num(li.amount)} onChange={(e) => updateLineItem(i, { amount: Number(e.currentTarget.value) })} />
+                        <input className="input w-28 text-right text-sm" type="number" value={num(li.amount)} onChange={(e) => updateLineItem(i, { amount: Number(e.currentTarget.value) })} title={tip("Edit the planned budget for this line item.")} />
                       ) : (
-                        <span>{currency(liAmount)}</span>
+                        <span title={tip("Planned dollars assigned to this line item.")}>{currency(liAmount)}</span>
                       )}
                     </td>
-                    <td className="text-right text-slate-700 dark:text-slate-300">{currency(liSpent)}</td>
-                    {/* Projected */}
+                    <td className="text-right text-slate-700 dark:text-slate-300" title={tip("Posted ledger spend recorded against this line item.")}>{currency(liSpent)}</td>
+                    <td className={`text-right ${colorVal(liSpentBal)}`} title={tip("Budget minus posted spend.")}>{currency(liSpentBal)}</td>
                     <td className="text-right">
                       {editing ? (
-                        <input className="input w-28 text-right text-sm" type="number" value={num(li.projected)} onChange={(e) => updateLineItem(i, { projected: Number(e.currentTarget.value) })} />
+                        <input className="input w-28 text-right text-sm" type="number" value={num(li.projected)} onChange={(e) => updateLineItem(i, { projected: Number(e.currentTarget.value) })} title={tip("Projected obligations not yet posted to the ledger.")} />
                       ) : (
-                        <span className="text-slate-700 dark:text-slate-300">{currency(liProj)}</span>
+                        <span className="text-slate-700 dark:text-slate-300" title={tip("Posted spend plus projected obligations.")}>{currency(liProjectedSpend)}</span>
                       )}
                     </td>
-                    <td className={`text-right ${colorVal(liProjBal)}`}>{currency(liProjBal)}</td>
-                    <td className={`text-right ${colorVal(liSpentBal)}`}>{currency(liSpentBal)}</td>
-                    <td><MiniBar spent={liSpent} amount={liAmount} /></td>
-                    {/* Locked */}
+                    <td className={`text-right font-semibold ${colorVal(liProjBal)}`} title={tip("Budget minus projected spend. This is the key availability number.")}>{currency(liProjBal)}</td>
+                    <td title={tip("Visual progress based on posted spend against budget.")}><MiniBar spent={liSpent} amount={liAmount} /></td>
                     <td className="text-center">
                       {editing ? (
-                        <button type="button" className="btn btn-ghost btn-xs" onClick={() => updateLineItem(i, { locked: !li.locked })} title={li.locked ? "Unlock" : "Lock"}>
-                          {li.locked ? "🔒" : "🔓"}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-1">
+                          <button type="button" className="btn btn-ghost btn-xs" onClick={() => updateLineItem(i, { locked: !li.locked })} title={li.locked ? tip("Unlock this line item so it can be adjusted.") : tip("Lock this line item to prevent accidental budget edits.")}>
+                            {li.locked ? "🔒" : "🔓"}
+                          </button>
+                          <button type="button" className={`btn btn-ghost btn-xs ${li.capEnabled ? "text-amber-600" : "text-slate-400"}`} onClick={() => updateLineItem(i, { capEnabled: !li.capEnabled })} title={li.capEnabled ? tip("Per-customer spend cap is enabled.") : tip("Per-customer spend cap is disabled.")}>
+                            {li.capEnabled ? "🚧" : "–"}
+                          </button>
+                        </div>
                       ) : (
-                        <span>{li.locked ? "🔒" : ""}</span>
+                        <div className="flex flex-wrap items-center justify-center gap-1">
+                          <StatusChip label="Locked" active={!!li.locked} title={li.locked ? tip("This line item is locked.") : tip("This line item is editable.")} />
+                          <StatusChip
+                            label={li.capEnabled && li.perCustomerCap != null ? `Cap ${num(li.perCustomerCap).toLocaleString()}` : "No Cap"}
+                            active={!!li.capEnabled}
+                            tone="amber"
+                            title={li.capEnabled && li.perCustomerCap != null ? tip(`Per-customer spend cap: ${currency(num(li.perCustomerCap))}.`) : tip("No per-customer spend cap is configured.")}
+                          />
+                        </div>
                       )}
                     </td>
-                    {/* Cap toggle */}
-                    <td className="text-center">
-                      {editing ? (
-                        <button type="button" className={`btn btn-ghost btn-xs ${li.capEnabled ? "text-amber-600" : "text-slate-400"}`} onClick={() => updateLineItem(i, { capEnabled: !li.capEnabled })} title={li.capEnabled ? "Cap enabled" : "Cap disabled"}>
-                          {li.capEnabled ? "🚧" : "–"}
-                        </button>
-                      ) : li.capEnabled && li.perCustomerCap != null ? (
-                        <span className="text-xs font-medium text-amber-700" title={`Per-customer cap: $${li.perCustomerCap}`}>🚧 ${num(li.perCustomerCap).toLocaleString()}</span>
-                      ) : (
-                        <span className="text-slate-300">–</span>
-                      )}
-                    </td>
-                    {/* Cap $ (edit only) */}
+                    {!editing && (
+                      <td className="text-right">
+                        <ActionMenu items={menuItems} />
+                      </td>
+                    )}
                     {editing && (
                       <td>
                         {li.capEnabled ? (
-                          <input className="input w-24 text-sm" type="number" min={0} placeholder="No limit" value={li.perCustomerCap ?? ""}
-                            onChange={(e) => updateLineItem(i, { perCustomerCap: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
-                          />
+                          <input className="input w-24 text-sm" type="number" min={0} placeholder="No limit" value={li.perCustomerCap ?? ""} onChange={(e) => updateLineItem(i, { perCustomerCap: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })} />
                         ) : (
-                          <span className="text-slate-300 text-xs">off</span>
+                          <span className="text-xs text-slate-300">off</span>
                         )}
                       </td>
                     )}
-                    {/* Activity toggle (view only) */}
-                    {!editing && grantId && (
-                      <td className="text-center">
-                        <button
-                          type="button"
-                          className={`btn btn-ghost btn-xs ${isExpanded ? "text-sky-600" : "text-slate-400"}`}
-                          onClick={() => toggleExpand(liId)}
-                          title={isExpanded ? "Hide activity" : `View ${liActivity.length} ledger entries`}
-                        >
-                          {isExpanded ? "▲" : "▼"}{liActivity.length > 0 ? ` ${liActivity.length}` : ""}
-                        </button>
-                      </td>
-                    )}
-                    {/* Add Funds (view only) */}
-                    {!editing && (
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs text-sky-700"
-                          onClick={() => setAddFundsIdx(i)}
-                        >
-                          + Funds
-                        </button>
-                      </td>
-                    )}
-                    {/* Delete (edit only) */}
                     {editing && (
                       <td className="text-right">
                         <button className="btn btn-ghost btn-xs text-red-500" onClick={() => removeLineItem(i)}>Delete</button>
@@ -629,6 +1100,9 @@ export function BudgetActivityTab({
                     currency={currency}
                     colSpan={colCount}
                     onClose={() => setExpandedId(null)}
+                    mode={activityMode}
+                    onModeChange={setActivityMode}
+                    onSelectItem={setSelectedActivity}
                   />
                 ) : null;
 
@@ -636,44 +1110,42 @@ export function BudgetActivityTab({
               })
             )}
           </tbody>
-
-          {/* Totals footer — clickable to expand all activity */}
           {budget.lineItems.length > 0 && (
             <tfoot>
               <tr
-                className={`border-t border-slate-200 font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ${expandedId === "all" ? "bg-sky-50 dark:bg-sky-950/20" : "bg-slate-50 dark:bg-slate-900"}`}
-                onClick={() => !editing && toggleExpand("all")}
-                title={!editing ? (expandedId === "all" ? "Hide all activity" : "Click to view all ledger activity") : undefined}
+                className={`cursor-pointer border-t border-slate-200 font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${expandedId === "all" ? "bg-sky-50 dark:bg-sky-950/20" : "bg-slate-50 dark:bg-slate-900"}`}
+                onClick={() => !editing && setExpandedId((prev) => (prev === "all" ? null : "all"))}
+                title={!editing ? (expandedId === "all" ? tip("Hide all activity.") : tip("View all grant activity across line items.")) : undefined}
               >
                 <td className="text-slate-700 dark:text-slate-300">
                   Totals{" "}
                   {!editing && (
-                    <span className="text-xs font-normal text-slate-400 ml-1">
-                      {expandedId === "all" ? "▲ hide" : `▼ all activity (${allActivity.length})`}
+                    <span className="ml-1 text-xs font-normal text-slate-400">
+                      {expandedId === "all" ? "▲ hide" : `▼ all activity (${activityRows.length})`}
                     </span>
                   )}
                 </td>
+                <td />
                 <td className="text-right">{currency(liTotals.liAmount)}</td>
                 <td className="text-right">{currency(liTotals.liSpent)}</td>
-                <td className="text-right">{currency(liTotals.liProjected)}</td>
-                <td className={`text-right ${colorVal(liTotals.liAmount - liTotals.liSpent - liTotals.liProjected)}`}>
-                  {currency(liTotals.liAmount - liTotals.liSpent - liTotals.liProjected)}
-                </td>
-                <td className={`text-right ${colorVal(liTotals.liAmount - liTotals.liSpent)}`}>
-                  {currency(liTotals.liAmount - liTotals.liSpent)}
-                </td>
-                <td /><td /><td />
-                {editing && <td />}
-                {!editing && grantId && <td />}
+                <td className={`text-right ${colorVal(liTotals.liAmount - liTotals.liSpent)}`}>{currency(liTotals.liAmount - liTotals.liSpent)}</td>
+                <td className="text-right">{currency(liTotals.liSpent + liTotals.liProjected)}</td>
+                <td className={`text-right ${colorVal(liTotals.liAmount - liTotals.liSpent - liTotals.liProjected)}`}>{currency(liTotals.liAmount - liTotals.liSpent - liTotals.liProjected)}</td>
+                <td />
+                <td />
                 {!editing && <td />}
+                {editing && <td />}
                 {editing && <td />}
               </tr>
               {expandedId === "all" && !editing && (
                 <ActivityDrawer
-                  items={allActivity}
+                  items={activityRows}
                   currency={currency}
                   colSpan={colCount}
                   onClose={() => setExpandedId(null)}
+                  mode={activityMode}
+                  onModeChange={setActivityMode}
+                  onSelectItem={setSelectedActivity}
                 />
               )}
             </tfoot>
@@ -681,7 +1153,6 @@ export function BudgetActivityTab({
         </table>
       </div>
 
-      {/* Edit controls */}
       {editing && (
         <div className="flex items-center justify-between">
           <button className="btn btn-secondary btn-sm" onClick={addLineItem}>+ Line Item</button>
@@ -691,17 +1162,38 @@ export function BudgetActivityTab({
         </div>
       )}
 
-      {/* Add Funds modal */}
-      {addFundsIdx !== null && (
+      {fundsState !== null && (
         <AddFundsModal
-          targetIdx={addFundsIdx}
+          targetIdx={fundsState.index}
           lineItems={budget.lineItems}
           num={num}
           currency={currency}
-          onCommit={handleAddFundsCommit}
-          onClose={() => setAddFundsIdx(null)}
+          onCommit={handleFundsCommit}
+          onClose={() => setFundsState(null)}
+          initialMode={fundsState.mode}
         />
       )}
+
+      {spendCapIdx !== null && budget.lineItems[spendCapIdx] && (
+        <SpendCapModal
+          lineItem={budget.lineItems[spendCapIdx]}
+          num={num}
+          onClose={() => setSpendCapIdx(null)}
+          onCommit={({ capEnabled, perCustomerCap }) => {
+            updateLineItem(spendCapIdx, { capEnabled, perCustomerCap });
+            setSpendCapIdx(null);
+          }}
+        />
+      )}
+
+      <SpendDetailModal
+        row={selectedActivity}
+        isOpen={!!selectedActivity}
+        onClose={() => setSelectedActivity(null)}
+        grantNameById={grantNameById}
+        lineItemLookup={lineItemLookup}
+        customerNameById={customerNameById}
+      />
     </div>
   );
 }

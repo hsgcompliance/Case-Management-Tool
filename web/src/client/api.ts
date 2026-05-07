@@ -104,6 +104,8 @@ export const endpointsStrict = {
   usersInvite:        { method: 'POST', path: 'usersInvite' },
   usersSetRole:       { method: 'POST', path: 'usersSetRole' },
   usersSetActive:     { method: 'POST', path: 'usersSetActive' },
+  usersUpdateProfile: { method: 'POST', path: 'usersUpdateProfile' },
+  usersResendInvite:  { method: 'POST', path: 'usersResendInvite' },
   usersRevokeSessions:{ method: 'POST', path: 'usersRevokeSessions' },
   usersList:          { method: 'GET',  path: 'usersList' },
   devOrgsList:        { method: 'GET',  path: 'devOrgsList' },
@@ -206,6 +208,8 @@ export const endpointsStrict = {
   gdriveCreateFolder:            { method: 'POST', path: 'gdriveCreateFolder' },
   gdriveUpload:                  { method: 'POST', path: 'gdriveUpload' },
   gdriveBuildCustomerFolder:     { method: 'POST', path: 'gdriveBuildCustomerFolder' },
+  gdriveConfigGet:               { method: 'GET',  path: 'gdriveConfigGet' },
+  gdriveConfigPatch:             { method: 'POST', path: 'gdriveConfigPatch' },
 
   // CUSTOMERS
   customersUpsert:               { method: 'POST',  path: 'customersUpsert' },
@@ -297,6 +301,10 @@ export const endpointsLoose = {
   paymentQueuePostToLedger:     { method: 'POST',  path: 'paymentQueuePostToLedger' },
   paymentQueueReopen:           { method: 'POST',  path: 'paymentQueueReopen' },
   paymentQueueVoid:             { method: 'POST',  path: 'paymentQueueVoid' },
+  paymentQueueRecomputeGrantAllocations: { method: 'POST', path: 'paymentQueueRecomputeGrantAllocations' },
+
+  // DRIVE (runtime admin tooling)
+  gdriveCustomerFolderSync:     { method: 'POST',  path: 'gdriveCustomerFolderSync' },
 
 } as const satisfies Record<string, EndpointDef>;
 
@@ -681,8 +689,9 @@ export function createApi({
 
     const url = toUrl(base, path);
 
-    // Query serialization (GET only)
-    if (method === 'GET' && query) {
+    // Query serialization. Some POST/PATCH endpoints use query params for
+    // resource ids and the JSON body for the mutation payload.
+    if (query) {
       for (const [k, v] of Object.entries(query)) {
         if (v == null) continue;
         if (Array.isArray(v)) {

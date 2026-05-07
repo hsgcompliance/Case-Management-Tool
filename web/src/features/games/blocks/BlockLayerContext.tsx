@@ -73,23 +73,24 @@ const BLOCK_CSS = `
     pointer-events: none !important;
   }
   [data-block-error] {
-    outline: 3px solid #ef4444 !important;
+    outline: 2.5px solid #ef4444 !important;
     outline-offset: 2px !important;
     animation: blkError 2.8s ease-in-out !important;
   }
   [data-block-cracked-1] {
-    box-shadow: inset 0 0 0 2px rgba(251,146,60,0.35) !important;
+    box-shadow: inset 0 0 0 2px rgba(251,146,60,0.45), 0 0 8px rgba(251,146,60,0.18) !important;
+    filter: brightness(0.97) !important;
   }
   [data-block-cracked-0] {
-    box-shadow: inset 0 0 0 2px rgba(239,68,68,0.5) !important;
-    filter: brightness(0.92) saturate(0.7) !important;
+    box-shadow: inset 0 0 0 2.5px rgba(239,68,68,0.65), 0 0 12px rgba(239,68,68,0.22) !important;
+    filter: brightness(0.90) saturate(0.65) !important;
   }
   [data-block-farming] {
-    box-shadow: inset 0 0 0 2px rgba(34,197,94,0.5) !important;
+    box-shadow: inset 0 0 0 2px rgba(34,197,94,0.55), 0 0 8px rgba(34,197,94,0.15) !important;
   }
   [data-block-character] {
-    opacity: 0.55 !important;
-    filter: grayscale(0.4) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
   }
   @keyframes blkShake {
     0%,100% { transform: translateX(0) rotate(0deg); }
@@ -106,9 +107,10 @@ const BLOCK_CSS = `
     100% { transform: translateY(130vh) rotate(18deg) scale(0.6); opacity: 0; }
   }
   @keyframes blkDissolve {
-    0%   { opacity: 1; filter: blur(0); transform: scale(1); }
-    40%  { opacity: 0.7; filter: blur(3px); }
-    100% { opacity: 0; filter: blur(14px); transform: scale(1.06); }
+    0%   { opacity: 1; transform: scale(1);    border-radius: inherit; }
+    30%  { opacity: 1; transform: scale(0.6);  border-radius: 50%; }
+    65%  { opacity: 0.8; transform: scale(0.2); border-radius: 50%; }
+    100% { opacity: 0; transform: scale(0.05); border-radius: 50%; }
   }
   @keyframes blkError {
     0%,100%   { outline-color: transparent; background-color: transparent; }

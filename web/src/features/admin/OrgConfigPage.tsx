@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@app/auth/AuthProvider";
 import { Orgs, type OrgConfigDoc } from "@client/orgs";
 import { toast } from "@lib/toast";
+import GDriveConfigPanel from "./GDriveConfigPanel";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -214,6 +215,7 @@ export default function OrgConfigPage() {
   const [createName, setCreateName]   = React.useState("");
   const [creating,   setCreating]     = React.useState(false);
   const [deleting,   setDeleting]     = React.useState(false);
+  const [driveExpanded, setDriveExpanded] = React.useState(false);
 
   const orgQ = useQuery({
     queryKey: [...ORG_QK(targetOrgId || "my"), targetOrgId],
@@ -338,6 +340,26 @@ export default function OrgConfigPage() {
           </button>
         </div>
       )}
+
+      {/* Google Drive config panel */}
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setDriveExpanded((x) => !x)}
+          className="w-full flex items-center justify-between bg-slate-50 border-b border-slate-200 px-4 py-3 text-left hover:bg-slate-100 transition-colors"
+        >
+          <div>
+            <span className="font-semibold text-slate-900 text-sm">Google Drive</span>
+            <span className="ml-2 text-xs text-slate-400">System</span>
+          </div>
+          <span className="text-slate-400 text-xs">{driveExpanded ? "▲" : "▼"}</span>
+        </button>
+        {driveExpanded && (
+          <div className="px-4 py-4">
+            <GDriveConfigPanel />
+          </div>
+        )}
+      </div>
 
       {/* Config docs */}
       {orgQ.isLoading ? (
