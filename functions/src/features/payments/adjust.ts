@@ -88,7 +88,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
     return res.status(400).json({ ok: false, error: parsed.error.message });
   }
 
-  const { enrollmentId, spendId, patch, reason } =
+  const { enrollmentId, spendId, paymentId: paymentIdHint, patch, reason } =
     parsed.data as TPaymentsAdjustSpendBody;
 
   const user: any = (req as any)?.user || {};
@@ -113,10 +113,35 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
       const e: any = eSnap.data() || {};
       assertOrgAccess(user, e);
 
-      // ---- load spend from subcollection (authoritative for enrollment spend details) ----
-      const spendRef = eRef.collection("spends").doc(spendId);
-      const spendSnap = await trx.get(spendRef);
-      if (!spendSnap.exists) throw new Error("Spend not found");
+      // ---- resolve spend from subcollection ----
+      // spendId may be absent or stale (enrollment.spends[] no longer written after 50-cap fix).
+      // Fall back to querying the subcollection by paymentId to find the latest positive, non-reversal spend.
+      let spendRef: any = null;
+      let spendSnap: any = null;
+
+      if (spendId) {
+        const candidateRef = eRef.collection("spends").doc(spendId);
+        const candidateSnap = await trx.get(candidateRef);
+        if (candidateSnap.exists) {
+          spendRef = candidateRef;
+          spendSnap = candidateSnap;
+        }
+      }
+
+      if (!spendSnap) {
+        const lookupId = paymentIdHint || "";
+        if (!lookupId) throw new Error("Spend not found — provide spendId or paymentId");
+        const qs = await trx.get(eRef.collection("spends").where("paymentId", "==", lookupId));
+        const eligible = qs.docs
+          .filter((d: any) => Number(d.data()?.amount || 0) > 0 && !d.data()?.reversalOf)
+          .sort((a: any, b: any) =>
+            Number(b.data()?.ts?.toMillis?.() ?? 0) - Number(a.data()?.ts?.toMillis?.() ?? 0)
+          )[0];
+        if (!eligible) throw new Error("Spend not found");
+        spendRef = eligible.ref;
+        spendSnap = eligible;
+      }
+
       const oldSpend: any = spendSnap.data() || {};
 
       // Guardrails: only adjust a positive spend (not a reversal record)

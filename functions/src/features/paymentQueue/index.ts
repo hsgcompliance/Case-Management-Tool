@@ -4,6 +4,7 @@ export {
   paymentQueueGet,
   paymentQueuePatch,
   paymentQueuePostToLedger,
+  paymentQueueBypassClose,
   paymentQueueReopen,
   paymentQueueVoid,
   paymentQueueAdminSync,

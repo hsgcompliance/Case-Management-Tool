@@ -53,6 +53,8 @@
     "migration:firestore:apply": "node scripts/migration/firestore-apply.mjs",
     "migration:checks": "node scripts/migration-checks.mjs",
     "migration:checks:coverage": "node scripts/migration/checks/check-harvest-coverage.mjs",
-    "migration:checks:field-maps": "node scripts/migration/checks/check-field-maps.mjs"
+    "migration:checks:field-maps": "node scripts/migration/checks/check-field-maps.mjs",
+    "payments:close-past": "node scripts/close-past-payments.mjs",
+    "payments:close-past-credit-cards": "node scripts/close-past-credit-card-payments.mjs"
   }
 }

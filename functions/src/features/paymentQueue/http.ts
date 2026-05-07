@@ -4,6 +4,7 @@ import { adminSyncPaymentQueueHandler } from './adminSyncPaymentQueue';
 import {
   PaymentQueueListBody,
   PaymentQueuePatchBody,
+  PaymentQueueBypassCloseBody,
   PaymentQueuePostToLedgerBody,
   PaymentQueueReopenBody,
   PaymentQueueVoidBody,
@@ -14,6 +15,7 @@ import {
   listPaymentQueueItems,
   getPaymentQueueItem,
   patchPaymentQueueItem,
+  bypassClosePaymentQueueItems,
   postPaymentQueueToLedger,
   reopenPaymentQueueItem,
   voidPaymentQueueItems,
@@ -38,7 +40,7 @@ export const paymentQueueList = secureHandler(async (req, res): Promise<void> =>
 
   const result = await listPaymentQueueItems(orgId, body);
   res.json({ok: true, ...result});
-}, {auth: 'user'});
+}, {auth: 'user', memory: '512MiB', concurrency: 10});
 
 /* ============================================================================
    GET /paymentQueueGet?id=…
@@ -91,6 +93,17 @@ export const paymentQueuePostToLedger = secureHandler(async (req, res): Promise<
     res.status(400).json({ok: false, error: err.message || 'post_to_ledger_failed'});
   }
 });
+
+/* ============================================================================
+   POST /paymentQueueBypassClose
+============================================================================ */
+
+export const paymentQueueBypassClose = secureHandler(async (req, res): Promise<void> => {
+  const body = PaymentQueueBypassCloseBody.parse(req.body || {});
+  const uid = requireUid(req as any);
+  const result = await bypassClosePaymentQueueItems(body, uid);
+  res.json({ok: true, ...result});
+}, {auth: 'user', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueueReopen?id=…

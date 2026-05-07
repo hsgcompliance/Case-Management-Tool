@@ -299,6 +299,7 @@ export const endpointsLoose = {
   paymentQueueGet:              { method: 'GET',   path: 'paymentQueueGet' },
   paymentQueuePatch:            { method: 'PATCH', path: 'paymentQueuePatch' },
   paymentQueuePostToLedger:     { method: 'POST',  path: 'paymentQueuePostToLedger' },
+  paymentQueueBypassClose:      { method: 'POST',  path: 'paymentQueueBypassClose' },
   paymentQueueReopen:           { method: 'POST',  path: 'paymentQueueReopen' },
   paymentQueueVoid:             { method: 'POST',  path: 'paymentQueueVoid' },
   paymentQueueRecomputeGrantAllocations: { method: 'POST', path: 'paymentQueueRecomputeGrantAllocations' },
