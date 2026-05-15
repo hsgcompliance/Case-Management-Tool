@@ -5,6 +5,7 @@ import ActionMenu from "@entities/ui/ActionMenu";
 import GrantSelect from "@entities/selectors/GrantSelect";
 import { Modal } from "@entities/ui/Modal";
 import { EnrollmentMigrateDialog } from "@entities/dialogs/enrollment/EnrollmentMigrateDialog";
+import { EnrollmentCleanupDialog } from "@entities/dialogs/enrollment/EnrollmentCleanupDialog";
 import { useGrants } from "@hooks/useGrants";
 import { usePaymentsDeleteRows, usePaymentsSpend } from "@hooks/usePayments";
 import { useTasksDelete, useTasksUpdateStatus } from "@hooks/useTasks";
@@ -14,6 +15,7 @@ import {
   useEnrollmentsAdminDelete,
   useEnrollmentsDelete,
   useEnrollmentsPatch,
+  useEnrollmentsVoidProjections,
 } from "@hooks/useEnrollments";
 import { toast } from "@lib/toast";
 import { fmtDateOrDash } from "@lib/formatters";
@@ -78,6 +80,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const patch = useEnrollmentsPatch();
   const softDelete = useEnrollmentsDelete();
   const adminDelete = useEnrollmentsAdminDelete();
+  const voidProjections = useEnrollmentsVoidProjections();
   const paymentsSpend = usePaymentsSpend();
   const paymentsDeleteRows = usePaymentsDeleteRows();
   const tasksUpdateStatus = useTasksUpdateStatus();
@@ -95,6 +98,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const [editEndDate, setEditEndDate] = React.useState("");
 
   const [migrateTarget, setMigrateTarget] = React.useState<Enrollment | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<Enrollment | null>(null);
+  const [isAdminDelete, setIsAdminDelete] = React.useState(false);
   const [closeTarget, setCloseTarget] = React.useState<Enrollment | null>(null);
   const [closeDate, setCloseDate] = React.useState<string>(isoToday());
   const [closeTaskMode, setCloseTaskMode] = React.useState<"complete" | "delete">("complete");
@@ -107,6 +112,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     patch.isPending ||
     softDelete.isPending ||
     adminDelete.isPending ||
+    voidProjections.isPending ||
     paymentsSpend.isPending ||
     paymentsDeleteRows.isPending ||
     tasksUpdateStatus.isPending ||
@@ -297,6 +303,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         active: false,
         endDate: closeDate || closeTarget.endDate || isoToday(),
       });
+
+      // Void paymentQueue projections. Non-fatal — enrollment is already closed.
+      await voidProjections.mutateAsync(closeTarget.id).catch(() => {});
+
       toast("Enrollment closed.", { type: "success" });
       setCloseTarget(null);
     } catch (e: unknown) {
@@ -306,27 +316,30 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     }
   };
 
-  const onSoftDelete = async (row: Enrollment) => {
-    if (!window.confirm("Soft delete this enrollment?")) return;
-    setError(null);
-    try {
-      await softDelete.mutateAsync(row.id);
-      toast("Enrollment soft deleted.", { type: "success" });
-    } catch (e: unknown) {
-      const msg = toApiError(e).error || "Failed to delete enrollment.";
-      setError(msg);
-      toast(msg, { type: "error" });
-    }
+  const onSoftDelete = (row: Enrollment) => {
+    setDeleteTarget(row);
+    setIsAdminDelete(false);
   };
 
-  const onAdminDelete = async (row: Enrollment) => {
-    if (!window.confirm("Admin delete this enrollment permanently?")) return;
+  const onAdminDelete = (row: Enrollment) => {
+    setDeleteTarget(row);
+    setIsAdminDelete(true);
+  };
+
+  const confirmDelete = async ({ voidPaid, unlinkSpends }: { voidPaid: boolean; unlinkSpends: boolean }) => {
+    if (!deleteTarget) return;
     setError(null);
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
     try {
-      await adminDelete.mutateAsync(row.id);
-      toast("Enrollment admin deleted.", { type: "success" });
+      if (isAdminDelete) {
+        await adminDelete.mutateAsync({ id, voidPaid, unlinkSpends });
+      } else {
+        await softDelete.mutateAsync({ id, voidPaid, unlinkSpends });
+      }
+      toast(`Enrollment ${isAdminDelete ? "permanently deleted" : "deleted"}.`, { type: "success" });
     } catch (e: unknown) {
-      const msg = toApiError(e).error || "Failed admin delete.";
+      const msg = toApiError(e).error || "Failed to delete enrollment.";
       setError(msg);
       toast(msg, { type: "error" });
     }
@@ -668,6 +681,13 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             </select>
           </div>
 
+          {closeFutureUnpaidPayments.length > 0 && (
+            <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <span className="font-medium">{closeFutureUnpaidPayments.length} pending payment queue projection{closeFutureUnpaidPayments.length !== 1 ? "s" : ""}</span>
+              {" "}will be voided when this enrollment is closed.
+            </div>
+          )}
+
           <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
             <div>Last payment date on enrollment: {closeLastPaymentDate || "None"}</div>
             <div>Closing is blocked if close date is before the last payment date.</div>
@@ -743,6 +763,14 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           // Hook invalidation already runs; refetch immediately for instant table update.
           void refetch();
         }}
+      />
+
+      <EnrollmentCleanupDialog
+        open={!!deleteTarget}
+        enrollmentLabel={deleteTarget ? formatEnrollmentLabel(deleteTarget as any) : ""}
+        isAdminDelete={isAdminDelete}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={(opts) => void confirmDelete(opts)}
       />
     </div>
   );

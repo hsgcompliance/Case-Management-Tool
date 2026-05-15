@@ -24,6 +24,23 @@ export { MetricToggleCard } from "./MetricToggleCard";
 export { Modal } from "./Modal";
 export { default as RefreshButton } from "./RefreshButton";
 export {
+  DEFAULT_TABLE_COLUMN_PART,
+  SmartFilterHeader,
+  SmartRowHeader,
+  SortableHeader,
+  compareSmartValues,
+  filterRows,
+  normalizeFilterValue,
+  sortRows,
+  useTableColumnFilters,
+  useTableSort,
+  type SortDir,
+  type SortState,
+  type TableColumnFilterState,
+  type TableColumnFilters,
+  type TableColumnPart,
+} from "./SmartRowHeader";
+export {
   RowClearShell,
   RowStateBadge,
   asRowState,

@@ -47,6 +47,7 @@ export const enrollmentsAdminDelete = secureHandler(
     let voidPaid = false;
     let mode: "safe" | "hard" = "safe";
     let purgeSpends = false;
+    let unlinkSpends = false;
 
     if (typeof parsed === "string") ids = [parsed];
     else if (Array.isArray(parsed)) ids = parsed;
@@ -55,6 +56,7 @@ export const enrollmentsAdminDelete = secureHandler(
       voidPaid = parsed.voidPaid === true;
       mode = String(parsed.mode || "").toLowerCase() === "hard" ? "hard" : "safe";
       purgeSpends = parsed.purgeSpends === true || parsed.purgeSubcollections === true;
+      unlinkSpends = (parsed as any).unlinkSpends === true;
     }
 
     ids = Array.from(new Set(ids.map((s) => String(s).trim()).filter(Boolean)));
@@ -104,7 +106,7 @@ export const enrollmentsAdminDelete = secureHandler(
 
     // Perform delete (soft in safe mode, hard in hard mode).
     const out = await deleteEnrollmentsCore(
-      ids.map((id) => ({ id, voidPaid, hard: mode === "hard" })),
+      ids.map((id) => ({ id, voidPaid, hard: mode === "hard", unlinkSpends })),
       (req as any).user
     );
 

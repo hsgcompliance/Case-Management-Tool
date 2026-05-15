@@ -142,13 +142,13 @@ service cloud.firestore {
     match /orgs/{orgId} {
       allow read: if sameOrgId(orgId);
       allow create, delete: if canManageOrgDocs(orgId);
-      allow update: if sameOrgId(orgId);
+      allow update: if sameOrgId(orgId) && topRole() != "viewer";
     }
 
     match /orgs/{orgId}/{document=**} {
       allow read: if sameOrgId(orgId);
       allow create, delete: if canManageOrgDocs(orgId);
-      allow update: if sameOrgId(orgId);
+      allow update: if sameOrgId(orgId) && topRole() != "viewer";
     }
 
     // Catch-all: any unlisted collection still requires verified staff + same org.

@@ -188,7 +188,7 @@ export const customerGet = secureHandler(
 
     res.status(200).json({ ok: true, customer: { id: snap.id, ...data } });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] },
+  { auth: "viewer", methods: ["GET", "OPTIONS"] },
 );
 
 // Canonical endpoint name; keep legacy alias above for backward compatibility.
@@ -284,7 +284,7 @@ export const customersList = secureHandler(
       note: "list is org-scoped for now; cross-org teams will be merged in later",
     });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] },
+  { auth: "viewer", methods: ["GET", "OPTIONS"] },
 );
 
 /** POST /customersBackfillNames — temporary admin/dev utility to split names */

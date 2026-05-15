@@ -24,6 +24,10 @@ const GrantBudgetStrip = dynamic(
   () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
   { ssr: false, loading: () => <div className="h-6 animate-pulse rounded bg-slate-100" /> },
 );
+const PaymentEditorSheetSurface = dynamic(
+  () => import("@features/payment-editor-lab/PaymentEditorLabPage"),
+  { ssr: false, loading: () => <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-500">Loading sheet editor...</div> },
+);
 import { CustomerPaymentsTable } from "../components";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
@@ -45,7 +49,8 @@ function paymentDate(p: TPayment): string {
 function paymentTypeKey(p: TPayment): string {
   const type = String(p?.type || "monthly").toLowerCase();
   if (type !== "monthly") return type;
-  const notes = Array.isArray((p as any)?.note) ? (p as any).note : (p as any)?.note != null ? [(p as any).note] : [];
+  const noteValue = (p as Record<string, unknown>).note;
+  const notes = Array.isArray(noteValue) ? noteValue : noteValue != null ? [noteValue] : [];
   const tags = notes.map((x: unknown) => String(x || "").toLowerCase());
   const isUtility = tags.some((t) => t === "sub:utility" || t === "utility" || t.startsWith("sub:utility") || t.startsWith("utility:"));
   return isUtility ? "monthly:utility" : "monthly:rent";
@@ -70,6 +75,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   const [caseworthyComplete, setCaseworthyComplete] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [enrollmentFilterId, setEnrollmentFilterId] = React.useState<string>("all");
+  const [viewMode, setViewMode] = React.useState<"legacy" | "sheet">("legacy");
 
   const sorted = React.useMemo(() => {
     return rows.slice().sort((a: CustomerPaymentRow, b: CustomerPaymentRow) => {
@@ -389,29 +395,59 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           <div className="text-sm font-semibold text-slate-900">Payment Schedule</div>
           <div className="text-xs text-slate-500">Create schedules, post payments, adjust rows, and preview budget impact.</div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="btn-secondary btn-sm"
-            onClick={() => {
-              setAdjustInitialEnrollmentId(enrollmentFilterId === "all" ? null : enrollmentFilterId);
-              setAdjustOpen(true);
-            }}
-            disabled={adjustMutation.isPending || adjustEnrollments.length === 0}
-            title={adjustEnrollments.length === 0 ? "Create an enrollment first." : "Adjust payments and projections"}
-          >
-            {adjustMutation.isPending ? "Applying..." : "Adjust Schedule"}
-          </button>
-          <button
-            className="btn btn-sm"
-            onClick={() => setBuilderOpen(true)}
-            disabled={buildScheduleMutation.isPending || builderEnrollments.length === 0}
-            title={builderEnrollments.length === 0 ? "Create an enrollment first." : "Build projected schedule rows"}
-          >
-            {buildScheduleMutation.isPending ? "Building..." : "Build Schedule"}
-          </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
+            <button
+              type="button"
+              className={[
+                "rounded px-2.5 py-1.5 font-semibold transition",
+                viewMode === "legacy" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900",
+              ].join(" ")}
+              onClick={() => setViewMode("legacy")}
+            >
+              Legacy View
+            </button>
+            <button
+              type="button"
+              className={[
+                "rounded px-2.5 py-1.5 font-semibold transition",
+                viewMode === "sheet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900",
+              ].join(" ")}
+              onClick={() => setViewMode("sheet")}
+            >
+              Sheet View
+            </button>
+          </div>
+          {viewMode === "legacy" ? (
+            <>
+              <button
+                className="btn-secondary btn-sm"
+                onClick={() => {
+                  setAdjustInitialEnrollmentId(enrollmentFilterId === "all" ? null : enrollmentFilterId);
+                  setAdjustOpen(true);
+                }}
+                disabled={adjustMutation.isPending || adjustEnrollments.length === 0}
+                title={adjustEnrollments.length === 0 ? "Create an enrollment first." : "Adjust payments and projections"}
+              >
+                {adjustMutation.isPending ? "Applying..." : "Adjust Schedule"}
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => setBuilderOpen(true)}
+                disabled={buildScheduleMutation.isPending || builderEnrollments.length === 0}
+                title={builderEnrollments.length === 0 ? "Create an enrollment first." : "Build projected schedule rows"}
+              >
+                {buildScheduleMutation.isPending ? "Building..." : "Build Schedule"}
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
+      {viewMode === "sheet" ? (
+        <PaymentEditorSheetSurface fixedCustomerId={customerId} fixedCustomerName={customerName} embedded />
+      ) : (
+        <>
       <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="field">
@@ -479,7 +515,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           {([
             { title: "By Line Item", rows: byLineItem.map((r) => ({ label: r.key, ...r })) },
-            { title: "By Enrollment", rows: byEnrollment.map((r) => ({ label: r.label, ...r })) },
+            { title: "By Enrollment", rows: byEnrollment.map((r) => ({ ...r, label: r.label })) },
             { title: "By Type", rows: byType.map((r) => ({ label: r.key, ...r })) },
           ] as const).map((section) => (
             <div key={section.title} className="rounded border border-slate-200">
@@ -658,6 +694,8 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         onCancel={() => setAdjustOpen(false)}
         onApply={(payload) => void applyAdjustments(payload)}
       />
+        </>
+      )}
     </div>
   );
 }

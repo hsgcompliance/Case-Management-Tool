@@ -53,6 +53,372 @@ function eligibilityDraftObject(value: unknown): Record<string, string> {
   );
 }
 
+const RENTAL_ASSISTANCE_TAG = "rental-assistance";
+
+// ── Pin system ────────────────────────────────────────────────────────────────
+
+const PIN_COLORS = ["red", "amber", "emerald", "sky", "violet", "rose", "orange"] as const;
+type PinColor = typeof PIN_COLORS[number];
+
+const PIN_COLOR_CHIP: Record<PinColor, string> = {
+  red:     "border-red-200 bg-red-50 text-red-700",
+  amber:   "border-amber-200 bg-amber-50 text-amber-700",
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  sky:     "border-sky-200 bg-sky-50 text-sky-700",
+  violet:  "border-violet-200 bg-violet-50 text-violet-700",
+  rose:    "border-rose-200 bg-rose-50 text-rose-700",
+  orange:  "border-orange-200 bg-orange-50 text-orange-700",
+};
+
+const PIN_COLOR_DOT: Record<PinColor, string> = {
+  red:     "bg-red-500",
+  amber:   "bg-amber-400",
+  emerald: "bg-emerald-500",
+  sky:     "bg-sky-400",
+  violet:  "bg-violet-500",
+  rose:    "bg-rose-500",
+  orange:  "bg-orange-400",
+};
+
+function pinColorChipCls(color: string | null | undefined): string {
+  if (color && color in PIN_COLOR_CHIP) return PIN_COLOR_CHIP[color as PinColor];
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((tag) => String(tag || "").trim()).filter(Boolean);
+}
+
+function hasRentalAssistanceTag(value: unknown): boolean {
+  return normalizeTags(value).some((tag) => tag.toLowerCase() === RENTAL_ASSISTANCE_TAG);
+}
+
+function setRentalAssistanceTag(model: Record<string, any>, enabled: boolean) {
+  const tags = normalizeTags(model.tags).filter((tag) => tag.toLowerCase() !== RENTAL_ASSISTANCE_TAG);
+  return { ...model, tags: enabled ? [...tags, RENTAL_ASSISTANCE_TAG] : tags };
+}
+
+type InvoiceOption = {
+  id: string;
+  label: string;
+  code?: string;
+  template?: string;
+  enabled?: boolean;
+  custom?: boolean;
+};
+
+const DEFAULT_EXPENSE_CATEGORIES: InvoiceOption[] = [
+  { id: "housing-non-hrdc", label: "Housing Assistance (non-HRDC Property)", code: "UNR-9520-300-00" },
+  { id: "housing-hrdc", label: "Housing Assistance (HRDC Property)", code: "UNR-9960-300-00" },
+  { id: "deposit", label: "Deposit Assistance", code: "UNR-9545-300-00" },
+  { id: "preventative-arrears", label: "Preventative Arrears", code: "UNR-9548-300-00" },
+  { id: "personal-needs", label: "Personal Needs", code: "UNR-5607-300-00" },
+  { id: "utility", label: "Utility Assistance", code: "UNR-8510-300-00" },
+];
+
+const DEFAULT_DESCRIPTION_TEMPLATES: InvoiceOption[] = [
+  { id: "rental-assistance", label: "Rental Assistance", template: "J. Doe: March RA" },
+  { id: "prorated-rental-assistance", label: "Prorated Rental Assistance", template: "J. Doe: Feb Prorated Rent" },
+  { id: "deposit-assistance", label: "Deposit Assistance", template: "J. Doe: DA" },
+  { id: "utility-assistance", label: "Utility Assistance", template: "J. Doe: March Util Assistance" },
+];
+
+const DEFAULT_ELIGIBILITY: Record<string, string> = {
+  "Housing Status": "Experiencing Category 1 Homelessness",
+  "Sustainability Requirement": "Must demonstrate sustainability",
+  "Unit Rent limit": "Lesser of FMR & Rent Reasonable",
+  "Age Requirement": "None",
+  "Income Limits": "None",
+  "Asset Limit": "No more than 2x 80% FMR for unit size",
+  "Landlord Restrictions": "Cannot be HRDC Property",
+  "Sobriety Requirement": "None",
+};
+
+const DEFAULT_LEVEL_OF_ASSISTANCE: Record<string, string> = {
+  "Deposit Only": "MAP 0-3",
+  "Short-Term (1-3mo)": "MAP 4-7",
+  "Medium-Term (4-24mo)": "MAP 8+",
+};
+
+const DEFAULT_INVOICE_DOCUMENTS = [
+  "Lease",
+  "Landlord Verification Form",
+  "CaseWorthy PPI",
+  "MOU",
+  "Rent Cert Letter",
+];
+
+function listFromUnknown(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  const text = String(value || "").trim();
+  return text ? [text] : [];
+}
+
+function invoiceDocumentsFrom(row: Record<string, any> | null | undefined): string[] {
+  if (!row) return [];
+  const direct = listFromUnknown(row.invoiceDocuments);
+  if (direct.length) return direct;
+  const details = row.details && typeof row.details === "object" ? row.details as Record<string, unknown> : {};
+  const nested = listFromUnknown(details.invoiceDocuments);
+  if (nested.length) return nested;
+  for (const key of ["Invoice Docs", "Invoice Documents"]) {
+    const raw = row[key];
+    if (raw && typeof raw === "object" && !Array.isArray(raw) && "_value" in raw) {
+      const docs = listFromUnknown((raw as Record<string, unknown>)._value);
+      if (docs.length) return docs;
+    }
+    const docs = listFromUnknown(raw);
+    if (docs.length) return docs;
+  }
+  return [];
+}
+
+function levelOfAssistanceFrom(row: Record<string, any> | null | undefined): Record<string, string> {
+  if (!row) return {};
+  const candidates = [
+    row.levelOfAssistance,
+    row["Level of Assistance"],
+    row.details?.levelOfAssistanceEligibility,
+  ];
+  for (const candidate of candidates) {
+    const raw = candidate && typeof candidate === "object" && !Array.isArray(candidate) && "_value" in candidate
+      ? (candidate as Record<string, unknown>)._value
+      : candidate;
+    const normalized = eligibilityDraftObject(raw);
+    if (Object.keys(normalized).length) return normalized;
+  }
+  return {};
+}
+
+function grantMaxLengthFrom(row: Record<string, any> | null | undefined): string {
+  if (!row) return "";
+  const direct = String(row.lengthOfAssistance ?? row.maxLengthOfAssistance ?? row.maximumLengthOfAssistance ?? "").trim();
+  if (direct) return direct;
+  const dynamic = row["Maximum Length of Assistance"];
+  if (dynamic && typeof dynamic === "object" && !Array.isArray(dynamic) && "_value" in dynamic) {
+    return String((dynamic as Record<string, unknown>)._value || "").trim();
+  }
+  return String(row.details?.maximumLengthOfAssistance || "").trim();
+}
+
+function asInvoiceOptions(value: unknown): InvoiceOption[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && !Array.isArray(row))
+    .map((row, index) => ({
+      id: String(row.id || row.label || `invoice_${index}`),
+      label: String(row.label || ""),
+      code: row.code == null ? undefined : String(row.code),
+      template: row.template == null ? undefined : String(row.template),
+      enabled: row.enabled === true,
+      custom: row.custom === true,
+    }))
+    .filter((row) => row.id && row.label);
+}
+
+function mergeInvoiceOptions(defaults: InvoiceOption[], saved: unknown): InvoiceOption[] {
+  const savedRows = asInvoiceOptions(saved);
+  const byId = new Map(savedRows.map((row) => [row.id, row]));
+  const defaultRows = defaults.map((row) => ({ ...row, ...(byId.get(row.id) || {}) }));
+  const customRows = savedRows.filter((row) => row.custom && !defaults.some((def) => def.id === row.id));
+  return [...defaultRows, ...customRows];
+}
+
+function invoiceText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function InvoiceInfoPanel({ value }: { value: unknown }) {
+  const inv = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const grantCode = invoiceText(inv.grantCode);
+  const functionalGroup = invoiceText(inv.functionalGroup || "Housing");
+  const categories = asInvoiceOptions(inv.expenseCategories).filter((row) => row.enabled);
+  const descriptions = asInvoiceOptions(inv.descriptionTemplates).filter((row) => row.enabled);
+
+  if (!grantCode && categories.length === 0 && descriptions.length === 0) return null;
+
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Invoice Defaults</div>
+        {functionalGroup ? (
+          <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+            {functionalGroup}
+          </span>
+        ) : null}
+      </div>
+      <div className="space-y-4">
+        {grantCode ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Grant Code</div>
+            <div className="mt-1 font-mono text-sm text-slate-800">{grantCode}</div>
+          </div>
+        ) : null}
+        {categories.length ? (
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Expense Categories</div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {categories.map((row) => (
+                <div key={row.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-sm font-medium text-slate-800">{row.label}</div>
+                  <div className="mt-0.5 font-mono text-xs text-slate-500">{row.code || "-"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {descriptions.length ? (
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Description Templates</div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {descriptions.map((row) => (
+                <div key={row.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-sm font-medium text-slate-800">{row.label}</div>
+                  <div className="mt-0.5 text-xs text-slate-500">{row.template || "-"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function InvoiceInfoEditor({
+  model,
+  setModel,
+}: {
+  model: Record<string, any>;
+  setModel: React.Dispatch<React.SetStateAction<Record<string, any>>>;
+}) {
+  const inv = ((model.invoicing && typeof model.invoicing === "object") ? model.invoicing : {}) as Record<string, unknown>;
+  const categories = mergeInvoiceOptions(DEFAULT_EXPENSE_CATEGORIES, inv.expenseCategories);
+  const descriptions = mergeInvoiceOptions(DEFAULT_DESCRIPTION_TEMPLATES, inv.descriptionTemplates);
+
+  const setInv = (patch: Record<string, unknown>) => {
+    setModel((m) => ({ ...m, invoicing: { ...((m.invoicing || {}) as Record<string, unknown>), ...patch } }));
+  };
+
+  const setCategory = (id: string, patch: Partial<InvoiceOption>) => {
+    setInv({ expenseCategories: categories.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+  };
+
+  const setDescription = (id: string, patch: Partial<InvoiceOption>) => {
+    setInv({ descriptionTemplates: descriptions.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
+  };
+
+  const addCustomCategory = () => {
+    const id = `custom_${Date.now().toString(36)}`;
+    setInv({
+      expenseCategories: [
+        ...categories,
+        { id, label: "Other Category", code: "", enabled: true, custom: true },
+      ],
+    });
+  };
+
+  const removeCustomCategory = (id: string) => {
+    setInv({ expenseCategories: categories.filter((row) => row.id !== id) });
+  };
+
+  return (
+    <div className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+      <div>
+        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Invoice Defaults</div>
+        <p className="mt-1 text-xs text-slate-500">
+          Select the values this grant should surface in payment and invoice workflows.
+        </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-slate-500">Functional Group</span>
+          <input
+            className="input w-full"
+            value={String(inv.functionalGroup ?? "Housing")}
+            onChange={(e) => setInv({ functionalGroup: e.currentTarget.value })}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-slate-500">Grant Code</span>
+          <input
+            className="input w-full font-mono"
+            placeholder="#237"
+            value={String(inv.grantCode ?? "")}
+            onChange={(e) => setInv({ grantCode: e.currentTarget.value })}
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Expense Category</div>
+          <button type="button" className="btn btn-secondary btn-xs" onClick={addCustomCategory}>
+            Add Other
+          </button>
+        </div>
+        <div className="space-y-2">
+          {categories.map((row) => (
+            <div key={row.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-[auto_minmax(180px,1fr)_minmax(150px,220px)_auto]">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300 accent-indigo-600"
+                  checked={row.enabled === true}
+                  onChange={(e) => setCategory(row.id, { enabled: e.currentTarget.checked })}
+                />
+              </label>
+              <input
+                className="input h-8 text-sm"
+                value={row.label}
+                readOnly={!row.custom}
+                onChange={(e) => setCategory(row.id, { label: e.currentTarget.value })}
+              />
+              <input
+                className="input h-8 font-mono text-xs"
+                value={row.code || ""}
+                placeholder="UNR-0000-000-00"
+                onChange={(e) => setCategory(row.id, { code: e.currentTarget.value })}
+              />
+              {row.custom ? (
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => removeCustomCategory(row.id)}>
+                  Remove
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Description</div>
+        <div className="space-y-2">
+          {descriptions.map((row) => (
+            <div key={row.id} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-[auto_minmax(150px,220px)_1fr]">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300 accent-indigo-600"
+                  checked={row.enabled === true}
+                  onChange={(e) => setDescription(row.id, { enabled: e.currentTarget.checked })}
+                />
+              </label>
+              <div className="flex items-center text-sm font-medium text-slate-700">{row.label}</div>
+              <input
+                className="input h-8 text-sm"
+                value={row.template || ""}
+                onChange={(e) => setDescription(row.id, { template: e.currentTarget.value })}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** normalize to either "" or YYYY-MM-DD (string) — only use on COMMIT */
 const toISOOrEmpty = (x: any): string => {
   if (!x) return "";
@@ -206,7 +572,134 @@ function EligibilityDisplay({ value }: { value: unknown }) {
   );
 }
 
-function EligibilityEditor({
+function KeyValueRecommendedEditor({
+  title,
+  description,
+  value,
+  defaults,
+  onChange,
+}: {
+  title: string;
+  description?: string;
+  value: Record<string, string>;
+  defaults: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const rows = Object.entries(Object.keys(value).length ? value : defaults);
+  const commit = (next: Record<string, string>) => {
+    const cleaned = Object.entries(next).reduce((acc: Record<string, string>, [key, raw]) => {
+      const k = String(key || "").trim();
+      if (!k) return acc;
+      acc[k] = String(raw ?? "");
+      return acc;
+    }, {});
+    onChange(cleaned);
+  };
+  const addRow = () => {
+    let idx = rows.length + 1;
+    let key = `Item ${idx}`;
+    while ((value[key] ?? defaults[key]) != null) {
+      idx += 1;
+      key = `Item ${idx}`;
+    }
+    commit({ ...(Object.keys(value).length ? value : defaults), [key]: "" });
+  };
+  const remove = (key: string) => {
+    const base = Object.keys(value).length ? value : defaults;
+    const next = { ...base };
+    delete next[key];
+    commit(next);
+  };
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div>
+        <div className="text-sm font-semibold text-slate-800">{title}</div>
+        {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+      </div>
+      <div className="space-y-2">
+        {rows.map(([key, val]) => (
+          <div key={key} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(180px,240px)_1fr_auto]">
+            <input
+              className="input"
+              defaultValue={key}
+              onBlur={(e) => {
+                const nextKey = e.currentTarget.value.trim();
+                if (!nextKey || nextKey === key) return;
+                const base = Object.keys(value).length ? value : defaults;
+                const next = { ...base };
+                next[nextKey] = next[key] ?? "";
+                delete next[key];
+                commit(next);
+              }}
+            />
+            <input
+              className="input"
+              value={val}
+              onChange={(e) => {
+                const base = Object.keys(value).length ? value : defaults;
+                commit({ ...base, [key]: e.currentTarget.value });
+              }}
+            />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(key)}>
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={addRow}>
+        Add Row
+      </button>
+    </div>
+  );
+}
+
+function ListRecommendedEditor({
+  title,
+  description,
+  value,
+  defaults,
+  onChange,
+}: {
+  title: string;
+  description?: string;
+  value: string[];
+  defaults: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const rows = value.length ? value : defaults;
+  const commit = (next: string[]) => onChange(next.map((item) => String(item || "").trim()).filter(Boolean));
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div>
+        <div className="text-sm font-semibold text-slate-800">{title}</div>
+        {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+      </div>
+      <div className="space-y-2">
+        {rows.map((doc, index) => (
+          <div key={`${doc}:${index}`} className="grid grid-cols-[1fr_auto] gap-2">
+            <input
+              className="input"
+              value={doc}
+              onChange={(e) => {
+                const next = [...rows];
+                next[index] = e.currentTarget.value;
+                commit(next);
+              }}
+            />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => commit(rows.filter((_, i) => i !== index))}>
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => commit([...rows, ""])}>
+        Add Document
+      </button>
+    </div>
+  );
+}
+
+function RecommendedGrantInfoEditor({
   model,
   setModel,
   grant,
@@ -216,98 +709,61 @@ function EligibilityEditor({
   grant: Record<string, any> | null;
 }) {
   const eligibility = eligibilityDraftObject(model.eligibility ?? grant?.eligibility);
-  const rows = Object.entries(eligibility);
-
-  const commit = (next: Record<string, string>) => {
-    const cleaned = eligibilityDraftObject(next);
-    setModel((m) => ({
-      ...(m || {}),
-      eligibility: Object.keys(cleaned).length ? cleaned : null,
-    }));
-  };
-
-  const updateKey = (oldKey: string, newKeyRaw: string) => {
-    const newKey = newKeyRaw.trim();
-    if (!newKey || newKey === oldKey) return;
-    if (eligibility[newKey]) return;
-    const next = { ...eligibility };
-    next[newKey] = next[oldKey] ?? "";
-    delete next[oldKey];
-    commit(next);
-  };
-
-  const updateValue = (key: string, value: string) => {
-    commit({ ...eligibility, [key]: value });
-  };
-
-  const remove = (key: string) => {
-    const next = { ...eligibility };
-    delete next[key];
-    commit(next);
-  };
-
-  const addRow = () => {
-    let idx = rows.length + 1;
-    let key = `Requirement ${idx}`;
-    while (eligibility[key]) {
-      idx += 1;
-      key = `Requirement ${idx}`;
-    }
-    commit({ ...eligibility, [key]: "" });
-  };
+  const level = levelOfAssistanceFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
+  const invoiceDocuments = invoiceDocumentsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
+  const duration = String(model.duration ?? grant?.duration ?? "1 Year");
+  const maxLength = String(
+    model.lengthOfAssistance ??
+    grantMaxLengthFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ??
+    "",
+  );
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div>
-        <div className="text-slate-500 dark:text-slate-400">Eligibility</div>
-        <p className="mt-1 text-xs text-slate-500">
-          Add structured eligibility criteria as key/value pairs.
-        </p>
+    <div className="md:col-span-2 space-y-4">
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-slate-500">Duration</span>
+          <input
+            className="input w-full"
+            value={duration}
+            placeholder="1 Year"
+            onChange={(e) => setModel((m) => ({ ...m, duration: e.currentTarget.value }))}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-slate-500">Max Length of Assistance</span>
+          <input
+            className="input w-full"
+            value={maxLength}
+            placeholder="Up to 24 Months, Internal Policy of 6 currently"
+            onChange={(e) => setModel((m) => ({ ...m, lengthOfAssistance: e.currentTarget.value }))}
+          />
+        </label>
       </div>
 
-      {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-sm text-slate-500">
-          No eligibility criteria yet.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {rows.map(([key, value]) => (
-            <div key={key} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(180px,220px)_1fr_auto]">
-              <input
-                className="input"
-                type="text"
-                defaultValue={key}
-                onBlur={(e) => updateKey(key, e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    updateKey(key, e.currentTarget.value);
-                    (e.currentTarget as HTMLInputElement).blur();
-                  }
-                }}
-              />
-              <input
-                className="input"
-                type="text"
-                value={value}
-                placeholder="Example: Household income below 60% AMI"
-                onChange={(e) => updateValue(key, e.currentTarget.value)}
-              />
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => remove(key)}
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <KeyValueRecommendedEditor
+        title="Eligibility Criteria"
+        description="Prefilled from the ESG RRH pattern; edit or remove rows for this grant."
+        value={eligibility}
+        defaults={DEFAULT_ELIGIBILITY}
+        onChange={(next) => setModel((m) => ({ ...m, eligibility: next }))}
+      />
 
-      <button type="button" className="btn btn-secondary btn-sm" onClick={addRow}>
-        Add Criterion
-      </button>
+      <KeyValueRecommendedEditor
+        title="Level of Assistance"
+        description="Internal guidance for what assistance level is expected."
+        value={level}
+        defaults={DEFAULT_LEVEL_OF_ASSISTANCE}
+        onChange={(next) => setModel((m) => ({ ...m, levelOfAssistance: next }))}
+      />
+
+      <ListRecommendedEditor
+        title="Invoicing Docs"
+        description="Optional default documents expected before payment/invoice processing."
+        value={invoiceDocuments}
+        defaults={DEFAULT_INVOICE_DOCUMENTS}
+        onChange={(next) => setModel((m) => ({ ...m, invoiceDocuments: next }))}
+      />
     </div>
   );
 }
@@ -332,11 +788,14 @@ function GrantInfoPanel({
 
   const startDate     = String(g.startDate   || "").slice(0, 10);
   const endDate       = String(g.endDate     || "").slice(0, 10);
+  const duration      = String(g.duration || "").trim();
   const description   = String(g.description || "").trim();
-  const maxLen        = String(g.lengthOfAssistance ?? g.maxLengthOfAssistance ?? "").trim();
+  const maxLen        = grantMaxLengthFrom(g);
   const maxAmount     = String(g.maxAmount   ?? g.maximumAmount ?? g.maxAssistanceAmount ?? "").trim();
   const services      = g.servicesOffered;
   const eligibility   = g.eligibility;
+  const levelRows     = Object.entries(levelOfAssistanceFrom(g));
+  const invoiceDocs   = invoiceDocumentsFrom(g);
 
   const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
   const hasEligibility = Object.keys(normalizeEligibility(eligibility)).length > 0;
@@ -401,6 +860,11 @@ function GrantInfoPanel({
         {description && <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{description}</p>}
       </FieldBlock>
 
+      {/* Duration */}
+      <FieldBlock label="Duration" empty={!duration}>
+        {duration && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{duration}</span>}
+      </FieldBlock>
+
       {/* Max Length of Assistance */}
       <FieldBlock label="Max Length of Assistance" empty={!maxLen}>
         {maxLen && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{maxLen}</span>}
@@ -420,6 +884,33 @@ function GrantInfoPanel({
       <FieldBlock label="Eligibility" empty={!hasEligibility}>
         <EligibilityDisplay value={eligibility} />
       </FieldBlock>
+
+      <FieldBlock label="Level of Assistance" empty={!levelRows.length}>
+        {levelRows.length ? (
+          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            {levelRows.map(([key, value]) => (
+              <React.Fragment key={key}>
+                <span className="font-medium text-slate-600">{key}</span>
+                <span className="text-slate-800">{String(value)}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        ) : null}
+      </FieldBlock>
+
+      <FieldBlock label="Invoicing Docs" empty={!invoiceDocs.length}>
+        {invoiceDocs.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {invoiceDocs.map((doc) => (
+              <span key={doc} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700">
+                {doc}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </FieldBlock>
+
+      <InvoiceInfoPanel value={g.invoicing} />
     </div>
   );
 }
@@ -499,9 +990,36 @@ export function DetailsTab({
   );
 
   const statusVal = String((grant?.status ?? model?.status ?? "draft") || "draft");
-  const kindVal = String(grant?.kind || model?.kind || "grant");
+  const kindVal = String(model?.kind || grant?.kind || "grant");
+  const isGrantKind = kindVal !== "program";
+  const rentalAssistanceTagged = hasRentalAssistanceTag(model.tags ?? grant?.tags);
   const additionalFieldCount = Object.keys(dynamicValue || {}).length;
   const [advancedOpen, setAdvancedOpen] = useState(additionalFieldCount > 0);
+  const seededRecommendedRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing || seededRecommendedRef.current) return;
+    seededRecommendedRef.current = true;
+    setModel((m) => {
+      const next = { ...(m || {}) };
+      if (!Object.keys(eligibilityDraftObject(next.eligibility ?? grant?.eligibility)).length) {
+        next.eligibility = DEFAULT_ELIGIBILITY;
+      }
+      if (!Object.keys(levelOfAssistanceFrom(next)).length && !Object.keys(levelOfAssistanceFrom(grant as any)).length) {
+        next.levelOfAssistance = DEFAULT_LEVEL_OF_ASSISTANCE;
+      }
+      if (!invoiceDocumentsFrom(next).length && !invoiceDocumentsFrom(grant as any).length) {
+        next.invoiceDocuments = DEFAULT_INVOICE_DOCUMENTS;
+      }
+      if (!String(next.duration ?? grant?.duration ?? "").trim()) {
+        next.duration = "1 Year";
+      }
+      if (!grantMaxLengthFrom(next) && !grantMaxLengthFrom(grant as any)) {
+        next.lengthOfAssistance = "Up to 24 Months, Internal Policy of 6 currently";
+      }
+      return next;
+    });
+  }, [editing, grant, setModel]);
 
   const STATUS_CHIP: Record<string, string> = {
     active: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300",
@@ -522,6 +1040,35 @@ export function DetailsTab({
             <span className={`rounded-md border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${STATUS_CHIP[statusVal] ?? STATUS_CHIP.draft}`}>
               {statusVal}
             </span>
+            {isGrantKind && rentalAssistanceTagged ? (
+              <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                Rental Assistance
+              </span>
+            ) : null}
+            {/* Important Pin badge */}
+            {!!(grant as any)?.pins?.important?.enabled && (
+              <span
+                className={`rounded-md border px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${pinColorChipCls((grant as any).pins.important.color)}`}
+                title={(grant as any).pins.important.note || undefined}
+              >
+                {(grant as any).pins.important.label || "Important"}
+              </span>
+            )}
+            {/* Digest Pin badge */}
+            {!!(grant as any)?.pins?.digest?.enabled && (
+              <span className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-sky-700">
+                Digest
+              </span>
+            )}
+            {/* Invoice Pin badge */}
+            {!!(grant as any)?.pins?.invoice?.enabled && (
+              <span
+                className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-indigo-700"
+                title={(grant as any).pins.invoice.note || undefined}
+              >
+                {(grant as any).pins.invoice.label || "Invoice"}
+              </span>
+            )}
           </div>
 
           {/* Rich metric cards — powered by grantMetrics/{id} */}
@@ -629,16 +1176,168 @@ export function DetailsTab({
             <div className="mt-1 text-xs text-slate-500">Programs are zero-budget. Change kind to escalate a program to a grant.</div>
           </div>
 
+          {isGrantKind ? (
+            <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-2.5 py-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded border-slate-300 accent-emerald-600"
+                  checked={rentalAssistanceTagged}
+                  onChange={(e) => {
+                    const checked = e.currentTarget.checked;
+                    setModel((m) => setRentalAssistanceTag(m || {}, checked));
+                  }}
+                />
+                <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">
+                  Rental Assistance
+                </span>
+                <span className="text-xs text-emerald-800/75 dark:text-emerald-200/75">
+                  Budget grouping and reporting
+                </span>
+              </label>
+            </div>
+          ) : null}
+
+          {/* ── Pins ──────────────────────────────────────────────────────── */}
+          {isGrantKind && (
+            <div className="md:col-span-2 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Grant Pins</div>
+
+              {/* Important Pin */}
+              <div className="rounded-md border border-slate-200 bg-slate-50/70 px-2.5 py-2 space-y-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 rounded border-slate-300 accent-violet-600"
+                    checked={!!model?.pins?.important?.enabled}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      setModel((m) => ({
+                        ...m,
+                        pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), enabled: checked } },
+                      }));
+                    }}
+                  />
+                  <span className="text-xs font-semibold text-slate-800">Important Pin</span>
+                  <span className="text-xs text-slate-500">
+                    Floats grant to top of lists
+                  </span>
+                </label>
+
+                {model?.pins?.important?.enabled && (
+                  <div className="grid gap-2 pl-5 md:grid-cols-[minmax(160px,240px)_auto_minmax(180px,1fr)]">
+                    {/* Label */}
+                    <div>
+                      <div className="text-xs text-slate-500 mb-0.5">Label</div>
+                      <input
+                        className="input input-sm h-8 w-full text-xs"
+                        type="text"
+                        placeholder="Important (default)"
+                        value={String(model?.pins?.important?.label ?? "")}
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          setModel((m) => ({
+                            ...m,
+                            pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), label: v } },
+                          }));
+                        }}
+                      />
+                    </div>
+                    {/* Color */}
+                    <div>
+                      <div className="text-xs text-slate-500 mb-1">Color</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {(["", ...PIN_COLORS] as const).map((c) => (
+                          <button
+                            key={c || "none"}
+                            type="button"
+                            onClick={() => setModel((m) => ({
+                              ...m,
+                              pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), color: c || null } },
+                            }))}
+                            className={[
+                              "h-4 w-4 rounded-full border-2 transition",
+                              (model?.pins?.important?.color ?? "") === c
+                                ? "border-slate-600 scale-110"
+                                : "border-transparent hover:border-slate-400",
+                              c ? PIN_COLOR_DOT[c as PinColor] : "bg-white border border-slate-300",
+                            ].join(" ")}
+                            title={c || "No color"}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {/* Note */}
+                    <div>
+                      <div className="text-xs text-slate-500 mb-0.5">Note (optional)</div>
+                      <input
+                        className="input h-8 w-full text-xs"
+                        type="text"
+                        placeholder="Internal note about this pin..."
+                        value={String(model?.pins?.important?.note ?? "")}
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          setModel((m) => ({
+                            ...m,
+                            pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), note: v } },
+                          }));
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Digest Pin */}
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50/70 px-2.5 py-2">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 rounded border-slate-300 accent-sky-600"
+                    checked={!!model?.pins?.digest?.enabled}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      setModel((m) => ({
+                        ...m,
+                        pins: { ...(m?.pins ?? {}), digest: { ...(m?.pins?.digest ?? {}), enabled: checked } },
+                      }));
+                    }}
+                  />
+                  <span className="text-xs font-semibold text-slate-800">Digest Pin</span>
+                  <span className="text-xs text-slate-500">
+                    Include in org digests
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50/70 px-2.5 py-2">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 rounded border-slate-300 accent-indigo-600"
+                    checked={!!model?.pins?.invoice?.enabled}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      setModel((m) => ({
+                        ...m,
+                        pins: { ...(m?.pins ?? {}), invoice: { ...(m?.pins?.invoice ?? {}), enabled: checked, label: m?.pins?.invoice?.label || "Invoice" } },
+                      }));
+                    }}
+                  />
+                  <span className="text-xs font-semibold text-indigo-900">Invoice Pin</span>
+                  <span className="text-xs text-indigo-700/80">
+                    Surface in invoice/payment workflows
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+
           {/* Promoted fields in edit mode */}
           <div className="md:col-span-2">
             <PromotedField label="Description" fieldKey="description" multiline editing={editing} model={model} setModel={setModel} grant={grant as any} />
           </div>
           <div className="md:col-span-2">
-            <EligibilityEditor model={model} setModel={setModel} grant={grant as any} />
+            <InvoiceInfoEditor model={model} setModel={setModel} />
           </div>
-          <div className="md:col-span-2">
-            <PromotedField label="Length of Assistance" fieldKey="lengthOfAssistance" editing={editing} model={model} setModel={setModel} grant={grant as any} />
-          </div>
+          <RecommendedGrantInfoEditor model={model} setModel={setModel} grant={grant as any} />
         </div>
       )}
 
@@ -668,11 +1367,11 @@ export function DetailsTab({
               <div className="border-t border-slate-200 p-4">
                 <DynamicFieldsEditor
                   value={dynamicValue}
-                  hiddenKeys={["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description"]}
+                  hiddenKeys={["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description", "invoicing", "invoiceDocuments", "levelOfAssistance", "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance"]}
                   onChange={(next) => {
                     const candidate = next as Record<string, any>;
                     const nonMeta: Record<string, any> = {};
-                    const SKIP = new Set(["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description"]);
+                    const SKIP = new Set(["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description", "invoicing", "invoiceDocuments", "levelOfAssistance", "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance"]);
                     for (const [k, v] of Object.entries(candidate)) {
                       if (!META_KEYS.has(k) && !SKIP.has(k)) nonMeta[k] = v;
                     }
@@ -776,8 +1475,10 @@ function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
     "updatedAt", "createdAt", "deleted", "active", "orgId",
     "startDate", "endDate", "kind",
     "tags", "eligibility", "lengthOfAssistance",
+    "invoicing", "invoiceDocuments", "levelOfAssistance",
+    "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance",
     "description", "servicesOffered", "maxAmount", "maximumAmount", "maxAssistanceAmount",
-    "maxLengthOfAssistance",
+    "maxLengthOfAssistance", "details",
   ]);
 
   type FieldEntry = { key: string; rawValue: any; priority: Priority };

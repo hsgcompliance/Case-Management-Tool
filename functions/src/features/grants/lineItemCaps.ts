@@ -9,7 +9,7 @@
 // Called by postPaymentQueueToLedger (and optionally by a ledger trigger) to
 // keep running totals in sync.  checkCap() is a pure helper with no side effects.
 
-import { db, isoNow } from "../../core";
+import { db, isoNow, newBulkWriter } from "../../core";
 
 const COLLECTION = "grantCustomerSpend";
 
@@ -144,11 +144,11 @@ export async function recomputeCustomerSpendForGrant(opts: {
 
   if (!opts.dryRun) {
     const existing = await db.collection(COLLECTION).where("grantId", "==", grantId).get();
-    const batch = db.batch();
-    for (const doc of existing.docs) batch.delete(doc.ref);
+    const writer = newBulkWriter(2);
+    for (const doc of existing.docs) writer.delete(doc.ref);
     const now = isoNow();
     for (const [customerId, data] of byCustomer.entries()) {
-      batch.set(db.collection(COLLECTION).doc(docId(grantId, customerId)), {
+      writer.set(db.collection(COLLECTION).doc(docId(grantId, customerId)), {
         grantId,
         customerId,
         lineItemSpend: data.lineItemSpend,
@@ -158,7 +158,7 @@ export async function recomputeCustomerSpendForGrant(opts: {
         updatedAt: now,
       }, { merge: false });
     }
-    await batch.commit();
+    await writer.close();
   }
 
   return {

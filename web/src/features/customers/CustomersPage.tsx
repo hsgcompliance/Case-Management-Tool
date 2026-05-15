@@ -652,15 +652,17 @@ export function CustomersPage() {
     setLastRefreshedAt(Date.now());
     setStaleBannerVisible(false);
     void qc.invalidateQueries({ queryKey: qk.customers.root, exact: false });
-    void qc.invalidateQueries({ queryKey: qk.enrollments.root, exact: false });
     void qc.refetchQueries({ queryKey: qk.customers.root, exact: false, type: "active" });
-    void qc.refetchQueries({ queryKey: qk.enrollments.root, exact: false, type: "active" });
+    if (!isViewer) {
+      void qc.invalidateQueries({ queryKey: qk.enrollments.root, exact: false });
+      void qc.refetchQueries({ queryKey: qk.enrollments.root, exact: false, type: "active" });
+    }
     if (pageMode === "new") {
       setCardPoolMode("all");
     } else {
       void refetch();
     }
-  }, [pageMode, qc, refetch, setCardPoolMode]);
+  }, [isViewer, pageMode, qc, refetch, setCardPoolMode]);
 
   const setCustomersPageMode = React.useCallback(
     async (nextMode: CustomersPageMode) => {
@@ -744,7 +746,7 @@ export function CustomersPage() {
           actions={
             <>
               <RefreshButton
-                queryKeys={[qk.customers.root, qk.enrollments.root]}
+                queryKeys={isViewer ? [qk.customers.root] : [qk.customers.root, qk.enrollments.root]}
                 onRefresh={handleManualRefresh}
                 className="btn btn-sm rounded-lg"
                 label="Refresh"
@@ -837,6 +839,7 @@ export function CustomersPage() {
             onEnrollmentStatusesChange={setEnrollmentStatuses}
             onResetFilters={resetFilters}
             onSearchEnter={handleSearchEnter}
+            featureFlags={isViewer ? { showEnrollmentRefreshAction: false, showBulkActions: false } : undefined}
           />
         ) : (
           <>

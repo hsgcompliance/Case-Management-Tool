@@ -54,6 +54,7 @@ export const PaymentQueueItem = z.object({
     index: z.number().nullable(),
     orderRange: z.tuple([z.number(), z.number()]).nullable().optional(),
     fieldIds: z.record(z.string(), z.string().nullable()).optional(),
+    fieldOrders: z.record(z.string(), z.number().nullable()).optional(),
   }).optional(),
   localModified: z.boolean().optional(),
   localModifiedAt: z.string().nullable().optional(),

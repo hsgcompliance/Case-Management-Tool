@@ -14,7 +14,7 @@ import { useCustomer, useUpsertCustomers, usePatchCustomers } from "@hooks/useCu
 import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
 import {
   useGDriveBuildCustomerFolder,
-  useGDriveCustomerFolderIndex,
+  useSheetCustomerFolderIndex,
   ACTIVE_PARENT_ID,
   EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
@@ -51,6 +51,14 @@ type EnrollmentDraft = {
   startDate: string;
   endDate: string;
   endDateManuallyEdited: boolean;
+};
+type FlowMilestoneState = "done" | "active" | "pending" | "skipped";
+
+type FlowMilestone = {
+  key: string;
+  label: string;
+  state: FlowMilestoneState;
+  note: string;
 };
 
 const FLOW_STEPS: Array<{ step: FlowStep; label: string }> = [
@@ -112,6 +120,50 @@ function formatHeaderValue(value: unknown): string {
   return String(value || "").trim();
 }
 
+function milestoneClasses(state: FlowMilestoneState): string {
+  if (state === "done") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (state === "active") return "border-sky-300 bg-sky-50 text-sky-800";
+  if (state === "skipped") return "border-slate-200 bg-white/70 text-slate-500";
+  return "border-slate-200 bg-white text-slate-600";
+}
+
+function milestoneDotClasses(state: FlowMilestoneState): string {
+  if (state === "done") return "bg-emerald-500";
+  if (state === "active") return "bg-sky-500";
+  if (state === "skipped") return "bg-slate-300";
+  return "bg-slate-300";
+}
+
+function milestoneStatusText(state: FlowMilestoneState): string {
+  if (state === "done") return "Done";
+  if (state === "active") return "Now";
+  if (state === "skipped") return "Skipped";
+  return "Waiting";
+}
+
+function fallbackMilestones(): FlowMilestone[] {
+  return [
+    {
+      key: "customer",
+      label: "Customer Created",
+      state: "pending",
+      note: "Customer record has not been created yet.",
+    },
+    {
+      key: "enrollment",
+      label: "Customer Enrolled",
+      state: "pending",
+      note: "Waiting for customer record.",
+    },
+    {
+      key: "extras",
+      label: "Extras",
+      state: "pending",
+      note: "Available after enrollment.",
+    },
+  ];
+}
+
 function grantLabel(grant: Record<string, unknown>): string {
   return String(grant.name || grant.code || grant.id || "Program").trim();
 }
@@ -141,6 +193,44 @@ const FOLDER_TEMPLATES_FLOW = DRIVE_FILE_TEMPLATES;
 
 function renderFlowDocName(tpl: string, first: string, last: string): string {
   return tpl.replace(/\{first\}/gi, first).replace(/\{last\}/gi, last).replace(/\s{2,}/g, " ").trim();
+}
+
+function resolveFlowTemplateFileId(
+  tmpl: (typeof FOLDER_TEMPLATES_FLOW)[number],
+  medicaid: "yes" | "no" | "not_sure",
+): string {
+  const fileId = "variants" in tmpl
+    ? medicaid === "yes"
+      ? tmpl.variants.payer
+      : tmpl.variants.nonpayer
+    : tmpl.id;
+  return String(fileId || "").trim();
+}
+
+function buildFlowTemplatePayload(args: {
+  selectedTemplates: Set<string>;
+  medicaid: "yes" | "no" | "not_sure";
+  firstName: string;
+  lastName: string;
+}): Array<{ fileId: string; name: string }> {
+  const first = args.firstName.trim();
+  const last = args.lastName.trim();
+  return FOLDER_TEMPLATES_FLOW.flatMap((tmpl) => {
+    if (!args.selectedTemplates.has(tmpl.key)) return [];
+    const fileId = resolveFlowTemplateFileId(tmpl, args.medicaid);
+    if (fileId.length < 3) return [];
+    return [{ fileId, name: renderFlowDocName(tmpl.docNameTpl, first, last) }];
+  });
+}
+
+function formatFlowError(title: string, error: unknown): string {
+  const detail = toApiError(error).error || (error instanceof Error ? error.message : "");
+  const cleanDetail = String(detail || "").trim();
+  if (!cleanDetail || cleanDetail === title) return title;
+  if (cleanDetail.startsWith("[") || cleanDetail.includes('"code"') || cleanDetail.includes("ZodError")) {
+    return title;
+  }
+  return `${title}: ${cleanDetail}`;
 }
 
 function buildFlowFolderName(last: string, first: string, cwid?: string | null) {
@@ -364,6 +454,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [secondaryCaseManagerId, setSecondaryCaseManagerId] = React.useState<string>("");
   const [otherContactDrafts, setOtherContactDrafts] = React.useState<Array<{ uid: string; role: string }>>([]);
   const [selectedEnrollmentDrafts, setSelectedEnrollmentDrafts] = React.useState<EnrollmentDraft[]>([]);
+  const [enrollmentSearch, setEnrollmentSearch] = React.useState("");
   const [wantsTaskReminders, setWantsTaskReminders] = React.useState(false);
   const [taskReminderDrafts, setTaskReminderDrafts] = React.useState<TaskTemplateDraft[]>([]);
   const [wantsPayments, setWantsPayments] = React.useState(false);
@@ -382,6 +473,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [buildSubfolders, setBuildSubfolders] = React.useState<string[]>([]);
   const [workingLabel, setWorkingLabel] = React.useState<string | null>(null);
   const [flowError, setFlowError] = React.useState<string | null>(null);
+  const [showDupeModal, setShowDupeModal] = React.useState(false);
+  const [dupeDismissed, setDupeDismissed] = React.useState(false);
 
   // Duplicate check
   const qc = useQueryClient();
@@ -400,13 +493,24 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const enrollmentsQ = useCustomerEnrollments(customerId || undefined, { enabled: !!customerId });
   const enrollments = React.useMemo(() => enrollmentsQ.data || [], [enrollmentsQ.data]);
 
-  const folderIndexQ = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
-    { enabled: folderMode !== "none" },
-  );
+  const folderIndexQ = useSheetCustomerFolderIndex({ enabled: folderMode !== "none" });
   const buildFolder = useGDriveBuildCustomerFolder(
     { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
   );
+
+  const folderDupes = React.useMemo(() => {
+    if (!lastName.trim() || folderMode !== "build") return [];
+    const last = lastName.trim().toLowerCase();
+    return (folderIndexQ.data?.folders ?? []).filter(
+      (f) => f.last?.toLowerCase().startsWith(last.slice(0, 3)) ?? false
+    );
+  }, [folderIndexQ.data, lastName, folderMode]);
+
+  React.useEffect(() => {
+    if (folderMode === "build" && !dupeDismissed && folderDupes.length > 0) {
+      setShowDupeModal(true);
+    }
+  }, [folderMode, folderDupes.length, dupeDismissed]);
 
   const existingGrantIds = React.useMemo(
     () => new Set(enrollments.map((enrollment) => String(enrollment.grantId || "").trim()).filter(Boolean)),
@@ -545,6 +649,75 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
       ].filter((item): item is { label: string; value: string } => !!item),
     [headerCwId, headerDob, headerHmisId],
   );
+
+  const extrasPlanned =
+    wantsTaskReminders ||
+    wantsPayments ||
+    folderMode !== "none" ||
+    taskScheduleCount > 0 ||
+    paymentScheduleCount > 0;
+  const extrasDone =
+    (wantsTaskReminders ? taskScheduleCount > 0 : true) &&
+    (wantsPayments ? paymentScheduleCount > 0 : true) &&
+    folderMode === "none";
+  const flowMilestones = React.useMemo<FlowMilestone[]>(() => {
+    try {
+      const enrollmentCount = Number.isFinite(activeEnrollments.length) ? activeEnrollments.length : 0;
+      const customerDone = !!customerId;
+      const enrolledDone = enrollmentCount > 0;
+      const extrasState: FlowMilestoneState = !extrasPlanned
+        ? "skipped"
+        : extrasDone
+          ? "done"
+          : enrolledDone
+            ? "active"
+            : "pending";
+
+      return [
+        {
+          key: "customer",
+          label: "Customer Created",
+          state: customerDone ? "done" : step >= 2 ? "active" : "pending",
+          note: customerDone ? "Record exists. Safe to exit." : "Customer record has not been created yet.",
+        },
+        {
+          key: "enrollment",
+          label: "Customer Enrolled",
+          state: enrolledDone ? "done" : customerDone ? "active" : "pending",
+          note: enrolledDone
+            ? `${enrollmentCount} active program${enrollmentCount === 1 ? "" : "s"}. Safe to exit.`
+            : customerDone
+              ? "Create program enrollments next."
+              : "Waiting for customer record.",
+        },
+        {
+          key: "extras",
+          label: "Extras",
+          state: extrasState,
+          note:
+            extrasState === "done"
+              ? "Optional setup is complete."
+              : extrasState === "active"
+                ? "Tasks, payments, or folder setup may still be pending."
+                : extrasState === "skipped"
+                  ? "No extra setup selected."
+                  : "Available after enrollment.",
+        },
+      ];
+    } catch {
+      return fallbackMilestones();
+    }
+  }, [activeEnrollments.length, customerId, extrasDone, extrasPlanned, step]);
+
+  const flowSafetyNote = React.useMemo(() => {
+    if (activeEnrollments.length > 0) {
+      return "Customer created and enrolled in programs. Safe to exit now; unfinished extras can be completed later.";
+    }
+    if (customerId) {
+      return "Customer created. Safe to exit now, but enrollment is not complete yet.";
+    }
+    return "Nothing has been created yet. Continue through Assignment to create the customer record.";
+  }, [activeEnrollments.length, customerId]);
 
   const openCustomerRecord = React.useCallback(
     (id: string) => {
@@ -707,7 +880,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
       if (step === 9) return;
       setStep((current) => Math.min(9, (current + 1) as FlowStep));
     } catch (error: unknown) {
-      setFlowError(toApiError(error).error || (error instanceof Error ? error.message : "Unable to continue."));
+      const title = step === 2 ? "Error saving Customer" : step === 3 ? "Error enrolling Customer" : "Unable to continue";
+      setFlowError(formatFlowError(title, error));
     } finally {
       setWorkingLabel(null);
     }
@@ -729,7 +903,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         toast("Payment schedule built.", { type: "success" });
         await enrollmentsQ.refetch();
       } catch (error: unknown) {
-        setFlowError(toApiError(error).error || "Failed to build payment schedule.");
+        setFlowError(formatFlowError("Error building Payment schedule", error));
       }
     },
     [buildPayments, enrollmentsQ],
@@ -738,12 +912,16 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const finishFlow = React.useCallback(async () => {
     if (!canFinish) return;
     setFlowError(null);
+    let failureTitle = "Error finalizing Customer setup";
     try {
       setWorkingLabel("Finalizing customer setup...");
+      failureTitle = "Error saving Customer";
       const ensuredCustomerId = await ensureCustomerExists();
+      failureTitle = "Error enrolling Customer";
       await ensureEnrollmentsExist(ensuredCustomerId);
 
       if (wantsTaskReminders && taskReminderDrafts.length > 0) {
+        failureTitle = "Error building Customer tasks";
         for (const enrollment of activeEnrollments) {
           const body: ReqOf<"tasksGenerateScheduleWrite"> = {
             enrollmentId: enrollment.id,
@@ -760,14 +938,12 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
 
       if (folderMode === "build" && buildFolderName.trim()) {
         setWorkingLabel("Building Drive folder…");
-        const templates = FOLDER_TEMPLATES_FLOW.flatMap((tmpl) => {
-          if (!buildSelectedTemplates.has(tmpl.key)) return [];
-          const docName = renderFlowDocName(tmpl.docNameTpl, firstName.trim(), lastName.trim());
-          if ("variants" in tmpl) {
-            const fileId = buildMedicaid === "yes" ? tmpl.variants.payer : tmpl.variants.nonpayer;
-            return [{ fileId, name: docName }];
-          }
-          return [{ fileId: tmpl.id, name: docName }];
+        failureTitle = "Error building Customer folder";
+        const templates = buildFlowTemplatePayload({
+          selectedTemplates: buildSelectedTemplates,
+          medicaid: buildMedicaid,
+          firstName,
+          lastName,
         });
         const built = await buildFolder.mutateAsync({
           name: buildFolderName.trim(),
@@ -788,6 +964,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           } as unknown as Parameters<typeof patchCustomer.mutateAsync>[0]);
         }
       } else if (folderMode === "link" && folderUrl.trim()) {
+        failureTitle = "Error linking Customer folder";
         const parsedFolderId = parseFlowFolderId(folderUrl);
         if (!parsedFolderId) {
           throw new Error("Enter a valid Google Drive folder URL or ID.");
@@ -803,6 +980,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         } as unknown as Parameters<typeof patchCustomer.mutateAsync>[0]);
       } else if (wantsFolderLink && folderUrl.trim()) {
         // Legacy path (kept for safety)
+        failureTitle = "Error linking Customer folder";
         const parsedFolderId = parseFolderId(folderUrl);
         if (!parsedFolderId) throw new Error("Enter a valid Google Drive folder URL or ID.");
         await patchCustomer.mutateAsync({
@@ -819,7 +997,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
       toast("Customer setup complete.", { type: "success" });
       openCustomerRecord(ensuredCustomerId);
     } catch (error: unknown) {
-      setFlowError(toApiError(error).error || (error instanceof Error ? error.message : "Unable to finish setup."));
+      setFlowError(formatFlowError(failureTitle, error));
     } finally {
       setWorkingLabel(null);
     }
@@ -1024,8 +1202,26 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
+        <input
+          type="search"
+          className="input input-sm w-full"
+          placeholder="Search programs…"
+          value={enrollmentSearch}
+          onChange={(e) => setEnrollmentSearch(e.currentTarget.value)}
+          disabled={programsLocked}
+        />
+
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {grantOptions.map((grant) => {
+          {(Array.isArray(grantOptions) ? grantOptions : [])
+            .filter((grant) => {
+              if (!grant?.id) return false;
+              const isSelected = selectedEnrollmentDrafts.some((d) => d.grantId === grant.id);
+              if (isSelected) return true;
+              const q = (enrollmentSearch ?? "").trim().toLowerCase();
+              if (!q) return true;
+              return String(grant.label ?? "").toLowerCase().includes(q);
+            })
+            .map((grant) => {
             const draft = selectedEnrollmentDrafts.find((entry) => entry.grantId === grant.id) || null;
             const selected = !!draft;
             return (
@@ -1289,29 +1485,88 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     <StepFrame
       eyebrow="Page 8"
       title="Google Drive folder"
-      description="Optionally create or link a Drive folder for this customer. You can also do this later from the Files tab."
+      description="Setting up a folder keeps documents organized. We strongly recommend building or linking one now."
     >
       <div className="space-y-5">
-        {/* Mode selector */}
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
-          {(["none", "build", "link"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={[
-                "rounded-lg px-4 py-2 text-sm font-semibold transition",
-                folderMode === mode ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100",
-              ].join(" ")}
-              onClick={() => setFolderMode(mode)}
-            >
-              {mode === "none" ? "Skip" : mode === "build" ? "Build New" : "Link Existing"}
-            </button>
-          ))}
+        {/* Primary choice cards */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => { setFolderMode("build"); setDupeDismissed(false); }}
+            className={[
+              "flex flex-col gap-2 rounded-[22px] border-2 p-5 text-left transition-all",
+              folderMode === "build"
+                ? "border-sky-500 bg-sky-50 shadow-md"
+                : "border-slate-200 bg-white hover:border-sky-300 hover:shadow-sm",
+            ].join(" ")}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base font-semibold text-slate-900">Build New Folder</span>
+              <span className="ml-auto rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700">
+                Recommended
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Create a fresh folder in the Rental Assistance Drive with templates and subfolders.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFolderMode("link")}
+            className={[
+              "flex flex-col gap-2 rounded-[22px] border-2 p-5 text-left transition-all",
+              folderMode === "link"
+                ? "border-violet-500 bg-violet-50 shadow-md"
+                : "border-slate-200 bg-white hover:border-violet-300 hover:shadow-sm",
+            ].join(" ")}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base font-semibold text-slate-900">Link Existing Folder</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Connect a folder already in Drive. Search by name or paste a URL.
+            </p>
+          </button>
         </div>
 
-        {/* Build new */}
+        {/* Skip state or skip link */}
+        {folderMode === "none" ? (
+          <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm text-slate-500">
+            No folder will be linked. You can set this up later from the customer&apos;s Files tab.
+          </div>
+        ) : (
+          <div className="text-center">
+            <button
+              type="button"
+              className="text-xs text-slate-400 underline hover:text-slate-600"
+              onClick={() => setFolderMode("none")}
+            >
+              Skip — I&apos;ll set this up later
+            </button>
+          </div>
+        )}
+
+        {/* Build new section */}
         {folderMode === "build" && (
           <div className="space-y-4 rounded-[22px] border border-slate-200 bg-white p-4">
+            {/* Dupe warning */}
+            {folderDupes.length > 0 && !dupeDismissed && (
+              <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <span className="mt-0.5 shrink-0 text-amber-600">⚠</span>
+                <p className="flex-1 text-sm text-amber-800">
+                  <strong>{folderDupes.length} existing folder{folderDupes.length > 1 ? "s" : ""}</strong> may already belong to this client.
+                </p>
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+                  onClick={() => setShowDupeModal(true)}
+                >
+                  Review
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="field md:col-span-2">
                 <span className="label">Folder name</span>
@@ -1341,19 +1596,27 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Copy templates</div>
               <div className="space-y-1.5">
                 {FOLDER_TEMPLATES_FLOW.map((tmpl) => {
-                  const checked = buildSelectedTemplates.has(tmpl.key);
+                  const fileId = resolveFlowTemplateFileId(tmpl, buildMedicaid);
+                  const templateConfigured = fileId.length >= 3;
+                  const checked = buildSelectedTemplates.has(tmpl.key) && templateConfigured;
                   return (
                     <label
                       key={tmpl.key}
+                      title={templateConfigured ? undefined : "Template ID is not configured."}
                       className={[
                         "flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm transition-colors",
-                        checked ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+                        !templateConfigured
+                          ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                          : checked
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
                       ].join(" ")}
                     >
                       <input
                         type="checkbox"
                         className="h-4 w-4 accent-sky-600"
                         checked={checked}
+                        disabled={!templateConfigured}
                         onChange={() =>
                           setBuildSelectedTemplates((prev) => {
                             const next = new Set(prev);
@@ -1369,6 +1632,9 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                           <div className="text-xs text-slate-400">
                             {buildMedicaid === "yes" ? "Payer variant" : "Non-payer variant"}
                           </div>
+                        )}
+                        {!templateConfigured && (
+                          <div className="text-xs text-amber-600">Template ID not configured</div>
                         )}
                       </div>
                     </label>
@@ -1387,7 +1653,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                       {sub}
                       <button
                         type="button"
-                        className="text-slate-400 hover:text-red-500 ml-0.5"
+                        className="ml-0.5 text-slate-400 hover:text-red-500"
                         onClick={() => setBuildSubfolders((prev) => prev.filter((s) => s !== sub))}
                       >
                         ✕
@@ -1430,14 +1696,13 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            {/* Duplicate check notice */}
             {folderIndexQ.isLoading && (
               <div className="text-xs text-slate-400">Checking index for existing folders…</div>
             )}
           </div>
         )}
 
-        {/* Link existing */}
+        {/* Link existing section */}
         {folderMode === "link" && (
           <div className="space-y-4 rounded-[22px] border border-slate-200 bg-white p-4">
             {folderIndexQ.isLoading ? (
@@ -1615,6 +1880,35 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        <div className="mt-5 rounded-[22px] border border-white/70 bg-white/70 p-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Build status</div>
+            <div className="text-xs font-medium text-slate-600">{flowSafetyNote}</div>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+            {(flowMilestones.length ? flowMilestones : fallbackMilestones()).map((item) => (
+              <div
+                key={item.key}
+                className={[
+                  "rounded-2xl border px-3 py-2.5 transition-colors",
+                  milestoneClasses(item.state),
+                ].join(" ")}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={["h-2.5 w-2.5 shrink-0 rounded-full", milestoneDotClasses(item.state)].join(" ")} />
+                    <span className="truncate text-sm font-semibold">{item.label}</span>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                    {milestoneStatusText(item.state)}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs opacity-80">{item.note}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-6 flex flex-wrap gap-2">
           {FLOW_STEPS.map((item) => (
             <div
@@ -1665,6 +1959,64 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         }}
         onClose={onClose}
       />
+
+      {showDupeModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-1 text-base font-bold text-slate-900">Possible existing client folders</div>
+            <p className="mb-4 text-sm text-slate-500">
+              We found folders that may match this client. Review them before building a new one.
+            </p>
+            <div className="max-h-64 space-y-2 overflow-y-auto">
+              {folderDupes.map((f) => (
+                <div key={f.id} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{f.name}</div>
+                    <div className="text-xs text-slate-400">
+                      {f.status}{f.cwid ? ` · CWID: ${f.cwid}` : ""}
+                      {f.createdTime ? ` · Created ${new Date(f.createdTime).toLocaleDateString()}` : ""}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <a href={f.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-xs text-sky-700">
+                      Open
+                    </a>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => {
+                        setFolderMode("link");
+                        setFolderUrl(f.id);
+                        setFolderAlias(f.name || "");
+                        setShowDupeModal(false);
+                        setDupeDismissed(true);
+                      }}
+                    >
+                      Use this
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 flex items-center justify-between">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm text-slate-500"
+                onClick={() => { setShowDupeModal(false); setDupeDismissed(true); setFolderMode("none"); }}
+              >
+                Abort — skip folder
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setShowDupeModal(false); setDupeDismissed(true); }}
+              >
+                Build new anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <PaymentScheduleBuilderDialog
         open={paymentBuilderOpen}

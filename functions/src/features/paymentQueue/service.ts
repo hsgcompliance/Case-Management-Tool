@@ -427,7 +427,12 @@ async function assertQueueGrantLineItem(item: TPaymentQueueItem): Promise<void> 
 
   // Both are required before posting to ledger — an unclassified item cannot
   // update grant budget totals and will silently leave the grant balance wrong.
-  if (!grantId || !lineItemId) throw new Error('grant_and_lineitem_required_before_posting');
+  if (!grantId && !lineItemId) {
+    if (item.okUnassigned === true) return;
+    throw new Error('grant_classification_or_no_grant_required_before_posting');
+  }
+  if (!grantId && lineItemId) throw new Error('grant_required_for_line_item');
+  if (grantId && !lineItemId) throw new Error('line_item_required_for_grant_posting');
 
   const grantSnap = await db.collection('grants').doc(grantId).get();
   if (!grantSnap.exists) throw new Error('grant_not_found');
@@ -711,8 +716,25 @@ export async function postPaymentQueueToLedger(
       'system.lastWriteAt': now,
     }) as any);
 
-    const updatedSnap = await trx.get(ref);
-    return {queueItem: docToItem(updatedSnap), ledgerEntryId};
+    return {
+      queueItem: {
+        ...item,
+        queueStatus: 'posted',
+        ledgerEntryId,
+        postedAt: now,
+        postedBy: actor,
+        reopenedAt: null,
+        reopenedBy: null,
+        reopenReason: null,
+        updatedAtISO: now,
+        system: {
+          ...(item.system || {}),
+          lastWriter: FN,
+          lastWriteAt: now,
+        },
+      } as TPaymentQueueItem,
+      ledgerEntryId,
+    };
   });
 
   // Update per-customer cap tracking outside the ledger transaction (best-effort, non-blocking)
@@ -866,8 +888,26 @@ export async function reopenPaymentQueueItem(
       'system.lastWriteAt': now,
     }) as any);
 
-    const updatedSnap = await trx.get(ref);
-    return {queueItem: docToItem(updatedSnap), reversalEntryId: String(reversal.id || '')};
+    return {
+      queueItem: {
+        ...item,
+        queueStatus: 'pending',
+        reversalEntryId: String(reversal.id || ''),
+        reopenedAt: now,
+        reopenedBy: actor,
+        reopenReason: body.reason ? String(body.reason).trim() : null,
+        ledgerEntryId: null,
+        postedAt: null,
+        postedBy: null,
+        updatedAtISO: now,
+        system: {
+          ...(item.system || {}),
+          lastWriter: FN,
+          lastWriteAt: now,
+        },
+      } as TPaymentQueueItem,
+      reversalEntryId: String(reversal.id || ''),
+    };
   });
 
   if (txResult && item.grantId && item.customerId && item.amount !== 0) {

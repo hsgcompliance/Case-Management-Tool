@@ -28,6 +28,11 @@ async function getOAuth2() {
   return oauth2;
 }
 
+function encodeHeaderValue(value: string): string {
+  const text = String(value || "");
+  return /^[\x00-\x7F]*$/.test(text) ? text : `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=`;
+}
+
 export async function sendHtmlEmail(args: {
   from?: string; // make optional; we’ll default from params
   to: string;
@@ -47,7 +52,7 @@ export async function sendHtmlEmail(args: {
       `Reply-To: ${fromAddr}\r\n` +
       `List-Unsubscribe: <mailto:${fromAddr}?subject=unsubscribe>\r\n` +
       `To: ${args.to}\r\n` +
-      `Subject: ${args.subject}\r\n` +
+      `Subject: ${encodeHeaderValue(args.subject)}\r\n` +
       "MIME-Version: 1.0\r\n" +
       'Content-Type: text/html; charset="UTF-8"\r\n\r\n' +
       args.html

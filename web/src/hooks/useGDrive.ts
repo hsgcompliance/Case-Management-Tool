@@ -6,7 +6,8 @@ import type { TCustomerFolder, TGDriveBuildCustomerFolderBody, TGDriveOrgConfig,
 import { qk } from './queryKeys';
 import { RQ_DEFAULTS } from './base';
 import { useInvalidateMutation } from './optimistic';
-import { ACTIVE_PARENT_ID, EXITED_PARENT_ID } from '@lib/driveConfig';
+import { ACTIVE_PARENT_ID, EXITED_PARENT_ID, FOLDER_INDEX_SHEET_ID, APPS_SCRIPT_EXEC_URL } from '@lib/driveConfig';
+import { getGoogleDriveAccessToken } from '@lib/googleDriveAccessToken';
 
 const INDEX_STALE_MS = 20 * 60_000; // 20 min - index changes infrequently
 
@@ -138,6 +139,87 @@ export function useGDriveConfigPatch() {
 export function useGDriveCustomerFolderSync() {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => GDrive.customerFolderSync(body),
+  });
+}
+
+// ── Sheets-based folder index ─────────────────────────────────────────────────
+
+// Column order from Apps Script INDEX_HEADERS:
+// ['FUNC','Folder Name','First','Last','Folder URL','Folder ID','CWID','Status','Result','Created At']
+const SC = { NAME: 1, FIRST: 2, LAST: 3, URL: 4, ID: 5, CWID: 6, STATUS: 7, CREATED: 9 } as const;
+
+function parseSheetRows(values: string[][]): TCustomerFolder[] {
+  const [, ...rows] = values; // skip header
+  return rows
+    .filter((r) => r[SC.ID])
+    .map((r) => ({
+      id: r[SC.ID] ?? "",
+      name: r[SC.NAME] ?? "",
+      url: r[SC.URL] ?? "",
+      first: r[SC.FIRST] || null,
+      last: r[SC.LAST] || null,
+      cwid: r[SC.CWID] || null,
+      status: (r[SC.STATUS]?.toUpperCase() === "ACTIVE" ? "active" : "exited") as "active" | "exited",
+      createdTime: r[SC.CREATED] || null,
+    }));
+}
+
+async function sheetsApiFetch(path: string, token: string) {
+  const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) throw new Error(`Sheets API ${resp.status}`);
+  return resp.json();
+}
+
+async function appsScriptFetch(route: string, params: Record<string, string>, token: string) {
+  const qs = new URLSearchParams({ route, ...params }).toString();
+  const resp = await fetch(`${APPS_SCRIPT_EXEC_URL}?${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    redirect: "follow",
+  });
+  if (!resp.ok) throw new Error(`Apps Script ${resp.status}`);
+  return resp.json();
+}
+
+export function useSheetCustomerFolderIndex(opts?: { enabled?: boolean; staleTime?: number }) {
+  const enabled = (opts?.enabled ?? true) && !!FOLDER_INDEX_SHEET_ID;
+  return useQuery<{ ok: boolean; folders: TCustomerFolder[] }>({
+    ...RQ_DEFAULTS,
+    enabled,
+    retry: false,
+    queryKey: qk.gdrive.sheetFolderIndex(),
+    queryFn: async () => {
+      const token = getGoogleDriveAccessToken();
+      if (!token) throw new Error("No Google access token");
+      const json = await sheetsApiFetch(`${FOLDER_INDEX_SHEET_ID}/values/index`, token) as { values?: string[][] };
+      return { ok: true, folders: parseSheetRows(json.values ?? []) };
+    },
+    staleTime: opts?.staleTime ?? 5 * 60_000,
+  });
+}
+
+export function useSheetArchiveClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (folderId: string) => {
+      const token = getGoogleDriveAccessToken();
+      if (!token) throw new Error("No Google access token");
+      return appsScriptFetch("archiveClient", { folderId }, token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() }),
+  });
+}
+
+export function useSheetUnarchiveClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (folderId: string) => {
+      const token = getGoogleDriveAccessToken();
+      if (!token) throw new Error("No Google access token");
+      return appsScriptFetch("unarchiveClient", { folderId }, token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() }),
   });
 }
 

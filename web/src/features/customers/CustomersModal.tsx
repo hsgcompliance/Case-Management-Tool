@@ -7,8 +7,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@entities/ui/Modal";
 import { useAuth } from "@app/auth/AuthProvider";
 import { isViewerLike } from "@lib/roles";
-import { useCustomer, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
-import { useGDriveCustomerFolderSync } from "@hooks/useGDrive";
+import { useCustomer, usePatchCustomers, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
+import { useSheetArchiveClient, useSheetUnarchiveClient } from "@hooks/useGDrive";
 import { qk } from "@hooks/queryKeys";
 import type { CustomersUpsertReq } from "@types";
 
@@ -160,11 +160,18 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
   }, [creating, loadingDetail, detail]);
 
   const upsert = useUpsertCustomers();
+  const patchCustomer = usePatchCustomers();
   const setCustomerActive = useSetCustomerActive();
   const softDeleteCustomer = useSoftDeleteCustomers();
-  const folderSync = useGDriveCustomerFolderSync();
+  const archiveClient = useSheetArchiveClient();
+  const unarchiveClient = useSheetUnarchiveClient();
   const saving = upsert.isPending;
   const [archivePrompt, setArchivePrompt] = React.useState<{ nextActive: boolean } | null>(null);
+  const [folderArchiveError, setFolderArchiveError] = React.useState<{
+    message: string;
+    folderId: string;
+    nextActive: boolean;
+  } | null>(null);
 
   const resetToServer = () => {
     if (creating) setModel({ status: "active" });
@@ -182,23 +189,75 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
 
   const applyCustomerActiveToggle = async (nextActive: boolean, syncFolder: boolean) => {
     setError(null);
+    setFolderArchiveError(null);
     setModel((prev) => applyActiveState(prev as Record<string, unknown>, nextActive));
 
     if (creating || !customerIdStr) return;
 
+    // Phase 1: Update customer status — must succeed.
     try {
       await setCustomerActive.mutateAsync({ id: customerIdStr, active: nextActive });
-      if (syncFolder) {
-        await folderSync.mutateAsync({
-          mode: "setFolderState",
-          customerId: customerIdStr,
-          active: nextActive,
-          apply: true,
-        });
-      }
     } catch (e: unknown) {
       if (detail) setModel(clone(detail));
       setError(e instanceof Error ? e.message : "Status update failed. Please try again.");
+      return;
+    }
+
+    if (!syncFolder) return;
+
+    // Phase 2: Sync Drive folder via Apps Script index sheet.
+    // Customer is already updated — a folder failure surfaces a retry toast, not a rollback.
+    const folderId =
+      (detail as any)?.meta?.driveFolderId ||
+      (detail as any)?.driveFolderId ||
+      (detail as any)?.meta?.driveFolders?.[0]?.id ||
+      (detail as any)?.driveFolders?.[0]?.id ||
+      null;
+
+    if (!folderId) {
+      setFolderArchiveError({
+        message: "No linked Drive folder found on this record. Link one from the Files tab.",
+        folderId: "",
+        nextActive,
+      });
+      return;
+    }
+
+    try {
+      if (nextActive) {
+        await unarchiveClient.mutateAsync(folderId);
+      } else {
+        await archiveClient.mutateAsync(folderId);
+      }
+    } catch {
+      setFolderArchiveError({
+        message: nextActive
+          ? "Customer restored — Drive folder unarchive failed. Use Retry or sync from Customer Folders."
+          : "Customer archived — Drive folder archive failed. Use Retry or sync from Customer Folders.",
+        folderId,
+        nextActive,
+      });
+    }
+  };
+
+  const retryFolderArchive = async () => {
+    if (!folderArchiveError?.folderId) { setFolderArchiveError(null); return; }
+    const { folderId, nextActive } = folderArchiveError;
+    setFolderArchiveError(null);
+    try {
+      if (nextActive) {
+        await unarchiveClient.mutateAsync(folderId);
+      } else {
+        await archiveClient.mutateAsync(folderId);
+      }
+    } catch {
+      setFolderArchiveError({
+        message: nextActive
+          ? "Unarchive failed again. Try later or sync manually from Customer Folders."
+          : "Archive failed again. Try later or sync manually from Customer Folders.",
+        folderId,
+        nextActive,
+      });
     }
   };
 
@@ -225,6 +284,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
   };
 
   const onSave = async () => {
+    if (isViewer) return;
     setError(null);
     try {
       const safeName =
@@ -271,6 +331,28 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
     }
   };
 
+  const onSaveNotes = async (notes: string) => {
+    if (isViewer) return;
+    if (creating || !customerIdStr) return;
+    const detailMeta =
+      detail && typeof detail === "object" && (detail as Record<string, unknown>).meta && typeof (detail as Record<string, unknown>).meta === "object"
+        ? ((detail as Record<string, unknown>).meta as Record<string, unknown>)
+        : {};
+    const modelMeta =
+      model && typeof model === "object" && model.meta && typeof model.meta === "object"
+        ? (model.meta as Record<string, unknown>)
+        : {};
+    const nextMeta = {
+      ...detailMeta,
+      ...modelMeta,
+      notes: notes.trim() ? notes : null,
+    };
+    await patchCustomer.mutateAsync({
+      id: customerIdStr,
+      patch: { meta: nextMeta },
+    });
+  };
+
   const titleName =
     (typeof model?.fullName === "string" && model.fullName.trim()) ||
     (model?.firstName || model?.lastName
@@ -291,10 +373,13 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
 
   const hasRecord = !!customerId && customerId !== "new";
   const canSave =
+    !isViewer &&
     tab === "details" &&
     (creating || editing) &&
     !saving &&
     !(customerId && loadingDetail);
+  const canEditDetails = tab === "details" && !creating && !isViewer;
+  const detailsBusy = saving || Boolean(customerId && loadingDetail);
 
   const baseline = creating ? { status: "active" } : detail ? detail : {};
   const dirty =
@@ -321,7 +406,16 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
   const modalFooter = (
     <>
       <div className="mr-auto">
-        {/* optional: you can put status/active chips here later */}
+        {canEditDetails && onDelete ? (
+          <button
+            type="button"
+            className="rounded-lg border border-red-300 bg-red-100 px-3 py-1.5 text-sm font-semibold text-slate-950 hover:bg-red-200 disabled:opacity-50"
+            onClick={onDelete}
+            disabled={detailsBusy}
+          >
+            Delete
+          </button>
+        ) : null}
       </div>
 
       <button
@@ -331,8 +425,20 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
         Close
       </button>
 
+      {canEditDetails && !editing ? (
+        <button className="btn btn-sm" onClick={onToggleEdit} disabled={detailsBusy}>
+          Edit
+        </button>
+      ) : null}
+
+      {canEditDetails && editing ? (
+        <button className="btn btn-ghost btn-sm" onClick={onToggleEdit} disabled={detailsBusy}>
+          Cancel
+        </button>
+      ) : null}
+
       <button
-        className="btn btn-sm"
+        className={["btn btn-sm", !creating && !editing ? "hidden" : ""].join(" ")}
         disabled={!canSave}
         onClick={onSave}
         data-tour="customer-detail-save-btn"
@@ -364,9 +470,29 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                 Use Edit to update details, then save changes.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canEditDetails && onDelete ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-red-300 bg-red-100 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-red-200 disabled:opacity-50"
+                  onClick={onDelete}
+                  disabled={detailsBusy}
+                >
+                  Delete
+                </button>
+              ) : null}
+              {canEditDetails && !editing ? (
+                <button className="btn btn-sm" onClick={onToggleEdit} disabled={detailsBusy}>
+                  Edit
+                </button>
+              ) : null}
+              {canEditDetails && editing ? (
+                <button className="btn btn-ghost btn-sm" onClick={onToggleEdit} disabled={detailsBusy}>
+                  Cancel
+                </button>
+              ) : null}
               <button
-                className="btn btn-sm"
+                className={["btn btn-sm", !creating && !editing ? "hidden" : ""].join(" ")}
                 disabled={!canSave}
                 onClick={onSave}
                 title={!canSave && tab !== "details" ? "Save is only on Details tab" : undefined}
@@ -416,10 +542,10 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                 editing={editing}
                 model={model}
                 setModel={setModel}
-                onToggleEdit={!creating && !isViewer ? onToggleEdit : undefined}
-                onDelete={!creating && !isViewer ? onDelete : undefined}
                 onToggleActive={onToggleActive}
-                statusBusy={setCustomerActive.isPending || folderSync.isPending}
+                statusBusy={setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending}
+                onSaveNotes={!creating && !isViewer ? onSaveNotes : undefined}
+                notesSaving={patchCustomer.isPending}
               />
             )}
             {tab === "enrollments" && hasRecord && <EnrollmentsTab customerId={customerId!} />}
@@ -432,6 +558,26 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
         )}
       </div>
 
+      {folderArchiveError ? (
+        <div className="fixed bottom-6 right-6 z-[85] flex max-w-sm items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-xl">
+          <span className="mt-0.5 shrink-0 text-amber-500">⚠</span>
+          <div className="flex-1">
+            <p className="text-sm text-amber-800">{folderArchiveError.message}</p>
+            {folderArchiveError.folderId && (
+              <button
+                type="button"
+                className="mt-1.5 text-xs font-semibold text-amber-700 underline hover:text-amber-900 disabled:opacity-50"
+                onClick={() => void retryFolderArchive()}
+                disabled={archiveClient.isPending || unarchiveClient.isPending}
+              >
+                {archiveClient.isPending || unarchiveClient.isPending ? "Retrying…" : "Retry folder sync"}
+              </button>
+            )}
+          </div>
+          <button type="button" className="shrink-0 text-amber-400 hover:text-amber-700" onClick={() => setFolderArchiveError(null)}>✕</button>
+        </div>
+      ) : null}
+
       {archivePrompt ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
@@ -439,14 +585,14 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
               {archivePrompt.nextActive ? "Unarchive Customer Folder?" : "Archive Customer Folder?"}
             </div>
             <p className="mt-2 text-sm text-slate-600">
-              This updates the customer folder index sheet so the daily trigger can keep Drive in sync.
+              This will also update the Drive folder index sheet to reflect the new status.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
                 onClick={() => setArchivePrompt(null)}
-                disabled={setCustomerActive.isPending || folderSync.isPending}
+                disabled={setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending}
               >
                 Cancel
               </button>
@@ -458,7 +604,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                   setArchivePrompt(null);
                   void applyCustomerActiveToggle(nextActive, false);
                 }}
-                disabled={setCustomerActive.isPending || folderSync.isPending}
+                disabled={setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending}
               >
                 No
               </button>
@@ -471,7 +617,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                   setArchivePrompt(null);
                   void applyCustomerActiveToggle(nextActive, true);
                 }}
-                disabled={setCustomerActive.isPending || folderSync.isPending}
+                disabled={setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending}
               >
                 Yes
               </button>

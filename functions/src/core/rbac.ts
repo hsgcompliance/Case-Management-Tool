@@ -14,12 +14,13 @@ export type Claims = {
   caps?: string[];
 };
 
-export type RoleLevel = "public" | "authed" | "user" | "admin" | "dev";
+export type RoleLevel = "public" | "authed" | "viewer" | "user" | "admin" | "dev";
 
 /** Canonical ladder roles (normalized). */
 const TOP_ROLES = {
   UNVERIFIED: normTok("unverified"),
   PUBLIC_USER: normTok("public_user"),
+  VIEWER: normTok("viewer"),
   USER: normTok("user"),
   ADMIN: normTok("admin"),
   DEV: normTok("dev"),
@@ -30,6 +31,7 @@ const TOP_ROLES = {
 const LADDER_SET = new Set<string>([
   TOP_ROLES.UNVERIFIED,
   TOP_ROLES.PUBLIC_USER,
+  TOP_ROLES.VIEWER,
   TOP_ROLES.USER,
   TOP_ROLES.ADMIN,
   TOP_ROLES.DEV,
@@ -130,9 +132,10 @@ export function isVerified(c: Claims) {
 const LEVEL_RANK: Record<RoleLevel, number> = {
   public: 0,
   authed: 1,
-  user: 2,
-  admin: 3,
-  dev: 4,
+  viewer: 2,
+  user: 3,
+  admin: 4,
+  dev: 5,
 };
 
 export function roleRankFromClaims(c: Claims): number {
@@ -151,6 +154,8 @@ export function roleRankFromClaims(c: Claims): number {
 
   if (tr === TOP_ROLES.UNVERIFIED || tr === TOP_ROLES.PUBLIC_USER || tr === "")
     return LEVEL_RANK.authed;
+
+  if (tr === TOP_ROLES.VIEWER) return LEVEL_RANK.viewer;
 
   return LEVEL_RANK.user;
 }
@@ -194,6 +199,7 @@ export function hasRole(c: Claims, role: string) {
   if (want === TOP_ROLES.DEV) return hasLevel(c, "dev");
   if (want === TOP_ROLES.ADMIN) return hasLevel(c, "admin");
   if (want === TOP_ROLES.USER) return hasLevel(c, "user");
+  if (want === TOP_ROLES.VIEWER) return hasLevel(c, "viewer");
   if (want === TOP_ROLES.ORG_DEV) return isOrgDev(c) || isSuperDev(c);
   if (want === TOP_ROLES.SUPER_DEV) return isSuperDev(c);
   if (want === TOP_ROLES.UNVERIFIED || want === TOP_ROLES.PUBLIC_USER)

@@ -11,6 +11,10 @@ import PaymentQueue, {
 import { qk } from "./queryKeys";
 import { RQ_DEFAULTS, RQ_DETAIL } from "./base";
 import { useInvalidateMutation } from "./optimistic";
+import {
+  findCachedPaymentQueueItemById,
+  optimisticPostPaymentQueuePatches,
+} from "./paymentQueueOptimistic";
 
 export type {
   PaymentQueueItem,
@@ -76,10 +80,17 @@ export function usePostPaymentQueueToLedger() {
   return useInvalidateMutation({
     queryClient: qc,
     queryKeys: [qk.paymentQueue.root, qk.ledger.root],
+    optimisticPatches: (args, queryClient) => {
+      const item = findCachedPaymentQueueItemById(queryClient, args.id);
+      return optimisticPostPaymentQueuePatches(queryClient, item);
+    },
     mutationFn: (args: { id: string; body?: PaymentQueuePostReq }) =>
       PaymentQueue.postToLedger(args.id, args.body || {}),
     onSuccess: async (_res, vars) => {
-      await qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(vars.id) });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(vars.id) }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+      ]);
     },
   });
 }

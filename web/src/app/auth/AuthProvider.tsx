@@ -141,6 +141,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let unsubAuth: (() => void) | undefined;
+    let unsubId: (() => void) | undefined;
     setBooting(true);
 
     void getRedirectResult(auth)
@@ -149,76 +151,83 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(() => {});
 
-    const unsubAuth = onAuthStateChanged(auth, async (u) => {
+    // Wait for Firebase to finish reading persisted auth state before registering
+    // listeners. Without this, onAuthStateChanged can fire null in a new tab
+    // before the stored user is restored from IndexedDB, causing a false redirect.
+    void auth.authStateReady().then(() => {
       if (cancelled) return;
-      setUser(u);
-      setErr(null);
 
-      if (!u) {
-        clearGoogleDriveAccessToken();
-        assignProfile(null);
-        setBooting(false);
-        return;
-      }
+      unsubAuth = onAuthStateChanged(auth, async (u) => {
+        if (cancelled) return;
+        setUser(u);
+        setErr(null);
 
-      syncGoogleDriveAccessTokenOwner(u.uid);
-
-      try { await u.getIdToken(true); } catch {}
-      try { await appCheckReadyPromise; } catch {}
-
-      try {
-        const me = await fetchProfile("auth-state", /* force */ true, u);
-        const roles: string[] = (me?.roles as string[]) || (me?.role ? [me.role] : []);
-        const role = roles[0] || me?.role;
-        const hasActive = Object.prototype.hasOwnProperty.call(me || {}, "active");
-        const isActive = hasActive ? (me as any)?.active !== false : true;
-        const allowed = role && role !== "unverified" && isActive;
-        if (allowed) {
-          // page-level hooks fetch domain data as needed
-        }
-        } catch (e: any) {
-          setErr(e?.message || "Failed to load profile");
-
-          // DEV BYPASS: if emulator and we have a user, derive a minimal profile so RequireVerified passes
-          const EMU = shouldUseEmulators();
-
-          if (EMU && u) {
-            try {
-              const info = await u.getIdTokenResult(true);
-              const claims: any = info?.claims || {};
-              const rawTop = claims.topRole || (claims.admin ? "admin" : "user");
-              const topRole = String(rawTop || "user").toLowerCase();
-              const roles: string[] =
-                Array.isArray(claims.roles) ? claims.roles :
-                claims.admin ? ["admin"] :
-                claims.role ? [claims.role] : ["staff"];
-
-              assignProfile({
-                uid: u.uid,
-                email: u.email || '',
-                displayName: u.displayName || '',
-                photoURL: u.photoURL || '',
-                roles,
-                role: roles[0],
-                topRole,
-                active: true,
-              });
-              return null; // we’ve set a viable profile
-            } catch {}
-          }
-
+        if (!u) {
+          clearGoogleDriveAccessToken();
           assignProfile(null);
-      } finally {
-        if (!cancelled) setBooting(false);
-      }
+          setBooting(false);
+          return;
+        }
+
+        syncGoogleDriveAccessTokenOwner(u.uid);
+
+        try { await u.getIdToken(true); } catch {}
+        try { await appCheckReadyPromise; } catch {}
+
+        try {
+          const me = await fetchProfile("auth-state", /* force */ true, u);
+          const roles: string[] = (me?.roles as string[]) || (me?.role ? [me.role] : []);
+          const role = roles[0] || me?.role;
+          const hasActive = Object.prototype.hasOwnProperty.call(me || {}, "active");
+          const isActive = hasActive ? (me as any)?.active !== false : true;
+          const allowed = role && role !== "unverified" && isActive;
+          if (allowed) {
+            // page-level hooks fetch domain data as needed
+          }
+          } catch (e: any) {
+            setErr(e?.message || "Failed to load profile");
+
+            // DEV BYPASS: if emulator and we have a user, derive a minimal profile so RequireVerified passes
+            const EMU = shouldUseEmulators();
+
+            if (EMU && u) {
+              try {
+                const info = await u.getIdTokenResult(true);
+                const claims: any = info?.claims || {};
+                const rawTop = claims.topRole || (claims.admin ? "admin" : "user");
+                const topRole = String(rawTop || "user").toLowerCase();
+                const roles: string[] =
+                  Array.isArray(claims.roles) ? claims.roles :
+                  claims.admin ? ["admin"] :
+                  claims.role ? [claims.role] : ["staff"];
+
+                assignProfile({
+                  uid: u.uid,
+                  email: u.email || '',
+                  displayName: u.displayName || '',
+                  photoURL: u.photoURL || '',
+                  roles,
+                  role: roles[0],
+                  topRole,
+                  active: true,
+                });
+                return null; // we've set a viable profile
+              } catch {}
+            }
+
+            assignProfile(null);
+        } finally {
+          if (!cancelled) setBooting(false);
+        }
+      });
+
+      unsubId = onIdTokenChanged(auth, async (u) => {
+        if (!u) return;
+        try { await fetchProfile("id-token-changed"); } catch {}
+      });
     });
 
-    const unsubId = onIdTokenChanged(auth, async (u) => {
-      if (!u) return;
-      try { await fetchProfile("id-token-changed"); } catch {}
-    });
-
-    return () => { cancelled = true; unsubAuth(); unsubId(); };
+    return () => { cancelled = true; unsubAuth?.(); unsubId?.(); };
   }, []);
 
   const signIn = async (email: string, password: string) => {

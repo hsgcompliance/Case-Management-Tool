@@ -1,9 +1,10 @@
 // functions/src/features/inbox/digestRentalAssistance.ts
 // Rental Assistance digest: active assistance grouped by grant, plus ended assistance.
-import {db, isoNow} from '../../core';
+import {db} from '../../core';
 import {sendHtmlEmail} from './emailer';
 import {loadDigestEnrollments} from './digestEnrollmentSource';
 import {computeNextRentCertDue} from './rentCert';
+import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
 const DASHBOARD_LINK = 'https://households-db.web.app/dashboard';
 const BRAND = '#2563EB';
@@ -90,8 +91,8 @@ function fmtDate(d: string): string {
   }
 }
 
-function fmtMoney(cents: number): string {
-  return '$' + (cents / 100).toLocaleString('en-US', {
+function fmtMoney(dollars: number): string {
+  return '$' + Number(dollars || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -133,7 +134,24 @@ function paymentRows(enrollment: Record<string, unknown>) {
 function isActiveEnrollment(row: Record<string, unknown>): boolean {
   const status = String(row.status || '').toLowerCase();
   if (row.deleted === true || status === 'deleted') return false;
+  if (status === 'closed' || row.active === false) return false;
   return row.active === true || status === 'active' || status === 'open';
+}
+
+function isClosedOrDeletedEnrollment(row: Record<string, unknown>): boolean {
+  const status = String(row.status || '').toLowerCase();
+  return row.deleted === true || row.active === false || status === 'deleted' || status === 'closed';
+}
+
+function isDeletedGrant(row: Record<string, unknown>): boolean {
+  const status = String(row.status || '').toLowerCase();
+  return row.deleted === true || status === 'deleted';
+}
+
+function isActiveGrant(row: Record<string, unknown>): boolean {
+  const status = String(row.status || '').toLowerCase();
+  if (isDeletedGrant(row) || status === 'closed') return false;
+  return row.active === true || status === 'active';
 }
 
 function customerName(data: Record<string, unknown>, fallback: string): string {
@@ -197,19 +215,26 @@ export async function buildRentalAssistanceDigestData(opts: {
     if (!customerId || !grantId) continue;
     const customer = customerMap.get(customerId) || {};
     if (customer.active !== true) continue;
+    if (isClosedOrDeletedEnrollment(enrollment)) continue;
     const payments = paymentRows(enrollment);
     if (!payments.length) continue;
 
     const grant = grantMap.get(grantId) || {};
+    if (isDeletedGrant(grant)) continue;
     const grantName = String(enrollment.grantName || grant.name || grant.code || grantId);
     const grantCode = String(grant.code || '');
     const name = String(enrollment.customerName || enrollment.clientName || '').trim() || customerName(customer, customerId);
     const active = isActiveEnrollment(enrollment);
+    const nextPayment = payments.find((payment) => !payment.paid && payment.dueDate >= today) || null;
+    const endDate = String(enrollment.endDate || '').slice(0, 10);
+    const assistanceHasEnded =
+      (isISO(endDate) && endDate < today) ||
+      !nextPayment ||
+      !isActiveGrant(grant);
 
-    if (active) {
+    if (active && !assistanceHasEnded) {
       activeAssistanceByCustomer.add(customerId);
       const due = computeNextRentCertDue([enrollment], {today});
-      const nextPayment = payments.find((payment) => !payment.paid && payment.dueDate >= today) || payments[payments.length - 1];
       const group = groups.get(grantId) || {
         grantId,
         grantName,
@@ -220,12 +245,12 @@ export async function buildRentalAssistanceDigestData(opts: {
       group.rows.push({
         customerName: name,
         startDate: String(enrollment.startDate || ''),
-        endDate: String(enrollment.endDate || ''),
-        paymentAmount: fmtMoney(Math.round(nextPayment.amount * 100)),
+        endDate,
+        paymentAmount: fmtMoney(nextPayment.amount),
         nextRentCertDate: due ? fmtDate(due.dueDate) : 'N/A',
       });
       groups.set(grantId, group);
-    } else {
+    } else if (active) {
       const paidPayments = payments.filter((payment) => payment.paid);
       const lastPayment = (paidPayments.length ? paidPayments : payments)
           .sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
@@ -388,17 +413,22 @@ export function buildRentalAssistanceDigestHtml(data: RentalAssistanceDigestData
 
 export async function buildAndSendRentalAssistanceDigest(
     to: string,
-    opts: { month: string; forUid?: string; recipientName?: string },
+    opts: { month: string; forUid?: string; recipientName?: string; force?: boolean },
 ): Promise<{ ok: boolean; skipped?: boolean }> {
   const key = `digest_rentalAssistance_${opts.month}_${to.toLowerCase()}`;
-  const logRef = db.collection('emailLogs').doc(key);
-  if ((await logRef.get()).exists) return {ok: true, skipped: true};
+  const reserved = await reserveDigestSend(key, {to, month: opts.month, digestType: 'rentalAssistance'}, {force: opts.force});
+  if (!reserved) return {ok: true, skipped: true};
 
-  const data = await buildRentalAssistanceDigestData(opts);
-  const html = buildRentalAssistanceDigestHtml(data);
-  const subject = `Rental Assistance Digest - ${monthLabel(opts.month)} (${data.groups.reduce((sum, group) => sum + group.rows.length, 0)} active)`;
+  try {
+    const data = await buildRentalAssistanceDigestData(opts);
+    const html = buildRentalAssistanceDigestHtml(data);
+    const subject = `Rental Assistance Digest - ${monthLabel(opts.month)} (${data.groups.reduce((sum, group) => sum + group.rows.length, 0)} active)`;
 
-  const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html});
-  await logRef.set({id: sent.id || null, to, month: opts.month, subject, createdAt: isoNow()}, {merge: true});
-  return sent;
+    const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html});
+    await markDigestSent(key, {id: sent.id || null, to, month: opts.month, subject, digestType: 'rentalAssistance'});
+    return sent;
+  } catch (error: unknown) {
+    await markDigestFailed(key, error, {to, month: opts.month, digestType: 'rentalAssistance'});
+    throw error;
+  }
 }

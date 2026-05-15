@@ -79,6 +79,11 @@ function asMaybeString(v: unknown): string | null {
   return s ? s : null;
 }
 
+function asPaymentType(v: unknown): "monthly" | "deposit" | "prorated" | "service" | null {
+  const s = String(v || "").trim().toLowerCase();
+  return s === "monthly" || s === "deposit" || s === "prorated" || s === "service" ? s : null;
+}
+
 // ------------------------------------
 // 1) Adjust a past spend (paid payment)
 // ------------------------------------
@@ -90,6 +95,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
 
   const { enrollmentId, spendId, paymentId: paymentIdHint, patch, reason } =
     parsed.data as TPaymentsAdjustSpendBody;
+  const patchWithType = patch as typeof patch & { type?: unknown };
 
   const user: any = (req as any)?.user || {};
   let uid = "";
@@ -176,6 +182,13 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         throw new Error("Invalid patch.amount");
       }
       const nextAmountCents = toCents(nextAmount);
+      const nextType =
+        patchWithType.type != null
+          ? asPaymentType(patchWithType.type)
+          : asPaymentType(oldSpend?.paymentSnapshot?.type);
+      if (patchWithType.type != null && !nextType) {
+        throw new Error("Invalid patch.type");
+      }
 
       const nextLineItemId =
         patch.lineItemId != null ? String(patch.lineItemId) : oldLineItemId;
@@ -215,6 +228,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         nextAmountCents === oldAmtCents &&
         nextLineItemId === oldLineItemId &&
         nextDueDateISO === oldDueDateISO &&
+        asMaybeString(nextType) === asMaybeString(oldSpend?.paymentSnapshot?.type) &&
         asMaybeString(nextVendor) === asMaybeString(oldSpend?.paymentSnapshot?.vendor) &&
         asMaybeString(nextComment) === asMaybeString(oldSpend?.paymentSnapshot?.comment) &&
         JSON.stringify(mergedNote) === JSON.stringify(oldNoteArr);
@@ -251,6 +265,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         nextAmountCents,
         nextLineItemId,
         nextDueDateISO,
+        nextType || "",
         asMaybeString(nextVendor) || "",
         asMaybeString(nextComment) || "",
         mergedNote.join("|"),
@@ -294,6 +309,9 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         oldSpend?.paymentLabelAtSpend ??
         `${nextDueDateISO ? `${nextDueDateISO} · ` : ""}${String(prevPay?.type || oldSpend?.paymentSnapshot?.type || "payment")}`;
 
+      const nextPaymentLabelAtSpend =
+        `${nextDueDateISO ? `${nextDueDateISO} - ` : ""}${String(nextType || prevPay?.type || oldSpend?.paymentSnapshot?.type || "payment")}`;
+
       // ---- ledger: write reversal + new corrected entry (append-only truth) ----
       const tsNow = Timestamp.now();
 
@@ -334,7 +352,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         grantNameAtSpend: oldSpend?.grantNameAtSpend ?? null,
         lineItemLabelAtSpend: oldSpend?.lineItemLabelAtSpend ?? null,
         customerNameAtSpend: fallbackCustomerNameAtSpend,
-        paymentLabelAtSpend: oldSpend?.paymentLabelAtSpend ?? fallbackPaymentLabelAtSpend,
+        paymentLabelAtSpend: fallbackPaymentLabelAtSpend,
 
         createdAt: tsNow,
         updatedAt: tsNow,
@@ -380,7 +398,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
           nextLI?.id ||
           null,
         customerNameAtSpend: fallbackCustomerNameAtSpend,
-        paymentLabelAtSpend: oldSpend?.paymentLabelAtSpend ?? fallbackPaymentLabelAtSpend,
+        paymentLabelAtSpend: nextPaymentLabelAtSpend,
 
         createdAt: tsNow,
         updatedAt: tsNow,
@@ -396,13 +414,14 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         lineItemId: nextLineItemId,
         dueDate: nextDueDateISO,
         customerNameAtSpend: fallbackCustomerNameAtSpend,
-        paymentLabelAtSpend: oldSpend?.paymentLabelAtSpend ?? fallbackPaymentLabelAtSpend,
+        paymentLabelAtSpend: nextPaymentLabelAtSpend,
 
         note: mergedNote.length ? mergedNote : oldSpend?.note,
 
         paymentSnapshot: {
           ...(oldSpend?.paymentSnapshot || {}),
           amount: nextAmountCents / 100,
+          ...(nextType ? { type: nextType } : {}),
           lineItemId: nextLineItemId,
           dueDate: nextDueDateISO,
           ...(patch.vendor !== undefined ? { vendor: nextVendor } : {}),
@@ -422,6 +441,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
               arr[paymentIdx] = removeUndefinedDeep({
                 ...prevPay,
                 amount: nextAmountCents / 100,
+                ...(nextType ? { type: nextType } : {}),
                 lineItemId: nextLineItemId,
                 dueDate: nextDueDateISO,
                 ...(patch.vendor !== undefined ? { vendor: nextVendor } : {}),

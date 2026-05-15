@@ -1,6 +1,7 @@
 // web/src/features/budget/BudgetPage.tsx
 "use client";
 import React, { useMemo, useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toApiError } from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
@@ -14,7 +15,7 @@ import { useOrgConfig } from "@hooks/useOrgConfig";
 import { useCreditCards } from "@hooks/useCreditCards";
 import { useSyncJotformSelection } from "@hooks/useJotform";
 import { qk } from "@hooks/queryKeys";
-import { hasAnyRole, isAdminLike } from "@lib/roles";
+import { hasAnyRole, isAdminLike, isViewerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import type { CreditCardEntity, CreditCardSummaryItem, TGrant as Grant } from "@types";
@@ -34,6 +35,15 @@ const isVisible = (g?: Partial<Grant> | null) =>
 
 const isGrant = (g: Partial<Grant>) =>
   String(g?.kind || "").toLowerCase() !== "program";
+
+const RENTAL_ASSISTANCE_TAG = "rental-assistance";
+
+function hasRentalAssistanceTag(g: Partial<Grant>) {
+  const tags = Array.isArray((g as Record<string, unknown>).tags)
+    ? ((g as Record<string, unknown>).tags as unknown[])
+    : [];
+  return tags.some((tag) => String(tag || "").trim().toLowerCase() === RENTAL_ASSISTANCE_TAG);
+}
 
 // ─── Grouping logic ───────────────────────────────────────────────────────────
 
@@ -56,6 +66,9 @@ function buildSections(
       .filter((g) => hiddenItems[String(g.id)]?.visible !== false)
       .map((g) => String(g.id)),
   );
+  const rentalAssistanceItems = grantsList
+    .filter((g) => visibleIds.has(String(g.id)) && isGrant(g) && hasRentalAssistanceTag(g))
+    .map((g) => ({ id: `${String(g.id)}::rental-assistance`, grantId: String(g.id) }));
 
   // "All Grants" flat view — ignore config groups
   if (viewMode === "all") {
@@ -86,19 +99,28 @@ function buildSections(
           String(g.id).toLowerCase().includes(searchLower),
       );
     }
-    return {
-      grantsById,
-      sections: visible.length > 0
-        ? [{ key: "_all", label: "All Grants", color: undefined, cols: 3,
-            items: visible.map((g) => ({ id: String(g.id), grantId: String(g.id) })) }]
-        : [],
-    };
+    const allItems = visible.map((g) => ({ id: String(g.id), grantId: String(g.id) }));
+    const sections = [
+      ...(rentalAssistanceItems.length > 0 && !searchLower
+        ? [{ key: RENTAL_ASSISTANCE_TAG, label: "Rental Assistance", color: "emerald", cols: 3, items: rentalAssistanceItems }]
+        : []),
+      ...(allItems.length > 0
+        ? [{ key: "_all", label: "All Grants", color: undefined, cols: 3, items: allItems }]
+        : []),
+    ];
+    return { grantsById, sections };
   }
 
   const sections = groups
     .filter((grp) => !grp.hidden)
     .map((grp) => {
       let items = grp.items.filter((item) => visibleIds.has(item.grantId));
+      if (grp.key === RENTAL_ASSISTANCE_TAG) {
+        const configuredGrantItems = items.filter((item) => !item.lineItemId);
+        const configuredIds = new Set(configuredGrantItems.map((item) => item.grantId));
+        const taggedExtras = rentalAssistanceItems.filter((item) => !configuredIds.has(item.grantId));
+        items = [...configuredGrantItems, ...taggedExtras];
+      }
       if (searchLower) {
         items = items.filter((item) => {
           const g = grantsById.get(item.grantId);
@@ -169,9 +191,11 @@ function cardToSummaryItem(card: CreditCardEntity): CreditCardSummaryItem {
 function CreditCardBudgetSection({
   onNewCard,
   onOpenCard,
+  readOnly = false,
 }: {
   onNewCard: () => void;
   onOpenCard: (card: CreditCardSummaryItem) => void;
+  readOnly?: boolean;
 }) {
   const { data: rawCards = [] } = useCreditCards({ active: true });
   const cards = rawCards.map(cardToSummaryItem);
@@ -187,13 +211,15 @@ function CreditCardBudgetSection({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          className="btn btn-xs btn-secondary"
-          onClick={onNewCard}
-        >
-          + New Card
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="btn btn-xs btn-secondary"
+            onClick={onNewCard}
+          >
+            + New Card
+          </button>
+        )}
       </div>
       {cards.length === 0 ? (
         <p className="text-sm text-slate-400 dark:text-slate-500">No credit cards configured.</p>
@@ -215,6 +241,7 @@ function CreditCardBudgetSection({
 
 export function BudgetPage() {
   const qc = useQueryClient();
+  const searchParams = useSearchParams();
   const { profile } = useAuth();
   const [filter, setFilter] = useState<FilterMode>("active");
   const [viewMode, setViewMode] = useState<ViewMode>("custom");
@@ -229,7 +256,8 @@ export function BudgetPage() {
   const { data: inactiveData = [] } = useGrants({ active: false, limit: 200 });
   const { data: config } = useOrgConfig();
   const syncSpendingForms = useSyncJotformSelection();
-  const canSyncSpendingForms = isAdminLike(profile) || hasAnyRole(profile?.roles, ["compliance", "org_dev", "super_dev"]);
+  const isViewer = isViewerLike(profile);
+  const canSyncSpendingForms = !isViewer && (isAdminLike(profile) || hasAnyRole(profile?.roles, ["compliance", "org_dev", "super_dev"]));
   const autoSyncFired = useRef(false);
 
   const sourceGrants = useMemo(() => {
@@ -246,6 +274,11 @@ export function BudgetPage() {
     () => buildSections(sourceGrants, config, search, viewMode),
     [sourceGrants, config, search, viewMode],
   );
+  const queryGrantId = String(searchParams?.get("grantId") || "").trim();
+
+  useEffect(() => {
+    if (queryGrantId) setSelectedGrantId(queryGrantId);
+  }, [queryGrantId]);
 
   const totalCount = sourceGrants.length;
   const hasConfig = (config?.budgetDisplay.groups ?? []).length > 0;
@@ -334,21 +367,25 @@ export function BudgetPage() {
                   All Grants ({totalCount})
                 </button>
               </div>
-              <button
-                type="button"
-                className="btn btn-xs btn-secondary"
-                onClick={() => setCreatingGrant(true)}
-              >
-                + New Grant
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setConfigOpen(true)}
-                title="Configure budget layout"
-              >
-                ⚙ Configure
-              </button>
+              {!isViewer && (
+                <button
+                  type="button"
+                  className="btn btn-xs btn-secondary"
+                  onClick={() => setCreatingGrant(true)}
+                >
+                  + New Grant
+                </button>
+              )}
+              {!isViewer && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setConfigOpen(true)}
+                  title="Configure budget layout"
+                >
+                  ⚙ Configure
+                </button>
+              )}
               <RefreshButton queryKeys={[qk.grants.root]} label="Refresh" onRefresh={onRefresh} />
               {syncSpendingForms.isPending && (
                 <span className="text-xs text-slate-400 dark:text-slate-500 animate-pulse">Syncing card data…</span>
@@ -360,6 +397,7 @@ export function BudgetPage() {
           <CreditCardBudgetSection
             onNewCard={() => setNewCardOpen(true)}
             onOpenCard={(card) => setSelectedCreditCard(card)}
+            readOnly={isViewer}
           />
 
           {/* Pinned grants */}
@@ -404,7 +442,7 @@ export function BudgetPage() {
                   ? "No budget groups configured yet."
                   : "No grants found."}
               </p>
-              {!search.trim() && viewMode === "custom" && !hasConfig && (
+              {!isViewer && !search.trim() && viewMode === "custom" && !hasConfig && (
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"

@@ -87,6 +87,8 @@ type DragPayload =
   | { type: "grant"; grantId: string }
   | { type: "lineItem"; grantId: string; lineItemId: string };
 
+const RENTAL_ASSISTANCE_GROUP_KEY = "rental-assistance";
+
 function encodeDrag(p: DragPayload): string {
   return JSON.stringify(p);
 }
@@ -405,6 +407,7 @@ function GroupBucket({
     const raw = e.dataTransfer.getData("text/plain");
     const payload = decodeDrag(raw);
     if (!payload) return;
+    if (group.key === RENTAL_ASSISTANCE_GROUP_KEY && payload.type !== "grant") return;
 
     const newItem: BudgetGroupItem = {
       id: makeItemId(payload.grantId, payload.type === "lineItem" ? payload.lineItemId : undefined),
@@ -511,7 +514,7 @@ function GroupBucket({
       <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5 min-h-[80px]">
         {group.items.length === 0 && !dragOver && (
           <div className="flex h-full min-h-[60px] items-center justify-center text-[11px] text-slate-400 dark:text-slate-600 italic">
-            Drop grants or line items here
+            {group.key === RENTAL_ASSISTANCE_GROUP_KEY ? "Drop grants here" : "Drop grants or line items here"}
           </div>
         )}
 

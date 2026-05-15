@@ -19,14 +19,28 @@ import { useAuth } from "@app/auth/AuthProvider";
 import Inbox from "@client/inbox";
 
 const PAGE_SIZE = 50;
-const TAGS = ["casemanager", "compliance", "viewer"] as const;
+const TAGS = ["casemanager", "compliance"] as const;
 type Tag = (typeof TAGS)[number];
+type ManagedTopRole = "viewer" | "user" | "admin" | "dev" | "org_dev" | "super_dev";
+
+const ROLE_OPTIONS: Array<{ value: ManagedTopRole; label: string; rank: number }> = [
+  { value: "viewer", label: "Viewer", rank: 1 },
+  { value: "user", label: "User", rank: 2 },
+  { value: "admin", label: "Admin", rank: 3 },
+  { value: "dev", label: "Dev", rank: 4 },
+  { value: "super_dev", label: "Super Dev", rank: 5 },
+];
+
+function topRoleRank(role: string) {
+  if (role === "org_dev") return 4;
+  return ROLE_OPTIONS.find((opt) => opt.value === role)?.rank ?? 0;
+}
 
 function normalizeTags(input: unknown): Tag[] {
   const raw = Array.isArray(input) ? input : [];
   const out = raw
     .map((x) => String(x || "").toLowerCase())
-    .filter((x): x is Tag => x === "casemanager" || x === "compliance" || x === "viewer");
+    .filter((x): x is Tag => x === "casemanager" || x === "compliance");
   return Array.from(new Set(out));
 }
 
@@ -42,6 +56,7 @@ function isPendingApproval(u: CompositeUser): boolean {
 }
 
 function roleBadgeClass(topRole: string) {
+  if (topRole === "viewer") return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-300";
   if (topRole === "admin") return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300";
   if (topRole === "user") return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-900/20 dark:text-sky-300";
   if (topRole === "unverified" || topRole === "public_user") return "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-300";
@@ -82,9 +97,13 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
 export default function AdminUsersPage() {
   const { user: authedUser, profile } = useAuth();
   const viewerTopRole = String(profile?.topRole || "").toLowerCase();
+  const viewerRank = topRoleRank(viewerTopRole);
   const canCrossOrgManage =
     viewerTopRole === "dev" || viewerTopRole === "org_dev" || viewerTopRole === "super_dev";
-  const canGrantSuperDev = viewerTopRole === "super_dev";
+  const assignableRoles = React.useMemo(
+    () => ROLE_OPTIONS.filter((opt) => opt.rank <= viewerRank),
+    [viewerRank],
+  );
   const [pageToken, setPageToken] = React.useState<string | undefined>(undefined);
   const [stack, setStack] = React.useState<string[]>([]);
   const [status, setStatus] = React.useState<"all" | "active" | "inactive">("all");
@@ -93,7 +112,7 @@ export default function AdminUsersPage() {
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [inviteEmail, setInviteEmail] = React.useState("");
   const [inviteName, setInviteName] = React.useState("");
-  const [inviteTopRole, setInviteTopRole] = React.useState<"user" | "admin" | "dev" | "org_dev" | "super_dev">("user");
+  const [inviteTopRole, setInviteTopRole] = React.useState<ManagedTopRole>("user");
   const [inviteSendEmail, setInviteSendEmail] = React.useState(true);
   const [inviteTags, setInviteTags] = React.useState<Tag[]>(["casemanager"]);
   const [continueUrl, setContinueUrl] = React.useState("");
@@ -202,15 +221,19 @@ export default function AdminUsersPage() {
       toast("Invite email is required.", { type: "error" });
       return;
     }
-    if (inviteTags.length === 0) {
+    if (inviteTopRole !== "viewer" && inviteTags.length === 0) {
       toast("Select at least one role tag.", { type: "error" });
+      return;
+    }
+    if (topRoleRank(inviteTopRole) > viewerRank) {
+      toast("You cannot assign a role above your own rank.", { type: "error" });
       return;
     }
     try {
       const result = await inviteMut.mutateAsync({
         email,
         name: inviteName.trim(),
-        roles: inviteTags,
+        roles: inviteTopRole === "viewer" ? [] : inviteTags,
         topRole: inviteTopRole,
         sendEmail: inviteSendEmail,
         ...(canCrossOrgManage && inviteOrgId.trim() ? { orgId: inviteOrgId.trim() } : {}),
@@ -311,9 +334,9 @@ export default function AdminUsersPage() {
     }
   };
 
-  const setTopRole = async (u: CompositeUser, topRole: "user" | "admin" | "dev" | "org_dev" | "super_dev") => {
+  const setTopRole = async (u: CompositeUser, topRole: ManagedTopRole) => {
     const tags = rowTags[u.uid] || normalizeTags(u.roles);
-    if (tags.length === 0) {
+    if (topRole !== "viewer" && tags.length === 0) {
       toast("Select at least one role tag.", { type: "error" });
       return;
     }
@@ -321,10 +344,14 @@ export default function AdminUsersPage() {
       toast("Use another admin account to change your own top role.", { type: "error" });
       return;
     }
+    if (topRoleRank(topRole) > viewerRank) {
+      toast("You cannot assign a role above your own rank.", { type: "error" });
+      return;
+    }
     try {
       await setRoleMut.mutateAsync({
         uid: u.uid,
-        roles: tags,
+        roles: topRole === "viewer" ? [] : tags,
         topRole,
       } as any);
       toast(`Top role set to ${topRole}.`, { type: "success" });
@@ -413,21 +440,17 @@ export default function AdminUsersPage() {
             />
           </label>
           <label className="text-sm">
-            <span className="text-xs text-slate-600">Role Escalation</span>
+                  <span className="text-xs text-slate-600">Role</span>
             <select
               className="select mt-1"
               value={inviteTopRole}
               onChange={(e) =>
-                setInviteTopRole(
-                  e.currentTarget.value as "user" | "admin" | "dev" | "org_dev" | "super_dev"
-                )
+                setInviteTopRole(e.currentTarget.value as ManagedTopRole)
               }
             >
-              <option value="user">user</option>
-              <option value="admin">admin</option>
-              {canCrossOrgManage && <option value="org_dev">org_dev</option>}
-              {canCrossOrgManage && <option value="dev">dev</option>}
-              {canGrantSuperDev && <option value="super_dev">super_dev</option>}
+              {assignableRoles.map((role) => (
+                <option key={role.value} value={role.value}>{role.label}</option>
+              ))}
             </select>
           </label>
           <label className="text-sm">
@@ -463,7 +486,7 @@ export default function AdminUsersPage() {
           )}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-          {TAGS.map((tag) => (
+          {inviteTopRole !== "viewer" && TAGS.map((tag) => (
             <label key={tag} className="inline-flex items-center gap-2">
               <input type="checkbox" checked={inviteTags.includes(tag)} onChange={() => toggleInviteTag(tag)} />
               <span>{tag}</span>
@@ -696,19 +719,12 @@ export default function AdminUsersPage() {
                       items={[
                         { key: "details", label: "View Details", onSelect: () => openUserDetail(u) },
                         { key: "resend-invite", label: "Send Invite Email Again", onSelect: () => resendInvite(u), disabled: !u.email },
-                        { key: "set-user", label: "Set User", onSelect: () => setTopRole(u, "user"), disabled: !!isSelf(u) },
-                        { key: "set-admin", label: "Escalate Admin", onSelect: () => setTopRole(u, "admin"), disabled: !!isSelf(u) },
-                        ...(canCrossOrgManage
-                          ? [
-                              { key: "set-org-dev", label: "Set org_dev", onSelect: () => setTopRole(u, "org_dev"), disabled: !!isSelf(u) },
-                              { key: "set-dev", label: "Set dev", onSelect: () => setTopRole(u, "dev"), disabled: !!isSelf(u) },
-                            ]
-                          : []),
-                        ...(canGrantSuperDev
-                          ? [
-                              { key: "set-super-dev", label: "Set super_dev", onSelect: () => setTopRole(u, "super_dev"), disabled: !!isSelf(u) },
-                            ]
-                          : []),
+                        ...assignableRoles.map((role) => ({
+                          key: `set-${role.value}`,
+                          label: `Set ${role.label}`,
+                          onSelect: () => setTopRole(u, role.value),
+                          disabled: !!isSelf(u) || top === role.value,
+                        })),
                         {
                           key: "toggle-active",
                           label: u.active ? "Deactivate" : "Activate",

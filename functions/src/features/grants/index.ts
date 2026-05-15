@@ -8,6 +8,10 @@ export {
   grantsList,
   grantsActivity,
   grantsGet,
+  grantsAdminPreview,
+  grantsAdminClearPayments,
+  grantsAdminClearEnrollments,
+  grantsAdminReconcileBudget,
 } from "./http";
 
 export { onGrantCreate, onGrantUpdate, onGrantDelete } from "./triggers";

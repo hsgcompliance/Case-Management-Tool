@@ -17,8 +17,8 @@ export const SECRET_GAME_ROUTE_OPTIONS = {
   },
   grants: {
     id: "grants",
-    label: "Grants / Programs Page",
-    description: "Allow launch from the /grants route.",
+    label: "Budget + Programs",
+    description: "Allow launch from the Budget and Programs routes.",
     path: Routes.protected.grants(),
     routeKind: "grants",
   },

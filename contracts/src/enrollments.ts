@@ -308,6 +308,7 @@ export const EnrollmentsDeleteBody = z.union([
   EnrollmentDeleteIdObj.extend({
     voidPaid: z.boolean().optional(),
     hard: z.boolean().optional(),
+    unlinkSpends: z.boolean().optional(),
   }),
 ]);
 
@@ -319,6 +320,7 @@ export const EnrollmentsAdminDeleteBody = z.union([
     mode: z.enum(["safe", "hard"]).optional(),
     purgeSpends: z.boolean().optional(),
     purgeSubcollections: z.boolean().optional(),
+    unlinkSpends: z.boolean().optional(),
   }),
 ]);
 

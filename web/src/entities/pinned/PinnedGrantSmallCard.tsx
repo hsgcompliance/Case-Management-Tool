@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { useGrant } from "@hooks/useGrants";
 import type { TGrant as Grant } from "@types";
 
@@ -176,9 +176,9 @@ export interface PinnedGrantSmallCardProps {
 }
 
 export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardProps) {
-  const router = useRouter();
   const { data: grant, isLoading } = useGrant(grantId, { enabled: !!grantId });
   const [modeIdx, setModeIdx] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
 
   if (isLoading || !grant) {
     return (
@@ -197,11 +197,12 @@ export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardP
   const cycleNext = () => setModeIdx((i) => (i + 1) % modes.length);
 
   return (
-    <div
+    <>
+      <div
       className="relative flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900 cursor-pointer select-none"
       onClick={cycleNext}
       title={`Click to cycle view (${MODE_LABELS[mode]})`}
-    >
+      >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2">
         <div className="min-w-0 flex-1">
@@ -263,13 +264,17 @@ export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardP
           ))}
         </div>
         <button
-          onClick={(e) => { e.stopPropagation(); router.push(`/grants/${grantId}`); }}
+          onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}
           className="text-[10px] font-semibold text-sky-500 hover:text-sky-600 dark:text-sky-400"
         >
           View →
         </button>
       </div>
-    </div>
+      </div>
+      {modalOpen ? (
+        <GrantWorkspaceModal grantId={grantId} onClose={() => setModalOpen(false)} />
+      ) : null}
+    </>
   );
 }
 

@@ -1,6 +1,7 @@
 // functions/src/features/inbox/digestCore.ts
-import {db, isoNow} from '../../core';
+import {db} from '../../core';
 import {sendHtmlEmail} from './emailer';
+import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 import {
   buildDigestHtml,
   buildDigestSubject,
@@ -192,16 +193,19 @@ export async function buildDigestData(opts: BuildOpts): Promise<DigestTemplateAr
 
           const today = todayISO();
           const paidPayments = payments.filter((p) => p.paid).sort((a, b) => b.dueDate.localeCompare(a.dueDate));
+          // Only include this enrollment in the Rental Assistance block if at least one paid payment exists
+          if (!paidPayments.length) return null;
           const nextPayments = payments.filter((p) => !p.paid && p.dueDate >= today);
           const nextRentCert = computeNextRentCertDue([e]);
+          const certInFuture = !!nextRentCert && nextRentCert.dueDate >= today;
           return {
             enrollmentId: String(e.id || ''),
             grantName: grantName(e),
             assistanceEndDate: String(e.endDate || payments[payments.length - 1]?.dueDate || ''),
             lastPayment: formatPayment(paidPayments[0] || null),
             nextPayment: formatPayment(nextPayments[0] || null),
-            nextRentCertDue: nextRentCert ? `${nextRentCert.dueDate}${nextRentCert.asap ? ' ASAP' : ''}` : 'None',
-            rentCertAsap: nextRentCert?.asap === true,
+            nextRentCertDue: certInFuture ? `${nextRentCert!.dueDate}${nextRentCert!.asap ? ' ASAP' : ''}` : 'No More Rent Certs Due',
+            rentCertAsap: certInFuture && nextRentCert!.asap === true,
           };
         })
         .filter((row): row is DigestRentalAssistanceRow => !!row);
@@ -308,6 +312,7 @@ type SendOpts = {
   dashboardLink?: string;
   cmName?: string;
   message?: string;
+  force?: boolean;
 };
 
 function injectMessage(html: string, message?: string): string {
@@ -326,40 +331,41 @@ export async function sendDigestEmail(
     digestData?: DigestTemplateArgs,
 ): Promise<{ ok: boolean; id?: string | null; skipped?: boolean }> {
   const key = `digest_${month}_${to.toLowerCase()}`;
-  const logRef = db.collection('emailLogs').doc(key);
-  const prior = await logRef.get();
-  if (prior.exists) return {ok: true, id: (prior.data() as any)?.id || null, skipped: true};
+  const reserved = await reserveDigestSend(key, {to, month, digestType: 'caseload'}, {force: sendOpts.force});
+  if (!reserved) return {ok: true, skipped: true};
 
-  const data = digestData ?? null;
-  const taskCount = data?.taskCount ?? 0;
-  const subject =
-    sendOpts.subject ||
-    (sendOpts.subjectTemplate ?
-      sendOpts.subjectTemplate.replace('${month}', month) :
-      data ?
-      buildDigestSubject(month, taskCount) :
-      `Caseload Digest - ${month}`);
+  try {
+    const data = digestData ?? null;
+    const taskCount = data?.taskCount ?? 0;
+    const subject =
+      sendOpts.subject ||
+      (sendOpts.subjectTemplate ?
+        sendOpts.subjectTemplate.replace('${month}', month) :
+        data ?
+        buildDigestSubject(month, taskCount) :
+        `Caseload Digest - ${month}`);
 
-  const html = data ?
-    buildDigestHtml({...data, dashboardLink: sendOpts.dashboardLink ?? data.dashboardLink}) :
-    `<div style="font:14px sans-serif"><h2>${subject}</h2><p>No digest data available.</p></div>`;
+    const html = data ?
+      buildDigestHtml({...data, dashboardLink: sendOpts.dashboardLink ?? data.dashboardLink}) :
+      `<div style="font:14px sans-serif"><h2>${subject}</h2><p>No digest data available.</p></div>`;
 
-  const htmlWithMessage = injectMessage(html, sendOpts.message);
-  const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html: htmlWithMessage});
+    const htmlWithMessage = injectMessage(html, sendOpts.message);
+    const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html: htmlWithMessage});
 
-  await logRef.set(
-      {
-        id: sent.id || null,
-        to,
-        month,
-        subject,
-        message: String(sendOpts.message || '').trim() || null,
-        createdAt: isoNow(),
-        taskCount,
-      },
-      {merge: true},
-  );
-  return sent;
+    await markDigestSent(key, {
+      id: sent.id || null,
+      to,
+      month,
+      subject,
+      message: String(sendOpts.message || '').trim() || null,
+      taskCount,
+      digestType: 'caseload',
+    });
+    return sent;
+  } catch (error: unknown) {
+    await markDigestFailed(key, error, {to, month, digestType: 'caseload'});
+    throw error;
+  }
 }
 
 export async function buildAndSendDigest(

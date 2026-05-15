@@ -1,7 +1,8 @@
 // functions/src/features/inbox/digestBudget.ts
 // Budget digest — per-grant budget summary email.
-import { db, isoNow } from "../../core";
+import { db } from "../../core";
 import { sendHtmlEmail } from "./emailer";
+import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
 const DASHBOARD_LINK = "https://households-db.web.app/dashboard";
 const BRAND   = "#2563EB";
@@ -50,8 +51,8 @@ type BudgetDigestData = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmt$(cents: number): string {
-  return "$" + (cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmt$(dollars: number): string {
+  return "$" + Number(dollars || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function pct(num: number, denom: number): number {
@@ -252,17 +253,22 @@ export function buildBudgetDigestHtml(data: BudgetDigestData): string {
 
 export async function buildAndSendBudgetDigest(
   to: string,
-  opts: { month: string; forUid: string; recipientName?: string }
+  opts: { month: string; forUid: string; recipientName?: string; force?: boolean }
 ): Promise<{ ok: boolean; skipped?: boolean }> {
   const key = `digest_budget_${opts.month}_${to.toLowerCase()}`;
-  const logRef = db.collection("emailLogs").doc(key);
-  if ((await logRef.get()).exists) return { ok: true, skipped: true };
+  const reserved = await reserveDigestSend(key, {to, month: opts.month, digestType: 'budget'}, {force: opts.force});
+  if (!reserved) return { ok: true, skipped: true };
 
-  const data = await buildBudgetDigestData({ month: opts.month, recipientName: opts.recipientName });
-  const html = buildBudgetDigestHtml(data);
-  const subject = `Budget Digest — ${monthLabel(opts.month)} (${data.grants.length} grant${data.grants.length !== 1 ? "s" : ""})`;
+  try {
+    const data = await buildBudgetDigestData({ month: opts.month, recipientName: opts.recipientName });
+    const html = buildBudgetDigestHtml(data);
+    const subject = `Budget Digest - ${monthLabel(opts.month)} (${data.grants.length} grant${data.grants.length !== 1 ? "s" : ""})`;
 
-  const sent = await sendHtmlEmail({ from: "hsgcompliance@thehrdc.org", to, subject, html });
-  await logRef.set({ id: sent.id || null, to, month: opts.month, subject, createdAt: isoNow() }, { merge: true });
-  return sent;
+    const sent = await sendHtmlEmail({ from: "hsgcompliance@thehrdc.org", to, subject, html });
+    await markDigestSent(key, { id: sent.id || null, to, month: opts.month, subject, digestType: 'budget' });
+    return sent;
+  } catch (error: unknown) {
+    await markDigestFailed(key, error, {to, month: opts.month, digestType: 'budget'});
+    throw error;
+  }
 }

@@ -23,7 +23,7 @@ export const inboxListMy = secureHandler(
     const tags = roleTagsFromClaims(ctx);
     const admin = isAdmin(ctx);
     const compliance = admin || tags.includes("compliance");
-    const caseManager = tags.includes("casemanager") || (!admin && !compliance);
+    const caseManager = tags.includes("casemanager");
 
     // Show queue tasks that this user can action.
     const groupCandidates: string[] = [];
@@ -96,5 +96,5 @@ export const inboxListMy = secureHandler(
 
     res.status(200).json({ ok: true, items: out });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );

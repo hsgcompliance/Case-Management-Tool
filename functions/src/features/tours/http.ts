@@ -122,7 +122,7 @@ export const toursList = secureHandler(
 
     res.status(200).json({ ok: true, items, next });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /** GET/POST /toursGet?id=... — user/admin */
@@ -143,7 +143,7 @@ export const toursGet = secureHandler(
 
     res.status(200).json({ ok: true, tour: { id: snap.id, ...(snap.data() || {}) } });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /** GET /toursStructure — user/admin (UI skeleton for create forms) */
@@ -178,6 +178,6 @@ export const toursStructure = secureHandler(
 
     res.status(200).json({ ok: true, structure });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );
 // END FILE

@@ -28,6 +28,7 @@ export * from "./features/creditCards";
 export * from "./features/assessments";
 export * from "./features/jotform";
 export * from "./features/paymentQueue";
+export * from "./features/budgetPipeline";
 export * from "./features/sheetsBridge";
 export * from "./features/metrics";
 export * from "./features/users";

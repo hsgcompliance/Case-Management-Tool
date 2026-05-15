@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { Grants } from "@client/grants";
 import { RQ_DEFAULTS, RQ_DETAIL } from "./base";
-import type { GrantsListQuery, GrantsUpsertReq, GrantsPatchReq } from "@types";
+import type { GrantsActivityReq, GrantsListQuery, GrantsUpsertReq, GrantsPatchReq } from "@types";
 import { useOptimisticMutation } from "./optimistic";
 import { useInvalidateMutation } from "./optimistic";
 
@@ -56,11 +56,15 @@ export function useGrantsStructure() {
   });
 }
 
-export function useGrantsActivity(grantId: string, limit = 1000) {
+export function useGrantsActivity(
+  grantId: string,
+  limit = 1000,
+  filters?: Omit<Partial<GrantsActivityReq>, "grantId" | "limit">,
+) {
   return useQuery({
     enabled: !!grantId,
-    queryKey: qk.grants.activity(grantId, limit),
-    queryFn: () => Grants.activity({ grantId, limit }),
+    queryKey: qk.grants.activity(grantId, { limit, ...(filters || {}) }),
+    queryFn: () => Grants.activity({ grantId, limit, ...(filters || {}) } as GrantsActivityReq),
     ...RQ_DEFAULTS,
   });
 }
@@ -212,6 +216,51 @@ export function useDeleteGrants() {
     },
     { meta: { queryClient: qc } },
   );
+}
+
+export function useGrantAdminPreview(grantId: string | undefined) {
+  return useQuery({
+    enabled: !!grantId,
+    queryKey: [...qk.grants.root, "adminPreview", grantId],
+    queryFn: () => Grants.adminPreview(grantId!),
+    staleTime: 30_000,
+  });
+}
+
+export function useGrantAdminClearPayments() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.grants.root],
+    mutationFn: (grantId: string) => Grants.adminClearPayments(grantId),
+    onSuccess: (_resp, grantId) => {
+      qc.invalidateQueries({ queryKey: qk.grants.detail(grantId) });
+    },
+  });
+}
+
+export function useGrantAdminClearEnrollments() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.grants.root],
+    mutationFn: (grantId: string) => Grants.adminClearEnrollments(grantId),
+    onSuccess: (_resp, grantId) => {
+      qc.invalidateQueries({ queryKey: qk.grants.detail(grantId) });
+    },
+  });
+}
+
+export function useGrantAdminReconcileBudget() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.grants.root],
+    mutationFn: (grantId: string) => Grants.adminReconcileBudget(grantId),
+    onSuccess: (_resp, grantId) => {
+      qc.invalidateQueries({ queryKey: qk.grants.detail(grantId) });
+    },
+  });
 }
 
 /** Optimistic hard delete: remove from lists, drop detail caches */

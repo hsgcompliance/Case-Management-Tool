@@ -147,7 +147,7 @@ export default function CardInvoiceEntryDialog({
     setVendor("");
     setComment("");
     setError(null);
-    if (mode === "reversal" && sourceAmountCents != null) {
+    if (sourceAmountCents != null) {
       setAmountStr(String(Math.abs(sourceAmountCents) / 100));
     } else {
       setAmountStr("");

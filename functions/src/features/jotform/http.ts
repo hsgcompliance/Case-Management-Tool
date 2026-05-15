@@ -143,7 +143,7 @@ export const jotformSubmissionsList = secureHandler(
 
     res.status(200).json({ ok: true, items, next, orgId: targetOrg });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /** GET/POST /jotformSubmissionsGet?id=... — org-scoped */
@@ -171,7 +171,7 @@ export const jotformSubmissionsGet = secureHandler(
 
     res.status(200).json({ ok: true, submission });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /** GET /jotformSubmissionsStructure — skeleton for create forms */
@@ -226,7 +226,7 @@ export const jotformSubmissionsStructure = secureHandler(
     };
     res.status(200).json({ ok: true, structure });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );
 
 /** GET/POST /jotformFormsList — direct forms list from Jotform API */
@@ -237,7 +237,7 @@ export const jotformFormsList = secureHandler(
     const out = await listJotformForms(src);
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
 );
 
 /** POST /jotformLinkSubmission — attach grant/customer/enrollment + field mapping */
@@ -302,7 +302,7 @@ export const jotformDigestGet = secureHandler(
     const out = await getJotformDigestMap(src, caller, targetOrg);
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /** GET/POST /jotformDigestList — list digest configs for org */
@@ -315,7 +315,7 @@ export const jotformDigestList = secureHandler(
     const out = await listJotformDigestMaps(src, caller, targetOrg);
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /** GET /jotformApiSubmissionsList?formId=...&limit=...&offset=... — live from Jotform API, no Firestore write */
@@ -335,7 +335,7 @@ export const jotformApiSubmissionsList = secureHandler(
     });
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
 );
 
 /** GET /jotformApiSubmissionGet?id=... — live single submission from Jotform API */
@@ -354,7 +354,7 @@ export const jotformApiSubmissionGet = secureHandler(
     }
     res.status(200).json({ ok: true, submission });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
 );
 
 /** POST /jotformSyncSubmissions — admin; pulls from Jotform API */

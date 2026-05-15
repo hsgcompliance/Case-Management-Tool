@@ -1,4 +1,4 @@
-// features/tools/widgets/toolsDefs.tsx
+// features/tools/toolsDefs.tsx
 // Tools page widget definitions — shown on /tools
 import { DASHBOARD_TOOL_DEFS } from "@widgets";
 import type { AnyDashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
@@ -12,13 +12,12 @@ import {
   type JotformsFilterState,
 } from "./JotformsTool";
 import { EmailDigestMain } from "./EmailDigestTool";
+import { PipelineManagerMain } from "./PipelineManagerTool";
 
 // IDs from DASHBOARD_TOOL_DEFS that belong on the Tools page
 const TOOLS_FROM_DASHBOARD_IDS = [
   "spending",               // → renamed "Invoicing", un-hidden
   "customer-folders",       // → un-hidden
-  "jotform-live-submissions",
-  "jotform-submission-manager",
 ];
 
 const fromDashboard = DASHBOARD_TOOL_DEFS
@@ -27,11 +26,7 @@ const fromDashboard = DASHBOARD_TOOL_DEFS
     ...t,
     hidden: false,
     defaultPinned: true,
-    title:
-      t.id === "spending" ? "Invoicing" :
-      t.id === "jotform-live-submissions" ? "Live Submissions" :
-      t.id === "jotform-submission-manager" ? "Submission Manager" :
-      t.title,
+    title: t.id === "spending" ? "Invoicing" : t.title,
   }));
 
 const newWidgets: readonly AnyDashboardToolDefinition[] = [
@@ -53,28 +48,35 @@ const newWidgets: readonly AnyDashboardToolDefinition[] = [
     Main: JotformsMain as AnyDashboardToolDefinition["Main"],
   },
   {
-    id: "assessment-manager",
-    title: "Assessment Manager",
+    id: "budget-map",
+    title: "Budget Pipelines",
     defaultPinned: true,
-    Main: AssessmentManagerMain as AnyDashboardToolDefinition["Main"],
-  },
-  {
-    id: "acuity-manager",
-    title: "Acuity Manager",
-    defaultPinned: true,
-    Main: AcuityManagerMain as AnyDashboardToolDefinition["Main"],
-  },
-  {
-    id: "reconciliations",
-    title: "Reconciliations",
-    defaultPinned: true,
-    Main: ReconciliationsMain as AnyDashboardToolDefinition["Main"],
+    Main: PipelineManagerMain as AnyDashboardToolDefinition["Main"],
   },
   {
     id: "email-digest",
     title: "Email Digest",
     defaultPinned: true,
     Main: EmailDigestMain as AnyDashboardToolDefinition["Main"],
+  },
+  // ── Advanced tools — accessible via the overflow menu ────────────────────
+  {
+    id: "assessment-manager",
+    title: "Assessment Manager",
+    defaultPinned: false,
+    Main: AssessmentManagerMain as AnyDashboardToolDefinition["Main"],
+  },
+  {
+    id: "acuity-manager",
+    title: "Acuity Manager",
+    defaultPinned: false,
+    Main: AcuityManagerMain as AnyDashboardToolDefinition["Main"],
+  },
+  {
+    id: "reconciliations",
+    title: "Reconciliations",
+    defaultPinned: false,
+    Main: ReconciliationsMain as AnyDashboardToolDefinition["Main"],
   },
 ];
 

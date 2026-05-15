@@ -48,6 +48,11 @@ function kindOf(g: Record<string, unknown>): "grant" | "program" {
   return String(g?.kind || "").toLowerCase() === "program" ? "program" : "grant";
 }
 
+function activeOf(g: Record<string, unknown>): boolean {
+  const status = String(g.status || "").toLowerCase();
+  return g.active === true || (g.active !== false && status === "active");
+}
+
 export const onGrantCreate = onDocumentCreated(
   { region: RUNTIME.region, document: "grants/{id}" },
   async (
@@ -78,7 +83,7 @@ export const onGrantCreate = onDocumentCreated(
 
     const status = String(data.status || "draft").toLowerCase();
     const kind = kindOf(data);
-    const active = !!data.active;
+    const active = activeOf(data as Record<string, unknown>);
 
     // Create grant compliance task when a grant is created as active
     if (active || status === "active") {
@@ -91,7 +96,7 @@ export const onGrantCreate = onDocumentCreated(
         status: "open",
         grantId,
         grantName,
-        title: `Grant Entry • ${grantName}`,
+        title: `Grant Entry - ${grantName}`,
         subtitle: "Complete HMIS Entry and CW Entry",
         assignedToGroup: "compliance",
         hmisComplete: false,
@@ -154,8 +159,8 @@ export const onGrantUpdate = onDocumentUpdated(
 
     const prevStatus = String(before.status || "draft").toLowerCase();
     const nextStatus = String(after.status || "draft").toLowerCase();
-    const wasActive = !!before.active;
-    const isActive = !!after.active;
+    const wasActive = activeOf(before as Record<string, unknown>);
+    const isActive = activeOf(after as Record<string, unknown>);
     const prevKind = kindOf(before as any);
     const nextKind = kindOf(after as any);
 
@@ -212,7 +217,7 @@ export const onGrantUpdate = onDocumentUpdated(
             status: "open",
             grantId,
             grantName,
-            title: `Grant Entry • ${grantName}`,
+            title: `Grant Entry - ${grantName}`,
             subtitle: "Complete HMIS Entry and CW Entry",
             assignedToGroup: "compliance",
             hmisComplete: false,
@@ -249,7 +254,7 @@ export const onGrantDelete = onDocumentDeleted(
     });
     const status = String(data.status || "draft").toLowerCase();
     const kind = kindOf(data as any);
-    const active = !!data.active;
+    const active = activeOf(data as Record<string, unknown>);
 
     await metricsRef.set(
       {

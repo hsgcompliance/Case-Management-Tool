@@ -124,7 +124,7 @@ function sectionLabel(label: string): string {
 function clientBlock(name: string, inner: string): string {
   return `
   <div style="background:${BG_CARD};border:1px solid ${BORDER};border-radius:10px;margin-bottom:12px;overflow:hidden">
-    <div style="background:${BG_SECT};border-bottom:1px solid ${BORDER};padding:10px 14px;font-size:14px;font-weight:700;color:${TEXT}">${esc(name)}</div>
+    <div style="background:${BG_SECT};border-bottom:1px solid ${BORDER};padding:10px 14px;font-size:18px;font-weight:800;color:${TEXT}">${esc(name)}</div>
     <div style="padding:12px 14px">${inner}</div>
   </div>`;
 }

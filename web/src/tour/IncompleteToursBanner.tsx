@@ -8,7 +8,7 @@ import { listAllTourSummaries } from "@features/admin/tourBuilder/tourStore";
 import { getAllProgress } from "./progress";
 
 const SESSION_ALL_KEY = "hdb.tours.prompted.ALL";
-const ELIGIBLE_PATH_PREFIXES = ["/reports", "/customers", "/grants"];
+const ELIGIBLE_PATH_PREFIXES = ["/reports", "/customers", "/budget", "/programs"];
 
 export default function IncompleteToursBanner() {
   const pathname = usePathname();

@@ -14,6 +14,7 @@ export {enrollmentsCheckDual} from "./checkDual";
 export { migrateEnrollment } from "./migrate";
 export { undoEnrollmentMigration } from "./migrate";
 export { adminReverseLedgerEntry } from "./adminReverseLedgerEntry";
+export { enrollmentsVoidProjections } from "./voidProjections";
 export {onEnrollmentCreateDefaults,
   onEnrollmentNormalize,
   onEnrollmentDelete} from "./triggers";

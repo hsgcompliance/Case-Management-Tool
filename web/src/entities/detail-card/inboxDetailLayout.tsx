@@ -62,7 +62,7 @@ function enrollmentHref(item: any): string | null {
 function grantHref(item: any): string | null {
   const id = grantId(item);
   if (!id) return null;
-  return `/grants/${id}`;
+  return `/budget?grantId=${encodeURIComponent(id)}`;
 }
 
 function budgetHref(item: any): string {
@@ -230,7 +230,7 @@ export function DetailQuickLinks({ item }: { item: any }) {
     <DetailSection title="Quick Links">
       <div className="flex flex-wrap gap-2">
         <LinkBtn href={enrollmentHref(item)} label="Edit Enrollment" />
-        <LinkBtn href={grantHref(item)} label="View Grant" />
+        <LinkBtn href={grantHref(item)} label="View in Budget" />
         <LinkBtn href={customerHref(item)} label="View Customer" />
         {showJotform ? <LinkBtn href={jotformDigestHref(item)} label="Open Jotform Digest" /> : null}
         {showJotform ? <LinkBtn href={jotformDashboardHref(item)} label="Open Jotform Dashboard" /> : null}

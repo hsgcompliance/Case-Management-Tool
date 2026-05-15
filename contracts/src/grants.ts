@@ -1,5 +1,5 @@
 // contracts/src/grants.ts
-import { z, Id, IdLike, TsLike, BoolLike, BoolFromLike, toArray } from "./core";
+import { z, Id, IdLike, TsLike, BoolLike, toArray } from "./core";
 import { Ok } from "./http";
 
 export { toArray } from "./core";
@@ -185,6 +185,120 @@ export const ConditionalTaskRule = z
 
 export type TConditionalTaskRule = z.infer<typeof ConditionalTaskRule>;
 
+// ─── Pins ─────────────────────────────────────────────────────────────────────
+// Stored on the grant doc. User-level pins (Dashboard, Favorite) live on userExtras.
+
+export const GRANT_PIN_COLORS = ["red", "amber", "emerald", "sky", "violet", "rose", "orange"] as const;
+export type TGrantPinColor = typeof GRANT_PIN_COLORS[number];
+
+/**
+ * Important Pin — org-visible flag on the grant object.
+ * Surfaces a bold badge in the UI and floats the grant to the top of lists.
+ * `meta` is an open passthrough for future feature hooks.
+ */
+export const GrantPinImportant = z.object({
+  enabled: z.boolean().default(false),
+  label: z.string().trim().nullish(),
+  color: z.enum(GRANT_PIN_COLORS).nullish(),
+  note: z.string().trim().nullish(),
+  pinnedAt: TsLike.nullish(),
+  pinnedBy: z.string().trim().nullish(),
+  meta: z.record(z.string(), z.unknown()).nullish(),
+}).passthrough();
+export type TGrantPinImportant = z.infer<typeof GrantPinImportant>;
+
+/**
+ * Digest Pin — when enabled, this grant is forced into org-wide budget digests
+ * regardless of individual CM subscriptions.
+ */
+export const GrantPinDigest = z.object({
+  enabled: z.boolean().default(false),
+  pinnedAt: TsLike.nullish(),
+  pinnedBy: z.string().trim().nullish(),
+}).passthrough();
+export type TGrantPinDigest = z.infer<typeof GrantPinDigest>;
+
+/**
+ * Invoice Pin - surfaces this grant in invoice/payment editing workflows
+ * without changing invoice or ledger source-of-truth records.
+ */
+export const GrantPinInvoice = z.object({
+  enabled: z.boolean().default(false),
+  pinnedAt: TsLike.nullish(),
+  pinnedBy: z.string().trim().nullish(),
+  label: z.string().trim().nullish(),
+  note: z.string().trim().nullish(),
+}).passthrough();
+export type TGrantPinInvoice = z.infer<typeof GrantPinInvoice>;
+
+export const GrantPins = z.object({
+  important: GrantPinImportant.nullish(),
+  digest: GrantPinDigest.nullish(),
+  invoice: GrantPinInvoice.nullish(),
+}).passthrough();
+export type TGrantPins = z.infer<typeof GrantPins>;
+
+// ─── Invoicing ─────────────────────────────────────────────────────────────
+
+export const GrantInvoicingFrequency = z.enum(["monthly", "quarterly", "annually", "on-demand"]);
+export type TGrantInvoicingFrequency = z.infer<typeof GrantInvoicingFrequency>;
+
+export const GrantInvoiceOption = z.object({
+  id: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  code: z.string().trim().nullish(),
+  template: z.string().trim().nullish(),
+  enabled: z.boolean().optional(),
+  custom: z.boolean().optional(),
+}).passthrough();
+export type TGrantInvoiceOption = z.infer<typeof GrantInvoiceOption>;
+
+/**
+ * Optional invoicing metadata stored on the grant doc.
+ * Covers grant codes, contract references, funder contacts, and billing details.
+ */
+export const GrantInvoicing = z.object({
+  /** Grant identifier used on invoices / reimbursement requests */
+  grantCode: z.string().trim().nullish(),
+  /** Functional group used by invoice/payment exports */
+  functionalGroup: z.string().trim().nullish(),
+  /** Expense category options this grant can surface in invoice/payment workflows */
+  expenseCategories: z.array(GrantInvoiceOption).nullish(),
+  /** Description templates this grant can surface in invoice/payment workflows */
+  descriptionTemplates: z.array(GrantInvoiceOption).nullish(),
+  /** Separate invoice code if the invoicing code differs from the grant code */
+  invoiceCode: z.string().trim().nullish(),
+  /** Program or funding-source code (e.g. federal program code) */
+  programCode: z.string().trim().nullish(),
+  /** Contract number with the funder */
+  contractNumber: z.string().trim().nullish(),
+  /** Vendor or supplier number assigned by the funder */
+  vendorNumber: z.string().trim().nullish(),
+  /** Name of the funder / grantor agency */
+  funder: z.string().trim().nullish(),
+  /** Primary contact name at the funder for invoicing */
+  funderContact: z.string().trim().nullish(),
+  /** Funder contact email */
+  funderEmail: z.string().trim().nullish(),
+  /** How often invoices are submitted */
+  frequency: GrantInvoicingFrequency.nullish(),
+  /** Day of month the invoice is due (1–28) */
+  dueDayOfMonth: z.number().int().min(1).max(28).nullish(),
+  /** Payment terms (e.g. "Net 30", "Net 60") */
+  paymentTerms: z.string().trim().nullish(),
+  /** Billing address (free-form) */
+  billingAddress: z.string().trim().nullish(),
+  /** Submission portal URL or platform name */
+  submissionPortal: z.string().trim().nullish(),
+  /** Reporting requirements or schedule */
+  reportingNotes: z.string().trim().nullish(),
+  /** General invoicing notes */
+  notes: z.string().trim().nullish(),
+  /** Open-ended meta for org-specific invoicing fields */
+  meta: z.record(z.string(), z.unknown()).nullish(),
+}).passthrough();
+export type TGrantInvoicing = z.infer<typeof GrantInvoicing>;
+
 /** ---------- Grant (INPUT) ---------- */
 export const GrantInputSchema = z
   .object({
@@ -215,6 +329,21 @@ export const GrantInputSchema = z
     /** Conditional task rules evaluated on each new enrollment. */
     conditionalTaskRules: z.array(ConditionalTaskRule).nullish(),
 
+    /**
+     * Org-visible pins on the grant object itself. Distinct from user-level
+     * dashboard/favorite pins (those live in userExtras).
+     */
+    pins: GrantPins.nullish(),
+
+    /** Optional invoicing metadata: codes, funder contacts, billing details. */
+    invoicing: GrantInvoicing.nullish(),
+
+    /** Optional documents expected for payment/invoice processing. */
+    invoiceDocuments: z.array(z.string().trim()).nullish(),
+
+    /** Optional internal guidance mapping assistance levels to eligibility criteria. */
+    levelOfAssistance: z.record(z.string(), z.string()).nullish(),
+
     meta: z.record(z.string(), z.unknown()).nullish(),
 
     createdAt: TsLike.nullish(),
@@ -235,14 +364,61 @@ export const GrantEntity = GrantInputSchema.extend({
 export type TGrantEntity = z.infer<typeof GrantEntity> &
   Record<string, unknown>;
 
+function stripPatchServerFields(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const row = { ...(value as Record<string, unknown>) };
+  const rawPatch = row.patch;
+  if (!rawPatch || typeof rawPatch !== "object" || Array.isArray(rawPatch)) return row;
+
+  const patch = { ...(rawPatch as Record<string, unknown>) };
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  delete patch.deletedAt;
+  delete patch.active;
+  delete patch.deleted;
+  delete patch._tags;
+  delete patch.system;
+
+  if (patch.budget && typeof patch.budget === "object" && !Array.isArray(patch.budget)) {
+    const budget = { ...(patch.budget as Record<string, unknown>) };
+    delete budget.createdAt;
+    delete budget.updatedAt;
+    patch.budget = budget;
+  }
+
+  row.patch = patch;
+  return row;
+}
+
+function stripGrantServerFields(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const grant = { ...(value as Record<string, unknown>) };
+  delete grant.createdAt;
+  delete grant.updatedAt;
+  delete grant.deletedAt;
+  delete grant.active;
+  delete grant.deleted;
+  delete grant._tags;
+  delete grant.system;
+
+  if (grant.budget && typeof grant.budget === "object" && !Array.isArray(grant.budget)) {
+    const budget = { ...(grant.budget as Record<string, unknown>) };
+    delete budget.createdAt;
+    delete budget.updatedAt;
+    grant.budget = budget;
+  }
+
+  return grant;
+}
+
 /* =============================================================================
    Requests / Responses (match current functions/http.ts + service.ts)
 ============================================================================= */
 
 // ---------------- Upsert (POST /grantsUpsert) ----------------
 export const GrantsUpsertBody = z.union([
-  GrantInputSchema,
-  z.array(GrantInputSchema).min(1),
+  z.preprocess(stripGrantServerFields, GrantInputSchema),
+  z.array(z.preprocess(stripGrantServerFields, GrantInputSchema)).min(1),
 ]);
 export const GrantUpsertBody = GrantsUpsertBody; // back-compat
 
@@ -251,12 +427,14 @@ export type TGrantsUpsertResp = Ok<{ ids: string[] }>;
 
 // ---------------- Patch (PATCH /grantsPatch) ----------------
 export const GrantsPatchRow = z
-  .object({
-    id: Id,
-    patch: GrantInputSchema.partial().passthrough(),
-    unset: z.array(z.string().min(1)).optional(),
-  })
-  .passthrough()
+  .preprocess(
+    stripPatchServerFields,
+    z.object({
+      id: Id,
+      patch: GrantInputSchema.partial().passthrough(),
+      unset: z.array(z.string().min(1)).optional(),
+    }).passthrough(),
+  )
   .refine(
     (v) => Object.keys(v.patch || {}).length > 0 || (v.unset?.length || 0) > 0,
     { message: "empty_patch" },
@@ -348,6 +526,8 @@ export const GrantsActivityQuery = z
   .object({
     grantId: IdLike,
     limit: z.coerce.number().int().min(1).max(1000).optional(),
+    cursor: z.string().trim().optional(),
+    includeProjected: z.union([BoolLike, z.string()]).optional(),
     orgId: IdLike.optional(),
   })
   .passthrough();
@@ -355,7 +535,8 @@ export const GrantsActivityQuery = z
 export type TGrantsActivityQuery = z.infer<typeof GrantsActivityQuery>;
 export type TGrantsActivityItem = {
   id: string;
-  kind: "spend" | "reversal";
+  kind: "spend" | "reversal" | "projection";
+  sourceType?: "ledger" | "paymentQueue" | "legacySpend";
   grantId: string;
   enrollmentId: string;
   paymentId?: string | null;
@@ -365,5 +546,64 @@ export type TGrantsActivityItem = {
   ts: string;
   by?: unknown | null;
   reversalOf?: string | null;
+  queueStatus?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  customerNameAtSpend?: string | null;
+  grantNameAtSpend?: string | null;
+  lineItemLabelAtSpend?: string | null;
+  paymentLabelAtSpend?: string | null;
+  ledgerEntry?: Record<string, unknown> | null;
+  paymentQueueItem?: Record<string, unknown> | null;
 };
-export type TGrantsActivityResp = Ok<{ items: TGrantsActivityItem[] }>;
+export type TGrantsActivityResp = Ok<{
+  items: TGrantsActivityItem[];
+  next?: { cursor: string } | null;
+  counts?: { total: number; ledger: number; projected: number; legacy: number };
+}>;
+
+// ---------------- Admin: Preview (GET /grantsAdminPreview) ----------------
+export const GrantsAdminPreviewQuery = z.object({ grantId: IdLike });
+export type TGrantsAdminPreviewQuery = z.infer<typeof GrantsAdminPreviewQuery>;
+
+type AmountCount = { count: number; amount: number };
+export type TGrantsAdminPreviewResp = Ok<{
+  ledger: { enrollmentSpends: AmountCount; ccInvoice: AmountCount };
+  paymentQueue: { projections: AmountCount; ccInvoice: AmountCount };
+  enrollments: { active: number; inactive: number; total: number };
+  currentBudget: { total: number; spent: number; projected: number; balance: number; projectedBalance: number };
+}>;
+
+// ---------------- Admin: Clear Payments (POST /grantsAdminClearPayments) ----------------
+export const GrantsAdminClearPaymentsBody = z.object({
+  grantId: IdLike,
+  confirm: z.literal("DELETE"),
+});
+export type TGrantsAdminClearPaymentsBody = z.infer<typeof GrantsAdminClearPaymentsBody>;
+export type TGrantsAdminClearPaymentsResp = Ok<{
+  deleted: { ledger: number; paymentQueue: number };
+  skipped: { ledger: number; paymentQueue: number };
+  totals: Record<string, number>;
+  counts: { ledger: number; paymentQueue: number };
+}>;
+
+// ---------------- Admin: Clear Enrollments (POST /grantsAdminClearEnrollments) ----------------
+export const GrantsAdminClearEnrollmentsBody = z.object({
+  grantId: IdLike,
+  confirm: z.literal("DELETE"),
+});
+export type TGrantsAdminClearEnrollmentsBody = z.infer<typeof GrantsAdminClearEnrollmentsBody>;
+export type TGrantsAdminClearEnrollmentsResp = Ok<{
+  cleared: { enrollments: number; paymentQueue: number };
+  skipped: { enrollments: number };
+}>;
+
+// ---------------- Admin: Reconcile Budget (POST /grantsAdminReconcileBudget) ----------------
+export const GrantsAdminReconcileBudgetBody = z.object({
+  grantId: IdLike,
+});
+export type TGrantsAdminReconcileBudgetBody = z.infer<typeof GrantsAdminReconcileBudgetBody>;
+export type TGrantsAdminReconcileBudgetResp = Ok<{
+  totals: Record<string, number>;
+  counts: { ledger: number; paymentQueue: number };
+}>;

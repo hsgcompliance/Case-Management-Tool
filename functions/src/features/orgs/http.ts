@@ -64,7 +64,7 @@ export const orgGet = secureHandler(
     }
     res.status(200).json({ ok: true, org });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );
 
 // ── GET /orgConfigGet ─────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ export const orgConfigGet = secureHandler(
     }
     res.status(200).json({ ok: true, config: { id: snap.id, ...snap.data() } });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );
 
 // ── POST /orgConfigPatch ──────────────────────────────────────────────────────

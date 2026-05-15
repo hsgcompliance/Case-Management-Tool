@@ -26,6 +26,8 @@ import type {
   EnrollmentsUndoMigrationResp,
   EnrollmentsAdminReverseLedgerEntryReq,
   EnrollmentsAdminReverseLedgerEntryResp,
+  EnrollmentsVoidProjectionsReq,
+  EnrollmentsVoidProjectionsResp,
   EnrollmentsListQuery,
   TEnrollment,
   EnrollmentGetByIdQuery,
@@ -225,8 +227,12 @@ export const Enrollments = {
     return null;
   },
 
-  delete: (idOrIds: string | string[]): Promise<EnrollmentsDeleteResp> => {
-    const body: EnrollmentsDeleteReq = Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds };
+  delete: (
+    idOrIds: string | string[],
+    opts?: { voidPaid?: boolean; unlinkSpends?: boolean }
+  ): Promise<EnrollmentsDeleteResp> => {
+    const base = Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds };
+    const body: EnrollmentsDeleteReq = { ...base, ...opts } as any;
     return api.callIdem(
       "enrollmentsDelete",
       body,
@@ -234,13 +240,25 @@ export const Enrollments = {
     );
   },
 
-  adminDelete: (idOrIds: string | string[]): Promise<EnrollmentsAdminDeleteResp> => {
+  adminDelete: (
+    idOrIds: string | string[],
+    opts?: { voidPaid?: boolean; unlinkSpends?: boolean }
+  ): Promise<EnrollmentsAdminDeleteResp> => {
     const base = Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds };
-    const body: EnrollmentsAdminDeleteReq = { ...base, mode: "hard", purgeSpends: true } as any;
+    const body: EnrollmentsAdminDeleteReq = { ...base, mode: "hard", purgeSpends: true, ...opts } as any;
     return api.callIdem(
       "enrollmentsAdminDelete",
       body,
       idemKey({ scope: "enrollments", op: "adminDelete", body })
+    );
+  },
+
+  voidProjections: (idOrIds: string | string[]): Promise<EnrollmentsVoidProjectionsResp> => {
+    const body: EnrollmentsVoidProjectionsReq = Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds };
+    return api.callIdem(
+      "enrollmentsVoidProjections",
+      body,
+      idemKey({ scope: "enrollments", op: "voidProjections", body })
     );
   },
 

@@ -16,8 +16,8 @@ export const qk = {
       ["grants", "list", stable(filters || {})] as const,
     detail: (id: string) => ["grants", "detail", id] as const,
     structure: () => ["grants", "structure"] as const,
-    activity: (grantId: string, limit = 1000) =>
-      ["grants", "activity", stable({ grantId, limit })] as const,
+    activity: (grantId: string, filters?: Record<string, unknown>) =>
+      ["grants", "activity", stable({ grantId, ...(filters || {}) })] as const,
   },
   creditCards: {
     root: ["creditCards"] as const,
@@ -98,6 +98,7 @@ export const qk = {
       ["gdrive", "list", stable(filters || {})] as const,
     customerFolderIndex: (query?: Record<string, unknown>) =>
       ["gdrive", "customerFolderIndex", stable(query || {})] as const,
+    sheetFolderIndex: () => ["gdrive", "sheetFolderIndex"] as const,
     config: ["gdrive", "config"] as const,
   },
   users: {
@@ -149,5 +150,11 @@ export const qk = {
     root: ["dashboard"] as const,
     // Feature-owned orchestration key for dashboard warmup gate.
     sharedWarmup: (version = "v3") => ["dashboard", "shared-warmup", version] as const,
+  },
+  pipeline: {
+    root: ["pipeline"] as const,
+    list: (filters?: Record<string, unknown>) =>
+      ["pipeline", "list", stable(filters || {})] as const,
+    detail: (id: string) => ["pipeline", "detail", id] as const,
   },
 };

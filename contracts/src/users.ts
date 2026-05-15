@@ -5,13 +5,14 @@ import { z, Id, TsLike } from "./core";
 export const RoleTagCanonical = z.enum(["casemanager", "compliance", "viewer"]);
 
 /** API-settable ladder levels that admins may set through admin endpoints. */
-export const TopRoleCanonical = z.enum(["user", "admin", "dev", "org_dev", "super_dev"]);
+export const TopRoleCanonical = z.enum(["viewer", "user", "admin", "dev", "org_dev", "super_dev"]);
 export type TRoleTag = z.infer<typeof RoleTagCanonical>;
 
 /** Full ladder used in claims/identity flows. */
 export const TopRoleLadder = z.enum([
   "unverified",
   "public_user",
+  "viewer",
   "user",
   "admin",
   "dev",
@@ -41,7 +42,7 @@ export const RoleInput = z.string().transform((v) => {
   return mapped;
 });
 
-export const RolesArray = z.array(RoleInput).min(1).default(["casemanager"]);
+export const RolesArray = z.array(RoleInput).default(["casemanager"]);
 
 export const CreateUserBody = z.object({
   email: z.email(),

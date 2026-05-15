@@ -211,7 +211,7 @@ export function PinnedCreditCardSmallCard({ creditCardId, onUnpin }: PinnedCredi
           ))}
         </div>
         <button
-          onClick={(e) => { e.stopPropagation(); router.push(`/grants`); }}
+          onClick={(e) => { e.stopPropagation(); router.push("/budget"); }}
           className="text-[10px] font-semibold text-sky-500 hover:text-sky-600 dark:text-sky-400"
         >
           View →
