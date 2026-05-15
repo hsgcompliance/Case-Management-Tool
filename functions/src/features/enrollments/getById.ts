@@ -32,4 +32,4 @@ export const enrollmentGetById = secureHandler(async (req, res) => {
     ok: true,
     enrollment: { ...(data || {}), id: snap.id },
   });
-}, {auth: "user", requireOrg: true, methods: ["GET", "OPTIONS"]});
+}, {auth: "viewer", requireOrg: true, methods: ["GET", "OPTIONS"]});

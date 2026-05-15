@@ -225,14 +225,43 @@ export const Grants = {
   // Server structure passthrough (tools/tab schema)
   structure: () => api.get("grantsStructure") as Promise<GrantsStructureResp>,
 
-  // Return activity array for the UI
-  activity: async (query: GrantsActivityReq) => {
-    const safeQuery = {
-      ...query,
-      ...(Number((query as any)?.limit) > 1000 ? { limit: 1000 } : {}),
-    } as GrantsActivityReq;
-    const res = (await api.get("grantsActivity", safeQuery)) as GrantsActivityResp | { items?: GrantsActivityItem[] };
-    return (res as { items?: GrantsActivityItem[] })?.items ?? [];
+  adminPreview: (grantId: string) =>
+    api.get("grantsAdminPreview", { grantId }),
+
+  adminClearPayments: (grantId: string) =>
+    api.post("grantsAdminClearPayments", { grantId, confirm: "DELETE" }),
+
+  adminClearEnrollments: (grantId: string) =>
+    api.post("grantsAdminClearEnrollments", { grantId, confirm: "DELETE" }),
+
+  adminReconcileBudget: (grantId: string) =>
+    api.post("grantsAdminReconcileBudget", { grantId }),
+
+  // Return all grant activity pages for accurate budget drawers.
+  activity: async (query: GrantsActivityReq, opts?: { maxItems?: number }) => {
+    const pageLimit = Math.max(1, Math.min(1000, Number((query as any)?.limit) || 1000));
+    const maxItems = Math.max(1, Number(opts?.maxItems ?? 50_000));
+    const out: GrantsActivityItem[] = [];
+    let cursor = (query as any)?.cursor ? String((query as any).cursor) : undefined;
+
+    for (let page = 0; page < 100 && out.length < maxItems; page++) {
+      const safeQuery = {
+        ...query,
+        limit: Math.min(pageLimit, maxItems - out.length),
+        ...(cursor ? { cursor } : {}),
+      } as GrantsActivityReq;
+      const res = (await api.get("grantsActivity", safeQuery)) as GrantsActivityResp | {
+        items?: GrantsActivityItem[];
+        next?: { cursor?: string | null } | null;
+      };
+      const items = (res as { items?: GrantsActivityItem[] })?.items ?? [];
+      out.push(...items);
+      const nextCursor = (res as { next?: { cursor?: string | null } | null })?.next?.cursor;
+      if (!items.length || !nextCursor) break;
+      cursor = String(nextCursor);
+    }
+
+    return out.slice(0, maxItems);
   },
 };
 

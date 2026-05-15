@@ -215,7 +215,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
     }
   },
   {
-    auth: "user",
+    auth: "viewer",
     methods: ["GET", "OPTIONS"],
     secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
     memory: "512MiB",

@@ -199,5 +199,5 @@ export const inboxWorkloadList = secureHandler(
     const sorted = sortRows(Array.from(map.values()), sortBy, sortDir, !!status);
     res.status(200).json({ ok: true, items: sorted.slice(0, hardLimit) });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );

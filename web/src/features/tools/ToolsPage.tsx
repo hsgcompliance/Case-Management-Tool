@@ -3,7 +3,7 @@
 
 import React from "react";
 import { DashboardStyleLayout } from "@entities/Page/dashboardStyle";
-import { TOOLS_TOOL_DEFS } from "./widgets/toolsDefs";
+import { TOOLS_TOOL_DEFS } from "./toolsDefs";
 
 export interface ToolsPageProps {
   selectedToolKey?: string;

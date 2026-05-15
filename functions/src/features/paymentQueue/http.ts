@@ -1,6 +1,6 @@
 // functions/src/features/paymentQueue/http.ts
 import {secureHandler, orgIdFromClaims, requireUid} from '../../core';
-import { adminSyncPaymentQueueHandler } from './adminSyncPaymentQueue';
+import {adminSyncPaymentQueueHandler} from './adminSyncPaymentQueue';
 import {
   PaymentQueueListBody,
   PaymentQueuePatchBody,
@@ -40,7 +40,7 @@ export const paymentQueueList = secureHandler(async (req, res): Promise<void> =>
 
   const result = await listPaymentQueueItems(orgId, body);
   res.json({ok: true, ...result});
-}, {auth: 'user', memory: '512MiB', concurrency: 10});
+}, {auth: 'viewer', memory: '512MiB', concurrency: 10});
 
 /* ============================================================================
    GET /paymentQueueGet?id=…
@@ -54,7 +54,7 @@ export const paymentQueueGet = secureHandler(async (req, res): Promise<void> => 
     return;
   }
   res.json({ok: true, item});
-});
+}, {auth: 'viewer', methods: ['GET', 'POST', 'OPTIONS']});
 
 /* ============================================================================
    PATCH /paymentQueuePatch?id=…
@@ -71,7 +71,7 @@ export const paymentQueuePatch = secureHandler(async (req, res): Promise<void> =
     return;
   }
   res.json({ok: true, item: updated});
-});
+}, {auth: 'user', methods: ['PATCH', 'POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueuePostToLedger?id=…
@@ -92,7 +92,7 @@ export const paymentQueuePostToLedger = secureHandler(async (req, res): Promise<
   } catch (err: any) {
     res.status(400).json({ok: false, error: err.message || 'post_to_ledger_failed'});
   }
-});
+}, {auth: 'user', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueueBypassClose
@@ -124,7 +124,7 @@ export const paymentQueueReopen = secureHandler(async (req, res): Promise<void> 
   } catch (err: any) {
     res.status(400).json({ok: false, error: err.message || 'reopen_failed'});
   }
-});
+}, {auth: 'user', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueueVoid?id=…  (voids a single item's entire submission group)
@@ -144,7 +144,7 @@ export const paymentQueueVoid = secureHandler(async (req, res): Promise<void> =>
   const uid = requireUid(req as any);
   const voided = await voidPaymentQueueItems(item.baseId, uid);
   res.json({ok: true, voided});
-});
+}, {auth: 'user', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueueAdminSync  (admin: backfill paymentQueue from enrollments + jotform)
@@ -152,7 +152,7 @@ export const paymentQueueVoid = secureHandler(async (req, res): Promise<void> =>
 
 export const paymentQueueAdminSync = secureHandler(async (req, res): Promise<void> => {
   await adminSyncPaymentQueueHandler(req as any, res as any);
-}, { auth: 'admin', methods: ['POST', 'OPTIONS'] });
+}, {auth: 'admin', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueueRecomputeGrantAllocations  (admin: rebuild paid allocation)
@@ -162,4 +162,4 @@ export const paymentQueueRecomputeGrantAllocations = secureHandler(async (req, r
   const body = PaymentQueueRecomputeGrantBody.parse(req.body || {});
   const result = await recomputePaymentQueueGrantAllocations(body.grantId, body.dryRun);
   res.json({ok: true, ...result});
-}, { auth: 'admin', methods: ['POST', 'OPTIONS'] });
+}, {auth: 'admin', methods: ['POST', 'OPTIONS']});

@@ -1,9 +1,10 @@
 // functions/src/features/inbox/digestEnrollments.ts
 // Enrollment digest: active enrollments, new this month, ending soon.
-import { db, isoNow } from "../../core";
+import { db } from "../../core";
 import { sendHtmlEmail } from "./emailer";
 import { monthAdd } from "./utils";
 import { loadDigestEnrollments } from "./digestEnrollmentSource";
+import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
 const DASHBOARD_LINK = "https://households-db.web.app/dashboard";
 const BRAND = "#2563EB";
@@ -234,18 +235,23 @@ export function buildEnrollmentDigestHtml(data: EnrollmentDigestData): string {
 
 export async function buildAndSendEnrollmentDigest(
   to: string,
-  opts: { month: string; forUid?: string; recipientName?: string }
+  opts: { month: string; forUid?: string; recipientName?: string; force?: boolean }
 ): Promise<{ ok: boolean; skipped?: boolean }> {
   const key = `digest_enrollments_${opts.month}_${to.toLowerCase()}`;
-  const logRef = db.collection("emailLogs").doc(key);
-  if ((await logRef.get()).exists) return { ok: true, skipped: true };
+  const reserved = await reserveDigestSend(key, {to, month: opts.month, digestType: 'enrollments'}, {force: opts.force});
+  if (!reserved) return { ok: true, skipped: true };
 
-  const data = await buildEnrollmentDigestData(opts);
-  const html = buildEnrollmentDigestHtml(data);
-  const label = monthLabel(opts.month);
-  const subject = `Enrollment Digest - ${label} (${data.active.length} active)`;
+  try {
+    const data = await buildEnrollmentDigestData(opts);
+    const html = buildEnrollmentDigestHtml(data);
+    const label = monthLabel(opts.month);
+    const subject = `Enrollment Digest - ${label} (${data.active.length} active)`;
 
-  const sent = await sendHtmlEmail({ from: "hsgcompliance@thehrdc.org", to, subject, html });
-  await logRef.set({ id: sent.id || null, to, month: opts.month, subject, createdAt: isoNow() }, { merge: true });
-  return sent;
+    const sent = await sendHtmlEmail({ from: "hsgcompliance@thehrdc.org", to, subject, html });
+    await markDigestSent(key, { id: sent.id || null, to, month: opts.month, subject, digestType: 'enrollments' });
+    return sent;
+  } catch (error: unknown) {
+    await markDigestFailed(key, error, {to, month: opts.month, digestType: 'enrollments'});
+    throw error;
+  }
 }

@@ -43,7 +43,7 @@ export default function GrantWorkspaceModal({
       topBar={
         <div className="workspace-breadcrumb">
           <button type="button" className="workspace-breadcrumb-back" onClick={onClose}>
-            &larr; Grants
+            &larr; Budget
           </button>
           <span className="workspace-breadcrumb-sep">/</span>
           <span className="workspace-breadcrumb-current">{breadcrumbLabel}</span>

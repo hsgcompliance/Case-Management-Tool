@@ -30,7 +30,7 @@ export const assessmentTemplatesGet = secureHandler(
     const out = await getTemplateService((req as any).user, { templateId });
     res.json({ template: out, ok: true });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
 );
 
 export const assessmentTemplatesList = secureHandler(
@@ -38,7 +38,7 @@ export const assessmentTemplatesList = secureHandler(
     const out = await listTemplatesService((req as any).user, req.body || {});
     res.json({ items: out, ok: true });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
 );
 
 export const assessmentTemplatesDelete = secureHandler(
@@ -58,7 +58,7 @@ export const assessmentTemplateVersionsList = secureHandler(
     const out = await listVersionsService((req as any).user, { templateId, status });
     res.json({ items: out, ok: true });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
 );
 
 export const assessmentSubmit = secureHandler(
@@ -76,7 +76,7 @@ export const assessmentSubmissionGet = secureHandler(
     const out = await getSubmissionService((req as any).user, { submissionId });
     res.json({ submission: out, ok: true });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
 );
 
 export const assessmentSubmissionsList = secureHandler(
@@ -84,7 +84,7 @@ export const assessmentSubmissionsList = secureHandler(
     const out = await listSubmissionsService((req as any).user, req.body || {});
     res.json({ items: out, ok: true });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], requireOrg: true, requireTeams: true }
 );
 
 /**

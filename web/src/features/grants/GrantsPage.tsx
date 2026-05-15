@@ -14,6 +14,8 @@ import { FilterToggleGroup } from "@entities/ui";
 import { useGrants } from "@hooks/useGrants";
 import { qk } from "@hooks/queryKeys";
 import { useGrantMetrics } from "@hooks/useMetrics";
+import { useAuth } from "@app/auth/AuthProvider";
+import { isViewerLike } from "@lib/roles";
 import { metricTextClass, populationChipClass, toneTextClass } from "@lib/colorRegistry";
 import type { TGrant as Grant } from "@types";
 import CreditCardsPanel from "./CreditCardsPanel";
@@ -250,6 +252,8 @@ function ProgramRow({
 export function GrantsPage() {
   const qc = useQueryClient();
   const router = useRouter();
+  const { profile } = useAuth();
+  const isViewer = isViewerLike(profile);
   const [view, setView] = useState<GrantBucket>("grant");
   const [filter, setFilter] = useState<FilterMode>("active");
   const [search, setSearch] = useState("");
@@ -373,10 +377,12 @@ export function GrantsPage() {
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button className="btn btn-xs" onClick={() => router.push("/grants/new?kind=grant")}>+ Grant</button>
-              <button className="btn-secondary btn-xs" onClick={() => router.push("/grants/new?kind=program")}>+ Program</button>
-            </div>
+            {!isViewer && (
+              <div className="flex items-center gap-2">
+                <button className="btn btn-xs" onClick={() => router.push("/grants/new?kind=grant")}>+ Grant</button>
+                <button className="btn-secondary btn-xs" onClick={() => router.push("/grants/new?kind=program")}>+ Program</button>
+              </div>
+            )}
           </div>
         </div>
 

@@ -250,6 +250,7 @@ export const PaymentsAdjustSpendBody = z.object({
   patch: z
     .object({
       amount: z.union([z.number(), z.string()]).optional(),
+      type: PaymentType.optional(),
       lineItemId: z.string().min(1).optional(),
       dueDate: ISO10ish.optional(), // normalized to ISO10
       note: z.union([z.string(), z.array(z.string())]).optional(),

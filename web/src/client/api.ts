@@ -122,6 +122,7 @@ export const endpointsStrict = {
   enrollmentGetById:  { method: 'GET',   path: 'enrollmentGetById' },
   enrollmentsDelete:  { method: 'POST',  path: 'enrollmentsDelete' },
   enrollmentsAdminDelete: { method: 'POST', path: 'enrollmentsAdminDelete' },
+  enrollmentsVoidProjections: { method: 'POST', path: 'enrollmentsVoidProjections' },
   enrollmentsEnrollCustomer: { method: 'POST', path: 'enrollmentsEnrollCustomer' },
   enrollmentsBulkEnroll: { method: 'POST', path: 'enrollmentsBulkEnroll' },
   enrollmentsCheckOverlaps: { method: 'POST', path: 'enrollmentsCheckOverlaps' },
@@ -137,9 +138,13 @@ export const endpointsStrict = {
   grantsDelete:       { method: 'POST',  path: 'grantsDelete' },
   grantsAdminDelete:  { method: 'POST',  path: 'grantsAdminDelete' },
   grantsList:         { method: 'GET',   path: 'grantsList' },
-  grantsActivity:     { method: 'GET',   path: 'grantsActivity' },
-  grantsStructure:    { method: 'GET',   path: 'grantsStructure' },
-  grantsGet:          { method: 'GET',   path: 'grantsGet' },
+  grantsActivity:              { method: 'GET',  path: 'grantsActivity' },
+  grantsStructure:             { method: 'GET',  path: 'grantsStructure' },
+  grantsGet:                   { method: 'GET',  path: 'grantsGet' },
+  grantsAdminPreview:          { method: 'GET',  path: 'grantsAdminPreview' },
+  grantsAdminClearPayments:    { method: 'POST', path: 'grantsAdminClearPayments' },
+  grantsAdminClearEnrollments: { method: 'POST', path: 'grantsAdminClearEnrollments' },
+  grantsAdminReconcileBudget:  { method: 'POST', path: 'grantsAdminReconcileBudget' },
 
   // JOTFORM
   jotformSubmissionsUpsert: { method: 'POST', path: 'jotformSubmissionsUpsert' },
@@ -307,6 +312,7 @@ export const endpointsLoose = {
   // DRIVE (runtime admin tooling)
   gdriveCustomerFolderSync:     { method: 'POST',  path: 'gdriveCustomerFolderSync' },
 
+
 } as const satisfies Record<string, EndpointDef>;
 
 // Merge for runtime usage (same behavior as before: one endpoints object).
@@ -470,6 +476,44 @@ function extractBackendErrorMessage(input: unknown): string | null {
   return walk(input);
 }
 
+const ENDPOINT_ERROR_TITLES: Record<string, string> = {
+  customersUpsert: "Error saving Customer",
+  customersPatch: "Error saving Customer",
+  enrollmentsEnrollCustomer: "Error enrolling Customer",
+  gdriveBuildCustomerFolder: "Error building Customer folder",
+  gdriveCreateFolder: "Error creating Drive folder",
+  gdriveUpload: "Error uploading Drive file",
+  gdriveCustomerFolderIndex: "Error loading Customer folders",
+  tasksGenerateScheduleWrite: "Error building Customer tasks",
+  paymentsGenerateProjections: "Error building Payment schedule",
+  paymentsUpsertProjections: "Error saving Payment schedule",
+  paymentsAdjustProjections: "Error adjusting Payment projections",
+  paymentsAdjustSpend: "Error adjusting Payment spend",
+};
+
+function isNoisyBackendMessage(message: string): boolean {
+  const s = message.trim();
+  return (
+    s.startsWith("[") ||
+    s.includes('"code"') ||
+    s.includes('"path"') ||
+    s.includes("ZodError")
+  );
+}
+
+function buildApiErrorToast(e: any): string {
+  const s = e?.meta?.status;
+  const fn = String(e?.meta?.name || "").trim();
+  const title = ENDPOINT_ERROR_TITLES[fn] || (fn ? `[${fn}] Request failed` : "Request failed");
+  const msg = extractBackendErrorMessage(e?.meta?.response) || extractBackendErrorMessage(e);
+
+  if (msg === "appcheck_failed") return `${title}: Security check failed. Refresh and try again.`;
+  if (isNoisyBackendMessage(String(msg || ""))) return title;
+  if (s === 401) return `${title}: ${msg || "Session expired. Please sign in."}`;
+  if (s) return `${title}: ${msg || `HTTP ${s}`}`;
+  return `${title}: ${msg || "Try again."}`;
+}
+
 function isFirestoreTimestampLike(value: unknown): value is {
   toMillis?: () => number;
   seconds?: number;
@@ -506,13 +550,7 @@ export function createApi({
   backoffMs = 300,
   getCacheTtlMs,
   onError = (e: any) => {
-    const s = e?.meta?.status;
-    const fn = String(e?.meta?.name || "").trim();
-    const msg = extractBackendErrorMessage(e?.meta?.response) || extractBackendErrorMessage(e);
-    const label = fn ? `[${fn}] ` : "";
-    if (s === 401) toast(`${label}${msg || 'Session expired. Please sign in.'}`, { type: 'error' });
-    else if (s) toast(`${label}${msg || `Request failed (HTTP ${s}).`}`, { type: 'error' });
-    else toast(`${label}${msg || 'Request failed. Try again.'}`, { type: 'error' });
+    toast(buildApiErrorToast(e), { type: 'error' });
     console.warn('[api]', e);
   },
   isHeavy = (name: EndpointName) => HEAVY_WRITE_ENDPOINTS.has(name),
@@ -546,13 +584,17 @@ export function createApi({
       responseData?.message
     );
     if (!code) return respStatus === 401;
+    if (code.includes('appcheck_failed') || code.includes('app check')) return false;
     return (
       code.includes('unauthenticated') ||
       code.includes('token_revoked') ||
-      code.includes('id-token-expired') ||
-      code.includes('appcheck_failed') ||
-      code.includes('auth')
+      code.includes('id-token-expired')
     );
+  }
+
+  function shouldForceFullLogin(name: EndpointName, respStatus: number): boolean {
+    if (String(name).startsWith('paymentQueue')) return false;
+    return respStatus === 401 || respStatus === 403;
   }
 
   async function forceFreshAuthTokens() {
@@ -782,7 +824,7 @@ export function createApi({
                 return exec();
               }
 
-              if (retriedAuth && authFailure) {
+              if (retriedAuth && authFailure && shouldForceFullLogin(name, resp.status)) {
                 await requireFullLogin(normalizeErrorCode(data?.error || data?.message || 'session_expired'));
               }
 
@@ -956,13 +998,7 @@ export const api: Api = createApi({
   },
   getCacheTtlMs: () => 0,
   onError: (e: any) => {
-    const s = e?.meta?.status;
-    const fn = String(e?.meta?.name || "").trim();
-    const msg = extractBackendErrorMessage(e?.meta?.response) || extractBackendErrorMessage(e);
-    const label = fn ? `[${fn}] ` : "";
-    if (s === 401) toast(`${label}${msg || 'Session expired. Please sign in.'}`, { type: 'error' });
-    else if (s) toast(`${label}${msg || `Request failed (HTTP ${s}).`}`, { type: 'error' });
-    else toast(`${label}${msg || 'Request failed. Try again.'}`, { type: 'error' });
+    toast(buildApiErrorToast(e), { type: 'error' });
     console.warn('[api]', e);
   },
 });

@@ -3,7 +3,9 @@ import {
   db,
   FieldValue,
   RUNTIME,
+  isoNow,
 } from "../../core";
+import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
 import {
   onDocumentCreated,
   onDocumentUpdated,
@@ -254,8 +256,85 @@ export const onCustomerUpdate = onDocumentUpdated(
     if (changedKeys.includes("caseManagerId") || changedKeys.includes("caseManagerName")) {
       await syncCustomerCaseManagerToEnrollments(String(e.params.id || ""), before, after);
     }
+
+    // Customer became inactive → close all active enrollments + void their projections.
+    if (wasActive && !isNowActive) {
+      await cascadeCustomerInactiveToEnrollments(String(e.params.id || ""));
+    }
   }
 );
+
+async function cascadeCustomerInactiveToEnrollments(customerId: string) {
+  if (!customerId) return;
+
+  // --- READ FIRST ---
+  let snap: FirebaseFirestore.QuerySnapshot;
+  try {
+    snap = await db
+      .collection("customerEnrollments")
+      .where("customerId", "==", customerId)
+      .where("active", "==", true)
+      .get();
+  } catch (e: any) {
+    console.error(`[cascadeCustomerInactive] read failed for customer ${customerId}:`, e?.message || e);
+    return;
+  }
+
+  if (snap.empty) return;
+
+  const now = isoNow();
+  const batch = db.batch();
+  const enrollmentIds: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string }> = [];
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as any;
+    // Skip enrollments already closed/deleted
+    const status = String(data?.status || "").toLowerCase();
+    if (status === "closed" || status === "deleted") continue;
+
+    batch.set(
+      doc.ref,
+      {
+        status: "closed",
+        active: false,
+        closedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        system: { lastWriter: FN_CUSTOMER_UPDATE, lastWriteAt: FieldValue.serverTimestamp() },
+      },
+      { merge: true }
+    );
+
+    enrollmentIds.push({
+      id: doc.id,
+      orgId: data?.orgId ?? null,
+      grantId: data?.grantId ?? null,
+      customerId: data?.customerId ?? customerId,
+    });
+  }
+
+  try {
+    await batch.commit();
+  } catch (e: any) {
+    console.error(`[cascadeCustomerInactive] batch close failed for customer ${customerId}:`, e?.message || e);
+    return;
+  }
+
+  // Void paymentQueue projections for each closed enrollment.
+  // Errors here are non-fatal — the enrollments are already closed.
+  await Promise.allSettled(
+    enrollmentIds.map(({ id, orgId, grantId, customerId: cid }) =>
+      syncEnrollmentProjectionQueueItems({
+        orgId,
+        enrollmentId: id,
+        grantId,
+        customerId: cid,
+        payments: [],
+      }).catch((e: any) =>
+        console.error(`[cascadeCustomerInactive] voidProjections failed for enrollment ${id}:`, e?.message || e)
+      )
+    )
+  );
+}
 
 export const onCustomerDelete = onDocumentDeleted(
   {

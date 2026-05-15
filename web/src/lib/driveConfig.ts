@@ -4,6 +4,8 @@ function readPublicId(value: string | undefined): string {
 
 export const ACTIVE_PARENT_ID = readPublicId(process.env.NEXT_PUBLIC_GDRIVE_ACTIVE_PARENT_ID);
 export const EXITED_PARENT_ID = readPublicId(process.env.NEXT_PUBLIC_GDRIVE_EXITED_PARENT_ID);
+export const FOLDER_INDEX_SHEET_ID = readPublicId(process.env.NEXT_PUBLIC_GDRIVE_FOLDER_INDEX_SHEET_ID);
+export const APPS_SCRIPT_EXEC_URL = String(process.env.NEXT_PUBLIC_APPS_SCRIPT_EXEC_URL ?? "").trim();
 
 export const DRIVE_FILE_TEMPLATES = [
   {

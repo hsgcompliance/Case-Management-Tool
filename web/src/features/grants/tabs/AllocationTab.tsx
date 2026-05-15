@@ -3,7 +3,7 @@
 // Shows paid, projected, and total allocated per customer.
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useGrantCustomerAllocations } from "@hooks/useGrantCustomerAllocations";
 import { useRecomputeGrantAllocations } from "@hooks/usePaymentQueue";
 import { toast } from "@lib/toast";
@@ -43,15 +43,54 @@ export function AllocationTab({ grantId, perCustomerCap, lineItems = [] }: Alloc
     }
     return map;
   }, [lineItems]);
+  const displayLineItems = React.useMemo(() => {
+    const seen = new Set<string>();
+    const items: Array<{
+      id: string;
+      label: string;
+      cap: number | null;
+    }> = [];
 
-  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
-  const pageRows = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    for (const item of lineItems) {
+      const id = String(item.id || "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      items.push({
+        id,
+        label: String(item.label || item.name || item.title || id),
+        cap: item.capEnabled && item.perCustomerCap != null ? Number(item.perCustomerCap) : null,
+      });
+    }
+
+    for (const row of rows) {
+      for (const id of Object.keys(row.lineItemTotal || {})) {
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const item = lineItemById.get(id);
+        items.push({
+          id,
+          label: String(item?.label || item?.name || item?.title || id),
+          cap: item?.capEnabled && item?.perCustomerCap != null ? Number(item.perCustomerCap) : null,
+        });
+      }
+    }
+
+    return items;
+  }, [lineItemById, lineItems, rows]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
   const showPaidProjected = rows.some((r) => r.projected !== 0);
+
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(totalPages - 1);
+  }, [page, totalPages]);
 
   if (isLoading) {
     return (
       <div className="py-8 text-center text-sm text-slate-400">
-        Loading allocations…
+        Loading allocations...
       </div>
     );
   }
@@ -120,6 +159,20 @@ export function AllocationTab({ grantId, perCustomerCap, lineItems = [] }: Alloc
                   </th>
                 </>
               )}
+              {displayLineItems.map((lineItem) => (
+                <th
+                  key={lineItem.id}
+                  className="px-4 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400"
+                  title={lineItem.cap != null ? `${lineItem.id} cap ${fmtUsd(lineItem.cap)} / customer` : lineItem.id}
+                >
+                  <div>{lineItem.label}</div>
+                  {lineItem.cap != null && (
+                    <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                      Cap {fmtUsd(lineItem.cap)}
+                    </div>
+                  )}
+                </th>
+              ))}
               <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 dark:text-slate-400">
                 Total Allocated
               </th>
@@ -146,43 +199,37 @@ export function AllocationTab({ grantId, perCustomerCap, lineItems = [] }: Alloc
                 >
                   <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">
                     <div>{row.customerName}</div>
-                    {Object.keys(row.lineItemTotal || {}).length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {Object.entries(row.lineItemTotal)
-                          .sort((a, b) => Math.abs(Number(b[1] || 0)) - Math.abs(Number(a[1] || 0)))
-                          .slice(0, 5)
-                          .map(([lineItemId, amount]) => {
-                            const line = lineItemById.get(lineItemId);
-                            const label = String(line?.label || line?.name || line?.title || lineItemId);
-                            const cap = line?.capEnabled && line?.perCustomerCap != null ? Number(line.perCustomerCap) : null;
-                            const over = cap != null && Number(amount || 0) > cap;
-                            return (
-                            <span
-                              key={lineItemId}
-                              className={[
-                                "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-normal dark:bg-slate-900",
-                                over
-                                  ? "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:text-red-300"
-                                  : "border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:text-slate-400",
-                              ].join(" ")}
-                              title={lineItemId}
-                            >
-                              {label}: {fmtUsd(Number(amount || 0))}{cap != null ? ` / ${fmtUsd(cap)}` : ""}
-                            </span>
-                          );})}
-                      </div>
-                    )}
                   </td>
                   {showPaidProjected && (
                     <>
                       <td className="px-4 py-2.5 text-right tabular-nums text-amber-700 dark:text-amber-400">
-                        {row.paid !== 0 ? fmtUsd(row.paid) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                        {row.paid !== 0 ? fmtUsd(row.paid) : <span className="text-slate-300 dark:text-slate-600">-</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-blue-700 dark:text-blue-400">
-                        {row.projected !== 0 ? fmtUsd(row.projected) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                        {row.projected !== 0 ? fmtUsd(row.projected) : <span className="text-slate-300 dark:text-slate-600">-</span>}
                       </td>
                     </>
                   )}
+                  {displayLineItems.map((lineItem) => {
+                    const amount = Number(row.lineItemTotal?.[lineItem.id] || 0);
+                    const over = lineItem.cap != null && amount > lineItem.cap;
+                    return (
+                      <td
+                        key={lineItem.id}
+                        className={[
+                          "px-4 py-2.5 text-right tabular-nums",
+                          over
+                            ? "font-semibold text-red-600 dark:text-red-400"
+                            : amount !== 0
+                            ? "text-slate-700 dark:text-slate-200"
+                            : "text-slate-300 dark:text-slate-600",
+                        ].join(" ")}
+                        title={lineItem.cap != null ? `${lineItem.label}: ${fmtUsd(amount)} / ${fmtUsd(lineItem.cap)}` : lineItem.label}
+                      >
+                        {amount !== 0 ? fmtUsd(amount) : "-"}
+                      </td>
+                    );
+                  })}
                   <td
                     className={[
                       "px-4 py-2.5 text-right tabular-nums font-semibold",
@@ -223,24 +270,24 @@ export function AllocationTab({ grantId, perCustomerCap, lineItems = [] }: Alloc
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-1">
           <span className="text-xs text-slate-400">
-            Page {page + 1} of {totalPages} · {rows.length} total
+            Page {safePage + 1} of {totalPages} - {rows.length} total
           </span>
           <div className="flex items-center gap-1">
             <button
               type="button"
-              disabled={page === 0}
-              onClick={() => setPage((p) => p - 1)}
+              disabled={safePage === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
               className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300"
             >
-              ← Prev
+              Prev
             </button>
             <button
               type="button"
-              disabled={page >= totalPages - 1}
-              onClick={() => setPage((p) => p + 1)}
+              disabled={safePage >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300"
             >
-              Next →
+              Next
             </button>
           </div>
         </div>

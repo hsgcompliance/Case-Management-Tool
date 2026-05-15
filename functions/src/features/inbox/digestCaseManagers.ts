@@ -1,8 +1,9 @@
 // functions/src/features/inbox/digestCaseManagers.ts
 // Case Manager overview digest with active customer/enrollment counts.
-import {authAdmin, db, isoNow} from '../../core';
+import {authAdmin, db} from '../../core';
 import {sendHtmlEmail} from './emailer';
 import {loadDigestEnrollments} from './digestEnrollmentSource';
+import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
 const DASHBOARD_LINK = 'https://households-db.web.app/dashboard';
 const BRAND = '#2563EB';
@@ -315,17 +316,22 @@ export function buildCaseManagerDigestHtml(data: CaseManagerDigestData): string 
 
 export async function buildAndSendCaseManagerDigest(
     to: string,
-    opts: { month: string; recipientName?: string },
+    opts: { month: string; recipientName?: string; force?: boolean },
 ): Promise<{ ok: boolean; skipped?: boolean }> {
   const key = `digest_caseManagers_${opts.month}_${to.toLowerCase()}`;
-  const logRef = db.collection('emailLogs').doc(key);
-  if ((await logRef.get()).exists) return {ok: true, skipped: true};
+  const reserved = await reserveDigestSend(key, {to, month: opts.month, digestType: 'caseManagers'}, {force: opts.force});
+  if (!reserved) return {ok: true, skipped: true};
 
-  const data = await buildCaseManagerDigestData({month: opts.month, recipientName: opts.recipientName});
-  const html = buildCaseManagerDigestHtml(data);
-  const subject = `Case Manager Digest - ${monthLabel(opts.month)} (${data.rows.length} CMs, ${data.totals.activeCustomers} customers)`;
+  try {
+    const data = await buildCaseManagerDigestData({month: opts.month, recipientName: opts.recipientName});
+    const html = buildCaseManagerDigestHtml(data);
+    const subject = `Case Manager Digest - ${monthLabel(opts.month)} (${data.rows.length} CMs, ${data.totals.activeCustomers} customers)`;
 
-  const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html});
-  await logRef.set({id: sent.id || null, to, month: opts.month, subject, createdAt: isoNow()}, {merge: true});
-  return sent;
+    const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html});
+    await markDigestSent(key, {id: sent.id || null, to, month: opts.month, subject, digestType: 'caseManagers'});
+    return sent;
+  } catch (error: unknown) {
+    await markDigestFailed(key, error, {to, month: opts.month, digestType: 'caseManagers'});
+    throw error;
+  }
 }

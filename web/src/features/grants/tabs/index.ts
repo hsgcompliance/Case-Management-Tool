@@ -6,3 +6,4 @@ export { TasksTab } from "./TasksTab";
 export { AssessmentsTab } from "./AssessmentsTab";
 export { ActivityTab } from "./ActivityTab";
 export { AllocationTab } from "./AllocationTab";
+export { AdminTab } from "./AdminTab";

@@ -72,11 +72,13 @@ function writeTiers(storageKey: string | undefined, tiers: TierState) {
 
 function readHidden(storageKey?: string): boolean {
   const key = sk(storageKey, "hidden");
-  if (!key || typeof window === "undefined") return false;
+  if (!key || typeof window === "undefined") return true;
   try {
-    return window.localStorage.getItem(key) === "1";
+    const stored = window.localStorage.getItem(key);
+    // "0" = user explicitly expanded; anything else (including null) = collapsed
+    return stored !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 

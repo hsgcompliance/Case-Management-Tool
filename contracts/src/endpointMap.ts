@@ -269,6 +269,15 @@ import type {
 
   TGrantsActivityQuery,
   TGrantsActivityResp,
+
+  TGrantsAdminPreviewQuery,
+  TGrantsAdminPreviewResp,
+  TGrantsAdminClearPaymentsBody,
+  TGrantsAdminClearPaymentsResp,
+  TGrantsAdminClearEnrollmentsBody,
+  TGrantsAdminClearEnrollmentsResp,
+  TGrantsAdminReconcileBudgetBody,
+  TGrantsAdminReconcileBudgetResp,
 } from "./grants";
 
 // ----- surface aliases -----
@@ -304,6 +313,18 @@ export type GrantsStructureResp = TGrantsStructureResp;
 
 export type GrantsActivityReq = TGrantsActivityQuery;
 export type GrantsActivityResp = TGrantsActivityResp;
+
+export type GrantsAdminPreviewReq = TGrantsAdminPreviewQuery;
+export type GrantsAdminPreviewResp = TGrantsAdminPreviewResp;
+
+export type GrantsAdminClearPaymentsReq = TGrantsAdminClearPaymentsBody;
+export type GrantsAdminClearPaymentsResp = TGrantsAdminClearPaymentsResp;
+
+export type GrantsAdminClearEnrollmentsReq = TGrantsAdminClearEnrollmentsBody;
+export type GrantsAdminClearEnrollmentsResp = TGrantsAdminClearEnrollmentsResp;
+
+export type GrantsAdminReconcileBudgetReq = TGrantsAdminReconcileBudgetBody;
+export type GrantsAdminReconcileBudgetResp = TGrantsAdminReconcileBudgetResp;
 
 /* ============================================================================
    Jotform
@@ -447,6 +468,12 @@ export type EnrollmentsBackfillNamesResp = TEnrollmentsBackfillNamesResp;
 
 export type EnrollmentsDeleteReq = TEnrollmentsDeleteBody;
 export type EnrollmentsDeleteResp = TEnrollmentsDeleteResp;
+
+export type EnrollmentsVoidProjectionsReq = { id: string } | { ids: string[] } | string | string[];
+export type EnrollmentsVoidProjectionsResp = {
+  ok: boolean;
+  results: Array<{ id: string; ok?: true; skipped?: true; error?: string }>;
+};
 
 export type EnrollmentsEnrollCustomerReq = TEnrollmentsEnrollCustomerBody;
 export type EnrollmentsEnrollCustomerResp = TEnrollmentsEnrollCustomerResp;
@@ -906,6 +933,7 @@ export interface EndpointMap {
   enrollmentsMigrate: { req: EnrollmentsMigrateReq; resp: EnrollmentsMigrateResp };
   enrollmentsUndoMigration: { req: EnrollmentsUndoMigrationReq; resp: EnrollmentsUndoMigrationResp };
   enrollmentsAdminReverseLedgerEntry: { req: EnrollmentsAdminReverseLedgerEntryReq; resp: EnrollmentsAdminReverseLedgerEntryResp };
+  enrollmentsVoidProjections: { req: EnrollmentsVoidProjectionsReq; resp: EnrollmentsVoidProjectionsResp };
 
   // GRANTS
   grantsUpsert: { req: GrantsUpsertReq; resp: GrantsUpsertResp };
@@ -916,6 +944,10 @@ export interface EndpointMap {
   grantsGet: { req: GrantsGetReq; resp: GrantsGetResp };
   grantsStructure: { req: GrantsStructureReq; resp: GrantsStructureResp };
   grantsActivity: { req: GrantsActivityReq; resp: GrantsActivityResp };
+  grantsAdminPreview: { req: GrantsAdminPreviewReq; resp: GrantsAdminPreviewResp };
+  grantsAdminClearPayments: { req: GrantsAdminClearPaymentsReq; resp: GrantsAdminClearPaymentsResp };
+  grantsAdminClearEnrollments: { req: GrantsAdminClearEnrollmentsReq; resp: GrantsAdminClearEnrollmentsResp };
+  grantsAdminReconcileBudget: { req: GrantsAdminReconcileBudgetReq; resp: GrantsAdminReconcileBudgetResp };
 
   // JOTFORM
   jotformSubmissionsUpsert: { req: JotformSubmissionsUpsertReq; resp: JotformSubmissionsUpsertResp };

@@ -64,7 +64,13 @@ export type ExtractedSpendItem = {
   direction?: "charge" | "return";
   directionFieldId?: string | null;
   amountFieldId?: string | null;
-  extractionGroup?: { kind: "purchase" | "return" | "fallback"; index: number | null; orderRange?: [number, number] | null; fieldIds?: Record<string, string | null> };
+  extractionGroup?: {
+    kind: "purchase" | "return" | "fallback";
+    index: number | null;
+    orderRange?: [number, number] | null;
+    fieldIds?: Record<string, string | null>;
+    fieldOrders?: Record<string, number | null>;
+  };
   merchant: string;
   expenseType: string;
   program: string;
@@ -139,6 +145,16 @@ const CC_SCHEMA = {
     email: "295",
   },
 } as const;
+
+const CC_FIELD_ORDER: Record<string, number> = {
+  "219": 11,
+  "82": 14, "84": 15, "169": 16, "296": 17, "204": 18, "156": 19, "174": 20, "85": 21, "86": 22, "70": 24, "151": 25,
+  "182": 31, "183": 32, "184": 33, "205": 35, "185": 36, "186": 37, "106": 38, "107": 39, "109": 40, "143": 41,
+  "187": 46, "188": 47, "189": 48, "206": 50, "190": 51, "191": 52, "114": 53, "115": 54, "117": 55,
+  "192": 61, "193": 62, "194": 63, "207": 65, "195": 66, "196": 67, "122": 68, "123": 69, "125": 70, "147": 71,
+  "197": 75, "198": 76, "199": 77, "208": 79, "200": 80, "201": 81, "130": 82, "131": 83, "133": 84,
+  "281": 96, "284": 98, "285": 99, "286": 100, "303": 101, "287": 102, "288": 103, "289": 104, "290": 105, "291": 106, "293": 108, "294": 109, "295": 111,
+};
 
 const INVOICE_SCHEMA = {
   globals: {
@@ -224,6 +240,15 @@ function getFiles(answers: AnyObj, ids: readonly string[]): string[] {
     else { const s = asText(v); if (s) out.push(s); }
   }
   return Array.from(new Set(out)).filter(Boolean);
+}
+
+function fieldOrders(answers: AnyObj, fieldIds: Record<string, string | null>): Record<string, number | null> {
+  return Object.fromEntries(
+      Object.entries(fieldIds).map(([key, id]) => {
+        const answerOrder = Number(id ? (answers[id] as AnyObj | undefined)?.order : NaN);
+        return [key, Number.isFinite(answerOrder) && answerOrder > 0 ? answerOrder : id ? CC_FIELD_ORDER[id] ?? null : null];
+      }),
+  );
 }
 
 function parseMoney(v: unknown, errors?: SpendExtractionError[], fieldId?: string): number {
@@ -408,6 +433,21 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
     const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
     const txnFiles = getFiles(answers, tx.files);
     const program = programOperations || tssCategory || supportiveProgram;
+    const returnFieldIds = {
+      cardUsed: tx.cardUsed,
+      merchant: tx.merchant,
+      expenseType: tx.expenseType,
+      supportiveProgram: tx.supportiveProgram,
+      tssCategory: tx.tssCategory,
+      flexToggle: tx.flexToggle,
+      programOperations: tx.programOperations,
+      customerName: tx.customerName,
+      purpose: tx.purpose,
+      cost: tx.cost,
+      files: tx.files[0] ?? null,
+      notes: tx.notes,
+      email: tx.email,
+    };
     anyFlex = anyFlex || isFlexTxn;
 
     items.push({
@@ -425,18 +465,8 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
         kind: "return",
         index: 1,
         orderRange: [91, 109],
-        fieldIds: {
-          cardUsed: tx.cardUsed,
-          merchant: tx.merchant,
-          expenseType: tx.expenseType,
-          supportiveProgram: tx.supportiveProgram,
-          tssCategory: tx.tssCategory,
-          programOperations: tx.programOperations,
-          customerName: tx.customerName,
-          purpose: tx.purpose,
-          cost: tx.cost,
-          notes: tx.notes,
-        },
+        fieldIds: returnFieldIds,
+        fieldOrders: fieldOrders(answers, returnFieldIds),
       },
       merchant, expenseType, program,
       billedTo: "", project: "", purchasePath: "",
@@ -479,6 +509,19 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
     const txnFiles = getFiles(answers, tx.files);
     const uploadAllForTxn = i === 0 ? uploadAll : [];
     const files = Array.from(new Set([...txnFiles, ...uploadAllForTxn]));
+    const txFieldIds = {
+      cardUsed: CC_SCHEMA.globals.cardUsed,
+      merchant: tx.merchant,
+      expenseType: tx.expenseType,
+      supportiveProgram: tx.supportiveProgram,
+      programOperations: (tx as any).programOperations ?? null,
+      customerName: tx.customerName,
+      flexToggle: tx.flexToggle,
+      purpose: tx.purpose,
+      cost: tx.cost,
+      files: tx.files[0] ?? null,
+      notes: tx.notes ?? null,
+    };
 
     const program = expenseType.toLowerCase().includes("customer")
       ? supportiveProgram
@@ -503,16 +546,8 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
         kind: "purchase",
         index: i + 1,
         orderRange: orderRanges[i] ?? null,
-        fieldIds: {
-          merchant: tx.merchant,
-          expenseType: tx.expenseType,
-          supportiveProgram: tx.supportiveProgram,
-          programOperations: (tx as any).programOperations ?? null,
-          customerName: tx.customerName,
-          purpose: tx.purpose,
-          cost: tx.cost,
-          notes: tx.notes ?? null,
-        },
+        fieldIds: txFieldIds,
+        fieldOrders: fieldOrders(answers, txFieldIds),
       },
       merchant, expenseType, program,
       billedTo: "", project: "", purchasePath: "",
@@ -538,6 +573,19 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
     const txnFiles = getFiles(answers, tx0.files);
     const files = Array.from(new Set([...txnFiles, ...uploadAll]));
     const customer = asText(getAns(answers, tx0.customerName));
+    const fallbackFieldIds = {
+      cardUsed: CC_SCHEMA.globals.cardUsed,
+      merchant: tx0.merchant,
+      expenseType: tx0.expenseType,
+      supportiveProgram: tx0.supportiveProgram,
+      programOperations: (tx0 as any).programOperations ?? null,
+      customerName: tx0.customerName,
+      flexToggle: tx0.flexToggle,
+      purpose: tx0.purpose,
+      cost: tx0.cost,
+      files: tx0.files[0] ?? null,
+      notes: tx0.notes ?? null,
+    };
     anyFlex = anyFlex || isFlexTxn;
     errors.push({ code: SPEND_ERR.EMPTY_RESULT, message: "No non-empty transactions found; using Tx1 as fallback" });
     items.push({
@@ -551,16 +599,8 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
         kind: "fallback",
         index: 1,
         orderRange: orderRanges[0],
-        fieldIds: {
-          merchant: tx0.merchant,
-          expenseType: tx0.expenseType,
-          supportiveProgram: tx0.supportiveProgram,
-          programOperations: (tx0 as any).programOperations ?? null,
-          customerName: tx0.customerName,
-          purpose: tx0.purpose,
-          cost: tx0.cost,
-          notes: tx0.notes ?? null,
-        },
+        fieldIds: fallbackFieldIds,
+        fieldOrders: fieldOrders(answers, fallbackFieldIds),
       },
       merchant: asText(getAns(answers, tx0.merchant)),
       expenseType: asText(getAns(answers, tx0.expenseType)),

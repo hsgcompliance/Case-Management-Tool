@@ -76,8 +76,12 @@ functions_dump.txt
 artifacts/
 docs/
 google Scripts Integration/
-scripts/migration/
-scripts/migration-*.mjs
 scripts/out/
 scripts/prompts/
 seeds/
+
+# Archived migration and seed artifacts (gitignored in new location)
+archive/migration/scripts/
+archive/migration/lib/
+archive/migration/artifacts/
+archive/seed-emulator/logs/

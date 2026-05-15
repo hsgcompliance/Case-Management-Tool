@@ -60,6 +60,7 @@ export function isCaseManagerLike(input: RoleLike): boolean {
 
 export function isViewerLike(input: RoleLike): boolean {
   if (!input) return false;
+  if (topRoleNormalized(input) === "viewer") return true;
   return normalizeRoles(input.roles).includes("viewer");
 }
 

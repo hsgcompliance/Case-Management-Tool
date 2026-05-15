@@ -178,5 +178,5 @@ export const tasksList = secureHandler( async (req, res) => {
 
     res.status(200).json({ ok: true, items });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );

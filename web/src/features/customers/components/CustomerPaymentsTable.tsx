@@ -24,14 +24,16 @@ type Props = {
   busyCompliance?: boolean;
 };
 
-function paymentDate(p: any): string {
-  return safeISODate10(p?.dueDate || p?.date) || "";
+function paymentDate(p: unknown): string {
+  const payment = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
+  return safeISODate10(payment.dueDate || payment.date) || "";
 }
 
-function paymentTypeLabel(p: any): string {
-  const type = String(p?.type || "-").toLowerCase();
+function paymentTypeLabel(p: unknown): string {
+  const payment = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
+  const type = String(payment.type || "-").toLowerCase();
   if (type !== "monthly") return type || "-";
-  const notes = Array.isArray(p?.note) ? p.note : p?.note != null ? [p.note] : [];
+  const notes = Array.isArray(payment.note) ? payment.note : payment.note != null ? [payment.note] : [];
   const tags = notes.map((x: unknown) => String(x || "").toLowerCase());
   const subtype =
     tags.find((t) => t === "sub:utility" || t === "utility" || t.startsWith("sub:utility") || t.startsWith("utility:"))

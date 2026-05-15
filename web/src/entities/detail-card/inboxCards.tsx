@@ -237,7 +237,7 @@ function MonthlyPaymentServiceCard({ item, actions, extras }: InboxDetailProps) 
     },
     {
       key: "paid",
-      label: "Payment Received",
+      label: "Invoice Submitted",
       value: localPaid,
       onToggle: () => {
         const next = !localPaid;

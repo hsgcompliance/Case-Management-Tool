@@ -6,7 +6,7 @@ import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { TPayment } from "@types";
 import type { PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
-import { safeISODate10 } from "@lib/date";
+import { safeISODate10, todayISO } from "@lib/date";
 import { isISO } from "@features/customers/components/paymentScheduleUtils";
 import dynamic from "next/dynamic";
 
@@ -89,6 +89,8 @@ export default function PaymentsProjectionsAdjustDialog({
   const [editedAmounts, setEditedAmounts] = React.useState<Record<string, string>>({});
   const [editedDueDates, setEditedDueDates] = React.useState<Record<string, string>>({});
   const [editedLineItems, setEditedLineItems] = React.useState<Record<string, string>>({});
+  const [editedVendors, setEditedVendors] = React.useState<Record<string, string>>({});
+  const [bulkVendor, setBulkVendor] = React.useState("");
   const [deletedIds, setDeletedIds] = React.useState<Record<string, boolean>>({});
   const [addRows, setAddRows] = React.useState<AddRow[]>([]);
   const [bulkFutureAmount, setBulkFutureAmount] = React.useState("");
@@ -112,6 +114,8 @@ export default function PaymentsProjectionsAdjustDialog({
     setEditedAmounts({});
     setEditedDueDates({});
     setEditedLineItems({});
+    setEditedVendors({});
+    setBulkVendor("");
     setDeletedIds({});
     setAddRows([]);
     setBulkFutureAmount("");
@@ -265,6 +269,25 @@ export default function PaymentsProjectionsAdjustDialog({
     setEditedLineItems((prev) => ({ ...prev, [id]: value }));
   };
 
+  const setEditVendor = (id: string, value: string) => {
+    setEditedVendors((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const applyBulkVendor = (futureOnly: boolean) => {
+    if (!bulkVendor.trim()) return;
+    const today = todayISO();
+    setEditedVendors((prev) => {
+      const next = { ...prev };
+      for (const p of payments) {
+        if (Boolean(p.paid) || deletedIds[paymentId(p)]) continue;
+        const dueDate = iso10(p.dueDate || (p as Record<string, unknown>)?.date || "");
+        if (futureOnly && dueDate && dueDate < today) continue;
+        next[paymentId(p)] = bulkVendor.trim();
+      }
+      return next;
+    });
+  };
+
   const toggleDelete = (id: string, checked: boolean) => {
     setDeletedIds((prev) => ({ ...prev, [id]: checked }));
     if (checked) {
@@ -398,6 +421,7 @@ export default function PaymentsProjectionsAdjustDialog({
         const amountValue = editedAmounts[id];
         const dueDateValue = editedDueDates[id];
         const lineItemValue = editedLineItems[id];
+        const vendorValue = editedVendors[id];
         const amountChanged =
           amountValue != null &&
           amountValue !== "" &&
@@ -410,12 +434,16 @@ export default function PaymentsProjectionsAdjustDialog({
           lineItemValue != null &&
           lineItemValue !== "" &&
           lineItemValue !== String(p.lineItemId || "");
-        if (!amountChanged && !dueDateChanged && !lineItemChanged) return null;
+        const vendorChanged =
+          vendorValue != null &&
+          vendorValue !== String((p as Record<string, unknown>).vendor || "");
+        if (!amountChanged && !dueDateChanged && !lineItemChanged && !vendorChanged) return null;
         return {
           paymentId: id,
           ...(amountChanged ? { amount: Number(amountValue) } : {}),
           ...(dueDateChanged ? { dueDate: dueDateValue } : {}),
           ...(lineItemChanged ? { lineItemId: lineItemValue } : {}),
+          ...(vendorChanged ? { vendor: vendorValue } : {}),
         };
       })
       .filter((r): r is { paymentId: string; amount?: number; dueDate?: string; lineItemId?: string } => !!r);
@@ -548,28 +576,43 @@ export default function PaymentsProjectionsAdjustDialog({
         />
 
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
             <div className="text-sm font-medium text-slate-800">Schedule Rows</div>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="number"
                 min={0}
                 step="0.01"
-                className="w-40 rounded border border-slate-300 px-2 py-1 text-xs"
+                className="w-36 rounded border border-slate-300 px-2 py-1 text-xs"
                 value={bulkFutureAmount}
                 onChange={(e) => setBulkFutureAmount(e.currentTarget.value)}
-                placeholder="Set all unpaid"
+                placeholder="Amount"
               />
               <button type="button" className="btn btn-ghost btn-sm" onClick={applyBulkFutureAmount}>
-                Apply to Unpaid
+                Update all future amounts
               </button>
+              <span className="text-slate-300">|</span>
+              <input
+                type="text"
+                className="w-40 rounded border border-slate-300 px-2 py-1 text-xs"
+                value={bulkVendor}
+                onChange={(e) => setBulkVendor(e.currentTarget.value)}
+                placeholder="Vendor"
+              />
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => applyBulkVendor(false)}>
+                Update all vendors
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => applyBulkVendor(true)}>
+                Update all future vendors
+              </button>
+              <span className="text-slate-300">|</span>
               <button type="button" className="btn btn-sm" onClick={addProjectionRow}>
                 Add Row
               </button>
             </div>
           </div>
 
-          <div className="max-h-[24rem] overflow-auto">
+          <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
               <thead className="sticky top-0 bg-white text-slate-500 shadow-[0_1px_0_rgb(226_232_240)]">
                 <tr>
@@ -577,6 +620,7 @@ export default function PaymentsProjectionsAdjustDialog({
                   <th className="px-3 py-2 text-left">Type</th>
                   <th className="px-3 py-2 text-right">Current</th>
                   <th className="px-3 py-2 text-right">Adjust Amount</th>
+                  <th className="px-3 py-2 text-left">Vendor</th>
                   <th className="px-3 py-2 text-center">Paid</th>
                   <th className="px-3 py-2 text-left">Line Item</th>
                   <th className="px-3 py-2 text-center">Delete</th>
@@ -585,7 +629,7 @@ export default function PaymentsProjectionsAdjustDialog({
               <tbody>
                 {payments.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-slate-500" colSpan={7}>No payments in this enrollment.</td>
+                    <td className="px-3 py-3 text-slate-500" colSpan={8}>No payments in this enrollment.</td>
                   </tr>
                 ) : payments.map((p, idx) => {
                   const id = paymentId(p);
@@ -616,6 +660,16 @@ export default function PaymentsProjectionsAdjustDialog({
                           onChange={(e) => setEditAmount(id, e.currentTarget.value)}
                           disabled={deleted}
                           placeholder={amountText(p.amount)}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          className="w-36 rounded border border-slate-300 px-2 py-1 text-xs"
+                          value={editedVendors[id] ?? String((p as Record<string, unknown>).vendor || "")}
+                          onChange={(e) => setEditVendor(id, e.currentTarget.value)}
+                          disabled={deleted || paid}
+                          placeholder={paid ? "—" : "Vendor"}
                         />
                       </td>
                       <td className="px-3 py-2 text-center">

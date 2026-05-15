@@ -44,7 +44,7 @@ export const ledgerList = secureHandler(
       hasMore: out.hasMore,
     });
   },
-  { auth: "user", requireOrg: true, methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", requireOrg: true, methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /* ============================================================================
@@ -174,7 +174,7 @@ export const ledgerGetById = secureHandler(
     res.json({ ok: true, entry });
     return;
   },
-  { auth: "user", requireOrg: true, methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", requireOrg: true, methods: ["GET", "OPTIONS"] }
 );
 
 /* ============================================================================
@@ -200,7 +200,7 @@ export const ledgerBalance = secureHandler(
     res.json({ ok: true, balances, groupBy: body.groupBy });
     return;
   },
-  { auth: "user", requireOrg: true, methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", requireOrg: true, methods: ["GET", "POST", "OPTIONS"] }
 );
 
 /* ============================================================================

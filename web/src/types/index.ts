@@ -63,6 +63,13 @@ export type {
   TGrantBudgetLineItem,
   TGrantBudgetTotals,
   TGrantBudget,
+  TGrantPinColor,
+  TGrantPinImportant,
+  TGrantPinDigest,
+  TGrantPinInvoice,
+  TGrantPins,
+  TGrantInvoicing,
+  TGrantInvoicingFrequency,
 
   TJotformSubmission,
   TJotformSubmissionEntity,
@@ -117,6 +124,8 @@ export type {
 
   TourFlowT,
 } from "@hdb/contracts";
+
+export { GRANT_PIN_COLORS } from "@hdb/contracts";
 
 // Backward-compatible UI aliases
 export type TCustomer = TCustomerEntity;
@@ -288,6 +297,9 @@ export type EnrollmentsUndoMigrationResp = RespOf<"enrollmentsUndoMigration">;
 
 export type EnrollmentsAdminReverseLedgerEntryReq = ReqOf<"enrollmentsAdminReverseLedgerEntry">;
 export type EnrollmentsAdminReverseLedgerEntryResp = RespOf<"enrollmentsAdminReverseLedgerEntry">;
+
+export type EnrollmentsVoidProjectionsReq = ReqOf<"enrollmentsVoidProjections">;
+export type EnrollmentsVoidProjectionsResp = RespOf<"enrollmentsVoidProjections">;
 
 export type EnrollmentsListQuery = ReqOf<"enrollmentsList">;
 export type EnrollmentsListResp = RespOf<"enrollmentsList">;

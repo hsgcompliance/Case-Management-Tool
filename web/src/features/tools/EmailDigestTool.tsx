@@ -1,6 +1,6 @@
 "use client";
 
-// features/tools/widgets/EmailDigestTool.tsx
+// features/tools/EmailDigestTool.tsx
 import React from "react";
 import Inbox from "@client/inbox";
 import { useUsers } from "@hooks/useUsers";

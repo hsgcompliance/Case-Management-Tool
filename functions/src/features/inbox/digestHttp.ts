@@ -60,6 +60,7 @@ export const inboxSendDigestNow = secureHandler(
       }
 
       const results: Array<{ uid: string; email: string; month: string; ok: boolean; skipped?: boolean; error?: string }> = [];
+      const force = true;
 
       for (const u of targets) {
         const digestFlags = await getDigestEnabledFlags(u.claims);
@@ -82,19 +83,20 @@ export const inboxSendDigestNow = secureHandler(
             const isAdmin = u.topRole === 'admin' || u.topRole === 'dev' || u.topRole === 'org_dev';
 
             if (digestType === 'caseload') {
-              r = await buildAndSendDigest(u.email, {month, forUid: u.uid, cmName: name, subject, subjectTemplate, message});
+              r = await buildAndSendDigest(u.email, {month, forUid: u.uid, cmName: name, subject, subjectTemplate, message, force});
             } else if (digestType === 'budget') {
-              r = await buildAndSendBudgetDigest(u.email, {month, forUid: u.uid, recipientName: name});
+              r = await buildAndSendBudgetDigest(u.email, {month, forUid: u.uid, recipientName: name, force});
             } else if (digestType === 'enrollments') {
               r = await buildAndSendEnrollmentDigest(u.email, {
                 month,
                 forUid: isCM && !isAdmin ? u.uid : undefined,
                 recipientName: name,
+                force,
               });
             } else if (digestType === 'caseManagers') {
-              r = await buildAndSendCaseManagerDigest(u.email, {month, recipientName: name});
+              r = await buildAndSendCaseManagerDigest(u.email, {month, recipientName: name, force});
             } else {
-              r = await buildAndSendRentalAssistanceDigest(u.email, {month, recipientName: name});
+              r = await buildAndSendRentalAssistanceDigest(u.email, {month, recipientName: name, force});
             }
 
             results.push({uid: u.uid, email: u.email, month, ok: r.ok, skipped: r.skipped});
@@ -114,6 +116,7 @@ export const inboxSendDigestNow = secureHandler(
       auth: 'admin',
       methods: ['POST', 'OPTIONS'],
       secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+      timeoutSeconds: 540,
       memory: '512MiB',
     },
 );

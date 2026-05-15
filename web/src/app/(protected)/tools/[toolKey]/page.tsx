@@ -2,7 +2,7 @@
 import React from "react";
 import { notFound } from "next/navigation";
 import ToolsPage from "@features/tools/ToolsPage";
-import { TOOLS_TOOL_DEFS, getToolsPageToolDef } from "@features/tools/widgets/toolsDefs";
+import { TOOLS_TOOL_DEFS, getToolsPageToolDef } from "@features/tools/toolsDefs";
 
 export function generateStaticParams() {
   return TOOLS_TOOL_DEFS.map((tool) => ({ toolKey: tool.id }));

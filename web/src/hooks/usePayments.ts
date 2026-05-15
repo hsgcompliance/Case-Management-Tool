@@ -10,6 +10,10 @@ import type { Enrollment } from "@client/enrollments";
 import Tasks from "@client/tasks";
 import { qk } from "./queryKeys";
 import { customerEnrollmentsQueryKey } from "./useEnrollments";
+import {
+  findCachedPaymentQueueItem,
+  optimisticPostPaymentQueuePatches,
+} from "./paymentQueueOptimistic";
 import { RQ_DEFAULTS } from "./base";
 import { useInvalidateMutation } from "./optimistic";
 import { toISODate } from "@lib/date";
@@ -53,6 +57,7 @@ export type PaymentsProjectionsAdjustInput = {
   spendAdjustment?: {
     paymentId: string;
     newAmount?: number;
+    type?: TPayment["type"];
     lineItemId?: string;
     dueDate?: string;
     note?: string | string[];
@@ -140,6 +145,12 @@ export type PaymentScheduleBuildInput = {
   };
   taskDefs?: unknown[];
   replaceTaskDefPrefixes?: string[];
+  invoiceDocsTask?: {
+    enabled: boolean;
+    dueDate?: string;
+    bucket?: "task" | "compliance";
+    docs?: string[];
+  };
 };
 
 function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<string, unknown> {
@@ -211,6 +222,18 @@ function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<s
         }
       : {}),
     services,
+    ...(input.invoiceDocsTask
+      ? {
+          invoiceDocsTask: {
+            enabled: input.invoiceDocsTask.enabled === true,
+            ...(input.invoiceDocsTask.dueDate ? { dueDate: toISO10(input.invoiceDocsTask.dueDate) } : {}),
+            ...(input.invoiceDocsTask.bucket ? { bucket: String(input.invoiceDocsTask.bucket) } : {}),
+            docs: Array.isArray(input.invoiceDocsTask.docs)
+              ? input.invoiceDocsTask.docs.map((doc) => String(doc || "").trim()).filter(Boolean)
+              : [],
+          },
+        }
+      : {}),
   };
 }
 
@@ -617,7 +640,7 @@ export function usePaymentsSpend() {
       const reverse = body?.reverse === true;
       const nowIso = new Date().toISOString();
 
-      return paymentMutationPatches(queryClient, {
+      const patches = paymentMutationPatches(queryClient, {
         enrollmentId,
         paymentId,
         patch: (payment) => ({
@@ -632,6 +655,19 @@ export function usePaymentsSpend() {
           ...(reverse ? {} : { paidFromGrant: Boolean((payment as Record<string, unknown>)?.paidFromGrant) }),
         }),
       });
+
+      if (!reverse) {
+        const queueItem = findCachedPaymentQueueItem(
+          queryClient,
+          (item) =>
+            String(item?.source || "") === "projection" &&
+            String(item?.enrollmentId || "").trim() === enrollmentId &&
+            String(item?.paymentId || "").trim() === paymentId,
+        );
+        patches.push(...optimisticPostPaymentQueuePatches(queryClient, queueItem));
+      }
+
+      return patches;
     },
     mutationFn: (args: { body: PaymentsSpendReq; idemKey?: string }) =>
       Payments.spend(args.body, args.idemKey) as Promise<PaymentsSpendResp>,
@@ -642,6 +678,7 @@ export function usePaymentsSpend() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
         qc.invalidateQueries({ queryKey: qk.ledger.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
         qc.invalidateQueries({ queryKey: qk.inbox.root }),
       ]);
     },
@@ -838,6 +875,7 @@ export function usePaymentsProjectionsAdjust() {
         } else {
           const patch: PaymentsAdjustSpendReq["patch"] = {
             ...(input.spendAdjustment.newAmount != null ? { amount: input.spendAdjustment.newAmount } : {}),
+            ...(input.spendAdjustment.type ? { type: input.spendAdjustment.type } : {}),
             ...(input.spendAdjustment.lineItemId ? { lineItemId: input.spendAdjustment.lineItemId } : {}),
             ...(input.spendAdjustment.dueDate ? { dueDate: input.spendAdjustment.dueDate } : {}),
             ...(input.spendAdjustment.note != null ? { note: input.spendAdjustment.note } : {}),

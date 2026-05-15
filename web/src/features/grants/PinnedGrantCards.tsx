@@ -2,8 +2,8 @@
 
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@app/auth/AuthProvider";
+import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { useGrant } from "@hooks/useGrants";
 import {
   getPinnedGrantIds,
@@ -146,9 +146,9 @@ function PinnedGrantCard({
   grantId: string;
   onUnpin: () => void;
 }) {
-  const router = useRouter();
   const { data: grant, isLoading } = useGrant(grantId, { enabled: !!grantId });
   const [pageIdx, setPageIdx] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
 
   if (isLoading || !grant) {
     return (
@@ -174,11 +174,12 @@ function PinnedGrantCard({
     setPageIdx((p) => Math.max(0, Math.min(pages.length - 1, p + dir)));
 
   return (
-    <div
+    <>
+      <div
       data-block-id={`grant:${grantId}`}
       data-block-name={String((g as any)?.name || grantId)}
       className="relative flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
-    >
+      >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-100 px-4 pt-4 pb-3 dark:border-slate-800">
         <div className="min-w-0 flex-1">
@@ -337,13 +338,17 @@ function PinnedGrantCard({
           <span className="ml-1 text-[10px] text-slate-400">{safePage + 1}/{pages.length}</span>
         </div>
         <button
-          onClick={() => router.push(`/grants/${grantId}`)}
+          onClick={() => setModalOpen(true)}
           className="text-xs font-semibold text-sky-500 hover:text-sky-600 dark:text-sky-400"
         >
           View →
         </button>
       </div>
-    </div>
+      </div>
+      {modalOpen ? (
+        <GrantWorkspaceModal grantId={grantId} onClose={() => setModalOpen(false)} />
+      ) : null}
+    </>
   );
 }
 

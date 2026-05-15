@@ -18,6 +18,7 @@ export default function ActionMenu({
   buttonLabel,
   buttonClassName = "",
   buttonAriaLabel,
+  buttonTitle,
 }: {
   items: ActionItem[];
   disabled?: boolean;
@@ -25,6 +26,7 @@ export default function ActionMenu({
   buttonLabel?: string;
   buttonClassName?: string;
   buttonAriaLabel?: string;
+  buttonTitle?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
@@ -125,6 +127,7 @@ export default function ActionMenu({
           buttonClassName,
         ].join(" ").trim()}
         aria-label={buttonAriaLabel || (buttonLabel ? undefined : "Open actions")}
+        title={buttonTitle}
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
         data-tour={tourId ? `${tourId}-toggle` : undefined}

@@ -21,6 +21,7 @@ export type PaymentQueueItem = Record<string, unknown> & {
     index: number | null;
     orderRange?: [number, number] | null;
     fieldIds?: Record<string, string | null>;
+    fieldOrders?: Record<string, number | null>;
   };
   merchant?: string;
   card?: string;

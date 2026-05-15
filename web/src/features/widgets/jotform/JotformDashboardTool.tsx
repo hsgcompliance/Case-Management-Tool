@@ -257,6 +257,85 @@ function QueueStageCard({
   );
 }
 
+function SpendGrantMappingTool({
+  items,
+  queueItems,
+}: {
+  items: Array<Record<string, unknown>>;
+  queueItems: PaymentQueueItem[];
+}) {
+  const queueById = React.useMemo(
+    () => new Map(queueItems.map((item) => [String(item.id), item])),
+    [queueItems],
+  );
+  const unclassified = queueItems.filter((item) => !item.grantId && item.okUnassigned !== true).length;
+  const noGrant = queueItems.filter((item) => !item.grantId && item.okUnassigned === true).length;
+  const classified = queueItems.filter((item) => item.grantId).length;
+
+  return (
+    <DetailCardShell
+      title="Grant Mapping Tool"
+      subtitle="Spend-form classification workspace for invoice and credit-card submissions"
+    >
+      <div className="grid gap-2 md:grid-cols-3">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Needs Mapping</div>
+          <div className="mt-1 text-xl font-black tabular-nums text-slate-900">{unclassified}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Classified</div>
+          <div className="mt-1 text-xl font-black tabular-nums text-slate-900">{classified}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">No Grant</div>
+          <div className="mt-1 text-xl font-black tabular-nums text-slate-900">{noGrant}</div>
+        </div>
+      </div>
+      <div className="mt-3 space-y-2">
+        {items.length ? items.map((item) => {
+          const queueItem = queueById.get(String(item.id)) || null;
+          const grantState = queueItem?.grantId
+            ? "Grant budget selected"
+            : queueItem?.okUnassigned === true
+              ? "No Grant Classification"
+              : "Needs mapping";
+          return (
+            <div key={String(item.id)} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    {String(item.merchant || item.vendor || item.program || item.billedTo || "Spend item")}
+                  </div>
+                  <div className="text-xs text-slate-500">{String(item.id || "")}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-bold tabular-nums text-slate-900">{fmtCurrencyUSD(item.amount)}</div>
+                  <div className="text-xs text-slate-500">{grantState}</div>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-700 md:grid-cols-2">
+                <MetadataRow label="Expense Type" value={String(item.expenseType || "-")} />
+                <MetadataRow label="Program / Bill To" value={String(item.program || item.project || item.billedTo || "-")} />
+                <MetadataRow label="Service / Purpose" value={String(item.serviceType || item.purpose || item.descriptor || "-")} />
+                <MetadataRow label="Current Grant" value={String(queueItem?.grantId || "-")} />
+                <MetadataRow label="Current Budget" value={String(queueItem?.lineItemId || "-")} />
+                <MetadataRow label="Queue Status" value={String(queueItem?.queueStatus || "pending")} />
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+            No spend items were extracted from this submission.
+          </div>
+        )}
+      </div>
+      <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+        Rule suggestions are not applied here yet. This panel is the spend-form hook point for the upcoming grant/budget decision tree.
+      </div>
+    </DetailCardShell>
+  );
+}
+
 function SubmissionPipelinePane({
   submission,
   digestMap,
@@ -303,6 +382,8 @@ function SubmissionPipelinePane({
   const { summary, fields, items } = summarizeSubmission(submission, digestMap || undefined);
   const queueState = summarizeQueueState(queueItems);
   const queueById = new Map(queueItems.map((item) => [String(item.id), item]));
+  const formId = String(submission.form_id || submission.formId || digestMap?.formId || "").trim();
+  const showSpendGrantMapping = isLineItemsFormId(formId);
   const q = wordSearch.trim().toLowerCase();
   const visibleFields = q
     ? fields.filter(
@@ -365,6 +446,13 @@ function SubmissionPipelinePane({
           <DetailRow label="Payment Staging" value={<Link className="text-sky-700 hover:underline" href="/tools/spending">Open Invoicing Tool</Link>} />
         </DetailSection>
       </DetailCardShell>
+
+      {showSpendGrantMapping ? (
+        <SpendGrantMappingTool
+          items={items as Array<Record<string, unknown>>}
+          queueItems={queueItems}
+        />
+      ) : null}
 
       <DetailCardShell title="Link to System Records" subtitle="Submission-level mapping that feeds queue extraction">
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2">

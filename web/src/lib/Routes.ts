@@ -27,11 +27,11 @@ export const Routes = {
     customer: ((id: string | number | ":id") =>
       `/customers/${id}`) as RouteFn<[string | number | ":id"]>,
 
-    // (protected)/grants/page.tsx
-    grants: (() => "/grants") as RouteFn,
-    // (protected)/grants/[grantId]/page.tsx
+    // Deprecated: grants are managed through Budget + Programs.
+    grants: (() => "/budget") as RouteFn,
+    // Deprecated: grant detail links should open GrantWorkspaceModal where possible.
     grant: ((id: string | number | ":id") =>
-      `/grants/${id}`) as RouteFn<[string | number | ":id"]>,
+      `/budget?grantId=${encodeURIComponent(String(id))}`) as RouteFn<[string | number | ":id"]>,
 
     // (protected)/casemanagers/page.tsx
     casemanagers: (() => "/casemanagers") as RouteFn,

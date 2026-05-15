@@ -84,6 +84,8 @@ async function setClaimsMerged(uid: string, nextClaims: Record<string, any>, rev
 
 function canonTopRole(topRole?: TTopRole): TTopRoleLadder {
   switch (topRole) {
+    case "viewer":
+      return "viewer";
     case "admin":
       return "admin";
     case "dev":
@@ -317,6 +319,8 @@ export async function setUserRoleService(input: SetRoleBodyIn) {
       ? "org_dev"
       : prevCC.topRole === "super_dev"
       ? "super_dev"
+      : prevCC.topRole === "viewer"
+      ? "viewer"
       : "user";
 
   const nextClaims = claimsFromShape({

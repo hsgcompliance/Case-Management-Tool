@@ -145,7 +145,7 @@ export const gdriveList = secureHandler(
     }
   },
   {
-    auth: "user",
+    auth: "viewer",
     methods: ["GET", "OPTIONS"],
     secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN, DRIVE_SANDBOX_FOLDER_ID],
     memory: "512MiB",
@@ -163,7 +163,7 @@ export const gdriveCreateFolder = secureHandler(
     res.status(200).json({ ok: true, folder: r });
   },
   {
-    auth: "user",
+    auth: "viewer",
     methods: ["POST", "OPTIONS"],
     secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
   }

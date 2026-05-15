@@ -3,6 +3,7 @@ import {
   secureHandler,
   db,
   FieldPath,
+  FieldValue,
   Timestamp,
   orgIdFromClaims,
   hasLevel,
@@ -12,6 +13,7 @@ import {
   normId,
   normStr,
   sanitizeFlatObject,
+  newBulkWriter,
   z,
   type AuthedRequest,
   type Claims,
@@ -76,7 +78,14 @@ function assertGrantOrgAccess(
 /** POST /grantsUpsert — admin; single or array */
 export const grantsUpsert = secureHandler(
   async (req, res) => {
-    const body = GrantUpsertBody.parse(req.body);
+    const parsed = GrantUpsertBody.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const body = parsed.data;
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, req.body);
     const out = await upsertGrants(body, caller, targetOrg);
@@ -88,7 +97,14 @@ export const grantsUpsert = secureHandler(
 /** PATCH /grantsPatch — verified org users (service enforces org invariants) */
 export const grantsPatch = secureHandler(
   async (req, res) => {
-    const body = GrantPatchBody.parse(req.body);
+    const parsed = GrantPatchBody.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const body = parsed.data;
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, req.body);
     const out = await patchGrants(body, caller, targetOrg);
@@ -100,7 +116,14 @@ export const grantsPatch = secureHandler(
 /** POST /grantsDelete — admin; id or ids[] (soft) */
 export const grantsDelete = secureHandler(
   async (req, res) => {
-    const ids = GrantsDeleteBody.parse(req.body);
+    const parsed = GrantsDeleteBody.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const ids = parsed.data;
 
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, req.body);
@@ -114,7 +137,14 @@ export const grantsDelete = secureHandler(
 /** POST /grantsAdminDelete — admin; id or ids[] (hard) */
 export const grantsAdminDelete = secureHandler(
   async (req, res) => {
-    const ids = GrantsAdminDeleteBody.parse(req.body);
+    const parsed = GrantsAdminDeleteBody.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const ids = parsed.data;
 
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, req.body);
@@ -297,16 +327,23 @@ export const grantsList = secureHandler(
 
     res.status(200).json({ ok: true, items, next, orgId: targetOrg });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] },
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] },
 );
 
 /** GET/POST /grantsGet?id=... — org-scoped */
 export const grantsGet = secureHandler(
   async (req, res) => {
     const rawSrc = (req.method === "GET" ? req.query : req.body) || {};
-    const src = GrantsGetQuery.parse(
+    const parsed = GrantsGetQuery.safeParse(
       sanitizeFlatObject(rawSrc as Record<string, unknown>),
     );
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_query", issues: parsed.error.issues });
+      return;
+    }
+    const src = parsed.data;
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, src);
 
@@ -327,7 +364,7 @@ export const grantsGet = secureHandler(
 
     res.status(200).json({ ok: true, grant: { id: snap.id, ...grant } });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] },
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] },
 );
 
 /** GET /grantsStructure — skeleton for create forms */
@@ -361,16 +398,23 @@ export const grantsStructure = secureHandler(
     };
     res.status(200).json({ ok: true, structure });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] },
+  { auth: "viewer", methods: ["GET", "OPTIONS"] },
 );
 
 /** GET/POST /grantsActivity?grantId=...&limit=... — org-scoped */
 export const grantsActivity = secureHandler(
   async (req, res) => {
     const rawSrc = (req.method === "GET" ? req.query : req.body) || {};
-    const src = GrantsActivityQuery.parse(
+    const parsed = GrantsActivityQuery.safeParse(
       sanitizeFlatObject(rawSrc as Record<string, unknown>),
     );
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_query", issues: parsed.error.issues });
+      return;
+    }
+    const src = parsed.data;
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, src);
 
@@ -379,6 +423,11 @@ export const grantsActivity = secureHandler(
       1,
       Math.min(1000, parseInt(String(src?.limit ?? "200"), 10) || 200),
     );
+    const cursorOffset = Math.max(0, parseInt(String(src?.cursor ?? "0"), 10) || 0);
+    const includeProjected =
+      src?.includeProjected === undefined
+        ? true
+        : !["false", "0", "no", "n"].includes(String(src.includeProjected).trim().toLowerCase());
     if (!grantId) {
       res.status(400).json({ ok: false, error: "missing_grantId" });
       return;
@@ -393,102 +442,583 @@ export const grantsActivity = secureHandler(
     const gData = gSnap.data() || {};
     assertGrantOrgAccess(caller, targetOrg, gData);
 
-    // Try collectionGroup('spends') first
+    const grantOrg = normId(gData.orgId);
+    const rowOrgAllowed = (row: Record<string, unknown>) => {
+      const rowOrg = normId(row.orgId);
+      return !rowOrg || !grantOrg || rowOrg === grantOrg || hasLevel(caller, "dev");
+    };
+    const isoFrom = (...values: unknown[]) => {
+      for (const value of values) {
+        const iso = toUtcIso(value as string | number | Date);
+        if (iso) return iso;
+      }
+      return new Date().toISOString();
+    };
+    const amountDollars = (row: Record<string, unknown>) => {
+      const cents = Number(row.amountCents);
+      if (Number.isFinite(cents)) return cents / 100;
+      const amount = Number(row.amount);
+      return Number.isFinite(amount) ? amount : 0;
+    };
+    const clean = (row: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+    const activity: Array<Record<string, unknown>> = [];
+    const ledgerKeys = new Set<string>();
+    const legacyKeys = new Set<string>();
+
+    const ledgerSnap = await db
+      .collection("ledger")
+      .where("grantId", "==", grantId)
+      .get();
+
+    for (const doc of ledgerSnap.docs) {
+      const row = { id: doc.id, ...(doc.data() || {}) } as Record<string, unknown>;
+      if (!rowOrgAllowed(row)) continue;
+      const amount = amountDollars(row);
+      const origin = (row.origin && typeof row.origin === "object" ? row.origin : {}) as Record<string, unknown>;
+      const enrollmentId = String(row.enrollmentId || "").trim();
+      const paymentId = String(origin.baseId || row.paymentId || "").trim();
+      const ts = isoFrom(row.postedAt, row.dueDate, row.createdAt, doc.updateTime);
+      const sourcePath = String(origin.sourcePath || "").trim();
+      if (sourcePath) ledgerKeys.add(`path:${sourcePath}`);
+      if (enrollmentId || paymentId) {
+        ledgerKeys.add(`match:${enrollmentId}:${paymentId}:${Math.round(amount * 100)}`);
+      }
+
+      activity.push(clean({
+        id: `ledger:${doc.id}`,
+        kind: amount < 0 || row.reversalOf || origin.reversalOf ? "reversal" : "spend",
+        sourceType: "ledger",
+        grantId,
+        enrollmentId,
+        paymentId: paymentId || null,
+        lineItemId: row.lineItemId ?? null,
+        amount,
+        note: row.note ?? row.comment ?? row.description ?? null,
+        ts,
+        by: row.postedBy ?? row.by ?? origin.postedBy ?? null,
+        reversalOf: row.reversalOf ?? origin.reversalOf ?? null,
+        queueStatus: null,
+        customerId: row.customerId ?? null,
+        customerNameAtSpend: row.customerNameAtSpend ?? null,
+        grantNameAtSpend: row.grantNameAtSpend ?? null,
+        lineItemLabelAtSpend: row.lineItemLabelAtSpend ?? null,
+        paymentLabelAtSpend: row.paymentLabelAtSpend ?? null,
+        ledgerEntry: row,
+      }));
+    }
+
+    if (includeProjected) {
+      const queueSnap = await db
+        .collection("paymentQueue")
+        .where("grantId", "==", grantId)
+        .where("queueStatus", "==", "pending")
+        .get();
+
+      for (const doc of queueSnap.docs) {
+        const row = { id: doc.id, ...(doc.data() || {}) } as Record<string, unknown>;
+        if (!rowOrgAllowed(row)) continue;
+        const source = String(row.source || "").toLowerCase();
+        if (!["projection", "invoice", "credit-card"].includes(source)) continue;
+        const amount = Number(row.amount || 0);
+        if (!Number.isFinite(amount) || amount === 0) continue;
+        activity.push(clean({
+          id: `queue:${doc.id}`,
+          kind: "projection",
+          sourceType: "paymentQueue",
+          grantId,
+          enrollmentId: String(row.enrollmentId || ""),
+          paymentId: row.paymentId ?? row.submissionId ?? null,
+          lineItemId: row.lineItemId ?? null,
+          amount,
+          note: row.note ?? row.notes ?? row.purpose ?? row.descriptor ?? null,
+          ts: isoFrom(row.dueDate, row.createdAt, row.postedAt, doc.updateTime),
+          by: row.postedBy ?? row.reopenedBy ?? null,
+          reversalOf: null,
+          queueStatus: row.queueStatus ?? null,
+          customerId: row.customerId ?? null,
+          customerName: row.customer ?? null,
+          paymentQueueItem: row,
+        }));
+      }
+    }
+
     try {
       const cg = db
         .collectionGroup("spends")
-        .where("grantId", "==", grantId)
-        .orderBy("ts", "desc")
-        .limit(limit);
-
+        .where("grantId", "==", grantId);
       const snap = await cg.get();
-      if (!snap.empty) {
-        const items = snap.docs.map((d) => {
-          const s = d.data() as Record<string, unknown>;
-          const amt = Number(s.amount || 0);
-
-          const tsIso = (() => {
-            const primary = toUtcIso(s.ts as string | number | Date);
-            if (primary) return primary;
-            const fallback = toUtcIso(
-              (d.updateTime ?? new Date()) as unknown as string | number | Date,
-            );
-            return fallback || new Date().toISOString();
-          })();
-
-          return {
-            id: s.id || d.id,
-            kind: amt < 0 ? "reversal" : "spend",
-            grantId: s.grantId || grantId,
-            enrollmentId: s.enrollmentId || d.ref.parent.parent?.id || "",
-            paymentId: s.paymentId ?? null,
-            lineItemId: s.lineItemId ?? null,
-            amount: amt,
-            note: s.note ?? null,
-            ts: tsIso,
-            by: s.by ?? null,
-            reversalOf: s.reversalOf ?? null,
-          };
-        });
-        res.status(200).json({ ok: true, items });
-        return;
+      for (const d of snap.docs) {
+        const s = d.data() as Record<string, unknown>;
+        const amount = Number(s.amount || 0);
+        const enrollmentId = String(s.enrollmentId || d.ref.parent.parent?.id || "").trim();
+        const paymentId = String(s.paymentId || "").trim();
+        const sourcePath = d.ref.path;
+        const matchKey = `match:${enrollmentId}:${paymentId}:${Math.round(amount * 100)}`;
+        if (ledgerKeys.has(`path:${sourcePath}`) || ledgerKeys.has(matchKey)) continue;
+        legacyKeys.add(matchKey);
+        activity.push(clean({
+          id: `legacy:${s.id || d.id}`,
+          kind: amount < 0 ? "reversal" : "spend",
+          sourceType: "legacySpend",
+          grantId,
+          enrollmentId,
+          paymentId: s.paymentId ?? null,
+          lineItemId: s.lineItemId ?? null,
+          amount,
+          note: s.note ?? null,
+          ts: isoFrom(s.ts, d.updateTime),
+          by: s.by ?? null,
+          reversalOf: s.reversalOf ?? null,
+        }));
       }
     } catch {
-      /* ignore; fallback below */
+      // Legacy supplement is best effort only; ledger remains authoritative.
     }
 
-    // Fallback: walk customerEnrollments.spends[]
-    const enr = await db
+    const enrollmentSnap = await db
+      .collection("customerEnrollments")
+      .where("grantId", "==", grantId)
+      .get();
+    for (const doc of enrollmentSnap.docs) {
+      const enrollment = doc.data() || {};
+      const spends = Array.isArray(enrollment.spends) ? enrollment.spends : [];
+      for (let i = 0; i < spends.length; i++) {
+        const spend = (spends[i] || {}) as Record<string, unknown>;
+        const amount = Number(spend.amount || 0);
+        const paymentId = String(spend.paymentId || "").trim();
+        const matchKey = `match:${doc.id}:${paymentId}:${Math.round(amount * 100)}`;
+        if (ledgerKeys.has(matchKey) || legacyKeys.has(matchKey)) continue;
+        legacyKeys.add(matchKey);
+        activity.push(clean({
+          id: `legacy-array:${spend.id || `act_${doc.id}_${paymentId || "nopay"}_${i}`}`,
+          kind: amount < 0 ? "reversal" : "spend",
+          sourceType: "legacySpend",
+          grantId,
+          enrollmentId: doc.id,
+          paymentId: spend.paymentId ?? null,
+          lineItemId: spend.lineItemId ?? null,
+          amount,
+          note: spend.note ?? null,
+          ts: isoFrom(spend.ts, doc.updateTime),
+          by: spend.by ?? null,
+          reversalOf: spend.reversalOf ?? null,
+        }));
+      }
+    }
+
+    activity.sort((a, b) => {
+      const dateCmp = String(b.ts || "").localeCompare(String(a.ts || ""));
+      if (dateCmp) return dateCmp;
+      return String(b.id || "").localeCompare(String(a.id || ""));
+    });
+
+    const page = activity.slice(cursorOffset, cursorOffset + limit);
+    const nextOffset = cursorOffset + page.length;
+    const counts = {
+      total: activity.length,
+      ledger: activity.filter((row) => row.sourceType === "ledger").length,
+      projected: activity.filter((row) => row.sourceType === "paymentQueue").length,
+      legacy: activity.filter((row) => row.sourceType === "legacySpend").length,
+    };
+    res.status(200).json({
+      ok: true,
+      items: page,
+      next: nextOffset < activity.length ? { cursor: String(nextOffset) } : null,
+      counts,
+    });
+  },
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] },
+);
+
+/**
+ * GET/POST /grantsAdminPreview — admin; returns impact counts for the three
+ * admin operations without making any changes.  Used to populate the Admin tab
+ * impact estimates before the user confirms a destructive action.
+ */
+export const grantsAdminPreview = secureHandler(
+  async (req, res) => {
+    const rawSrc = (req.method === "GET" ? req.query : req.body) || {};
+    const parsed = z.object({ grantId: z.string().min(1) }).safeParse(rawSrc);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const { grantId } = parsed.data;
+    const caller = req.user!;
+    const targetOrg = getTargetOrg(req, rawSrc);
+
+    const gSnap = await db.collection("grants").doc(grantId).get();
+    if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
+    const gData = gSnap.data() || {};
+    assertGrantOrgAccess(caller, targetOrg, gData);
+    const grantOrg = normId(gData.orgId) || normId(targetOrg);
+
+    const [ledgerSnap, queueSnap, enrollSnap] = await Promise.all([
+      db.collection("ledger").where("grantId", "==", grantId).get(),
+      db.collection("paymentQueue").where("grantId", "==", grantId).get(),
+      db.collection("customerEnrollments").where("grantId", "==", grantId).get(),
+    ]);
+
+    // ── Ledger breakdown ────────────────────────────────────────────────────
+    let enrollLedgerCount = 0; let enrollLedgerAmount = 0;
+    let ccLedgerCount = 0;     let ccLedgerAmount = 0;
+    for (const d of ledgerSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+      const source = normStr(row.source) || "";
+      const amount = Number(row.amountCents != null ? Number(row.amountCents) / 100 : row.amount ?? 0);
+      if (!Number.isFinite(amount)) continue;
+      if (_CC_SOURCES.has(source)) { ccLedgerCount++; ccLedgerAmount += amount; }
+      else if (normStr(row.enrollmentId)) { enrollLedgerCount++; enrollLedgerAmount += amount; }
+    }
+
+    // ── Queue breakdown ─────────────────────────────────────────────────────
+    let projCount = 0; let projAmount = 0;
+    let ccQueueCount = 0; let ccQueueAmount = 0;
+    for (const d of queueSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+      const source = normStr(row.source) || "";
+      const amount = Number(row.amount ?? 0);
+      if (!Number.isFinite(amount)) continue;
+      if (source === "projection") { projCount++; projAmount += amount; }
+      else if (_CC_SOURCES.has(source)) { ccQueueCount++; ccQueueAmount += amount; }
+    }
+
+    // ── Enrollment breakdown ────────────────────────────────────────────────
+    let activeEnrollments = 0; let inactiveEnrollments = 0;
+    for (const d of enrollSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+      if (row.active === true) activeEnrollments++; else inactiveEnrollments++;
+    }
+
+    const budget = (gData.budget || {}) as Record<string, unknown>;
+    const totals = (budget.totals || {}) as Record<string, unknown>;
+
+    res.status(200).json({
+      ok: true,
+      ledger: {
+        enrollmentSpends: { count: enrollLedgerCount, amount: enrollLedgerAmount },
+        ccInvoice: { count: ccLedgerCount, amount: ccLedgerAmount },
+      },
+      paymentQueue: {
+        projections: { count: projCount, amount: projAmount },
+        ccInvoice: { count: ccQueueCount, amount: ccQueueAmount },
+      },
+      enrollments: {
+        active: activeEnrollments,
+        inactive: inactiveEnrollments,
+        total: activeEnrollments + inactiveEnrollments,
+      },
+      currentBudget: {
+        total: Number(budget.total ?? 0),
+        spent: Number(totals.spent ?? 0),
+        projected: Number(totals.projected ?? 0),
+        balance: Number(totals.balance ?? 0),
+        projectedBalance: Number(totals.projectedBalance ?? 0),
+      },
+    });
+  },
+  { auth: "admin", methods: ["GET", "POST", "OPTIONS"] },
+);
+
+// ─── Shared helpers for admin budget ops ─────────────────────────────────────
+
+/** Sources that indicate a CC or invoice payment — never touch these in enrollment-clear ops. */
+const _CC_SOURCES = new Set(["credit-card", "invoice"]);
+
+/**
+ * Per-doc guard: returns true only if the doc genuinely belongs to the
+ * target grant AND the target org. This is a second line of defence after
+ * the Firestore query predicate — it prevents acting on docs that somehow
+ * slipped through (e.g. index lag, cross-shard reads during a rollout, or
+ * a future refactor that changes the query).
+ */
+function _docBelongsToGrant(
+  data: Record<string, unknown>,
+  grantId: string,
+  grantOrg: string,
+): boolean {
+  if (normStr(data.grantId) !== grantId) return false;
+  const docOrg = normStr(data.orgId);
+  // Tolerate legacy unscoped docs (no orgId) only if grant org is also unscoped.
+  if (docOrg && grantOrg && docOrg !== grantOrg) return false;
+  return true;
+}
+
+/**
+ * Recomputes budget totals from live ledger + pending paymentQueue data and
+ * writes them back to the grant document.  Both callers (clearPayments and
+ * reconcileBudget) use this so the math is identical.
+ *
+ * Every doc is validated against grantId + grantOrg before being counted.
+ */
+async function recomputeAndWriteBudget(
+  grantId: string,
+  grantOrg: string,
+  grantData: Record<string, unknown>,
+): Promise<{
+  updatedLineItems: Record<string, unknown>[];
+  newTotals: Record<string, number>;
+  counts: { ledger: number; paymentQueue: number };
+}> {
+  const [ledgerSnap, queueSnap] = await Promise.all([
+    db.collection("ledger").where("grantId", "==", grantId).get(),
+    db.collection("paymentQueue")
+      .where("grantId", "==", grantId)
+      .where("queueStatus", "==", "pending")
+      .get(),
+  ]);
+
+  const spentByLine: Record<string, number> = {};
+  let ledgerCounted = 0;
+  for (const d of ledgerSnap.docs) {
+    const row = d.data() as Record<string, unknown>;
+    if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+    const lineId = normStr(row.lineItemId) || "__none__";
+    const amount = Number(row.amountCents != null ? Number(row.amountCents) / 100 : row.amount ?? 0);
+    if (Number.isFinite(amount)) {
+      spentByLine[lineId] = (spentByLine[lineId] ?? 0) + amount;
+      ledgerCounted++;
+    }
+  }
+
+  const projectedByLine: Record<string, number> = {};
+  let queueCounted = 0;
+  for (const d of queueSnap.docs) {
+    const row = d.data() as Record<string, unknown>;
+    if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+    const source = normStr(row.source) || "";
+    if (!["projection", "invoice", "credit-card"].includes(source)) continue;
+    const lineId = normStr(row.lineItemId) || "__none__";
+    const amount = Number(row.amount ?? 0);
+    if (Number.isFinite(amount) && amount !== 0) {
+      projectedByLine[lineId] = (projectedByLine[lineId] ?? 0) + amount;
+      queueCounted++;
+    }
+  }
+
+  const budget = (grantData.budget || {}) as Record<string, unknown>;
+  const total = Number(budget.total ?? 0);
+  const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
+
+  const updatedLineItems = lineItems.map((li) => {
+    const liId = String(li.id || "");
+    return { ...li, spent: spentByLine[liId] ?? 0, projected: projectedByLine[liId] ?? 0 };
+  });
+
+  const totalSpent =
+    updatedLineItems.reduce((a, li) => a + Number(li.spent ?? 0), 0) +
+    (spentByLine["__none__"] ?? 0);
+  const totalProjected =
+    updatedLineItems.reduce((a, li) => a + Number(li.projected ?? 0), 0) +
+    (projectedByLine["__none__"] ?? 0);
+
+  const newTotals = {
+    spent: totalSpent,
+    projected: totalProjected,
+    projectedSpend: totalSpent + totalProjected,
+    balance: total - totalSpent,
+    projectedBalance: total - (totalSpent + totalProjected),
+  };
+
+  await db.collection("grants").doc(grantId).update({
+    "budget.totals": { ...((budget.totals || {}) as Record<string, unknown>), ...newTotals },
+    "budget.lineItems": updatedLineItems,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return { updatedLineItems, newTotals, counts: { ledger: ledgerCounted, paymentQueue: queueCounted } };
+}
+
+// ─── Admin handlers ───────────────────────────────────────────────────────────
+
+/**
+ * POST /grantsAdminClearPayments
+ *
+ * Deletes ONLY enrollment-sourced ledger entries (has enrollmentId, source not
+ * CC/invoice) and ONLY enrollment projection queue items (source === "projection")
+ * for the given grant.  CC and invoice ledger/queue entries are never touched.
+ *
+ * Every candidate doc is checked against the verified grantId AND orgId before
+ * deletion — the Firestore query predicate is not the only gate.
+ *
+ * Budget totals are recomputed from what actually remains after deletion, so
+ * they accurately reflect any CC/invoice amounts that were preserved.
+ */
+export const grantsAdminClearPayments = secureHandler(
+  async (req, res) => {
+    const parsed = z
+      .object({ grantId: z.string().min(1), confirm: z.literal("DELETE") })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const { grantId } = parsed.data;
+    const caller = req.user!;
+    const targetOrg = getTargetOrg(req, req.body);
+
+    const gSnap = await db.collection("grants").doc(grantId).get();
+    if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
+    const gData = gSnap.data() || {};
+    assertGrantOrgAccess(caller, targetOrg, gData);
+    const grantOrg = normId(gData.orgId) || normId(targetOrg);
+
+    const [ledgerSnap, queueSnap] = await Promise.all([
+      db.collection("ledger").where("grantId", "==", grantId).get(),
+      db.collection("paymentQueue").where("grantId", "==", grantId).get(),
+    ]);
+
+    let ledgerSkipped = 0;
+    let queueSkipped = 0;
+    const bw = newBulkWriter();
+
+    for (const d of ledgerSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      // Hard guard: must genuinely belong to this grant + org
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) { ledgerSkipped++; continue; }
+      // Skip CC and invoice ledger entries — only delete enrollment spends
+      const source = normStr(row.source) || "";
+      if (_CC_SOURCES.has(source)) { ledgerSkipped++; continue; }
+      // Must be linked to an enrollment; bare grant-level ledger entries are not enrollment spends
+      if (!normStr(row.enrollmentId)) { ledgerSkipped++; continue; }
+      bw.delete(d.ref);
+    }
+
+    for (const d of queueSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      // Hard guard: must genuinely belong to this grant + org
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) { queueSkipped++; continue; }
+      // Only delete enrollment projections — leave CC/invoice queue items alone
+      const source = normStr(row.source) || "";
+      if (source !== "projection") { queueSkipped++; continue; }
+      bw.delete(d.ref);
+    }
+
+    await bw.close();
+
+    // Recompute budget from what actually remains — never blindly zero
+    const { newTotals, counts } = await recomputeAndWriteBudget(grantId, grantOrg, gData);
+
+    res.status(200).json({
+      ok: true,
+      deleted: {
+        ledger: ledgerSnap.size - ledgerSkipped,
+        paymentQueue: queueSnap.size - queueSkipped,
+      },
+      skipped: { ledger: ledgerSkipped, paymentQueue: queueSkipped },
+      totals: newTotals,
+      counts,
+    });
+  },
+  { auth: "admin", methods: ["POST", "OPTIONS"] },
+);
+
+/**
+ * POST /grantsAdminClearEnrollments
+ *
+ * Soft-deletes all customerEnrollments for the grant and removes their pending
+ * projection queue items.  Every doc is verified against grantId + orgId before
+ * being written; mismatched docs are counted and skipped.
+ */
+export const grantsAdminClearEnrollments = secureHandler(
+  async (req, res) => {
+    const parsed = z
+      .object({ grantId: z.string().min(1), confirm: z.literal("DELETE") })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const { grantId } = parsed.data;
+    const caller = req.user!;
+    const targetOrg = getTargetOrg(req, req.body);
+
+    const gSnap = await db.collection("grants").doc(grantId).get();
+    if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
+    const gData = gSnap.data() || {};
+    assertGrantOrgAccess(caller, targetOrg, gData);
+    const grantOrg = normId(gData.orgId) || normId(targetOrg);
+
+    const enrollSnap = await db
       .collection("customerEnrollments")
       .where("grantId", "==", grantId)
       .get();
 
-    const tmp: Array<Record<string, unknown>> = [];
-    for (const doc of enr.docs) {
-      const e = doc.data() || {};
-      const arr = Array.isArray(e.spends) ? e.spends : [];
-      for (let i = 0; i < arr.length; i++) {
-        const s = arr[i] || {};
-        const amt = Number(s.amount || 0);
+    const bw = newBulkWriter();
+    const now = FieldValue.serverTimestamp();
+    const validEnrollIds: string[] = [];
+    let enrollSkipped = 0;
 
-        const tsIso = (() => {
-          const primary = toUtcIso(
-            (s as { ts?: unknown }).ts as string | number | Date,
-          );
-          if (primary) return primary;
-          const fallback = toUtcIso(
-            (doc.updateTime ?? new Date()) as unknown as string | number | Date,
-          );
-          return fallback || new Date().toISOString();
-        })();
+    for (const d of enrollSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      // Hard guard: must genuinely belong to this grant + org
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) { enrollSkipped++; continue; }
+      bw.update(d.ref, { deleted: true, active: false, status: "inactive", updatedAt: now });
+      validEnrollIds.push(d.id);
+    }
 
-        tmp.push({
-          id:
-            s.id ||
-            `act_${doc.id}_${s.paymentId ?? "nopay"}_${i}_${Math.abs(Math.round(amt * 100))}`,
-          kind: amt < 0 ? "reversal" : "spend",
-          grantId,
-          enrollmentId: doc.id,
-          paymentId: s.paymentId ?? null,
-          lineItemId: s.lineItemId ?? null,
-          amount: amt,
-          note: s.note ?? null,
-          ts: tsIso,
-          by: s.by ?? null,
-          reversalOf: s.reversalOf ?? null,
-        });
+    // Remove only projection-sourced queue items for the verified enrollment IDs
+    let queueDeleted = 0;
+    for (let i = 0; i < validEnrollIds.length; i += 30) {
+      const batch = validEnrollIds.slice(i, i + 30);
+      const qSnap = await db
+        .collection("paymentQueue")
+        .where("enrollmentId", "in", batch)
+        .where("grantId", "==", grantId)
+        .where("queueStatus", "==", "pending")
+        .get();
+      for (const d of qSnap.docs) {
+        const row = d.data() as Record<string, unknown>;
+        // Hard guard + only enrollment projections (not CC/invoice queue items)
+        if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+        const source = normStr(row.source) || "";
+        if (source !== "projection") continue;
+        bw.delete(d.ref);
+        queueDeleted++;
       }
     }
-    tmp.sort((a, b) =>
-      String((a as { ts?: unknown }).ts ?? "") <
-      String((b as { ts?: unknown }).ts ?? "")
-        ? 1
-        : String((a as { ts?: unknown }).ts ?? "") >
-            String((b as { ts?: unknown }).ts ?? "")
-          ? -1
-          : 0,
-    );
-    res.status(200).json({ ok: true, items: tmp.slice(0, limit) });
+
+    await bw.close();
+
+    res.status(200).json({
+      ok: true,
+      cleared: { enrollments: validEnrollIds.length, paymentQueue: queueDeleted },
+      skipped: { enrollments: enrollSkipped },
+    });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] },
+  { auth: "admin", methods: ["POST", "OPTIONS"] },
+);
+
+/**
+ * POST /grantsAdminReconcileBudget
+ *
+ * Recomputes budget totals by counting actual ledger + pending paymentQueue
+ * entries.  Every doc is validated against grantId + orgId before being counted.
+ */
+export const grantsAdminReconcileBudget = secureHandler(
+  async (req, res) => {
+    const parsed = z.object({ grantId: z.string().min(1) }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
+      return;
+    }
+    const { grantId } = parsed.data;
+    const caller = req.user!;
+    const targetOrg = getTargetOrg(req, req.body);
+
+    const gSnap = await db.collection("grants").doc(grantId).get();
+    if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
+    const gData = gSnap.data() || {};
+    assertGrantOrgAccess(caller, targetOrg, gData);
+    const grantOrg = normId(gData.orgId) || normId(targetOrg);
+
+    const { newTotals, counts } = await recomputeAndWriteBudget(grantId, grantOrg, gData);
+
+    res.status(200).json({ ok: true, totals: newTotals, counts });
+  },
+  { auth: "admin", methods: ["POST", "OPTIONS"] },
 );

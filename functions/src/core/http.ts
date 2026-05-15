@@ -10,7 +10,7 @@ import { requireOrg, requireTeams } from "./org";
 import { attachAuthContext, AuthedRequest } from "./requestContext";
 import { verifyUserFromRequest } from "./auth";
 
-type AuthMode = "public" | "authed" | "user" | "admin" | "dev";
+type AuthMode = "public" | "authed" | "viewer" | "user" | "admin" | "dev";
 type HttpMethod = "GET" | "POST" | "PATCH" | "OPTIONS" | "DELETE";
 
 type Options = {

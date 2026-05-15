@@ -4,19 +4,20 @@ import React, { useCallback, useDeferredValue, useMemo, useState } from "react";
 import ActionMenu, { type ActionItem } from "@entities/ui/ActionMenu";
 import { useEnrollments } from "@hooks/useEnrollments";
 import { useGrantActivity } from "@hooks/useGrants";
-import { type PaymentQueueItem, usePaymentQueueItems } from "@hooks/usePaymentQueue";
 import { useUsers } from "@hooks/useUsers";
 import { SpendDetailModal, type SpendRow } from "@features/widgets/spending/SpendDetailModal";
 import { fmtFromTsLike } from "@lib/date";
 
 type ActivityMode = "paid" | "projected" | "all";
-type ActivityKindFilter = "all" | "paid" | "projected" | "reversal";
+type ActivityKindFilter = "all" | "paid" | "projected" | "reversal" | "data-entry-complete" | "data-entry-incomplete";
+type ComplianceStatus = "complete" | "partial" | "none";
 type GrantActivityRow = SpendRow & {
   customerLabel: string;
   userLabel: string;
   noteText: string;
   displayType: "Paid" | "Projected" | "Reversal";
   sourceType: "paid" | "projected";
+  complianceStatus: ComplianceStatus;
   searchText: string;
 };
 
@@ -42,6 +43,24 @@ function lineItemTypeLabel(value: unknown) {
     return String(raw.label ?? raw.name ?? raw.id ?? "").trim();
   }
   return "";
+}
+
+function lineItemTypeKey(value: unknown) {
+  if (value == null) return "";
+  if (typeof value === "object") {
+    const raw = value as Record<string, unknown>;
+    const id = String(raw.id || "").trim();
+    if (id) return slugifyLineItemType(id);
+  }
+  return slugifyLineItemType(lineItemTypeLabel(value));
+}
+
+function isRentalAssistanceLineItem(lineItem: unknown) {
+  if (!lineItem || typeof lineItem !== "object") return false;
+  const raw = lineItem as Record<string, unknown>;
+  const typeKey = lineItemTypeKey(raw.type);
+  if (typeKey) return typeKey === "rental-assistance";
+  return slugifyLineItemType(String(raw.label || "")) === "rental-assistance";
 }
 
 function normalizeLineItemTypeInput(value: string) {
@@ -193,13 +212,13 @@ function ActivityDrawer({
       if (!modePass) return false;
 
       const kindPass =
-        kindFilter === "all"
-          ? true
-          : kindFilter === "paid"
-          ? item.displayType === "Paid"
-          : kindFilter === "projected"
-          ? item.displayType === "Projected"
-          : item.displayType === "Reversal";
+        kindFilter === "all" ? true
+        : kindFilter === "paid" ? item.displayType === "Paid"
+        : kindFilter === "projected" ? item.displayType === "Projected"
+        : kindFilter === "reversal" ? item.displayType === "Reversal"
+        : kindFilter === "data-entry-complete" ? item.displayType === "Paid" && item.complianceStatus === "complete"
+        : kindFilter === "data-entry-incomplete" ? item.displayType === "Paid" && item.complianceStatus !== "complete"
+        : true;
       if (!kindPass) return false;
 
       if (!normalizedQuery) return true;
@@ -230,9 +249,9 @@ function ActivityDrawer({
               </span>
               <div className="inline-flex rounded-lg border border-sky-200 bg-white/80 p-0.5 text-[11px]">
                 {([
+                  ["all", "All", false, "Posted and projected rows together for this grant scope."],
                   ["paid", "Paid", false, `Posted ledger rows only (${paidCount}).`],
                   ["projected", "Projected", projectedCount === 0, projectedCount > 0 ? `Pending projected payments only (${projectedCount}).` : "No projected payments for this scope."],
-                  ["all", "All", false, "Posted and projected rows together for this grant scope."],
                 ] as const).map(([key, label, disabled, title]) => (
                   <button
                     key={key}
@@ -270,11 +289,13 @@ function ActivityDrawer({
               className="input text-sm"
               value={kindFilter}
               onChange={(e) => setKindFilter(e.currentTarget.value as ActivityKindFilter)}
-              title={tip("Filter rows by activity type.")}
+              title={tip("Filter rows by activity type or compliance status.")}
             >
               <option value="all">All Types</option>
-              <option value="paid">Paid</option>
-              <option value="projected">Projected</option>
+              <option value="paid">Paid rows only</option>
+              <option value="projected">Projected rows only</option>
+              <option value="data-entry-complete">Data Entry Complete</option>
+              <option value="data-entry-incomplete">Data Entry Incomplete</option>
               <option value="reversal">Reversal</option>
             </select>
           </div>
@@ -313,7 +334,12 @@ function ActivityDrawer({
                         ) : item.displayType === "Projected" ? (
                           <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">Projected</span>
                         ) : (
-                          <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-700">Paid</span>
+                          <span className="inline-flex flex-wrap gap-1">
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-700">Paid</span>
+                            <span className={`rounded px-1.5 py-0.5 font-medium ${item.complianceStatus === "complete" ? "bg-emerald-50 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                              {item.complianceStatus === "complete" ? "Data Entry Complete" : "Data Entry Incomplete"}
+                            </span>
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -532,22 +558,14 @@ export function BudgetActivityTab({
 }) {
   const activityQ = useGrantActivity(grantId ?? "", 2000);
   const allActivity: any[] = useMemo(() => (Array.isArray(activityQ.data) ? activityQ.data : []), [activityQ.data]);
-  const projectedQ = usePaymentQueueItems(
-    grantId ? { grantId, source: "projection", queueStatus: "pending", limit: 1000 } : undefined,
-    { enabled: !!grantId && !editing, staleTime: 30_000 },
-  );
-  const projectedQueueItems: PaymentQueueItem[] = useMemo(
-    () => (Array.isArray(projectedQ.data) ? projectedQ.data : []),
-    [projectedQ.data],
-  );
   const { data: enrollments = [] } = useEnrollments(
     grantId ? { grantId, limit: 1000 } : undefined,
     { enabled: !!grantId && !editing },
   );
   const { data: users = [] } = useUsers({ status: "all", limit: 500 });
 
-  const [expandedId, setExpandedId] = useState<string | "all" | null>(null);
-  const [activityMode, setActivityMode] = useState<ActivityMode>("paid");
+  const [expandedId, setExpandedId] = useState<string | "all" | null>("all");
+  const [activityMode, setActivityMode] = useState<ActivityMode>("all");
   const [fundsState, setFundsState] = useState<{ index: number; mode: "add" | "move" } | null>(null);
   const [spendCapIdx, setSpendCapIdx] = useState<number | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<SpendRow | null>(null);
@@ -653,6 +671,24 @@ export function BudgetActivityTab({
     return map;
   }, [enrollmentInfoById]);
 
+  const paymentComplianceByKey = useMemo(() => {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const enrollment of enrollments as any[]) {
+      const enrollmentId = String(enrollment?.id || "").trim();
+      if (!enrollmentId) continue;
+      const payments = Array.isArray(enrollment?.payments) ? enrollment.payments : [];
+      for (const payment of payments) {
+        const paymentId = String(payment?.id || "").trim();
+        if (!paymentId) continue;
+        const compliance = payment?.compliance && typeof payment.compliance === "object"
+          ? payment.compliance as Record<string, unknown>
+          : null;
+        if (compliance) map.set(`${enrollmentId}:${paymentId}`, compliance);
+      }
+    }
+    return map;
+  }, [enrollments]);
+
   const userNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const user of users as any[]) {
@@ -668,14 +704,14 @@ export function BudgetActivityTab({
     for (const info of enrollmentInfoById.values()) {
       if (info.customerId) map.set(info.customerId, info.customerLabel);
     }
-    for (const item of projectedQueueItems) {
+    for (const item of allActivity) {
       const customerId = String(item?.customerId || "").trim();
       if (!customerId || map.has(customerId)) continue;
-      const label = String(item?.customer || item?.merchant || customerId).trim() || customerId;
+      const label = String(item?.customerName || item?.customerNameAtSpend || customerId).trim() || customerId;
       map.set(customerId, label);
     }
     return map;
-  }, [enrollmentInfoById, projectedQueueItems]);
+  }, [allActivity, enrollmentInfoById]);
 
   const grantNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -717,6 +753,60 @@ export function BudgetActivityTab({
     const rows: GrantActivityRow[] = [];
 
     for (const raw of allActivity) {
+      if (raw?.kind === "projection" || raw?.sourceType === "paymentQueue") {
+        const item = raw?.paymentQueueItem && typeof raw.paymentQueueItem === "object" ? raw.paymentQueueItem : raw;
+        const customerId = String(raw?.customerId || item?.customerId || "").trim();
+        const customerLabel = String(
+          raw?.customerName ||
+            item?.customer ||
+            customerNameById.get(customerId) ||
+            customerId ||
+            "",
+        ).trim();
+        const noteText = String(raw?.note || item?.note || item?.notes || item?.purpose || "").trim();
+        const date = dateIso10(raw?.ts || item?.dueDate || item?.createdAt || item?.postedAt);
+        const userLabel = resolveUserLabel(raw?.by || item?.postedBy || item?.reopenedBy);
+        const queueSource = String(item?.source || "").toLowerCase();
+        const rowKind =
+          queueSource === "invoice" ? "queue-invoice"
+          : queueSource === "credit-card" ? "queue-credit-card"
+          : "queue-projection";
+        const sourceLabel =
+          queueSource === "invoice" ? "Invoice"
+          : queueSource === "credit-card" ? "Credit Card"
+          : "Enrollment";
+
+        rows.push({
+          id: String(raw?.id || `queue:${item?.id || `${item?.enrollmentId || "projection"}:${item?.paymentId || date}`}`),
+          kind: rowKind,
+          sourceLabel,
+          title: String(item?.merchant || item?.descriptor || noteText || "Projected payment"),
+          subtitle: String(raw?.paymentId || item?.paymentId || item?.submissionId || item?.id || ""),
+          date,
+          month: monthFromDate(item?.month || date),
+          amountCents: Math.round(Math.max(0, Number(raw?.amount ?? item?.amount ?? 0)) * 100),
+          completed: false,
+          workflowState: "open",
+          workflowReason: "Projected spend, not yet paid",
+          grantId: String(raw?.grantId || item?.grantId || grantId || ""),
+          lineItemId: String(raw?.lineItemId || item?.lineItemId || ""),
+          customerId,
+          creditCardId: String(item?.creditCardId || ""),
+          creditCardName: String(item?.card || ""),
+          cardBucket: String(item?.cardBucket || ""),
+          taskToken: "",
+          paymentQueueItem: item,
+          customerLabel,
+          userLabel,
+          noteText,
+          displayType: "Projected",
+          sourceType: "projected",
+          complianceStatus: "none" as ComplianceStatus,
+          searchText: normalizeText([noteText, customerLabel, customerId, userLabel, item?.merchant, item?.paymentId, item?.id].join(" ")),
+        });
+        continue;
+      }
+
       const enrollmentId = String(raw?.enrollmentId || "").trim();
       const enrollmentInfo = enrollmentInfoById.get(enrollmentId);
       const customerId = String(raw?.customerId || enrollmentInfo?.customerId || "").trim();
@@ -732,13 +822,26 @@ export function BudgetActivityTab({
       const date = dateIso10(raw?.ts || raw?.date);
       const isReversal = !!raw?.reversalOf || Number(raw?.amount || 0) < 0;
       const userLabel = resolveUserLabel(raw?.by);
+      const paymentId = String(raw?.paymentId || "").trim();
+      const paymentCompliance = paymentComplianceByKey.get(`${enrollmentId}:${paymentId}`) || null;
+      const rawCompliance = raw?.compliance && typeof raw.compliance === "object" ? raw.compliance as Record<string, unknown> : null;
+      const ledgerCompliance =
+        raw?.ledgerEntry && typeof raw.ledgerEntry === "object" &&
+        (raw.ledgerEntry as Record<string, unknown>).compliance &&
+        typeof (raw.ledgerEntry as Record<string, unknown>).compliance === "object"
+          ? (raw.ledgerEntry as Record<string, unknown>).compliance as Record<string, unknown>
+          : null;
+      const compliance = paymentCompliance || rawCompliance || ledgerCompliance;
+      const hmis = !!(compliance?.hmisComplete);
+      const cw = !!(compliance?.caseworthyComplete);
+      const complianceStatus: ComplianceStatus = isReversal ? "complete" : (hmis && cw ? "complete" : (hmis || cw ? "partial" : "none"));
 
       rows.push({
-        id: `ledger:${String(raw?.id || `${enrollmentId}:${raw?.paymentId || date}`)}`,
+        id: String(raw?.id || `ledger:${enrollmentId}:${raw?.paymentId || date}`),
         kind: "grant-ledger",
         sourceLabel: "Enrollment",
         title: noteText || (isReversal ? "Payment reversal" : "Posted payment"),
-        subtitle: String(raw?.paymentId || raw?.id || ""),
+        subtitle: String(paymentId || raw?.id || ""),
         date,
         month: monthFromDate(date),
         amountCents: Math.round(Number(raw?.amount || 0) * 100),
@@ -753,7 +856,7 @@ export function BudgetActivityTab({
         cardBucket: "",
         taskToken: "",
         ledgerEntry: {
-          ...(raw as Record<string, unknown>),
+          ...((raw?.ledgerEntry && typeof raw.ledgerEntry === "object" ? raw.ledgerEntry : raw) as Record<string, unknown>),
           customerId,
           dueDate: raw?.ts || raw?.date || null,
           date,
@@ -763,43 +866,8 @@ export function BudgetActivityTab({
         noteText,
         displayType: isReversal ? "Reversal" : "Paid",
         sourceType: "paid",
-        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, raw?.paymentId, raw?.id].join(" ")),
-      });
-    }
-
-    for (const item of projectedQueueItems) {
-      const customerId = String(item?.customerId || "").trim();
-      const customerLabel = String(item?.customer || customerNameById.get(customerId) || customerId || "").trim();
-      const noteText = String(item?.note || item?.notes || item?.purpose || "").trim();
-      const date = dateIso10(item?.dueDate || item?.createdAt || item?.postedAt);
-      const userLabel = resolveUserLabel(item?.postedBy || item?.reopenedBy);
-
-      rows.push({
-        id: `queue:${String(item.id || `${item.enrollmentId || "projection"}:${item.paymentId || date}`)}`,
-        kind: "queue-projection",
-        sourceLabel: "Enrollment",
-        title: String(item?.merchant || item?.descriptor || noteText || "Projected payment"),
-        subtitle: String(item?.paymentId || item?.submissionId || item?.id || ""),
-        date,
-        month: monthFromDate(item?.month || date),
-        amountCents: Math.round(Math.max(0, Number(item?.amount || 0)) * 100),
-        completed: false,
-        workflowState: "open",
-        workflowReason: "Projected spend, not yet paid",
-        grantId: String(item?.grantId || grantId || ""),
-        lineItemId: String(item?.lineItemId || ""),
-        customerId,
-        creditCardId: "",
-        creditCardName: "",
-        cardBucket: "",
-        taskToken: "",
-        paymentQueueItem: item,
-        customerLabel,
-        userLabel,
-        noteText,
-        displayType: "Projected",
-        sourceType: "projected",
-        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, item?.merchant, item?.paymentId, item?.id].join(" ")),
+        complianceStatus,
+        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, paymentId, raw?.id].join(" ")),
       });
     }
 
@@ -809,7 +877,7 @@ export function BudgetActivityTab({
     });
 
     return rows;
-  }, [allActivity, customerNameById, enrollmentInfoById, grantId, projectedQueueItems, resolveUserLabel]);
+  }, [allActivity, customerNameById, enrollmentInfoById, grantId, paymentComplianceByKey, resolveUserLabel]);
 
   const activityByLineItem = useMemo(() => {
     const map = new Map<string, GrantActivityRow[]>();
@@ -841,6 +909,14 @@ export function BudgetActivityTab({
   void resolveCustomer;
   void resolveUser;
   const activityForLineItem = (liId: string) => activityByLineItem.get(liId) || [];
+  const refreshActivityData = () => {
+    void activityQ.refetch();
+  };
+  const toggleLineItemActivity = (lineItemId: string, lineItem: any) => {
+    const nextExpandedId = expandedId === lineItemId ? null : lineItemId;
+    setExpandedId(nextExpandedId);
+    if (nextExpandedId && !isRentalAssistanceLineItem(lineItem)) refreshActivityData();
+  };
   const colCount = editing ? 11 : 10;
 
   return (
@@ -915,7 +991,7 @@ export function BudgetActivityTab({
         </div>
       )}
 
-      {!editing && grantId && (activityQ.isLoading || projectedQ.isLoading) && (
+      {!editing && grantId && activityQ.isLoading && (
         <div className="text-xs italic text-slate-400">Loading grant activity…</div>
       )}
 
@@ -969,8 +1045,9 @@ export function BudgetActivityTab({
                     key: "view-activity",
                     label: "View Activity",
                     onSelect: () => {
-                      setActivityMode("paid");
+                      setActivityMode("all");
                       setExpandedId(liId);
+                      if (!isRentalAssistanceLineItem(li)) refreshActivityData();
                     },
                   },
                   {
@@ -994,7 +1071,7 @@ export function BudgetActivityTab({
                         <button
                           type="button"
                           className="group inline-flex items-center gap-2 text-left"
-                          onClick={() => setExpandedId((prev) => (prev === liId ? null : liId))}
+                          onClick={() => toggleLineItemActivity(liId, li)}
                           title={isExpanded ? tip("Collapse activity for this line item.") : tip(`Expand ${liActivity.length} activity row${liActivity.length === 1 ? "" : "s"} for this line item.`)}
                         >
                           <span className="text-xs text-slate-400 transition group-hover:text-sky-600">{isExpanded ? "▼" : "▶"}</span>
@@ -1189,7 +1266,11 @@ export function BudgetActivityTab({
       <SpendDetailModal
         row={selectedActivity}
         isOpen={!!selectedActivity}
-        onClose={() => setSelectedActivity(null)}
+        onClose={() => {
+          setSelectedActivity(null);
+          // Refetch unified grant activity so modal changes are reflected immediately.
+          void activityQ.refetch();
+        }}
         grantNameById={grantNameById}
         lineItemLookup={lineItemLookup}
         customerNameById={customerNameById}

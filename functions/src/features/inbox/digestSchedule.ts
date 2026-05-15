@@ -17,8 +17,22 @@ import {buildAndSendCaseManagerDigest} from './digestCaseManagers';
 import {buildAndSendRentalAssistanceDigest} from './digestRentalAssistance';
 import {sendHtmlEmail} from './emailer';
 import {ScheduleDigestBody} from './schemas';
+import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
 type DigestType = 'caseload' | 'budget' | 'enrollments' | 'caseManagers' | 'rentalAssistance';
+
+const PROCESSING_LEASE_MINUTES = 30;
+const MAX_DIGESTS_PER_RUN = 12;
+
+function isIsoDue(value: unknown, nowIso: string): boolean {
+  const sendAt = String(value || '').trim();
+  return !!sendAt && sendAt <= nowIso;
+}
+
+function isProcessingStale(value: unknown, nowMs: number): boolean {
+  const processingAtMs = new Date(String(value || '')).getTime();
+  return Number.isFinite(processingAtMs) && nowMs - processingAtMs > PROCESSING_LEASE_MINUTES * 60_000;
+}
 
 function escapeHtml(input: string): string {
   return input
@@ -53,47 +67,48 @@ async function sendCombinedCaseloadDigest(args: {
 }): Promise<void> {
   const {to, months, subject, message, uid, forUid, cmName} = args;
   const key = `digest_combined_${months.join(',')}_${to.toLowerCase()}`;
-  const logRef = db.collection('emailLogs').doc(key);
-  const prior = await logRef.get();
-  if (prior.exists) return;
+  const reserved = await reserveDigestSend(key, {to, months, digestType: 'caseload'});
+  if (!reserved) return;
 
-  let html = `<!DOCTYPE html><html lang="en"><body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"><div style="max-width:720px;margin:0 auto"><h2 style="margin:0 0 16px;color:#0f172a">${escapeHtml(subject || 'Digest')}</h2>`;
-  if (String(message || '').trim()) {
-    html += `<div style="margin:12px 0;padding:12px 14px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;white-space:pre-wrap">${escapeHtml(String(message).trim())}</div>`;
-  }
+  try {
+    let html = `<!DOCTYPE html><html lang="en"><body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"><div style="max-width:720px;margin:0 auto"><h2 style="margin:0 0 16px;color:#0f172a">${escapeHtml(subject || 'Digest')}</h2>`;
+    if (String(message || '').trim()) {
+      html += `<div style="margin:12px 0;padding:12px 14px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff;white-space:pre-wrap">${escapeHtml(String(message).trim())}</div>`;
+    }
 
-  for (const month of months) {
-    const data = await buildDigestData({
-      month,
-      forUid: forUid || uid,
-      cmName: cmName || 'Case Manager',
+    for (const month of months) {
+      const data = await buildDigestData({
+        month,
+        forUid: forUid || uid,
+        cmName: cmName || 'Case Manager',
+      });
+      html += `<div style="margin-top:18px">
+        <div style="font-size:16px;font-weight:700;color:#0f172a;margin:0 0 10px">${escapeHtml(buildDigestSubject(month, data.taskCount))}</div>
+        <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#ffffff">
+          ${extractBodyHtml(buildDigestHtml(data))}
+        </div>
+      </div>`;
+    }
+    html += '</div></body></html>';
+
+    const sent = await sendHtmlEmail({
+      from: 'hsgcompliance@thehrdc.org',
+      to,
+      subject: subject || 'Digest',
+      html,
     });
-    html += `<div style="margin-top:18px">
-      <div style="font-size:16px;font-weight:700;color:#0f172a;margin:0 0 10px">${escapeHtml(buildDigestSubject(month, data.taskCount))}</div>
-      <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#ffffff">
-        ${extractBodyHtml(buildDigestHtml(data))}
-      </div>
-    </div>`;
+    await markDigestSent(key, {
+      id: sent.id || null,
+      to,
+      months,
+      subject: subject || 'Digest',
+      message: String(message || '').trim() || null,
+      digestType: 'caseload',
+    });
+  } catch (error: unknown) {
+    await markDigestFailed(key, error, {to, months, digestType: 'caseload'});
+    throw error;
   }
-  html += '</div></body></html>';
-
-  const sent = await sendHtmlEmail({
-    from: 'hsgcompliance@thehrdc.org',
-    to,
-    subject: subject || 'Digest',
-    html,
-  });
-  await logRef.set(
-      {
-        id: sent.id || null,
-        to,
-        months,
-        subject: subject || 'Digest',
-        message: String(message || '').trim() || null,
-        createdAt: isoNow(),
-      },
-      {merge: true},
-  );
 }
 
 async function deliverScheduledDigest(_docId: string, row: Record<string, unknown>) {
@@ -202,25 +217,43 @@ export const processScheduledDigests = onSchedule(
       region: RUNTIME.region,
       schedule: 'every 15 minutes',
       secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+      timeoutSeconds: 540,
+      memory: '512MiB',
     },
     async () => {
       const nowIso = new Date().toISOString();
-      const snap = await db.collection('scheduledDigests').where('status', '==', 'pending').limit(200).get();
-      const due = snap.docs
+      const nowMs = Date.now();
+      const [pendingSnap, processingSnap] = await Promise.all([
+        db.collection('scheduledDigests').where('status', '==', 'pending').limit(200).get(),
+        db.collection('scheduledDigests').where('status', '==', 'processing').limit(200).get(),
+      ]);
+      const due = [...pendingSnap.docs, ...processingSnap.docs]
           .map((doc) => ({doc, data: doc.data() as Record<string, unknown>}))
           .filter(({data}) => {
-            const sendAt = String(data.sendAt || '').trim();
-            return sendAt && sendAt <= nowIso;
+            const status = String(data.status || '');
+            if (status === 'pending') return isIsoDue(data.sendAt, nowIso);
+            if (status === 'processing') return isProcessingStale(data.processingAt, nowMs);
+            return false;
           })
-          .sort((a, b) => String(a.data.sendAt || '').localeCompare(String(b.data.sendAt || '')));
+          .sort((a, b) => String(a.data.sendAt || '').localeCompare(String(b.data.sendAt || '')))
+          .slice(0, MAX_DIGESTS_PER_RUN);
 
       for (const {doc, data} of due) {
         const claimed = await db.runTransaction(async (tx) => {
           const fresh = await tx.get(doc.ref);
           if (!fresh.exists) return false;
           const current = fresh.data() as Record<string, unknown>;
-          if (String(current.status || '') !== 'pending') return false;
-          tx.set(doc.ref, {status: 'processing', processingAt: isoNow(), error: null}, {merge: true});
+          const status = String(current.status || '');
+          const canClaim =
+            status === 'pending' ||
+            (status === 'processing' && isProcessingStale(current.processingAt, Date.now()));
+          if (!canClaim) return false;
+          tx.set(doc.ref, {
+            status: 'processing',
+            processingAt: isoNow(),
+            retryCount: Number(current.retryCount || 0) + (status === 'processing' ? 1 : 0),
+            error: null,
+          }, {merge: true});
           return true;
         });
         if (!claimed) continue;

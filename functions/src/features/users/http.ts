@@ -85,8 +85,22 @@ function scopeForManagedUser(caller: Claims, src: { orgId?: unknown; teamIds?: u
 function canAssignElevatedTopRole(caller: Claims, topRole?: unknown) {
   const top = String(topRole || "").trim().toLowerCase();
   if (!top) return true;
-  if (top === "user" || top === "admin") return true;
-  return isSuperDev(caller);
+  const requestedRank = topRoleRank(top);
+  if (!requestedRank) return false;
+  return requestedRank <= topRoleRank(topRoleFromClaims(caller));
+}
+
+const TOP_ROLE_RANK: Record<string, number> = {
+  viewer: 1,
+  user: 2,
+  admin: 3,
+  dev: 4,
+  org_dev: 4,
+  super_dev: 5,
+};
+
+function topRoleRank(topRole?: unknown) {
+  return TOP_ROLE_RANK[String(topRole || "").trim().toLowerCase()] ?? 0;
 }
 
 // POST /usersCreate (admin)
@@ -154,12 +168,8 @@ export const usersSetRole = secureHandler(
     if (callerUid && body.uid === callerUid) {
       const currentTop = topRoleFromClaims(caller);
       const nextTop = body.topRole ?? currentTop;
-      if (currentTop === "admin" && nextTop !== "admin") {
-        res.status(400).json({ ok: false, error: "cannot_remove_own_admin" });
-        return;
-      }
-      if (currentTop === "super_dev" && nextTop !== "super_dev") {
-        res.status(400).json({ ok: false, error: "cannot_remove_own_super_dev" });
+      if (topRoleRank(nextTop) < topRoleRank(currentTop)) {
+        res.status(400).json({ ok: false, error: "cannot_demote_self" });
         return;
       }
     }
@@ -254,7 +264,7 @@ export const usersList = secureHandler(
     const out = await listUsersService(body, { orgId });
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", requireOrg: true, methods: ["POST", "GET", "OPTIONS"] }
+  { auth: "viewer", requireOrg: true, methods: ["POST", "GET", "OPTIONS"] }
 );
 
 // GET|POST /devOrgsList (super_dev)

@@ -6,6 +6,7 @@ import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { PaymentScheduleBuildInput } from "@hooks/usePayments";
 import type { TPayment } from "@types";
 import { isISODate10, todayISO as libTodayISO } from "@lib/date";
+import { useGrant } from "@hooks/useGrants";
 import { SpreadsheetBuilderView, type SSRow, newSSRow } from "./SpreadsheetBuilderView";
 import dynamic from "next/dynamic";
 const GrantBudgetStrip = dynamic(
@@ -109,6 +110,12 @@ type CertTaskPlan = {
   bucket: "task" | "compliance";
 };
 
+type InvoiceDocsPlan = {
+  enabled: boolean;
+  dueDate: string;
+  bucket: "task" | "compliance";
+};
+
 function todayISO(): string {
   return libTodayISO();
 }
@@ -133,6 +140,31 @@ function rowId(prefix: string): string {
 
 function cleanText(value: string): string {
   return String(value || "").trim();
+}
+
+function listFromUnknown(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  const text = String(value || "").trim();
+  return text ? [text] : [];
+}
+
+function invoiceDocsFromGrant(grant: Record<string, unknown> | null | undefined): string[] {
+  if (!grant) return [];
+  const direct = listFromUnknown(grant.invoiceDocuments);
+  if (direct.length) return direct;
+  const details = grant.details && typeof grant.details === "object" ? grant.details as Record<string, unknown> : {};
+  const nested = listFromUnknown(details.invoiceDocuments);
+  if (nested.length) return nested;
+  for (const key of ["Invoice Docs", "Invoice Documents"]) {
+    const raw = grant[key];
+    if (raw && typeof raw === "object" && !Array.isArray(raw) && "_value" in raw) {
+      const rows = listFromUnknown((raw as Record<string, unknown>)._value);
+      if (rows.length) return rows;
+    }
+    const rows = listFromUnknown(raw);
+    if (rows.length) return rows;
+  }
+  return [];
 }
 
 function asPositiveNumber(value: string): number {
@@ -224,6 +256,13 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
     deposit: mapSingle(m.deposit),
     prorated: mapSingle(m.prorated),
     services: mapServices(m.services),
+    invoiceDocsTask: m.invoiceDocsTask && typeof m.invoiceDocsTask === "object"
+      ? {
+          enabled: (m.invoiceDocsTask as Record<string, unknown>).enabled === true,
+          dueDate: String((m.invoiceDocsTask as Record<string, unknown>).dueDate || seedDate),
+          bucket: String((m.invoiceDocsTask as Record<string, unknown>).bucket || "compliance") === "task" ? "task" as const : "compliance" as const,
+        }
+      : null,
   };
 }
 
@@ -235,6 +274,8 @@ function MonthlyPlanEditor({
   onRemove,
   grantId,
   fallbackLineItemIds,
+  vendor,
+  onVendorChange,
 }: {
   label: string;
   plans: MonthlyPlan[];
@@ -243,12 +284,23 @@ function MonthlyPlanEditor({
   onRemove: (id: string) => void;
   grantId?: string | null;
   fallbackLineItemIds: string[];
+  vendor: string;
+  onVendorChange: (v: string) => void;
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{label}</div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onAdd}>+ Add row</button>
+      </div>
+      <div className="mb-3">
+        <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Vendor (optional)</div>
+        <input
+          className="w-full max-w-sm rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          value={vendor}
+          onChange={(e) => onVendorChange(e.currentTarget.value)}
+          placeholder="e.g. Parkview Apartments"
+        />
       </div>
       {plans.length === 0 ? (
         <div className="text-xs text-slate-500 dark:text-slate-400">No rows yet.</div>
@@ -284,10 +336,6 @@ function MonthlyPlanEditor({
                   />
                 </label>
                 <label className="text-sm">
-                  <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Vendor (optional)</div>
-                  <input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={plan.vendor} onChange={(e) => onChange(plan.id, { vendor: e.currentTarget.value })} />
-                </label>
-                <label className="text-sm">
                   <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Comment (optional)</div>
                   <input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={plan.comment} onChange={(e) => onChange(plan.id, { comment: e.currentTarget.value })} />
                 </label>
@@ -314,7 +362,9 @@ export default function PaymentScheduleBuilderDialog({
   const [recalcGrantProjected, setRecalcGrantProjected] = React.useState(true);
 
   const [rentPlans, setRentPlans] = React.useState<MonthlyPlan[]>([]);
+  const [rentVendor, setRentVendor] = React.useState("");
   const [utilityPlans, setUtilityPlans] = React.useState<MonthlyPlan[]>([]);
+  const [utilityVendor, setUtilityVendor] = React.useState("");
   const [deposit, setDeposit] = React.useState<SinglePlan>({ enabled: false, date: todayISO(), amount: "", lineItemId: "", vendor: "", comment: "" });
   const [prorated, setProrated] = React.useState<SinglePlan>({ enabled: false, date: todayISO(), amount: "", lineItemId: "", vendor: "", comment: "" });
   const [services, setServices] = React.useState<ServicePlan[]>([]);
@@ -324,6 +374,11 @@ export default function PaymentScheduleBuilderDialog({
     startDate: todayISO(),
     cadenceMonths: "3",
     endDate: plusOneYearISO(),
+    bucket: "compliance",
+  });
+  const [invoiceDocsTask, setInvoiceDocsTask] = React.useState<InvoiceDocsPlan>({
+    enabled: false,
+    dueDate: todayISO(),
     bucket: "compliance",
   });
   const [error, setError] = React.useState<string | null>(null);
@@ -339,7 +394,9 @@ export default function PaymentScheduleBuilderDialog({
     setUpdateGrantBudgets(true);
     setRecalcGrantProjected(true);
     setRentPlans(saved?.rentPlans?.length ? saved.rentPlans : [defaultMonthlyPlan("rent", firstLineItem, seedDate)]);
+    setRentVendor(saved?.rentPlans?.[0]?.vendor || "");
     setUtilityPlans(saved?.utilityPlans || []);
+    setUtilityVendor(saved?.utilityPlans?.[0]?.vendor || "");
     setDeposit(saved?.deposit || { enabled: false, date: seedDate, amount: "", lineItemId: firstLineItem, vendor: "", comment: "" });
     setProrated(saved?.prorated || { enabled: false, date: seedDate, amount: "", lineItemId: firstLineItem, vendor: "", comment: "" });
     setServices(saved?.services || []);
@@ -351,6 +408,7 @@ export default function PaymentScheduleBuilderDialog({
       endDate: plusOneYearISO(seedDate),
       bucket: "compliance",
     });
+    setInvoiceDocsTask(saved?.invoiceDocsTask || { enabled: false, dueDate: seedDate, bucket: "compliance" });
     setError(null);
     const ssBase = newSSRow("monthly-rent", firstOfNextMonth(seedDate));
     ssBase.lineItemId = firstLineItem;
@@ -368,6 +426,11 @@ export default function PaymentScheduleBuilderDialog({
   );
 
   const fallbackLineItemIds = selectedEnrollment?.lineItemIds || [];
+  const { data: selectedGrant } = useGrant(selectedEnrollment?.grantId, { enabled: !!selectedEnrollment?.grantId });
+  const invoiceDocs = React.useMemo(
+    () => invoiceDocsFromGrant((selectedGrant || null) as Record<string, unknown> | null),
+    [selectedGrant],
+  );
 
   const patchMonthlyPlans = (
     setter: React.Dispatch<React.SetStateAction<MonthlyPlan[]>>,
@@ -625,6 +688,7 @@ export default function PaymentScheduleBuilderDialog({
 
     const taskDefs: unknown[] = [];
     const rentCertTaskPrefix = "payment_rent_cert_";
+    const invoiceDocsTaskPrefix = "payment_invoice_docs_";
     if (certTask.enabled) {
       const certStart = certTask.startDate;
       const certEnd = certTask.endDate;
@@ -676,6 +740,22 @@ export default function PaymentScheduleBuilderDialog({
       });
     }
 
+    if (invoiceDocsTask.enabled) {
+      if (!isISO(invoiceDocsTask.dueDate)) return setError("Invoice docs task due date must be YYYY-MM-DD.");
+      const docs = invoiceDocs.length ? invoiceDocs : ["Invoice documentation packet"];
+      taskDefs.push({
+        id: `${invoiceDocsTaskPrefix}${enrollmentId}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "_"),
+        name: "Collect invoice documentation",
+        kind: "one-off",
+        dueDate: invoiceDocsTask.dueDate,
+        bucket: invoiceDocsTask.bucket,
+        notify: true,
+        assignedToGroup: "compliance",
+        notes: `Collect invoice docs before payment processing: ${docs.join(", ")}.`,
+        description: "Invoice documentation",
+      });
+    }
+
     onBuild({
       enrollmentId,
       replaceUnpaid,
@@ -686,7 +766,7 @@ export default function PaymentScheduleBuilderDialog({
           months: asPositiveInt(plan.months, 120),
           monthlyAmount: asPositiveNumber(plan.monthlyAmount),
           lineItemId: cleanText(plan.lineItemId),
-          ...(cleanText(plan.vendor) ? { vendor: cleanText(plan.vendor) } : {}),
+          ...(cleanText(rentVendor) ? { vendor: cleanText(rentVendor) } : {}),
           ...(cleanText(plan.comment) ? { comment: cleanText(plan.comment) } : {}),
         })),
         ...utilityPlans.map((plan) => ({
@@ -695,7 +775,7 @@ export default function PaymentScheduleBuilderDialog({
           months: asPositiveInt(plan.months, 120),
           monthlyAmount: asPositiveNumber(plan.monthlyAmount),
           lineItemId: cleanText(plan.lineItemId),
-          ...(cleanText(plan.vendor) ? { vendor: cleanText(plan.vendor) } : {}),
+          ...(cleanText(utilityVendor) ? { vendor: cleanText(utilityVendor) } : {}),
           ...(cleanText(plan.comment) ? { comment: cleanText(plan.comment) } : {}),
         })),
       ],
@@ -705,8 +785,14 @@ export default function PaymentScheduleBuilderDialog({
         recalcGrantProjected,
         activeOnly: true,
       },
+      invoiceDocsTask: {
+        enabled: invoiceDocsTask.enabled,
+        dueDate: invoiceDocsTask.dueDate,
+        bucket: invoiceDocsTask.bucket,
+        docs: invoiceDocs,
+      },
       taskDefs,
-      replaceTaskDefPrefixes: [rentCertTaskPrefix, "pay_cert_"],
+      replaceTaskDefPrefixes: [rentCertTaskPrefix, invoiceDocsTaskPrefix, "pay_cert_"],
     });
   };
 
@@ -837,6 +923,50 @@ export default function PaymentScheduleBuilderDialog({
         ) : null}
 
         {viewMode === "builder" ? (<>
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+          <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
+            <input
+              type="checkbox"
+              checked={invoiceDocsTask.enabled}
+              onChange={(e) => setInvoiceDocsTask((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
+            />
+            Build invoice docs task
+          </label>
+          {invoiceDocsTask.enabled ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <label className="text-sm">
+                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Due Date</div>
+                <input
+                  type="date"
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  value={invoiceDocsTask.dueDate}
+                  onChange={(e) => setInvoiceDocsTask((prev) => ({ ...prev, dueDate: e.currentTarget.value }))}
+                />
+              </label>
+              <label className="text-sm">
+                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Bucket</div>
+                <select
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  value={invoiceDocsTask.bucket}
+                  onChange={(e) => setInvoiceDocsTask((prev) => ({ ...prev, bucket: e.currentTarget.value as InvoiceDocsPlan["bucket"] }))}
+                >
+                  <option value="compliance">compliance</option>
+                  <option value="task">task</option>
+                </select>
+              </label>
+              <div className="flex items-end text-xs text-slate-600 dark:text-slate-400">
+                {invoiceDocs.length
+                  ? `Docs: ${invoiceDocs.slice(0, 5).join(", ")}${invoiceDocs.length > 5 ? ` +${invoiceDocs.length - 5}` : ""}`
+                  : "No grant invoice docs saved yet; creates a generic invoice documentation task."}
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Optional: create a compliance task from the grant&apos;s invoicing docs defaults.
+            </div>
+          )}
+        </div>
+
         <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
           <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
             <input
@@ -933,6 +1063,8 @@ export default function PaymentScheduleBuilderDialog({
           onRemove={(id) => setRentPlans((prev) => prev.filter((p) => p.id !== id))}
           grantId={selectedEnrollment?.grantId || null}
           fallbackLineItemIds={fallbackLineItemIds}
+          vendor={rentVendor}
+          onVendorChange={setRentVendor}
         />
 
         <MonthlyPlanEditor
@@ -943,6 +1075,8 @@ export default function PaymentScheduleBuilderDialog({
           onRemove={(id) => setUtilityPlans((prev) => prev.filter((p) => p.id !== id))}
           grantId={selectedEnrollment?.grantId || null}
           fallbackLineItemIds={fallbackLineItemIds}
+          vendor={utilityVendor}
+          onVendorChange={setUtilityVendor}
         />
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -1045,7 +1179,7 @@ export default function PaymentScheduleBuilderDialog({
           {previewRows.length === 0 ? (
             <div className="text-xs text-slate-500 dark:text-slate-400">Build rows above to preview the schedule.</div>
           ) : (
-            <div className="max-h-72 overflow-auto">
+            <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
                 <thead className="bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                   <tr>

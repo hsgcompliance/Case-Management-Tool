@@ -15,6 +15,7 @@ import {
   newBulkWriter,
   type Claims,
 } from "../../core";
+import { deleteEnrollmentsCore } from "../enrollments/delete";
 
 /* -------------------------------------------
    Reserved keys (server-owned / protected)
@@ -821,10 +822,11 @@ export async function softDeleteCustomers(
           d.ref,
           {
             deleted: true,
+            active: false,
             enrolled: false,
-            status: "closed",
+            status: "deleted",
             updatedAt: FieldValue.serverTimestamp(),
-            closedAt: FieldValue.serverTimestamp(),
+            deletedAt: FieldValue.serverTimestamp(),
           },
           { merge: true }
         );
@@ -844,6 +846,7 @@ export async function hardDeleteCustomers(ids: string | string[], caller: Claims
   const arr = toArray(ids);
   const orgId = requireOrgId(caller);
 
+  // --- ALL READS FIRST ---
   const snaps = await Promise.all(arr.map((id) => db.collection("customers").doc(id).get()));
   snaps.forEach((s) => {
     if (!s.exists) return;
@@ -855,10 +858,46 @@ export async function hardDeleteCustomers(ids: string | string[], caller: Claims
     }
   });
 
+  // Read all enrollments for every customer before any writes.
+  const enrollmentSnaps = await Promise.all(
+    arr.map((id) =>
+      db.collection("customerEnrollments").where("customerId", "==", id).get()
+        .then((s) => ({ customerId: id, docs: s.docs }))
+        .catch(() => ({ customerId: id, docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }))
+    )
+  );
+
+  // --- CASCADE DELETES (enrollments first, then customers) ---
+  const cascadeErrors: Array<{ customerId: string; enrollmentId: string; error: string }> = [];
+
+  for (const { customerId, docs } of enrollmentSnaps) {
+    for (const d of docs) {
+      const enrData = d.data() as any;
+      // Skip already-hard-deleted tombstones
+      if (enrData?.hardDeletePending === true) continue;
+      try {
+        await deleteEnrollmentsCore(
+          [{ id: d.id, hard: true }],
+          caller
+        );
+      } catch (e: any) {
+        // Log but continue — don't block customer delete for enrollment errors.
+        // Orphaned enrollments are recoverable; a blocked customer delete is not.
+        cascadeErrors.push({ customerId, enrollmentId: d.id, error: String(e?.message || e) });
+      }
+    }
+  }
+
+  // Delete customer docs
   const batch = db.batch();
   for (const id of arr) {
     batch.delete(db.collection("customers").doc(id));
   }
   await batch.commit();
-  return { ids: arr, deleted: true };
+
+  return {
+    ids: arr,
+    deleted: true,
+    ...(cascadeErrors.length ? { cascadeErrors } : {}),
+  };
 }

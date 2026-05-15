@@ -40,6 +40,22 @@ export type ProgramGroupCfg = {
   populations?: Array<"youth" | "family" | "individual">;
 };
 
+/**
+ * A system-level spending view preset saved by an admin.
+ * Appears in the invoice tool's Views strip for all users, visually distinct
+ * from personal saved views.
+ */
+export type SpendingPreset = {
+  id: string;
+  name: string;
+  description?: string;
+  color?: string;
+  /** Serialized SpendingFilterState — the tool parses with its own sanitizer. */
+  filterState: Record<string, unknown>;
+  createdAt?: string;
+  createdBy?: string;
+};
+
 export type OrgDisplayConfig = {
   budgetDisplay: {
     groups: BudgetGroupCfg[];
@@ -52,6 +68,8 @@ export type OrgDisplayConfig = {
   };
   /** Per-digest-type enabled flag. Missing key = enabled. */
   digestsEnabled: Record<string, boolean>;
+  /** System-level invoice tool presets set by admins, shown to all users. */
+  spendingPresets?: SpendingPreset[];
   /** Secret-games admin configuration. */
   secretGames?: unknown;
 };
@@ -143,6 +161,9 @@ async function fetchOrgConfig(): Promise<OrgConfigQueryResult> {
       groups: value?.programDisplay?.groups ?? DEFAULT_CONFIG.programDisplay.groups,
       items: value?.programDisplay?.items ?? {},
     },
+    spendingPresets: Array.isArray(value?.spendingPresets)
+      ? (value.spendingPresets as SpendingPreset[])
+      : undefined,
     secretGames: value?.secretGames,
   };
 

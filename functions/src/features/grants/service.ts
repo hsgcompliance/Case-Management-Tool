@@ -13,6 +13,8 @@ import {
   newBulkWriter,
   type Claims,
 } from "../../core";
+import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
+import { deleteEnrollmentsCore } from "../enrollments/delete";
 import {
   Grant,
   GrantPatchBody,
@@ -113,13 +115,23 @@ export function normalizeBudget(
     windowProjectedBalance,
   };
 
-  return {
+  const out: TGrantBudget = {
     total: totalCap,
     totals,
     lineItems: items,
-    createdAt: input.createdAt,
-    updatedAt: input.updatedAt,
   };
+
+  if (input.allocationEnabled !== undefined) {
+    out.allocationEnabled = input.allocationEnabled === true;
+  }
+  if (input.perCustomerCap !== undefined) {
+    out.perCustomerCap =
+      input.perCustomerCap == null ? null : Number(input.perCustomerCap);
+  }
+  if (input.createdAt != null) out.createdAt = input.createdAt;
+  if (input.updatedAt != null) out.updatedAt = input.updatedAt;
+
+  return out;
 }
 
 const cleanExtras = (v: Record<string, unknown> | null | undefined) =>
@@ -138,6 +150,7 @@ const RESERVED = new Set<string>([
   "_tags",
   "active",
   "deleted",
+  "system",
 ]);
 
 function isReserved(k: string) {
@@ -154,6 +167,37 @@ function isReservedRouteId(raw: unknown): boolean {
   if (s === "new") return true;
   if (s.startsWith("(") && s.endsWith(")new")) return true;
   return false;
+}
+
+const KNOWN_GRANT_FIELDS = new Set<string>([
+  "id",
+  "orgId",
+  "name",
+  "status",
+  "active",
+  "deleted",
+  "kind",
+  "duration",
+  "startDate",
+  "endDate",
+  "budget",
+  "taskTypes",
+  "tasks",
+  "conditionalTaskRules",
+  "pins",
+  "invoicing",
+  "meta",
+  "createdAt",
+  "updatedAt",
+]);
+
+function cleanTopLevelExtras(input: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input || {})) {
+    if (KNOWN_GRANT_FIELDS.has(key) || isReserved(key) || value === undefined) continue;
+    out[key] = sanitizeNestedObject(value);
+  }
+  return out;
 }
 
 /* ---------------- Program/Grant coherence ---------------- */
@@ -225,6 +269,17 @@ function sanitizeGrantPatch(patch: Partial<TGrant>): Partial<TGrant> {
 
   if (out.tasks !== undefined) out.tasks = cleanExtras(out.tasks);
   if (out.meta !== undefined) out.meta = cleanExtras(out.meta);
+  if (
+    out.budget !== undefined &&
+    out.budget !== null &&
+    typeof out.budget === "object" &&
+    !Array.isArray(out.budget)
+  ) {
+    const budget = { ...(out.budget as Record<string, unknown>) };
+    delete budget.createdAt;
+    delete budget.updatedAt;
+    out.budget = budget as TGrantBudget;
+  }
 
   return out;
 }
@@ -253,8 +308,10 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
 
   const tasks = cleanExtras(parsed.tasks);
   const meta = cleanExtras(parsed.meta);
+  const extras = cleanTopLevelExtras(parsed as Record<string, unknown>);
 
   return {
+    ...extras,
     id,
     orgId: normId(targetOrg),
 
@@ -271,6 +328,9 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
 
     budget,
     taskTypes: parsed.taskTypes ?? null,
+    conditionalTaskRules: parsed.conditionalTaskRules ?? null,
+    pins: parsed.pins ?? null,
+    invoicing: parsed.invoicing ?? null,
     tasks,
     meta,
 
@@ -339,6 +399,8 @@ export async function patchGrants(
     patch: Partial<TGrant>;
     unset?: string[];
   }> = [];
+  // Track grants whose status just became closed/deleted so we can cascade after write.
+  const cascadeNeeded: Array<{ id: string; targetStatus: "closed" | "deleted" }> = [];
 
   for (let i = 0; i < rows.length; i++) {
     const { id, patch, unset } = rows[i];
@@ -359,6 +421,13 @@ export async function patchGrants(
       "draft") as TGrant["status"];
     const active = nextStatus === "active";
     const deleted = nextStatus === "deleted";
+
+    // Detect terminal status transitions for cascade.
+    const prevStatus = (prev.status ?? "draft") as TGrant["status"];
+    if (prevStatus !== nextStatus) {
+      if (nextStatus === "closed") cascadeNeeded.push({ id, targetStatus: "closed" });
+      else if (nextStatus === "deleted") cascadeNeeded.push({ id, targetStatus: "deleted" });
+    }
 
     // program/grant coherence
     const kind = canonicalKind(prev, safePatch);
@@ -386,6 +455,18 @@ export async function patchGrants(
   }
 
   await writer.close();
+
+  // Cascade to enrollments for any grants that just became closed or deleted.
+  // Non-fatal — grant write already committed above.
+  if (cascadeNeeded.length) {
+    await Promise.allSettled(
+      cascadeNeeded.map(({ id, targetStatus }) =>
+        cascadeGrantToEnrollments(id, targetStatus).catch((e: any) =>
+          console.error(`[patchGrants] cascade failed for grant ${id} → ${targetStatus}:`, e?.message || e)
+        )
+      )
+    );
+  }
 
   // Budget patches: transact per-doc for deterministic merge + re-derive totals.
   for (const row of budgetRows) {
@@ -489,6 +570,84 @@ export async function patchGrants(
   return { ids };
 }
 
+/* ---------------- Grant → enrollment cascade ---------------- */
+
+/**
+ * Cascade a grant status transition to all non-terminal enrollments.
+ * Reads all affected enrollments first, then writes — never the reverse.
+ * Errors are logged per-enrollment but do not block the others.
+ */
+export async function cascadeGrantToEnrollments(
+  grantId: string,
+  targetStatus: "closed" | "deleted",
+) {
+  if (!grantId) return;
+
+  // --- READ FIRST: all enrollments for this grant that are not already terminal ---
+  let snap: FirebaseFirestore.QuerySnapshot;
+  try {
+    snap = await db
+      .collection("customerEnrollments")
+      .where("grantId", "==", grantId)
+      .get();
+  } catch (e: any) {
+    console.error(`[cascadeGrant] read failed for grant ${grantId}:`, e?.message || e);
+    return;
+  }
+
+  if (snap.empty) return;
+
+  const toProcess = snap.docs.filter((d) => {
+    const s = String((d.data() as any)?.status || "").toLowerCase();
+    return s !== "closed" && s !== "deleted";
+  });
+
+  if (!toProcess.length) return;
+
+  // --- WRITE: batch-close or batch-delete ---
+  const batch = db.batch();
+  const closedEnrollments: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string | null }> = [];
+
+  for (const doc of toProcess) {
+    const data = doc.data() as any;
+    const patch: Record<string, unknown> =
+      targetStatus === "closed"
+        ? { status: "closed", active: false, closedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }
+        : { status: "deleted", active: false, deleted: true, deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+
+    batch.set(doc.ref, patch, { merge: true });
+
+    closedEnrollments.push({
+      id: doc.id,
+      orgId: data?.orgId ?? null,
+      grantId: data?.grantId ?? grantId,
+      customerId: data?.customerId ?? null,
+    });
+  }
+
+  try {
+    await batch.commit();
+  } catch (e: any) {
+    console.error(`[cascadeGrant] batch write failed for grant ${grantId}:`, e?.message || e);
+    return;
+  }
+
+  // --- VOID projections for all affected enrollments (non-fatal per-enrollment) ---
+  await Promise.allSettled(
+    closedEnrollments.map(({ id, orgId, grantId: gid, customerId }) =>
+      syncEnrollmentProjectionQueueItems({
+        orgId,
+        enrollmentId: id,
+        grantId: gid,
+        customerId,
+        payments: [],
+      }).catch((e: any) =>
+        console.error(`[cascadeGrant] voidProjections failed for enrollment ${id}:`, e?.message || e)
+      )
+    )
+  );
+}
+
 /* ---------------- Delete (soft) ---------------- */
 
 export async function softDeleteGrants(
@@ -537,6 +696,15 @@ export async function softDeleteGrants(
   }
   await writer.close();
 
+  // Cascade to enrollments. Non-fatal per-grant — grant is already deleted above.
+  await Promise.allSettled(
+    arr.map((id) =>
+      cascadeGrantToEnrollments(id, "deleted").catch((e: any) =>
+        console.error(`[softDeleteGrants] cascade failed for grant ${id}:`, e?.message || e)
+      )
+    )
+  );
+
   return { ids: arr, deleted: true as const };
 }
 
@@ -549,6 +717,7 @@ export async function hardDeleteGrants(
 ) {
   assertTargetOrgAllowed(caller, targetOrg);
 
+  // --- ALL READS FIRST ---
   const arr = toArray(ids);
   const snaps = await Promise.all(
     arr.map((id) => db.collection("grants").doc(id).get()),
@@ -559,11 +728,43 @@ export async function hardDeleteGrants(
     assertDocOrgWritable(caller, targetOrg, s.data() || {});
   });
 
+  // Read all enrollments for every grant before any writes.
+  const enrollmentSnaps = await Promise.all(
+    arr.map((id) =>
+      db.collection("customerEnrollments").where("grantId", "==", id).get()
+        .then((s) => ({ grantId: id, docs: s.docs }))
+        .catch(() => ({ grantId: id, docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }))
+    )
+  );
+
+  // --- CASCADE: hard-delete enrollments first ---
+  const cascadeErrors: Array<{ grantId: string; enrollmentId: string; error: string }> = [];
+
+  for (const { grantId, docs } of enrollmentSnaps) {
+    for (const d of docs) {
+      const enrData = d.data() as any;
+      if (enrData?.hardDeletePending === true) continue;
+      try {
+        await deleteEnrollmentsCore(
+          [{ id: d.id, hard: true }],
+          caller
+        );
+      } catch (e: any) {
+        // Non-fatal: log and continue so remaining enrollments + grant still get deleted.
+        cascadeErrors.push({ grantId, enrollmentId: d.id, error: String(e?.message || e) });
+      }
+    }
+  }
+
   const batch = db.batch();
   for (const id of arr) {
     batch.delete(db.collection("grants").doc(id));
   }
   await batch.commit();
 
-  return { ids: arr, deleted: true };
+  return {
+    ids: arr,
+    deleted: true,
+    ...(cascadeErrors.length ? { cascadeErrors } : {}),
+  };
 }

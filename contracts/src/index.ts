@@ -14,6 +14,9 @@
 export * from "./core";
 export * from "./http";
 
+// Budget pipeline
+export * as budgetPipeline from "./budgetPipeline";
+
 // Canonical endpoint req/resp typing (this is where most “API types” live)
 export * from "./endpointMap";
 
@@ -178,6 +181,17 @@ export type {
   TGrantBudget,
   TGrantEntity,
 
+  // pins
+  TGrantPinColor,
+  TGrantPinImportant,
+  TGrantPinDigest,
+  TGrantPinInvoice,
+  TGrantPins,
+
+  // invoicing
+  TGrantInvoicing,
+  TGrantInvoicingFrequency,
+
   // request bodies + responses
   TGrantsUpsertBody,
   TGrantsUpsertResp,
@@ -203,7 +217,17 @@ export type {
   TGrantsActivityQuery,
   TGrantsActivityItem,
   TGrantsActivityResp,
+
+  TGrantsAdminPreviewQuery,
+  TGrantsAdminPreviewResp,
+  TGrantsAdminClearPaymentsBody,
+  TGrantsAdminClearPaymentsResp,
+  TGrantsAdminClearEnrollmentsBody,
+  TGrantsAdminClearEnrollmentsResp,
+  TGrantsAdminReconcileBudgetBody,
+  TGrantsAdminReconcileBudgetResp,
 } from "./grants";
+export { GRANT_PIN_COLORS } from "./grants";
 
 // Jotform
 export type {
@@ -496,3 +520,31 @@ export type {
   OrgManagerPatchTeamsBodyIn,
   UpdateMeBodyIn,
 } from "./users";
+
+// Budget Pipeline
+export type {
+  TPipelineOperator,
+  TPipelineStatus,
+  TPipelineCondition,
+  TPipelineConditionGroup,
+  TBudgetPipeline,
+  TBudgetPipelineUpsertBody,
+  TBudgetPipelineListQuery,
+  TBudgetPipelineDeleteBody,
+  TBudgetPipelinePreviewBody,
+  TPreviewItemResult,
+  TPreviewMatchedRow,
+  TBudgetPipelinePreviewResult,
+} from "./budgetPipeline";
+
+export {
+  PipelineOperator,
+  PipelineStatus,
+  PipelineCondition,
+  PipelineConditionGroup,
+  BudgetPipeline,
+  BudgetPipelineUpsertBody,
+  BudgetPipelineListQuery,
+  BudgetPipelineDeleteBody,
+  BudgetPipelinePreviewBody,
+} from "./budgetPipeline";

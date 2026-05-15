@@ -4,6 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@entities/ui/Modal";
+import { useAuth } from "@app/auth/AuthProvider";
 import { useCreditCards, usePatchCreditCards, useUpsertCreditCards } from "@hooks/useCreditCards";
 import { useLedgerEntries } from "@hooks/useLedger";
 import { usePaymentQueueItems, type PaymentQueueItem } from "@hooks/usePaymentQueue";
@@ -17,6 +18,7 @@ import {
 } from "@lib/colorRegistry";
 import { toast } from "@lib/toast";
 import { LINE_ITEMS_FORM_IDS } from "@widgets/jotform/lineItemsFormMap";
+import { isViewerLike } from "@lib/roles";
 import type { CreditCardEntity, TLedgerEntry } from "@types";
 
 type CardHealth = "active" | "warning" | "over";
@@ -321,6 +323,8 @@ function CreditCardTile({
 export function CreditCardsPanel() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { profile } = useAuth();
+  const isViewer = isViewerLike(profile);
   const patchCreditCards = usePatchCreditCards();
   const upsertCreditCards = useUpsertCreditCards();
   const [selectedCardId, setSelectedCardId] = React.useState("");
@@ -480,10 +484,12 @@ export function CreditCardsPanel() {
   );
 
   const openDigestTool = (_formId: string) => {
+    if (isViewer) return;
     router.push(`/tools/jotforms`);
   };
 
   const openCreateModal = () => {
+    if (isViewer) return;
     setCreateDraft(DEFAULT_CREATE_CARD_DRAFT());
     setCreateOpen(true);
   };
@@ -502,6 +508,7 @@ export function CreditCardsPanel() {
   };
 
   const createCard = async () => {
+    if (isViewer) return;
     const draft = ensureCreateCardDraft(createDraft);
     const name = String(draft.name || "").trim();
     if (!name) {
@@ -573,6 +580,7 @@ export function CreditCardsPanel() {
   };
 
   const saveBudget = async () => {
+    if (isViewer) return;
     if (!selectedCard) return;
     const nextAmount = Number(budgetDraft);
     if (!Number.isFinite(nextAmount) || nextAmount < 0) return;
@@ -601,17 +609,19 @@ export function CreditCardsPanel() {
               {monthLabel(currentMonth)} spend pulled from ledger and payment queue staging, with open card and invoice items surfaced for follow-up.
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn btn-xs" onClick={openCreateModal}>
-              Add Credit Card
-            </button>
-            <button type="button" className="btn-secondary btn-xs" onClick={() => openDigestTool(LINE_ITEMS_FORM_IDS.creditCard)}>
-              Card Form Map
-            </button>
-            <button type="button" className="btn-secondary btn-xs" onClick={() => openDigestTool(LINE_ITEMS_FORM_IDS.invoice)}>
-              Invoice Form Map
-            </button>
-          </div>
+          {!isViewer && (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn btn-xs" onClick={openCreateModal}>
+                Add Credit Card
+              </button>
+              <button type="button" className="btn-secondary btn-xs" onClick={() => openDigestTool(LINE_ITEMS_FORM_IDS.creditCard)}>
+                Card Form Map
+              </button>
+              <button type="button" className="btn-secondary btn-xs" onClick={() => openDigestTool(LINE_ITEMS_FORM_IDS.invoice)}>
+                Invoice Form Map
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">
@@ -797,24 +807,30 @@ export function CreditCardsPanel() {
         footer={
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
-              <button className="btn btn-ghost btn-sm" onClick={() => selectedCard && openDigestTool(selectedCard.formIds.creditCard)}>
-                Card Form Map
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={() => selectedCard && openDigestTool(selectedCard.formIds.invoice)}>
-                Invoice Form Map
-              </button>
+              {!isViewer && (
+                <>
+                  <button className="btn btn-ghost btn-sm" onClick={() => selectedCard && openDigestTool(selectedCard.formIds.creditCard)}>
+                    Card Form Map
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => selectedCard && openDigestTool(selectedCard.formIds.invoice)}>
+                    Invoice Form Map
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex gap-2">
               <button className="btn btn-secondary btn-sm" onClick={() => setSelectedCardId("")}>
                 Close
               </button>
-              <button
-                className="btn btn-sm"
-                onClick={() => void saveBudget()}
-                disabled={!selectedCard || budgetSaving || !budgetDraft.trim()}
-              >
-                {budgetSaving ? "Saving..." : "Save Limit"}
-              </button>
+              {!isViewer && (
+                <button
+                  className="btn btn-sm"
+                  onClick={() => void saveBudget()}
+                  disabled={!selectedCard || budgetSaving || !budgetDraft.trim()}
+                >
+                  {budgetSaving ? "Saving..." : "Save Limit"}
+                </button>
+              )}
             </div>
           </div>
         }
@@ -857,6 +873,7 @@ export function CreditCardsPanel() {
                       className="input w-full"
                       value={budgetDraft}
                       onChange={(e) => setBudgetDraft(e.currentTarget.value)}
+                      disabled={isViewer}
                     />
                   </label>
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/60">

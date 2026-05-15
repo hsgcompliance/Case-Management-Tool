@@ -36,7 +36,7 @@ function routeMatchesPathname(routeId: SecretGameRouteId, pathname: string): boo
     case "customers":
       return pathname === "/customers" || pathname.startsWith("/customers/");
     case "grants":
-      return pathname === "/grants" || pathname.startsWith("/grants/");
+      return pathname === "/budget" || pathname.startsWith("/budget/") || pathname === "/programs" || pathname.startsWith("/programs/");
     case "reports":
       return pathname === "/reports" || pathname.startsWith("/reports/");
     default:

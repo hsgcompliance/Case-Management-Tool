@@ -63,5 +63,5 @@ export const inboxDigestHtmlPreview = secureHandler(
 
       res.status(200).json({ok: true, html, subject, digestType, month});
     },
-    {auth: 'user', methods: ['GET', 'OPTIONS']},
+    {auth: 'viewer', methods: ['GET', 'OPTIONS']},
 );

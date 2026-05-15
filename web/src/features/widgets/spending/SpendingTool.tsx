@@ -3,12 +3,14 @@ import { toApiError } from "@client/api";
 import UsersClient from "@client/users";
 import { useAuth } from "@app/auth/AuthProvider";
 import GrantSelect from "@entities/selectors/GrantSelect";
+import LineItemSelect from "@entities/selectors/LineItemSelect";
 import { useCreditCards } from "@hooks/useCreditCards";
-import { usePaymentsUpdateCompliance } from "@hooks/usePayments";
+import { usePaymentsSpend, usePaymentsUpdateCompliance } from "@hooks/usePayments";
 import { useAutoAssignLedgerEntries, useLedgerEntries } from "@hooks/useLedger";
 import {
   usePaymentQueueItems,
   useBypassClosePaymentQueueItems,
+  usePatchPaymentQueueItem,
   usePostPaymentQueueToLedger,
   type PaymentQueueItem,
 } from "@hooks/usePaymentQueue";
@@ -19,9 +21,12 @@ import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
 import type { CreditCardEntity } from "@types";
 import { buildCsv, downloadCsv } from "@entities/ui/dashboardStyle/SmartExportButton";
-import { useOrgConfig } from "@hooks/useOrgConfig";
+import { useOrgConfig, useSaveOrgConfig, type OrgDisplayConfig, type SpendingPreset } from "@hooks/useOrgConfig";
+import { isAdminLike } from "@lib/roles";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import ActionMenu from "@entities/ui/ActionMenu";
+import { PageFilterBar } from "@entities/Page/PageFilterBar";
+import { FilterToggleGroup } from "@entities/ui/FilterToggleGroup";
 import {
   ComplexDateSelector,
   complexDateMatchesIsoDate,
@@ -78,7 +83,7 @@ export type SpendingFilterState = {
 export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   month: monthKeyOffsetDays(5),
   dateFilter: { mode: "month", month: monthKeyOffsetDays(5) },
-  typeFilter: "forms",
+  typeFilter: "",
   workflowFilter: "",
   grantId: "",
   cardFilterId: "",
@@ -95,11 +100,21 @@ type SpendingSavedView = {
   name: string;
   filterState: SpendingFilterState;
   builtIn?: boolean;
+  /** System preset set by an admin via the filter recorder — shown to all users. */
+  isPreset?: boolean;
+  /** Dynamically generated tab for an org-pinned grant — always visible, never stored. */
+  isGrantPin?: boolean;
+  updatedAt?: string;
+  /** Accent color key: "slate"|"sky"|"emerald"|"amber"|"rose"|"violet"|"orange" */
+  color?: string;
+  description?: string;
 };
 
 type SpendingViewsSettings = {
   defaultViewId?: string;
   views?: SpendingSavedView[];
+  /** IDs of built-in or user views the user has hidden from the strip. */
+  hiddenViewIds?: string[];
 };
 
 const SPENDING_VIEWS_SETTINGS_KEY = "spendingViews";
@@ -130,43 +145,68 @@ function spendingFilterPatch(patch: Partial<SpendingFilterState>): SpendingFilte
   };
 }
 
+// Last day of the month 3 months from today — used when a grant has no end date
+function grantFallbackEndDate(): string {
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth() + 4, 0);
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
+}
+
 function builtInSpendingViews(): SpendingSavedView[] {
+  const nextMonth = monthKeyOffsetDays(35);
   return [
     {
-      id: "builtin-current-month",
-      name: "CC + Invoices",
+      id: "builtin-all-spending",
+      name: "All Spending",
       filterState: cloneSpendingFilter(DEFAULT_SPENDING_FILTER),
       builtIn: true,
+      description: "All spending types, current month",
     },
     {
-      id: "builtin-all-current-month",
-      name: "All Spending",
-      filterState: spendingFilterPatch({ typeFilter: "" }),
+      id: "builtin-cc-invoices",
+      name: "CC + Invoices",
+      filterState: spendingFilterPatch({ typeFilter: "forms" }),
       builtIn: true,
+      description: "Credit card and invoice submissions",
+    },
+    {
+      id: "builtin-all-open",
+      name: "All Open",
+      filterState: spendingFilterPatch({ workflowFilter: "open" }),
+      builtIn: true,
+      description: "All open / unreconciled items",
+    },
+    {
+      id: "builtin-next-month-enrollments",
+      name: "Next Month",
+      filterState: spendingFilterPatch({
+        typeFilter: "enrollment",
+        month: nextMonth,
+        dateFilter: { mode: "month", month: nextMonth },
+      }),
+      builtIn: true,
+      description: "Projected enrollments for next month",
     },
     {
       id: "builtin-open-invoices",
       name: "Open Invoices",
       filterState: spendingFilterPatch({ typeFilter: "invoice", workflowFilter: "open" }),
       builtIn: true,
+      description: "Open invoice queue items",
     },
     {
       id: "builtin-card-data-entry",
       name: "Card Data Entry",
       filterState: spendingFilterPatch({ typeFilter: "card", workflowFilter: "open" }),
       builtIn: true,
-    },
-    {
-      id: "builtin-projected-enrollments",
-      name: "Projected Enrollments",
-      filterState: spendingFilterPatch({ typeFilter: "enrollment", workflowFilter: "open" }),
-      builtIn: true,
+      description: "Credit card items awaiting data entry",
     },
     {
       id: "builtin-reconciled",
       name: "Reconciled",
       filterState: spendingFilterPatch({ workflowFilter: "closed" }),
       builtIn: true,
+      description: "Posted / reconciled items",
     },
   ];
 }
@@ -180,13 +220,39 @@ function sanitizeSavedSpendingView(value: unknown): SpendingSavedView | null {
     ? (raw.filterState as Partial<SpendingFilterState>)
     : null;
   if (!id || !name || !filterState) return null;
+  const VALID_COLORS = new Set(["slate", "sky", "emerald", "amber", "rose", "violet", "orange"]);
+  const color = typeof raw.color === "string" && VALID_COLORS.has(raw.color) ? raw.color : undefined;
   return {
     id,
     name,
     filterState: spendingFilterPatch(filterState),
     builtIn: false,
+    isPreset: raw.isPreset === true,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : undefined,
+    color,
+    description: typeof raw.description === "string" ? raw.description : undefined,
   };
 }
+
+const VIEW_COLOR_DOT: Record<string, string> = {
+  slate: "bg-slate-400",
+  sky: "bg-sky-400",
+  emerald: "bg-emerald-500",
+  amber: "bg-amber-400",
+  rose: "bg-rose-500",
+  violet: "bg-violet-500",
+  orange: "bg-orange-400",
+};
+
+const VIEW_COLOR_ACTIVE: Record<string, string> = {
+  slate: "border-slate-300 bg-slate-100 text-slate-800",
+  sky: "border-sky-200 bg-sky-50 text-sky-800",
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  amber: "border-amber-200 bg-amber-50 text-amber-800",
+  rose: "border-rose-200 bg-rose-50 text-rose-800",
+  violet: "border-violet-200 bg-violet-50 text-violet-800",
+  orange: "border-orange-200 bg-orange-50 text-orange-800",
+};
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -265,6 +331,10 @@ function dateIso10(value: unknown): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function todayIso10() {
+  return dateIso10(new Date().toISOString());
 }
 
 function monthFromDate(value: unknown): string {
@@ -504,13 +574,13 @@ function CompactCardRow({
 // Secondary (expanded): [Open|All|Closed]  [Search]  [Clear]
 // ---------------------------------------------------------------------------
 
-const TYPE_OPTIONS = [
-  { id: "" as const, label: "All" },
-  { id: "forms" as const, label: "CC + Invoices" },
-  { id: "enrollment" as const, label: "Enrollment" },
-  { id: "card" as const, label: "Card" },
-  { id: "invoice" as const, label: "Invoice" },
-] satisfies { id: SpendingFilterState["typeFilter"]; label: string }[];
+const TYPE_OPTIONS: { id: SpendingFilterState["typeFilter"]; label: string }[] = [
+  { id: "", label: "All" },
+  { id: "forms", label: "CC + Invoices" },
+  { id: "enrollment", label: "Enrollment" },
+  { id: "card", label: "Card" },
+  { id: "invoice", label: "Invoice" },
+];
 
 const SPENDING_TABLE_PARTS = {
   date: [
@@ -539,7 +609,7 @@ const SPENDING_TABLE_PARTS = {
     { id: "subheader", label: "Sub header (workflow)" },
     { id: "chip", label: "Chip (reason)" },
   ],
-} satisfies Record<string, TableColumnPart[]>;
+} as Record<string, TableColumnPart[]>;
 
 // Filter panel is embedded inside LineItemSpendingTool so it has access to
 // filteredRows, stats, and action handlers. This topbar is kept as a no-op
@@ -666,6 +736,230 @@ const BUDGET_COLOR_DOT: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Filter Recorder — admin panel for inspecting + saving system-level presets
+// ---------------------------------------------------------------------------
+
+function FilterRecorder({
+  filterState,
+  orgConfig,
+}: {
+  filterState: SpendingFilterState;
+  orgConfig: OrgDisplayConfig | undefined;
+}) {
+  const { profile } = useAuth();
+  const isAdmin = isAdminLike(profile as { topRole?: unknown; role?: unknown } | null);
+  const saveOrgConfig = useSaveOrgConfig();
+
+  const [presetName, setPresetName] = React.useState("");
+  const [presetDescription, setPresetDescription] = React.useState("");
+  const [presetColor, setPresetColor] = React.useState("");
+  const [copied, setCopied] = React.useState(false);
+
+  const jsonStr = JSON.stringify(filterState, null, 2);
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(jsonStr).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const existingPresets = orgConfig?.spendingPresets ?? [];
+
+  const handleSavePreset = async () => {
+    const name = presetName.trim();
+    if (!name) { toast("Name required.", { type: "error" }); return; }
+    if (!orgConfig) { toast("Org config not loaded.", { type: "error" }); return; }
+    const newPreset: SpendingPreset = {
+      id: `preset-${Date.now()}`,
+      name,
+      description: presetDescription.trim() || undefined,
+      color: presetColor || undefined,
+      filterState: filterState as unknown as Record<string, unknown>,
+      createdAt: new Date().toISOString(),
+      createdBy: (profile as Record<string, unknown>)?.id as string | undefined,
+    };
+    try {
+      await saveOrgConfig.mutateAsync({ ...orgConfig, spendingPresets: [...existingPresets, newPreset] });
+      toast(`Preset "${name}" saved.`, { type: "success" });
+      setPresetName("");
+      setPresetDescription("");
+      setPresetColor("");
+    } catch (e) {
+      toast(toApiError(e, "Failed to save preset.").error, { type: "error" });
+    }
+  };
+
+  const handleDeletePreset = async (id: string) => {
+    if (!orgConfig) return;
+    try {
+      await saveOrgConfig.mutateAsync({
+        ...orgConfig,
+        spendingPresets: existingPresets.filter((p) => p.id !== id),
+      });
+      toast("Preset removed.", { type: "success" });
+    } catch (e) {
+      toast(toApiError(e, "Failed to remove preset.").error, { type: "error" });
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-700">Filter Recorder</div>
+        {!isAdmin && <span className="text-xs text-amber-600">Read-only — admin required to save system presets</span>}
+      </div>
+
+      {/* Current filter state JSON */}
+      <div className="relative">
+        <pre className="overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 max-h-[200px] font-mono">
+          {jsonStr}
+        </pre>
+        <button
+          type="button"
+          className="absolute right-2 top-2 btn btn-xs btn-ghost"
+          onClick={handleCopy}
+        >
+          {copied ? "Copied!" : "Copy JSON"}
+        </button>
+      </div>
+
+      {/* Existing system presets */}
+      {existingPresets.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            System Presets ({existingPresets.length})
+          </div>
+          {existingPresets.map((preset) => (
+            <div key={preset.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+              {preset.color && (
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${VIEW_COLOR_DOT[preset.color] ?? "bg-slate-300"}`} />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-slate-800">{preset.name}</div>
+                {preset.description && (
+                  <div className="truncate text-xs text-slate-500">{preset.description}</div>
+                )}
+              </div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn btn-xs text-rose-500 hover:bg-rose-50 hover:text-rose-600"
+                  disabled={saveOrgConfig.isPending}
+                  onClick={() => void handleDeletePreset(preset.id)}
+                  title="Remove system preset"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Save controls — admin only */}
+      {isAdmin && (
+        <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+          <div className="text-xs font-semibold text-amber-800">Save Current Filters as System Preset</div>
+          <div className="flex flex-wrap gap-2">
+            <input
+              className="input input-xs min-w-[150px] flex-1"
+              value={presetName}
+              onChange={(e) => setPresetName(e.currentTarget.value)}
+              placeholder="Preset name (required)"
+            />
+            <input
+              className="input input-xs min-w-[150px] flex-1"
+              value={presetDescription}
+              onChange={(e) => setPresetDescription(e.currentTarget.value)}
+              placeholder="Description (optional)"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">Color:</span>
+            {["", "slate", "sky", "emerald", "amber", "rose", "violet", "orange"].map((c) => (
+              <button
+                key={c || "none"}
+                type="button"
+                onClick={() => setPresetColor(c)}
+                className={[
+                  "h-4 w-4 rounded-full border-2 transition",
+                  presetColor === c ? "border-slate-600 scale-110" : "border-transparent hover:border-slate-400",
+                  c ? VIEW_COLOR_DOT[c] : "bg-white border border-slate-200",
+                ].join(" ")}
+                title={c || "No color"}
+                aria-label={`Color: ${c || "none"}`}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={saveOrgConfig.isPending || !presetName.trim()}
+            onClick={() => void handleSavePreset()}
+          >
+            {saveOrgConfig.isPending ? "Saving..." : "Save as System Preset"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ViewTab — renders one tab pill in the views strip.
+// Defined at module scope so the bundler never gets a TDZ on it.
+// ---------------------------------------------------------------------------
+
+function ViewTab({
+  view,
+  active,
+  isDefault,
+  showDelete,
+  savingViews,
+  onApply,
+  onDelete,
+}: {
+  view: SpendingSavedView;
+  active: boolean;
+  isDefault: boolean;
+  showDelete?: boolean;
+  savingViews: boolean;
+  onApply: () => void;
+  onDelete?: () => void;
+}) {
+  const dotClass = view.color ? VIEW_COLOR_DOT[view.color] : null;
+  const activeClass = view.color && active ? VIEW_COLOR_ACTIVE[view.color] : "";
+  return (
+    <span className="inline-flex overflow-hidden rounded border border-slate-200 bg-white">
+      <button
+        type="button"
+        className={[
+          "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold transition hover:bg-slate-50",
+          isDefault ? "bg-sky-50 text-sky-700" : active ? activeClass || "bg-slate-100 text-slate-800" : "text-slate-600",
+        ].join(" ")}
+        onClick={onApply}
+        title={view.description || view.name}
+      >
+        {dotClass && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} />}
+        {view.name}
+      </button>
+      {showDelete && onDelete && (
+        <button
+          type="button"
+          className="border-l border-slate-200 px-1.5 text-xs text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+          disabled={savingViews}
+          onClick={onDelete}
+          title="Delete saved view"
+        >
+          ×
+        </button>
+      )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 type SpendingToolProps = {
   filterState?: SpendingFilterState;
@@ -700,13 +994,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const filterState = props.filterState ?? localFilter;
   const setFilterState = props.onFilterChange ?? setLocalFilter;
 
-  const [showFilters, setShowFilters] = React.useState(false);
+
 
   const dateFilter = normalizeComplexDateValue(filterState.dateFilter, filterState.month);
   const month = complexDatePrimaryMonth(dateFilter);
   const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search, advancedQueueFilters } = filterState;
   const [saveViewName, setSaveViewName] = React.useState("");
+  const [saveViewColor, setSaveViewColor] = React.useState("");
   const [savingViews, setSavingViews] = React.useState(false);
+  const [activeSpendingViewId, setActiveSpendingViewId] = React.useState("");
+  const [saveViewDialogOpen, setSaveViewDialogOpen] = React.useState(false);
+  const [showFilterRecorder, setShowFilterRecorder] = React.useState(false);
   const [modalRow, setModalRow] = React.useState<SpendingRow | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
 
@@ -718,15 +1016,84 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     const saved = Array.isArray(raw?.views)
       ? raw.views.map(sanitizeSavedSpendingView).filter((v): v is SpendingSavedView => !!v)
       : [];
+    const hiddenViewIds = Array.isArray(raw?.hiddenViewIds)
+      ? (raw.hiddenViewIds as unknown[]).filter((id): id is string => typeof id === "string")
+      : [];
     return {
       defaultViewId: typeof raw?.defaultViewId === "string" ? raw.defaultViewId : undefined,
       views: saved,
+      hiddenViewIds,
     };
   }, [profile]);
 
+  const systemPresetViews = React.useMemo((): SpendingSavedView[] => {
+    const rawPresets = orgConfig?.spendingPresets;
+    if (!Array.isArray(rawPresets)) return [];
+    return rawPresets
+      .map((p) => {
+        const raw = p as Record<string, unknown>;
+        const id = String(raw.id || "").trim();
+        const name = String(raw.name || "").trim();
+        const fs = raw.filterState && typeof raw.filterState === "object"
+          ? (raw.filterState as Partial<SpendingFilterState>)
+          : null;
+        if (!id || !name || !fs) return null;
+        return sanitizeSavedSpendingView({ ...raw, isPreset: true }) as SpendingSavedView | null;
+      })
+      .filter((v): v is SpendingSavedView => !!v);
+  }, [orgConfig?.spendingPresets]);
+
+  const pinnedGrantViews = React.useMemo((): SpendingSavedView[] => {
+    return (grants as Record<string, unknown>[])
+      .flatMap((g) => {
+        const pins = g?.pins as Record<string, unknown> | undefined;
+        const digest = pins?.digest as Record<string, unknown> | undefined;
+        const invoice = pins?.invoice as Record<string, unknown> | undefined;
+        const grantId = String(g.id || "");
+        if (!grantId) return [];
+        const endDate = String(g.endDate || "").slice(0, 10);
+        const effectiveEndDate = endDate || grantFallbackEndDate();
+        const name = String(g.name || grantId);
+        const views: SpendingSavedView[] = [];
+        if (digest?.enabled) {
+          views.push({
+            id: `pinned-grant-${grantId}`,
+            name,
+            filterState: spendingFilterPatch({
+              typeFilter: "enrollment",
+              grantId,
+              showReversals: true,
+              dateFilter: { mode: "before" as const, date: effectiveEndDate },
+            }),
+            isGrantPin: true,
+            color: "emerald",
+            description: endDate ? `Enrollments through ${endDate}` : `Enrollments through ${effectiveEndDate}`,
+          });
+        }
+        if (invoice?.enabled) {
+          views.push({
+            id: `pinned-invoice-${grantId}`,
+            name: `${String(invoice.label || "Invoice")} - ${name}`,
+            filterState: spendingFilterPatch({
+              typeFilter: "invoice",
+              workflowFilter: "open",
+              grantId,
+              dateFilter: { mode: "before" as const, date: effectiveEndDate },
+            }),
+            isGrantPin: true,
+            color: "violet",
+            description: endDate
+              ? `Open invoices for this grant through ${endDate}`
+              : `Open invoices for this grant through ${effectiveEndDate}`,
+          });
+        }
+        return views;
+      });
+  }, [grants]);
+
   const spendingViews = React.useMemo(
-    () => [...builtInSpendingViews(), ...(spendingViewsSettings.views || [])],
-    [spendingViewsSettings.views]
+    () => [...builtInSpendingViews(), ...systemPresetViews, ...(spendingViewsSettings.views || [])],
+    [systemPresetViews, spendingViewsSettings.views]
   );
 
   const writeSpendingViewsSettings = React.useCallback(async (next: SpendingViewsSettings) => {
@@ -751,26 +1118,40 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   }, [profile, reloadProfile]);
 
   const applySpendingView = React.useCallback((view: SpendingSavedView) => {
+    setActiveSpendingViewId(view.id);
+    setSaveViewName(view.builtIn || view.isPreset ? "" : view.name);
+    setSaveViewColor(view.color || "");
     setFilterState(cloneSpendingFilter(view.filterState));
   }, [setFilterState]);
 
   const saveCurrentSpendingView = React.useCallback(async () => {
-    const name = saveViewName.trim();
+    const currentViews = spendingViewsSettings.views || [];
+    const activeUserView = currentViews.find((view) => view.id === activeSpendingViewId);
+    const name = saveViewName.trim() || activeUserView?.name || "";
     if (!name) {
       toast("Name the view first.", { type: "error" });
       return;
     }
+    const existingByName = currentViews.find((view) => view.name.toLowerCase() === name.toLowerCase());
+    const targetId = activeUserView?.id || existingByName?.id || `user-${Date.now()}`;
     const view: SpendingSavedView = {
-      id: `user-${Date.now()}`,
+      id: targetId,
       name,
       filterState: cloneSpendingFilter(filterState),
+      updatedAt: new Date().toISOString(),
+      ...(saveViewColor ? { color: saveViewColor } : {}),
     };
     await writeSpendingViewsSettings({
       ...spendingViewsSettings,
-      views: [...(spendingViewsSettings.views || []), view],
+      views: currentViews.some((existing) => existing.id === targetId)
+        ? currentViews.map((existing) => existing.id === targetId ? view : existing)
+        : [...currentViews, view],
     });
+    setActiveSpendingViewId(targetId);
     setSaveViewName("");
-  }, [filterState, saveViewName, spendingViewsSettings, writeSpendingViewsSettings]);
+    setSaveViewColor("");
+    setSaveViewDialogOpen(false);
+  }, [activeSpendingViewId, filterState, saveViewColor, saveViewName, spendingViewsSettings, writeSpendingViewsSettings]);
 
   const setDefaultSpendingView = React.useCallback(async (viewId: string) => {
     await writeSpendingViewsSettings({
@@ -784,7 +1165,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       defaultViewId: spendingViewsSettings.defaultViewId === viewId ? undefined : spendingViewsSettings.defaultViewId,
       views: (spendingViewsSettings.views || []).filter((view) => view.id !== viewId),
     });
-  }, [spendingViewsSettings, writeSpendingViewsSettings]);
+    if (activeSpendingViewId === viewId) {
+      setActiveSpendingViewId("");
+      setSaveViewName("");
+      setSaveViewColor("");
+    }
+  }, [activeSpendingViewId, spendingViewsSettings, writeSpendingViewsSettings]);
 
   const defaultViewAppliedRef = React.useRef(false);
   React.useEffect(() => {
@@ -794,6 +1180,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     const hit = spendingViews.find((view) => view.id === defaultViewId);
     if (!hit) return;
     defaultViewAppliedRef.current = true;
+    setActiveSpendingViewId(hit.id);
+    setSaveViewName(hit.builtIn || hit.isPreset ? "" : hit.name);
+    setSaveViewColor(hit.color || "");
     setFilterState(cloneSpendingFilter(hit.filterState));
   }, [setFilterState, spendingViews, spendingViewsSettings.defaultViewId]);
 
@@ -836,13 +1225,18 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [bulkPosting, setBulkPosting] = React.useState(false);
   const [bulkBypassClosing, setBulkBypassClosing] = React.useState(false);
-  React.useEffect(() => { setSelectedIds(new Set()); }, [filterState]);
+  const [bulkPostDialogOpen, setBulkPostDialogOpen] = React.useState(false);
+  const [bulkPostGrantId, setBulkPostGrantId] = React.useState("");
+  const [bulkPostLineItemId, setBulkPostLineItemId] = React.useState("");
+  React.useEffect(() => { setSelectedIds(new Set()); setBulkPostDialogOpen(false); }, [filterState]);
 
   // ── Mutations ────────────────────────────────────────────────────────────
 
   const autoAssignMutation = useAutoAssignLedgerEntries();
   const bypassCloseMutation = useBypassClosePaymentQueueItems();
+  const patchQueueMutation = usePatchPaymentQueueItem();
   const postMutation = usePostPaymentQueueToLedger();
+  const spendMutation = usePaymentsSpend();
   const updateCompliance = usePaymentsUpdateCompliance();
   const syncJotformSelection = useSyncJotformSelection();
 
@@ -869,7 +1263,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         (row.paymentQueueItem as Record<string, unknown> | undefined)?.enrollmentId ||
         ledger?.enrollmentId || ""
       );
-      const paymentId = String(ledger?.paymentId || "");
+      const paymentId = String(
+        (row.paymentQueueItem as Record<string, unknown> | undefined)?.paymentId ||
+        ledger?.paymentId || ""
+      );
 
       if (action === "invoice-submitted") {
         if (row.kind === "grant-ledger") {
@@ -879,7 +1276,18 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           }
           await updateCompliance.mutateAsync({ enrollmentId, paymentId, patch: { status: "invoice-submitted" } });
           toast("Invoice submitted.", { type: "success" });
-        } else {
+        } else if (row.kind === "queue-projection") {
+          if (!enrollmentId || !paymentId) {
+            toast("Cannot mark projected payment complete - missing enrollment/payment ID.", { type: "error" });
+            return;
+          }
+          await spendMutation.mutateAsync({ body: { enrollmentId, paymentId, reverse: false } });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+            queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
+          ]);
+          toast("Marked complete.", { type: "success" });
+        } else if (isQueueTransactionRow(row)) {
           if (!row.paymentQueueItem) { toast("No queue item to post.", { type: "error" }); return; }
           await postMutation.mutateAsync({ id: row.paymentQueueItem.id });
           await Promise.all([
@@ -887,6 +1295,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
           ]);
           toast("Invoice submitted.", { type: "success" });
+        } else {
+          toast("Open this row for completion details.", { type: "error" });
         }
       } else {
         if (!enrollmentId || !paymentId) {
@@ -1089,7 +1499,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         taskToken,
         vendor,
         expenseType: "",
-        purchaser: "",
+        purchaser: String(e?.purchaser || "").trim(),
         isReversal,
         searchText: [vendor, displayTitle, grantId, lineItemId, String(e?.customerId || "")].join(" ").toLowerCase(),
         ledgerEntry: e,
@@ -1195,13 +1605,16 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   }, [creditCardList, ledgerEntries, month, openTaskByToken, paymentQueueItems]);
 
   // ── Credit card summaries (only computed when in card mode) ──────────────
+  // Always scoped to the current calendar month regardless of the date filter,
+  // so the strip never shows false overspend from multi-month ranges.
+  const currentCalendarMonth = monthKeyOffsetDays(5);
 
   const creditCardSummaries = React.useMemo((): CreditCardSummaryView[] => {
     if (typeFilter !== "card") return [];
     return creditCardList
       .map((card) => {
         const rowsForCard = allRows.filter(
-          (row) => row.creditCardId === String(card.id || "") && isCardBudgetRow(row)
+          (row) => row.creditCardId === String(card.id || "") && isCardBudgetRow(row) && row.month === currentCalendarMonth
         );
         const spentCents = rowsForCard.reduce((sum, row) => sum + row.amountCents, 0);
         const pendingCents = rowsForCard
@@ -1230,13 +1643,13 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       .sort((a, b) => b.usagePct - a.usagePct || b.spentCents - a.spentCents || a.name.localeCompare(b.name));
   }, [allRows, creditCardList, typeFilter]);
 
-  // Card budget map for modal (all cards, not just card-filter mode)
+  // Card budget map for modal (all cards, not just card-filter mode) — always current month
   const cardBudgetById = React.useMemo((): Map<string, CardBudget> => {
     const map = new Map<string, CardBudget>();
     for (const card of creditCardList) {
       const cid = String(card.id || "");
       if (!cid) continue;
-      const rowsForCard = allRows.filter((r) => r.creditCardId === cid && isCardBudgetRow(r));
+      const rowsForCard = allRows.filter((r) => r.creditCardId === cid && isCardBudgetRow(r) && r.month === currentCalendarMonth);
       const spentCents = rowsForCard.reduce((s, r) => s + r.amountCents, 0);
       const pendingCents = rowsForCard
         .filter((r) => (r.kind === "queue-credit-card" || invoiceRowLooksLikeCreditCardSpend(r)) && r.workflowState === "open")
@@ -1319,7 +1732,6 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       ],
       typeFilter: typeFilter || "forms",
     });
-    setShowFilters(true);
   }, [advancedQueueFieldOptions, advancedQueueFilters, setFilter, typeFilter]);
 
   const removeAdvancedQueueFilter = React.useCallback((id: string) => {
@@ -1416,6 +1828,18 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     [baseFilteredRows, columnFilters, getSpendingColumnValue]
   );
 
+  const selectedRows = React.useMemo(
+    () => filteredRows.filter((row) => selectedIds.has(row.id)),
+    [filteredRows, selectedIds]
+  );
+
+  const selectedQueueTransactionRows = React.useMemo(
+    () => selectedRows.filter((row) => isQueueTransactionRow(row) && row.paymentQueueItem && row.workflowState === "open"),
+    [selectedRows]
+  );
+
+  const selectedNonQueueTransactionCount = Math.max(0, selectedRows.length - selectedQueueTransactionRows.length);
+
   const sortedRows = React.useMemo(
     () => sortRows(filteredRows, sort, getSpendingColumnValue),
     [filteredRows, sort, getSpendingColumnValue]
@@ -1451,30 +1875,67 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   // ── Export ───────────────────────────────────────────────────────────────
 
-  type ExportRow = { source: string; card: string; date: string; title: string; grant: string; lineItem: string; amount: number; status: string };
+  type ExportRow = {
+    date: string; type: string; customer: string; caseManager: string;
+    grant: string; lineItem: string; amount: string; vendor: string; status: string;
+  };
 
   const toExportRow = React.useCallback(
-    (r: SpendingRow): ExportRow => ({
-      source: r.sourceLabel,
-      card: r.creditCardName || r.creditCardId || "-",
-      date: r.date,
-      title: r.title,
-      grant: grantNameById.get(r.grantId) || r.grantId || "-",
-      lineItem: lineItemLookup.get(`${r.grantId}:${r.lineItemId}`)?.lineItemLabel || r.lineItemId || "-",
-      amount: r.amountCents / 100,
-      status: r.complianceStatus,
-    }),
-    [grantNameById, lineItemLookup]
+    (r: SpendingRow): ExportRow => {
+      const info = lineItemLookup.get(`${r.grantId}:${r.lineItemId}`);
+      const rawCmId = String(
+        (r.paymentQueueItem as Record<string, unknown> | undefined)?.caseManagerId
+        || (r.ledgerEntry as Record<string, unknown> | undefined)?.caseManagerId
+        || cmIdByCustomerId.get(r.customerId)
+        || ""
+      );
+      const typeLabel = (() => {
+        const isProjection = r.kind === "queue-projection";
+        const isEnrollment = r.kind === "grant-ledger" || isProjection;
+        const isInvoice = r.kind === "queue-invoice";
+        let label = isProjection ? "Projected"
+          : isEnrollment ? "Enrollment"
+          : isInvoice ? "Invoice"
+          : r.cardBucket || (r.creditCardName ? r.creditCardName.split(" - ")[0].trim() : "") || r.sourceLabel || "Card";
+        if (r.isReversal) label += " (Reversal)";
+        return label;
+      })();
+      const statusLabel = (() => {
+        const { kind, workflowState, complianceStatus } = r;
+        if (kind === "queue-projection") return workflowState === "closed" ? "Posted" : "Projected";
+        if (kind === "grant-ledger") {
+          if (complianceStatus === "Data Entry Complete") return "Data Entry ✓";
+          if (complianceStatus.startsWith("Posted;")) return complianceStatus;
+          return "Posted";
+        }
+        if (workflowState === "open") return "Data Entry";
+        if (complianceStatus === "Data Entry Complete") return "Data Entry ✓";
+        return "Posted";
+      })();
+      return {
+        date: fmtDateOrDash(r.date),
+        type: typeLabel,
+        customer: customerNameById.get(r.customerId) || "-",
+        caseManager: (rawCmId && userDisplayNameByUid.get(rawCmId)) || "-",
+        grant: info?.grantName || grantNameById.get(r.grantId) || r.grantId || "-",
+        lineItem: info?.lineItemLabel || r.lineItemId || "-",
+        amount: fmtCurrencyUSD(r.amountCents / 100),
+        vendor: r.vendor || r.purchaser || r.title || "-",
+        status: statusLabel,
+      };
+    },
+    [grantNameById, lineItemLookup, customerNameById, cmIdByCustomerId, userDisplayNameByUid]
   );
 
   const EXPORT_COLUMNS = [
-    { key: "source", label: "Source", value: (r: ExportRow) => r.source },
-    { key: "card", label: "Card", value: (r: ExportRow) => r.card },
     { key: "date", label: "Date", value: (r: ExportRow) => r.date },
-    { key: "title", label: "Title", value: (r: ExportRow) => r.title },
+    { key: "type", label: "Type", value: (r: ExportRow) => r.type },
+    { key: "customer", label: "Customer", value: (r: ExportRow) => r.customer },
+    { key: "caseManager", label: "Case Manager", value: (r: ExportRow) => r.caseManager },
     { key: "grant", label: "Grant", value: (r: ExportRow) => r.grant },
     { key: "lineItem", label: "Line Item", value: (r: ExportRow) => r.lineItem },
     { key: "amount", label: "Amount", value: (r: ExportRow) => r.amount },
+    { key: "vendor", label: "Vendor / Purchaser", value: (r: ExportRow) => r.vendor },
     { key: "status", label: "Status", value: (r: ExportRow) => r.status },
   ];
 
@@ -1584,47 +2045,64 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     downloadCsv(buildCsv(exportRows, EXPORT_COLUMNS), `spending-${fileSafeLabel(complexDateValueLabel(dateFilter))}`);
   }
 
-  async function onBulkPost() {
-    const selected = filteredRows.filter((r) => selectedIds.has(r.id));
+  async function onBulkPost(overrideGrantId?: string, overrideLineItemId?: string) {
+    const selected = selectedRows;
     const alreadyClosed = selected.filter((r) => r.workflowState === "closed" || !r.paymentQueueItem);
-    const postable = selected.filter(
-      (r) => r.paymentQueueItem && r.workflowState === "open" && r.grantId && r.lineItemId
-    );
-    const unassigned = selected.filter(
-      (r) => r.paymentQueueItem && r.workflowState === "open" && (!r.grantId || !r.lineItemId)
-    );
+    const postable = selected.filter((r) => isQueueTransactionRow(r) && r.paymentQueueItem && r.workflowState === "open");
+    const ignoredRows = selected.filter((r) => !postable.includes(r) && !alreadyClosed.includes(r));
+
+    if (overrideGrantId && !overrideLineItemId) {
+      toast("Select a budget for the chosen grant, or leave Grant as No Grant Classification.", { type: "error" });
+      return;
+    }
 
     if (!postable.length) {
       const parts = [
         alreadyClosed.length ? `${alreadyClosed.length} already posted` : null,
-        unassigned.length ? `${unassigned.length} missing grant/line item` : null,
+        ignoredRows.length ? `${ignoredRows.length} non-CC/invoice row${ignoredRows.length === 1 ? "" : "s"} ignored` : null,
       ].filter(Boolean).join(", ");
       toast(
-        parts ? `Nothing to post — ${parts}.` : "No selected rows are ready to post — each needs a grant and line item assigned.",
+        parts ? `Nothing to post - ${parts}.` : "No selected CC or invoice rows are ready to post.",
         { type: "error" }
       );
       return;
     }
 
+    setBulkPostDialogOpen(false);
     setBulkPosting(true);
     let success = 0;
     let skipped = alreadyClosed.length;
+    let skippedIncomplete = 0;
     let failed = 0;
-    let aborted = false;
 
     for (const row of postable) {
       try {
+        if (overrideGrantId) {
+          await patchQueueMutation.mutateAsync({
+            id: row.paymentQueueItem!.id,
+            body: {
+              grantId: overrideGrantId,
+              lineItemId: overrideLineItemId,
+              okUnassigned: false,
+            },
+          });
+        } else if (!row.grantId) {
+          await patchQueueMutation.mutateAsync({
+            id: row.paymentQueueItem!.id,
+            body: {
+              grantId: null,
+              lineItemId: null,
+              okUnassigned: true,
+            },
+          });
+        } else if (!row.lineItemId) {
+          skippedIncomplete++;
+          continue;
+        }
         await postMutation.mutateAsync({ id: row.paymentQueueItem!.id });
         success++;
       } catch (e: unknown) {
         const msg = String(toApiError(e).error || "").toLowerCase();
-        // Auth failures trigger the global logout handler — abort the loop immediately
-        // so we don't fire more requests into a broken auth state.
-        if (msg.includes("session") || msg.includes("sign in") || msg.includes("unauthenticated") || msg.includes("expired")) {
-          aborted = true;
-          break;
-        }
-        // Item already posted on the server (stale UI state) — skip gracefully
         if (/already.post|already_exist|conflict|duplicate|posted/i.test(msg)) {
           skipped++;
         } else {
@@ -1634,24 +2112,20 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     }
 
     setBulkPosting(false);
-    if (!aborted) setSelectedIds(new Set());
-
-    if (aborted) {
-      toast("Session error during bulk post — please refresh and try again.", { type: "error" });
-      return;
-    }
+    setSelectedIds(new Set());
 
     const parts = [
-      success > 0 ? `${success} posted` : null,
+      success > 0 ? `${success} submitted` : null,
       skipped > 0 ? `${skipped} skipped (already posted)` : null,
-      unassigned.length > 0 ? `${unassigned.length} skipped (no grant/line item)` : null,
+      skippedIncomplete > 0 ? `${skippedIncomplete} skipped (grant needs budget)` : null,
+      ignoredRows.length > 0 ? `${ignoredRows.length} ignored (not CC/invoice queue rows)` : null,
       failed > 0 ? `${failed} failed` : null,
     ].filter(Boolean).join(", ");
     toast(parts || "Nothing posted.", { type: success > 0 ? "success" : "error" });
   }
 
   async function onBulkBypassClose() {
-    const selected = filteredRows.filter((r) => selectedIds.has(r.id));
+    const selected = selectedRows;
     const closable = selected.filter((r) =>
       isQueueTransactionRow(r) && r.paymentQueueItem && r.workflowState === "open"
     );
@@ -1722,322 +2196,438 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     />
   );
 
+  // ── Saved view pre-computations ──────────────────────────────────────────
+
+  const allBuiltIns = builtInSpendingViews();
+  const hidden = new Set(spendingViewsSettings.hiddenViewIds ?? []);
+  const visibleBuiltIns = allBuiltIns.filter((v) => !hidden.has(v.id));
+  const visiblePresets = systemPresetViews.filter((v) => !hidden.has(v.id));
+  const visibleUserViews = (spendingViewsSettings.views ?? []).filter((v) => !hidden.has(v.id));
+  const activeView = spendingViews.find((view) => view.id === activeSpendingViewId);
+  const activeUserView = (spendingViewsSettings.views ?? []).find((view) => view.id === activeSpendingViewId);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-slate-200 bg-white p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Views</span>
-          {spendingViews.map((view) => (
-            <button
+      <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+        {/* ── Saved view strip ──────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-start gap-1.5">
+
+          {/* Visible built-in tabs */}
+          {visibleBuiltIns.map((view) => (
+            <ViewTab
               key={view.id}
-              type="button"
-              className={[
-                "btn btn-xs btn-ghost",
-                spendingViewsSettings.defaultViewId === view.id ? "border-sky-200 bg-sky-50 text-sky-700" : "",
-              ].join(" ")}
-              onClick={() => applySpendingView(view)}
-              title={spendingViewsSettings.defaultViewId === view.id ? "Default view" : undefined}
-            >
-              {view.name}
-            </button>
+              view={view}
+              active={activeSpendingViewId === view.id}
+              isDefault={spendingViewsSettings.defaultViewId === view.id}
+              savingViews={savingViews}
+              onApply={() => applySpendingView(view)}
+            />
           ))}
-          <div className="ml-auto flex min-w-[260px] flex-wrap items-center justify-end gap-2">
-            <input
-              className="input input-xs w-[150px]"
-              value={saveViewName}
-              onChange={(e) => setSaveViewName(e.currentTarget.value)}
-              placeholder="View name"
+
+          {/* Pinned grant tabs — always visible, never in library */}
+          {pinnedGrantViews.length > 0 && (
+            <>
+              <span className="h-5 w-px self-center bg-slate-200" aria-hidden />
+              <span className="self-center text-[10px] font-semibold uppercase tracking-wide text-emerald-500">Grants</span>
+              {pinnedGrantViews.map((view) => (
+                <button
+                  key={view.id}
+                  type="button"
+                  className={[
+                    "inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-semibold transition",
+                    view.color === "violet"
+                      ? activeSpendingViewId === view.id
+                        ? "border-violet-200 bg-violet-50 text-violet-800"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:bg-violet-50/60 hover:text-violet-700"
+                      : activeSpendingViewId === view.id
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:bg-emerald-50/60 hover:text-emerald-700",
+                  ].join(" ")}
+                  onClick={() => applySpendingView(view)}
+                  title={view.description || view.name}
+                >
+                  <span className={["h-1.5 w-1.5 shrink-0 rounded-full", view.color === "violet" ? "bg-violet-500" : "bg-emerald-500"].join(" ")} />
+                  {view.name}
+                </button>
+              ))}
+            </>
+          )}
+
+          {/* Visible system preset tabs */}
+          {visiblePresets.length > 0 && (
+            <>
+              <span className="h-5 w-px self-center bg-slate-200" aria-hidden />
+              {visiblePresets.map((view) => (
+                <ViewTab
+                  key={view.id}
+                  view={view}
+                  active={activeSpendingViewId === view.id}
+                  isDefault={spendingViewsSettings.defaultViewId === view.id}
+                  savingViews={savingViews}
+                  onApply={() => applySpendingView(view)}
+                />
+              ))}
+            </>
+          )}
+
+          {/* Visible user-saved tabs */}
+          {visibleUserViews.length > 0 && (
+            <>
+              <span className="h-5 w-px self-center bg-slate-200" aria-hidden />
+              {visibleUserViews.map((view) => (
+                <ViewTab
+                  key={view.id}
+                  view={view}
+                  active={activeSpendingViewId === view.id}
+                  isDefault={spendingViewsSettings.defaultViewId === view.id}
+                  showDelete
+                  savingViews={savingViews}
+                  onApply={() => applySpendingView(view)}
+                  onDelete={() => void deleteSavedSpendingView(view.id)}
+                />
+              ))}
+            </>
+          )}
+
+          <div className="ml-auto">
+            <ActionMenu
+              disabled={savingViews}
+              buttonAriaLabel="Spending view actions"
+              buttonTitle="Spending view actions"
+              items={[
+                {
+                  key: "save-filter-view",
+                  label: "Save Filter View",
+                  onSelect: () => {
+                    setSaveViewName((name) => name || activeUserView?.name || "");
+                    setSaveViewColor((color) => color || activeView?.color || "");
+                    setSaveViewDialogOpen(true);
+                  },
+                },
+                {
+                  key: "set-default",
+                  label: "Set Active View as Default",
+                  disabled: !activeView,
+                  onSelect: () => activeView ? void setDefaultSpendingView(activeView.id) : undefined,
+                },
+                {
+                  key: "recorder",
+                  label: showFilterRecorder ? "Close Recorder" : "Open Recorder",
+                  onSelect: () => setShowFilterRecorder((v) => !v),
+                },
+                {
+                  key: "show-all-tabs",
+                  label: "Show All View Tabs",
+                  disabled: !(spendingViewsSettings.hiddenViewIds ?? []).length,
+                  onSelect: () => void writeSpendingViewsSettings({ ...spendingViewsSettings, hiddenViewIds: [] }),
+                },
+                {
+                  key: "delete-view",
+                  label: "Delete Active Saved View",
+                  disabled: !activeUserView,
+                  danger: true,
+                  onSelect: () => activeUserView ? void deleteSavedSpendingView(activeUserView.id) : undefined,
+                },
+              ]}
+            />
+          </div>
+        </div>
+
+        {/* ── Filter Recorder ───────────────────────────────────────────── */}
+        {saveViewDialogOpen && (
+          <div className="ml-auto w-full max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 shadow-sm">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-800">Save Filter View</div>
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost"
+                onClick={() => setSaveViewDialogOpen(false)}
+                aria-label="Close save filter view dialog"
+              >
+                x
+              </button>
+            </div>
+            <div className="space-y-2">
+              <input
+                className="input input-sm w-full"
+                value={saveViewName}
+                onChange={(e) => setSaveViewName(e.currentTarget.value)}
+                placeholder="View name"
+                autoFocus
+              />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Color</span>
+                {["", "slate", "sky", "emerald", "amber", "rose", "violet", "orange"].map((c) => (
+                  <button
+                    key={c || "none"}
+                    type="button"
+                    onClick={() => setSaveViewColor(c)}
+                    className={[
+                      "h-5 w-5 rounded-full border-2 transition",
+                      saveViewColor === c ? "border-slate-700 scale-110" : "border-transparent hover:border-slate-400",
+                      c ? VIEW_COLOR_DOT[c] : "bg-white border border-slate-200",
+                    ].join(" ")}
+                    title={c || "No color"}
+                    aria-label={`Color: ${c || "none"}`}
+                  />
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSaveViewDialogOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={savingViews || !saveViewName.trim()}
+                  onClick={() => void saveCurrentSpendingView()}
+                >
+                  {savingViews ? "Saving..." : "Save View"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showFilterRecorder && <FilterRecorder filterState={filterState} orgConfig={orgConfig} />}
+      </div>
+      {/* ── Unified filter panel ──────────────────────────────────────────── */}
+      <PageFilterBar
+        search={filterState.search}
+        onSearchChange={(v) => setFilter({ search: v })}
+        searchPlaceholder="Search spending…"
+        resultLabel={
+          `${filteredRows.length} rows · ${fmtCurrencyUSD(stats.totalCents / 100)}` +
+          (stats.openCount > 0 ? ` · ${stats.openCount} open` : "") +
+          (stats.unallocatedCount > 0 ? ` · ${stats.unallocatedCount} unallocated` : "") +
+          (stats.projectedCount > 0 ? ` · ${stats.projectedCount} projected` : "")
+        }
+        actions={
+          <button
+            type="button"
+            className="btn btn-sm rounded-lg"
+            onClick={() => setFilterState({ ...DEFAULT_SPENDING_FILTER, month, dateFilter })}
+          >
+            Clear
+          </button>
+        }
+      >
+        <div className="flex flex-wrap gap-4">
+          {/* Date */}
+          <div className="space-y-1">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date</div>
+            <div className="flex items-center gap-1">
+              <ComplexDateSelector value={dateFilter} onChange={setDateFilter} />
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost h-8 w-8 px-0 text-slate-500"
+                onClick={() => setDateFilter({ mode: "before", date: todayIso10() })}
+                title="Switch date filter to before today."
+                aria-label="Use before today date filter"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Type */}
+          <FilterToggleGroup
+            label="Type"
+            value={filterState.typeFilter}
+            options={TYPE_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            onChange={(v) => setFilter({ typeFilter: v, cardFilterId: "", cardBucketFilter: "" })}
+          />
+
+          {/* Status */}
+          <FilterToggleGroup
+            label="Status"
+            value={filterState.workflowFilter}
+            options={[
+              { value: "" as const, label: "All" },
+              { value: "open" as const, label: "Open" },
+              { value: "closed" as const, label: "Closed" },
+            ]}
+            onChange={(v) => setFilter({ workflowFilter: v })}
+          />
+
+          {/* Grant */}
+          {filterState.typeFilter !== "card" && (
+            <div className="min-w-[200px] space-y-1">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Grant</div>
+              <GrantSelect
+                value={filterState.grantId || null}
+                onChange={(next) => setFilter({ grantId: String(next || "") })}
+                includeUnassigned
+                placeholderLabel="All grants"
+                className="w-[200px]"
+              />
+            </div>
+          )}
+
+          {/* Customer */}
+          <div className="min-w-[160px] space-y-1">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Customer</div>
+            <select
+              className="input input-sm w-[160px]"
+              value={filterState.customerId || ""}
+              onChange={(e) => setFilter({ customerId: e.currentTarget.value })}
+            >
+              <option value="">All Customers</option>
+              {sortedCustomers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Case Manager */}
+          <div className="min-w-[150px] space-y-1">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Case Manager</div>
+            <select
+              className="input input-sm w-[150px]"
+              value={filterState.cmId || ""}
+              onChange={(e) => setFilter({ cmId: e.currentTarget.value })}
+            >
+              <option value="">All CMs</option>
+              {sortedUsers.map((u) => (
+                <option key={u.uid} value={u.uid}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Options */}
+          <div className="space-y-1">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Options</div>
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-xs"
+                checked={!!filterState.showReversals}
+                onChange={(e) => setFilter({ showReversals: e.currentTarget.checked })}
+              />
+              Show reversals
+            </label>
+          </div>
+
+          {/* Advanced Filters */}
+          <div className="w-full space-y-2 rounded border border-slate-200 bg-slate-50 p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Advanced Filters</span>
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost"
+                onClick={addAdvancedQueueFilter}
+                disabled={advancedQueueFieldOptions.length === 0}
+              >
+                Add field filter
+              </button>
+              <span className="text-[11px] text-slate-500">
+                {queueRowsForFieldDiscovery.length} loaded CC/invoice row{queueRowsForFieldDiscovery.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {advancedQueueFilters.length > 0 ? (
+              <div className="space-y-1.5">
+                {advancedQueueFilters.map((filter) => {
+                  const selectedOption = advancedQueueFieldOptions.find((option) => option.key === filter.fieldKey);
+                  return (
+                    <div key={filter.id} className="grid gap-1 md:grid-cols-[minmax(220px,1fr)_120px_minmax(160px,240px)_auto] md:items-start">
+                      <select
+                        className="input input-xs w-full"
+                        value={filter.fieldKey}
+                        onChange={(e) => updateAdvancedQueueFilter(filter.id, { fieldKey: e.currentTarget.value })}
+                      >
+                        {advancedQueueFieldOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label} [{option.fieldId}]{option.samples.length ? ` - ${option.samples.join(" | ")}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input input-xs w-full"
+                        value={filter.operator}
+                        onChange={(e) => updateAdvancedQueueFilter(filter.id, { operator: e.currentTarget.value as AdvancedQueueFilterOperator })}
+                      >
+                        <option value="contains">contains</option>
+                        <option value="equals">equals</option>
+                        <option value="empty">is empty</option>
+                      </select>
+                      <input
+                        className="input input-xs w-full"
+                        value={filter.value}
+                        disabled={filter.operator === "empty"}
+                        onChange={(e) => updateAdvancedQueueFilter(filter.id, { value: e.currentTarget.value })}
+                        placeholder={filter.operator === "empty" ? "" : "Value"}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-ghost text-slate-500"
+                        onClick={() => removeAdvancedQueueFilter(filter.id)}
+                      >
+                        Remove
+                      </button>
+                      {selectedOption?.samples.length ? (
+                        <div className="text-[10px] text-slate-500 md:col-span-4">
+                          {selectedOption.key.startsWith("raw:") ? "Raw Jotform" : "Extracted"} field {selectedOption.fieldId}: {selectedOption.samples.join(" | ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-[11px] text-slate-500">
+                Add filters to search loaded credit-card and invoice queue fields.
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-slate-400">Actions</span>
+            <ActionMenu
+              disabled={syncJotformSelection.isPending}
+              buttonLabel={syncJotformSelection.isPending ? "Refreshing..." : "Refresh"}
+              buttonAriaLabel="Refresh options"
+              buttonTitle="Pull latest data from Jotform or refresh enrollment/payment queue data. 'Refresh Jotforms' syncs recent submissions; 'Reconcile' does a full deep sync."
+              items={[
+                {
+                  key: "enrollments",
+                  label: "Refresh Enrollments",
+                  onSelect: () => void onRefreshEnrollments(),
+                },
+                {
+                  key: "jotforms",
+                  label: "Refresh Jotforms",
+                  onSelect: () => void onRefreshJotforms(),
+                },
+                {
+                  key: "jotforms-reconcile",
+                  label: "Reconcile with Jotform",
+                  onSelect: () => void onReconcileJotforms(),
+                },
+              ]}
             />
             <button
               type="button"
               className="btn btn-xs btn-ghost"
-              disabled={savingViews}
-              onClick={() => void saveCurrentSpendingView()}
+              disabled={autoAssignMutation.isPending}
+              onClick={() => void onAutoAssign()}
+              title="Automatically match unallocated card ledger entries to grants and line items based on saved card matching rules."
             >
-              Save View
+              {autoAssignMutation.isPending ? "Auto Assigning…" : "Auto Assign"}
             </button>
-            <select
-              className="input input-xs w-[150px]"
-              value={spendingViewsSettings.defaultViewId || ""}
-              disabled={savingViews}
-              onChange={(e) => void setDefaultSpendingView(e.currentTarget.value)}
-              title="Default spending view"
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              disabled={exportRows.length === 0}
+              onClick={onExport}
             >
-              <option value="">No default</option>
-              {spendingViews.map((view) => (
-                <option key={view.id} value={view.id}>{view.name}</option>
-              ))}
-            </select>
-            {(spendingViewsSettings.views || []).length > 0 ? (
-              <select
-                className="input input-xs w-[130px]"
-                disabled={savingViews}
-                value=""
-                onChange={(e) => {
-                  const viewId = e.currentTarget.value;
-                  if (viewId) void deleteSavedSpendingView(viewId);
-                }}
-                title="Delete saved view"
-              >
-                <option value="">Delete...</option>
-                {(spendingViewsSettings.views || []).map((view) => (
-                  <option key={view.id} value={view.id}>{view.name}</option>
-                ))}
-              </select>
-            ) : null}
+              Export CSV
+            </button>
           </div>
         </div>
-      </div>
-      {/* ── Unified filter panel ──────────────────────────────────────────── */}
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
-        {/* Always-visible bar: month + toggle */}
-        <div className="flex flex-wrap items-center gap-2">
-          <ComplexDateSelector value={dateFilter} onChange={setDateFilter} />
-          <button
-            type="button"
-            className={["btn btn-sm btn-ghost gap-1", hasActiveFilters ? "border-sky-200 bg-sky-50 text-sky-700" : ""].join(" ")}
-            onClick={() => setShowFilters((v) => !v)}
-          >
-            Filters {hasActiveFilters ? "●" : showFilters ? "▴" : "▾"}
-          </button>
-        </div>
-
-        {/* Collapsible: filter controls + actions + results */}
-        {showFilters && (
-          <div className="space-y-3 border-t border-slate-100 pt-2">
-            {/* Filter controls */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-                {TYPE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id || "all"}
-                    type="button"
-                    onClick={() => setFilter({ typeFilter: opt.id, cardFilterId: "", cardBucketFilter: "" })}
-                    className={[
-                      "rounded-md px-3 py-1 text-xs font-semibold transition",
-                      filterState.typeFilter === opt.id
-                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
-                        : "text-slate-500 hover:text-slate-800",
-                    ].join(" ")}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-
-              {filterState.typeFilter !== "card" && (
-                <GrantSelect
-                  value={filterState.grantId || null}
-                  onChange={(next) => setFilter({ grantId: String(next || "") })}
-                  includeUnassigned
-                  placeholderLabel="All grants"
-                  className="w-[200px]"
-                />
-              )}
-
-              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-                {(["", "open", "closed"] as const).map((w) => (
-                  <button
-                    key={w || "all"}
-                    type="button"
-                    onClick={() => setFilter({ workflowFilter: w })}
-                    className={[
-                      "rounded-md px-3 py-1 text-xs font-semibold transition",
-                      filterState.workflowFilter === w
-                        ? "border border-slate-200 bg-white text-slate-900 shadow-sm"
-                        : "text-slate-500 hover:text-slate-800",
-                    ].join(" ")}
-                  >
-                    {w === "" ? "All Status" : w === "open" ? "Open" : "Closed"}
-                  </button>
-                ))}
-              </div>
-
-              <input
-                type="search"
-                className="input input-sm w-[160px]"
-                value={filterState.search}
-                onChange={(e) => setFilter({ search: e.currentTarget.value })}
-                placeholder="Search…"
-              />
-
-              <select
-                className="input input-sm w-[160px]"
-                value={filterState.customerId || ""}
-                onChange={(e) => setFilter({ customerId: e.currentTarget.value })}
-              >
-                <option value="">All Customers</option>
-                {sortedCustomers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-
-              <select
-                className="input input-sm w-[150px]"
-                value={filterState.cmId || ""}
-                onChange={(e) => setFilter({ cmId: e.currentTarget.value })}
-              >
-                <option value="">All CMs</option>
-                {sortedUsers.map((u) => (
-                  <option key={u.uid} value={u.uid}>{u.name}</option>
-                ))}
-              </select>
-
-              <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-600">
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-xs"
-                  checked={!!filterState.showReversals}
-                  onChange={(e) => setFilter({ showReversals: e.currentTarget.checked })}
-                />
-                Show reversals
-              </label>
-
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => { setFilterState({ ...DEFAULT_SPENDING_FILTER, month, dateFilter }); setShowFilters(false); }}
-              >
-                Clear
-              </button>
-            </div>
-
-            <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Advanced Filters</span>
-                <button
-                  type="button"
-                  className="btn btn-xs btn-ghost"
-                  onClick={addAdvancedQueueFilter}
-                  disabled={advancedQueueFieldOptions.length === 0}
-                >
-                  Add field filter
-                </button>
-                <span className="text-[11px] text-slate-500">
-                  {queueRowsForFieldDiscovery.length} loaded CC/invoice row{queueRowsForFieldDiscovery.length === 1 ? "" : "s"}
-                </span>
-              </div>
-
-              {advancedQueueFilters.length > 0 ? (
-                <div className="space-y-1.5">
-                  {advancedQueueFilters.map((filter) => {
-                    const selectedOption = advancedQueueFieldOptions.find((option) => option.key === filter.fieldKey);
-                    return (
-                      <div key={filter.id} className="grid gap-1 md:grid-cols-[minmax(220px,1fr)_120px_minmax(160px,240px)_auto] md:items-start">
-                        <select
-                          className="input input-xs w-full"
-                          value={filter.fieldKey}
-                          onChange={(e) => updateAdvancedQueueFilter(filter.id, { fieldKey: e.currentTarget.value })}
-                        >
-                          {advancedQueueFieldOptions.map((option) => (
-                            <option key={option.key} value={option.key}>
-                              {option.label} [{option.fieldId}]{option.samples.length ? ` - ${option.samples.join(" | ")}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="input input-xs w-full"
-                          value={filter.operator}
-                          onChange={(e) => updateAdvancedQueueFilter(filter.id, { operator: e.currentTarget.value as AdvancedQueueFilterOperator })}
-                        >
-                          <option value="contains">contains</option>
-                          <option value="equals">equals</option>
-                          <option value="empty">is empty</option>
-                        </select>
-                        <input
-                          className="input input-xs w-full"
-                          value={filter.value}
-                          disabled={filter.operator === "empty"}
-                          onChange={(e) => updateAdvancedQueueFilter(filter.id, { value: e.currentTarget.value })}
-                          placeholder={filter.operator === "empty" ? "" : "Value"}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-ghost text-slate-500"
-                          onClick={() => removeAdvancedQueueFilter(filter.id)}
-                        >
-                          Remove
-                        </button>
-                        {selectedOption?.samples.length ? (
-                          <div className="text-[10px] text-slate-500 md:col-span-4">
-                            {selectedOption.key.startsWith("raw:") ? "Raw Jotform" : "Extracted"} field {selectedOption.fieldId}: {selectedOption.samples.join(" | ")}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-[11px] text-slate-500">
-                  Add filters to search loaded credit-card and invoice queue fields.
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] uppercase tracking-wide text-slate-400">Actions</span>
-              <ActionMenu
-                disabled={syncJotformSelection.isPending}
-                buttonLabel={syncJotformSelection.isPending ? "Refreshing..." : "Refresh"}
-                buttonAriaLabel="Refresh options"
-                items={[
-                  {
-                    key: "enrollments",
-                    label: "Refresh Enrollments",
-                    onSelect: () => void onRefreshEnrollments(),
-                  },
-                  {
-                    key: "jotforms",
-                    label: "Refresh Jotforms",
-                    onSelect: () => void onRefreshJotforms(),
-                  },
-                  {
-                    key: "jotforms-reconcile",
-                    label: "Reconcile with Jotform",
-                    onSelect: () => void onReconcileJotforms(),
-                  },
-                ]}
-              />
-              <button
-                type="button"
-                className="btn btn-xs btn-ghost"
-                disabled={autoAssignMutation.isPending}
-                onClick={() => void onAutoAssign()}
-              >
-                {autoAssignMutation.isPending ? "Auto Assigning…" : "Auto Assign"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-xs btn-ghost"
-                disabled={exportRows.length === 0}
-                onClick={onExport}
-              >
-                Export CSV
-              </button>
-            </div>
-
-            {/* Filter results */}
-            <div className="flex flex-wrap items-center gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-              <span className="text-[10px] uppercase tracking-wide text-slate-400">Results</span>
-              <span className="text-slate-600">
-                {filteredRows.length} rows · <b>{fmtCurrencyUSD(stats.totalCents / 100)}</b>
-              </span>
-              {stats.openCount > 0 && (
-                <span className="text-amber-700">{stats.openCount} open</span>
-              )}
-              {stats.unallocatedCount > 0 && (
-                <span className="text-rose-700">{stats.unallocatedCount} unallocated</span>
-              )}
-              {stats.projectedCount > 0 && (
-                <span className="text-violet-700">{stats.projectedCount} projected</span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      </PageFilterBar>
 
       {/* ── Grant budget strip (when grant filter is active) ──────────────── */}
       {filterState.grantId && <GrantBudgetStrip grantId={filterState.grantId} />}
@@ -2049,16 +2639,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            disabled={bulkPosting || bulkBypassClosing}
-            onClick={() => void onBulkPost()}
+            disabled={bulkPosting || bulkBypassClosing || selectedQueueTransactionRows.length === 0}
+            onClick={() => setBulkPostDialogOpen((v) => !v)}
           >
-            {bulkPosting ? "Posting…" : "Post to Ledger"}
+            {bulkPosting ? "Posting..." : "Mark Complete"}
           </button>
           <button
             type="button"
             className="btn btn-xs btn-ghost text-amber-700"
-            disabled={bulkPosting || bulkBypassClosing}
+            disabled={bulkPosting || bulkBypassClosing || selectedQueueTransactionRows.length === 0}
             onClick={() => void onBulkBypassClose()}
+            title="Mark selected queue rows as closed without creating ledger entries or adjusting grant budgets. Use when an item was handled outside the system."
           >
             {bulkBypassClosing ? "Closing..." : "Bypass Close"}
           </button>
@@ -2072,10 +2663,68 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           <button
             type="button"
             className="btn btn-xs btn-ghost text-slate-500"
-            onClick={() => setSelectedIds(new Set())}
+            onClick={() => { setSelectedIds(new Set()); setBulkPostDialogOpen(false); }}
           >
             Clear
           </button>
+        </div>
+      )}
+
+      {/* ── Bulk post dialog ─────────────────────────────────────────────── */}
+      {bulkPostDialogOpen && selectedIds.size > 0 && (
+        <div className="rounded-lg border border-sky-200 bg-white p-4 shadow-md space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold text-slate-800">
+              Mark complete for {selectedQueueTransactionRows.length} CC/invoice item{selectedQueueTransactionRows.length === 1 ? "" : "s"}
+            </div>
+            <button type="button" className="btn btn-xs btn-ghost" onClick={() => setBulkPostDialogOpen(false)}>✕</button>
+          </div>
+          {selectedQueueTransactionRows.length > 0 ? (
+            <>
+              <p className="text-xs text-slate-500">
+                Assign grant only applies to selected credit-card and invoice queue rows. Leave blank to mark them as No Grant Classification.
+              </p>
+              {selectedNonQueueTransactionCount > 0 && (
+                <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  {selectedNonQueueTransactionCount} selected row{selectedNonQueueTransactionCount === 1 ? "" : "s"} will be ignored because bulk grant assignment only applies to CC/invoice queue rows.
+                </p>
+              )}
+              <GrantSelect
+                value={bulkPostGrantId || null}
+                onChange={(v) => { setBulkPostGrantId(String(v || "")); setBulkPostLineItemId(""); }}
+                includeUnassigned
+                placeholderLabel="No Grant Classification"
+              />
+              {bulkPostGrantId && (
+                <>
+                  <GrantBudgetStrip grantId={bulkPostGrantId} />
+                  <LineItemSelect
+                    grantId={bulkPostGrantId}
+                    value={bulkPostLineItemId || null}
+                    onChange={(v) => setBulkPostLineItemId(String(v || ""))}
+                    inputClassName="w-full"
+                  />
+                </>
+              )}
+            </>
+          ) : (
+            <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              No selected open CC or invoice queue rows can be marked complete from this bulk action. Projected payments use the payments spend flow.
+            </p>
+          )}
+          <div className="flex gap-2 justify-end">
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setBulkPostDialogOpen(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={bulkPosting || selectedQueueTransactionRows.length === 0 || (!!bulkPostGrantId && !bulkPostLineItemId)}
+              onClick={() => void onBulkPost(bulkPostGrantId || undefined, bulkPostLineItemId || undefined)}
+            >
+              {bulkPosting ? "Posting..." : `Submit ${selectedQueueTransactionRows.length} item${selectedQueueTransactionRows.length === 1 ? "" : "s"}`}
+            </button>
+          </div>
         </div>
       )}
 
@@ -2286,7 +2935,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
                     {/* Vendor + Purchaser */}
                     <td className="min-w-0">
-                      <div className="text-sm text-slate-700 truncate max-w-[140px]">{r.vendor || r.title || "—"}</div>
+                      <div className="text-sm text-slate-700 truncate max-w-[140px]">{r.vendor || "—"}</div>
                       {r.purchaser && r.purchaser !== cmName && (
                         <div className="text-[11px] text-slate-400 truncate max-w-[140px]">{r.purchaser}</div>
                       )}

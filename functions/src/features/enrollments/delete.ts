@@ -10,11 +10,46 @@ import {
   normId as norm,
   toDateOnly,
   computeBudgetTotals,
+  newBulkWriter,
 } from "../../core";
 import { writeLedgerEntry } from "../ledger/service";
 import { closeEnrollmentInboxItems } from "../inbox/utils";
 import { EnrollmentsDeleteBody } from "./schemas";
 import { summarize } from "../tasks/utils";
+
+/**
+ * Unlinks CC and Invoice paymentQueue items from their grant/lineItem
+ * so they remain auditable but are no longer attributed to the deleted
+ * enrollment's grant. Reads all docs first, then writes in bulk.
+ * Never touches jotform submissions.
+ */
+async function unlinkEnrollmentSpends(enrollmentId: string): Promise<void> {
+  if (!enrollmentId) return;
+
+  // READ FIRST
+  const snap = await db
+    .collection("paymentQueue")
+    .where("enrollmentId", "==", enrollmentId)
+    .where("source", "in", ["credit-card", "invoice"])
+    .get();
+
+  if (snap.empty) return;
+
+  const writer = newBulkWriter(2);
+  for (const doc of snap.docs) {
+    writer.set(
+      doc.ref,
+      {
+        grantId: null,
+        lineItemId: null,
+        unlinkedAt: FieldValue.serverTimestamp(),
+        unlinkedReason: "enrollment_deleted",
+      },
+      { merge: true }
+    );
+  }
+  await writer.close();
+}
 
 /**
  * Core deleter used by both user and admin endpoints.
@@ -29,7 +64,7 @@ import { summarize } from "../tasks/utils";
  *   That must happen AFTERWARD (BulkWriter) to avoid orphaned subcollections.
  */
 export async function deleteEnrollmentsCore(
-  items: Array<{ id: string; voidPaid?: boolean; hard?: boolean }>,
+  items: Array<{ id: string; voidPaid?: boolean; hard?: boolean; unlinkSpends?: boolean }>,
   caller: any
 ) {
   const results: Array<{ id: string; ok?: true; error?: string }> = [];
@@ -68,7 +103,7 @@ export async function deleteEnrollmentsCore(
   }
 
   // run each enrollment in its own transaction (avoids cross-grant contention)
-  for (const { id, voidPaid = false, hard = false } of items) {
+  for (const { id, voidPaid = false, hard = false, unlinkSpends = false } of items) {
     const enrollmentId = String(id || "").trim();
 
     try {
@@ -385,6 +420,16 @@ export async function deleteEnrollmentsCore(
       // Directly close inbox items — the Firestore trigger bails early on hard deletes
       // and runs asynchronously. This ensures items are closed by the time we respond.
       await closeEnrollmentInboxItems(enrollmentId).catch(() => {});
+
+      // Unlink CC/Invoice paymentQueue items from their grant so they remain
+      // auditable but are no longer attributed to the deleted enrollment's grant.
+      // Never deletes jotform submissions. Non-fatal.
+      if (unlinkSpends) {
+        await unlinkEnrollmentSpends(enrollmentId).catch((e: any) =>
+          console.error(`[deleteEnrollmentsCore] unlinkSpends failed for ${enrollmentId}:`, e?.message || e)
+        );
+      }
+
       results.push({ id: enrollmentId, ok: true });
     } catch (e: any) {
       results.push({ id: enrollmentId || String(id || ""), error: String(e?.message || e) });
@@ -414,6 +459,7 @@ export const enrollmentsDelete = secureHandler(
     let ids: string[] = [];
     let voidPaid = false;
     let hardRequested = false;
+    let unlinkSpends = false;
 
     if (typeof parsed === "string") ids = [parsed];
     else if (Array.isArray(parsed)) ids = parsed;
@@ -421,6 +467,7 @@ export const enrollmentsDelete = secureHandler(
       ids = parsed.id ? [parsed.id] : Array.isArray(parsed.ids) ? parsed.ids : [];
       voidPaid = parsed.voidPaid === true;
       hardRequested = parsed.hard === true;
+      unlinkSpends = (parsed as any).unlinkSpends === true;
     }
 
     ids = Array.from(new Set(ids.map((s) => String(s).trim()).filter(Boolean)));
@@ -432,7 +479,7 @@ export const enrollmentsDelete = secureHandler(
     const hardEffective = hardRequested && (isAdmin(user) || isDev(user));
 
     const out = await deleteEnrollmentsCore(
-      ids.map((id) => ({ id, voidPaid, hard: hardEffective })),
+      ids.map((id) => ({ id, voidPaid, hard: hardEffective, unlinkSpends })),
       user
     );
 

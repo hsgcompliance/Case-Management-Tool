@@ -80,4 +80,4 @@ export const enrollmentsList = secureHandler(async (req, res) => {
   const next = snap.size === lim ? snap.docs[snap.size-1].id : null;
 
   res.status(200).json({ok: true, items, next});
-}, {auth: "user", requireOrg: true, methods: ["GET", "POST", "OPTIONS"]});
+}, {auth: "viewer", requireOrg: true, methods: ["GET", "POST", "OPTIONS"]});

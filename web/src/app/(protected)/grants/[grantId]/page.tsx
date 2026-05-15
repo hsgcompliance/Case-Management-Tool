@@ -1,8 +1,10 @@
-// app/(protected)/grants/[grantId]/page.tsx
-import GrantDetailPageWrapper from "./_wrapper";
+import { redirect } from "next/navigation";
 
-export function generateStaticParams() { return []; }
+type Props = {
+  params: { grantId: string };
+};
 
-export default function GrantDetailPage() {
-  return <GrantDetailPageWrapper />;
+// Deprecated: grant detail pages now live in the Budget workspace modal.
+export default function GrantDetailPage({ params }: Props) {
+  redirect(`/budget?grantId=${encodeURIComponent(params.grantId)}`);
 }

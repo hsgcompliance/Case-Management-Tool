@@ -49,7 +49,7 @@ export const inboxMetricsMy = secureHandler(
     const tags = roleTagsFromClaims(ctx);
     const admin = isAdmin(ctx);
     const compliance = admin || tags.includes("compliance");
-    const caseManager = tags.includes("casemanager") || (!admin && !compliance);
+    const caseManager = tags.includes("casemanager");
 
     const groupCandidates: string[] = [];
     if (admin) groupCandidates.push("admin");
@@ -120,5 +120,5 @@ export const inboxMetricsMy = secureHandler(
       total: computeScope(totalItems, today, uid),
     });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );

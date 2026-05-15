@@ -477,12 +477,51 @@ export function useEnrollmentsBulkEnroll() {
   });
 }
 
+type DeleteArgs = string | string[] | { id: string; voidPaid?: boolean; unlinkSpends?: boolean };
+
 export function useEnrollmentsDelete() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
     queryKeys: [qk.enrollments.root, qk.inbox.root],
-    mutationFn: (idOrIds: string | string[]) => EnrollmentsAPI.delete(idOrIds),
+    mutationFn: (args: DeleteArgs) => {
+      if (typeof args === "string" || Array.isArray(args)) return EnrollmentsAPI.delete(args);
+      const { id, voidPaid, unlinkSpends } = args;
+      return EnrollmentsAPI.delete(id, { voidPaid, unlinkSpends });
+    },
+    onSuccess: async (result, args) => {
+      const ids = new Set<string>();
+      const idOrIds = typeof args === "object" && !Array.isArray(args) ? (args as { id: string }).id : args;
+      const requested = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+      for (const id of requested) {
+        const nextId = String(id || "").trim();
+        if (nextId) ids.add(nextId);
+      }
+      if (Array.isArray((result as { results?: unknown[] })?.results)) {
+        for (const item of (result as { results?: Array<{ id?: unknown }> }).results || []) {
+          const nextId = String(item?.id || "").trim();
+          if (nextId) ids.add(nextId);
+        }
+      }
+      const allIds = Array.from(ids);
+      removeEnrollmentCaches(qc, allIds);
+      await invalidateEnrollmentQueries(qc, { enrollmentIds: allIds });
+    },
+  });
+}
+
+type AdminDeleteArgs = string | string[] | { id: string; voidPaid?: boolean; unlinkSpends?: boolean };
+
+export function useEnrollmentsAdminDelete() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root, qk.inbox.root],
+    mutationFn: (args: AdminDeleteArgs) => {
+      if (typeof args === "string" || Array.isArray(args)) return EnrollmentsAPI.adminDelete(args);
+      const { id, voidPaid, unlinkSpends } = args;
+      return EnrollmentsAPI.adminDelete(id, { voidPaid, unlinkSpends });
+    },
     onSuccess: async (result, idOrIds) => {
       const ids = new Set<string>();
       const requested = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
@@ -503,29 +542,11 @@ export function useEnrollmentsDelete() {
   });
 }
 
-export function useEnrollmentsAdminDelete() {
-  const qc = useQueryClient();
+export function useEnrollmentsVoidProjections() {
   return useInvalidateMutation({
-    queryClient: qc,
-    queryKeys: [qk.enrollments.root, qk.inbox.root],
-    mutationFn: (idOrIds: string | string[]) => EnrollmentsAPI.adminDelete(idOrIds),
-    onSuccess: async (result, idOrIds) => {
-      const ids = new Set<string>();
-      const requested = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
-      for (const id of requested) {
-        const nextId = String(id || "").trim();
-        if (nextId) ids.add(nextId);
-      }
-      if (Array.isArray((result as { results?: unknown[] })?.results)) {
-        for (const item of (result as { results?: Array<{ id?: unknown }> }).results || []) {
-          const nextId = String(item?.id || "").trim();
-          if (nextId) ids.add(nextId);
-        }
-      }
-      const allIds = Array.from(ids);
-      removeEnrollmentCaches(qc, allIds);
-      await invalidateEnrollmentQueries(qc, { enrollmentIds: allIds });
-    },
+    queryClient: useQueryClient(),
+    queryKeys: [qk.enrollments.root],
+    mutationFn: (idOrIds: string | string[]) => EnrollmentsAPI.voidProjections(idOrIds),
   });
 }
 

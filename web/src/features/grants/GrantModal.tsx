@@ -24,12 +24,13 @@ import { toast } from "@lib/toast";
 import { noUndefined } from "@lib/safeData";
 import { parseISO10, safeISODate10, toISODate } from "@lib/date";
 import { fmtDateOrDash } from "@lib/formatters";
-import { isAdminLike } from "@lib/roles";
+import { isAdminLike, isViewerLike } from "@lib/roles";
 import { toApiError } from "@client/api";
 import type { TGrant as Grant, ISODate } from "@types";
-import { DetailsTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab } from "./tabs";
+import { DetailsTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab, AdminTab } from "./tabs";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
+import { GrantAdminMenu } from "./GrantAdminMenu";
 
 const num = (n: unknown, fallback = 0) => {
   const v = typeof n === "number" ? n : Number(n);
@@ -107,6 +108,8 @@ function recomputeBudgetTotals(budget: unknown) {
 
 function sanitizeBudgetForWrite(budget: unknown) {
   const b = deepClone((budget || {}) as Record<string, unknown>);
+  delete b.createdAt;
+  delete b.updatedAt;
   if (b.totals && typeof b.totals === "object") {
     delete (b.totals as Record<string, unknown>).spent;
   }
@@ -173,9 +176,19 @@ const pickNonMeta = (obj: Record<string, unknown>) => {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj || {})) {
     if (META_KEYS.has(k)) continue;
-    if (k === "budget" || k === "assessments" || k === "tasks") continue;
+    if (k === "budget" || k === "assessments" || k === "tasks" || k === "invoicing") continue;
     if (k === "orgId" || k === "kind" || k === "deleted") continue;
-    if (k === "tags" || k === "eligibility" || k === "lengthOfAssistance") continue;
+    if (
+      k === "tags" ||
+      k === "eligibility" ||
+      k === "lengthOfAssistance" ||
+      k === "invoiceDocuments" ||
+      k === "levelOfAssistance" ||
+      k === "Invoice Docs" ||
+      k === "Invoice Documents" ||
+      k === "Level of Assistance" ||
+      k === "Maximum Length of Assistance"
+    ) continue;
     out[k] = v;
   }
   return out;
@@ -193,13 +206,14 @@ const grantKindOf = (row: Record<string, unknown>): "grant" | "program" => {
   return total <= 0 ? "program" : "grant";
 };
 
-type GrantTab = "details" | "budget" | "tasks" | "assessments" | "allocation";
+type GrantTab = "details" | "budget" | "tasks" | "assessments" | "allocation" | "admin";
 
 const tabFromQuery = (tab: string | null): GrantTab => {
   if (tab === "budget" || tab === "activity") return "budget";
   if (tab === "tasks") return "tasks";
   if (tab === "assessments") return "assessments";
   if (tab === "allocation") return "allocation";
+  if (tab === "admin") return "admin";
   return "details";
 };
 
@@ -209,7 +223,7 @@ type Props = {
   initialCreateData?: Partial<Grant>;
   canAdminDelete?: boolean;
   pageMode?: boolean;
-  /** Called with the new grant ID after creation, instead of navigating to /grants/{id}. */
+  /** Called with the new grant ID after creation, instead of navigating to Budget. */
   onCreated?: (id: string) => void;
 };
 
@@ -336,7 +350,12 @@ export default function GrantDetailModal({
     const lineItems = Array.isArray(b.lineItems) ? b.lineItems as Record<string, unknown>[] : [];
     return lineItems.some((li) => li.capEnabled === true);
   }, [editing, model, grant]);
-  const canEditKind = isAdminLike(profile as { topRole?: unknown; role?: unknown } | null);
+  const roleProfile = profile as { topRole?: unknown; role?: unknown; roles?: unknown } | null;
+  const isViewer = isViewerLike(roleProfile);
+  const isAdminRole = isAdminLike(roleProfile);
+  const canEditGrant = !isViewer;
+  const canEditKind = isAdminRole && !isViewer;
+  const canUseAdminTools = !isCreate && !!fetchId && isAdminRole && !isViewer;
 
   const { data: pinnedIds = [] } = usePinnedGrantIds();
   const togglePin = useTogglePinnedGrant();
@@ -379,6 +398,7 @@ export default function GrantDetailModal({
 
   const handleSave = async () => {
     try {
+      if (!canEditGrant) return;
       if (saveDisabled) {
         toast("Name and Start Date are required.", { type: "error" });
         return;
@@ -420,7 +440,7 @@ export default function GrantDetailModal({
           if (onCreated) {
             onCreated(createdId);
           } else {
-            router.replace(`/grants/${createdId}`);
+            router.replace(`/budget?grantId=${encodeURIComponent(createdId)}`);
           }
           return;
         }
@@ -440,6 +460,7 @@ export default function GrantDetailModal({
   };
 
   const handleDelete = async () => {
+    if (!canEditGrant) return;
     const id = String(grantId || model?.id || "");
     if (!id) return;
     if (!window.confirm("Delete this grant?")) return;
@@ -456,6 +477,7 @@ export default function GrantDetailModal({
   };
 
   const handleAdminDelete = async () => {
+    if (!canUseAdminTools) return;
     const id = String(grantId || model?.id || "");
     if (!id) return;
     if (window.prompt("Type DELETE to confirm permanent delete") !== "DELETE")
@@ -481,6 +503,7 @@ export default function GrantDetailModal({
     startDate?: string | null;
     endDate?: string | null;
   }) {
+    if (!canUseAdminTools) return;
     if (!opts.enrollmentIds.length) {
       toast("Select at least one enrollment.", { type: "error" });
       return;
@@ -519,11 +542,13 @@ export default function GrantDetailModal({
   const readChecked = (e: React.ChangeEvent<HTMLInputElement>) =>
     !!e.currentTarget.checked;
   const requestKindChange = (nextKind: "grant" | "program") => {
+    if (!canEditKind) return;
     if (nextKind === currentKind) return;
     setPendingKind(nextKind);
     setKindDialogOpen(true);
   };
   const confirmKindChange = () => {
+    if (!canEditKind) return;
     const nextKind = pendingKind;
     if (!nextKind) return;
     setModel((m) => ({
@@ -590,6 +615,9 @@ export default function GrantDetailModal({
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {canUseAdminTools && fetchId && (
+                <GrantAdminMenu grantId={fetchId} />
+              )}
               {!isCreate && fetchId && (
                 <div ref={pinRef} className="relative">
                   <button
@@ -625,7 +653,7 @@ export default function GrantDetailModal({
                   )}
                 </div>
               )}
-              {!isCreate && (
+              {!isCreate && canEditGrant && (
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => setEditing((v) => !v)}
@@ -636,7 +664,7 @@ export default function GrantDetailModal({
               <button
                 className="btn btn-sm"
                 onClick={handleSave}
-                disabled={saveDisabled || saving || !editing}
+                disabled={!canEditGrant || saveDisabled || saving || !editing}
               >
                 {saving ? "Saving..." : isCreate ? "Create" : "Save Changes"}
               </button>
@@ -651,6 +679,9 @@ export default function GrantDetailModal({
               : "Click Edit to modify fields."}
           </div>
           <div className="flex items-center gap-2">
+            {canUseAdminTools && fetchId && (
+              <GrantAdminMenu grantId={fetchId} />
+            )}
             {!isCreate && fetchId && (
               <div ref={pinRef} className="relative">
                 <button
@@ -687,7 +718,7 @@ export default function GrantDetailModal({
                 )}
               </div>
             )}
-            {!isCreate && (
+            {!isCreate && canEditGrant && (
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => setEditing((v) => !v)}
@@ -695,7 +726,7 @@ export default function GrantDetailModal({
                 {editing ? "Cancel" : "Edit"}
               </button>
             )}
-            {editing && (
+            {editing && canEditGrant && (
               <button
                 className="btn btn-sm"
                 onClick={handleSave}
@@ -752,6 +783,7 @@ export default function GrantDetailModal({
         <TabsRouter
           showBudgetTab={showBudgetTab}
           showAllocationTab={showAllocationTab}
+          isAdmin={canUseAdminTools}
           editing={editing}
           model={model}
           setModel={setModel}
@@ -770,7 +802,7 @@ export default function GrantDetailModal({
         />
       )}
 
-      {!isCreate && editing && !pageMode && (
+      {!isCreate && editing && !pageMode && canEditGrant && (
         <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/60 dark:bg-red-950/30">
           <div className="flex items-center justify-between">
             <div className="text-sm text-red-700 dark:text-red-300">
@@ -864,6 +896,7 @@ export default function GrantDetailModal({
 function TabsRouter(props: {
   showBudgetTab: boolean;
   showAllocationTab: boolean;
+  isAdmin?: boolean;
   editing: boolean;
   grantId?: string;
   model: Record<string, unknown>;
@@ -891,8 +924,9 @@ function TabsRouter(props: {
     const next = tabFromQuery(searchParams.get("tab"));
     if (next === "budget" && !props.showBudgetTab) setTab("details");
     else if (next === "allocation" && !props.showAllocationTab) setTab("details");
+    else if (next === "admin" && !props.isAdmin) setTab("details");
     else setTab(next);
-  }, [searchParams, props.showBudgetTab, props.showAllocationTab]);
+  }, [searchParams, props.showBudgetTab, props.showAllocationTab, props.isAdmin]);
 
   const dynamicValue = useMemo(() => pickNonMeta(props.model), [props.model]);
 
@@ -902,21 +936,23 @@ function TabsRouter(props: {
     tasks:       "Tasks",
     assessments: "Assessments",
     allocation:  "Allocation",
+    admin:       "Admin",
   };
 
   return (
     <>
       <div className="tabs mt-4" data-tour="grant-tabs">
-        {(["details", "budget", "allocation", "tasks", "assessments"] as const)
+        {(["details", "budget", "allocation", "tasks", "assessments", "admin"] as const)
           .filter((t) => {
             if (t === "budget")     return props.showBudgetTab;
             if (t === "allocation") return props.showAllocationTab;
+            if (t === "admin")      return !!props.isAdmin;
             return true;
           })
           .map((t) => (
             <button
               key={t}
-              className={["tab", tab === t ? "tab-active" : ""].join(" ")}
+              className={["tab", tab === t ? "tab-active" : "", t === "admin" ? "text-orange-600 dark:text-orange-400" : ""].join(" ")}
               onClick={() => setTab(t)}
             >
               {TAB_LABELS[t]}
@@ -983,6 +1019,13 @@ function TabsRouter(props: {
           lineItems={Array.isArray((props.grant?.budget as Record<string, unknown> | undefined)?.lineItems)
             ? ((props.grant?.budget as Record<string, unknown>).lineItems as any)
             : []}
+        />
+      )}
+
+      {tab === "admin" && props.isAdmin && props.grantId && (
+        <AdminTab
+          grantId={props.grantId}
+          grant={props.grant}
         />
       )}
     </>

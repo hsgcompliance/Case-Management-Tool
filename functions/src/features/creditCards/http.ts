@@ -191,7 +191,7 @@ export const creditCardsList = secureHandler(
 
     res.status(200).json({ ok: true, items, next, orgId: targetOrg });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 export const creditCardsGet = secureHandler(
@@ -216,7 +216,7 @@ export const creditCardsGet = secureHandler(
     assertCreditCardOrgAccess(caller, targetOrg, card);
     res.status(200).json({ ok: true, card: { id: snap.id, ...card } });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
 
 export const creditCardsStructure = secureHandler(
@@ -246,7 +246,7 @@ export const creditCardsStructure = secureHandler(
     };
     res.status(200).json({ ok: true, structure });
   },
-  { auth: "user", methods: ["GET", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "OPTIONS"] }
 );
 
 export const creditCardsSummary = secureHandler(
@@ -269,5 +269,5 @@ export const creditCardsSummary = secureHandler(
     });
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", methods: ["GET", "POST", "OPTIONS"] }
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"] }
 );
