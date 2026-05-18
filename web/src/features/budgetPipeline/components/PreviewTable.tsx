@@ -62,7 +62,7 @@ export function PreviewTable({ result, isLoading, onRun }: Props) {
           <p className="font-semibold text-amber-800 dark:text-amber-300">Pipeline conflicts detected:</p>
           {result.conflicts.map((c) => (
             <p key={c.pipelineId} className="text-amber-700 dark:text-amber-400">
-              "{c.pipelineName}" also matches {c.itemIds.length} item{c.itemIds.length !== 1 ? "s" : ""}. These would double-count.
+              &quot;{c.pipelineName}&quot; also matches {c.itemIds.length} item{c.itemIds.length !== 1 ? "s" : ""}. These would double-count.
             </p>
           ))}
         </div>
@@ -71,7 +71,7 @@ export function PreviewTable({ result, isLoading, onRun }: Props) {
       {/* Table */}
       {!result && !isLoading && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
-          Click "Run Preview" to evaluate the current rules against pending transactions.
+          Click &quot;Run Preview&quot; to evaluate the current rules against pending transactions.
         </div>
       )}
 

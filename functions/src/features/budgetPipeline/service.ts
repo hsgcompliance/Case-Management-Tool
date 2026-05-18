@@ -8,6 +8,7 @@ import {
   type TPipelineCondition,
   type TPipelineConditionGroup,
   type TPipelineOperator,
+  type TPipelineRuleNode,
 } from './schemas';
 
 const COLLECTION = 'budgetPipelines';
@@ -108,11 +109,61 @@ function evalGroup(
   return {match: anyMatch, reasons: results.filter((r) => r.match).map((r) => r.reason)};
 }
 
+function legacyGroupsToTree(
+  groups: TPipelineConditionGroup[],
+  rootLogic: 'AND' | 'OR',
+): TPipelineRuleNode {
+  return {
+    id: 'legacy-root',
+    type: 'group',
+    logic: rootLogic,
+    children: groups.map((group) => ({
+      id: group.id,
+      type: 'group' as const,
+      logic: group.logic,
+      children: group.conditions.map((condition) => ({
+        id: condition.id,
+        type: 'condition' as const,
+        condition,
+      })),
+    })),
+  };
+}
+
+function evalRuleTree(
+  item: Record<string, unknown>,
+  node: TPipelineRuleNode,
+  opts: {rootEmptyMatch: boolean; childEmptyMatch: boolean; isRoot?: boolean},
+): {match: boolean; reasons: string[]} {
+  if (node.type === 'condition') {
+    const result = evalCondition(item, node.condition);
+    return {match: result.match, reasons: result.match ? [result.reason] : []};
+  }
+
+  if (node.children.length === 0) {
+    return {match: opts.isRoot ? opts.rootEmptyMatch : opts.childEmptyMatch, reasons: []};
+  }
+
+  const results = node.children.map((child) => evalRuleTree(item, child, {...opts, isRoot: false}));
+  if (node.logic === 'AND') {
+    const match = results.every((r) => r.match);
+    return {match, reasons: results.flatMap((r) => r.reasons)};
+  }
+
+  const match = results.some((r) => r.match);
+  return {match, reasons: results.filter((r) => r.match).flatMap((r) => r.reasons)};
+}
+
 // empty includeGroups = match all
 function evalIncludes(
   item: Record<string, unknown>,
   groups: TPipelineConditionGroup[],
+  tree?: TPipelineRuleNode | null,
 ): {matched: boolean; reasons: string[]} {
+  if (tree) {
+    const result = evalRuleTree(item, tree, {rootEmptyMatch: true, childEmptyMatch: true, isRoot: true});
+    return {matched: result.match, reasons: result.reasons};
+  }
   if (groups.length === 0) return {matched: true, reasons: []};
   for (const group of groups) {
     const {match, reasons} = evalGroup(item, group);
@@ -125,7 +176,12 @@ function evalIncludes(
 function evalExcludes(
   item: Record<string, unknown>,
   groups: TPipelineConditionGroup[],
+  tree?: TPipelineRuleNode | null,
 ): {excluded: boolean; reasons: string[]} {
+  if (tree) {
+    const result = evalRuleTree(item, tree, {rootEmptyMatch: false, childEmptyMatch: true, isRoot: true});
+    return {excluded: result.match, reasons: result.reasons};
+  }
   for (const group of groups) {
     const {match, reasons} = evalGroup(item, group);
     if (match) return {excluded: true, reasons};
@@ -176,6 +232,12 @@ export async function upsertBudgetPipeline(
       sourceFormTitle: body.sourceFormTitle !== undefined ? (body.sourceFormTitle ?? null) : (prev?.sourceFormTitle ?? null),
       includeGroups: body.includeGroups ?? prev?.includeGroups ?? [],
       excludeGroups: body.excludeGroups ?? prev?.excludeGroups ?? [],
+      includeTree: body.includeTree !== undefined
+        ? body.includeTree
+        : (prev?.includeTree ?? legacyGroupsToTree(prev?.includeGroups ?? [], 'OR')),
+      excludeTree: body.excludeTree !== undefined
+        ? body.excludeTree
+        : (prev?.excludeTree ?? legacyGroupsToTree(prev?.excludeGroups ?? [], 'OR')),
       createdAt: prev?.createdAt ?? now,
       createdBy: prev?.createdBy ?? uid,
       updatedAt: now,
@@ -196,6 +258,8 @@ export async function upsertBudgetPipeline(
     sourceFormTitle: body.sourceFormTitle ?? null,
     includeGroups: body.includeGroups ?? [],
     excludeGroups: body.excludeGroups ?? [],
+    includeTree: body.includeTree ?? legacyGroupsToTree(body.includeGroups ?? [], 'AND'),
+    excludeTree: body.excludeTree ?? legacyGroupsToTree(body.excludeGroups ?? [], 'OR'),
     createdAt: now,
     createdBy: uid,
     updatedAt: now,
@@ -243,10 +307,10 @@ export async function previewBudgetPipeline(
   const perItem: PreviewItemResult[] = [];
 
   for (const item of items) {
-    const inc = evalIncludes(item, body.includeGroups);
+    const inc = evalIncludes(item, body.includeGroups, body.includeTree ?? null);
     if (!inc.matched) continue;
 
-    const exc = evalExcludes(item, body.excludeGroups);
+    const exc = evalExcludes(item, body.excludeGroups, body.excludeTree ?? null);
     if (exc.excluded) {
       perItem.push({
         itemId: item.id as string,
@@ -281,9 +345,9 @@ export async function previewBudgetPipeline(
     const conflictIds: string[] = [];
 
     for (const item of matched) {
-      const pInc = evalIncludes(item, p.includeGroups);
+      const pInc = evalIncludes(item, p.includeGroups, p.includeTree ?? null);
       if (!pInc.matched) continue;
-      const pExc = evalExcludes(item, p.excludeGroups);
+      const pExc = evalExcludes(item, p.excludeGroups, p.excludeTree ?? null);
       if (!pExc.excluded) conflictIds.push(item.id as string);
     }
 
@@ -327,8 +391,8 @@ export function matchesPipeline(
   pipeline: TBudgetPipeline,
 ): boolean {
   if (pipeline.sourceFormId && item.formId !== pipeline.sourceFormId) return false;
-  const inc = evalIncludes(item, pipeline.includeGroups);
+  const inc = evalIncludes(item, pipeline.includeGroups, pipeline.includeTree ?? null);
   if (!inc.matched) return false;
-  const exc = evalExcludes(item, pipeline.excludeGroups);
+  const exc = evalExcludes(item, pipeline.excludeGroups, pipeline.excludeTree ?? null);
   return !exc.excluded;
 }

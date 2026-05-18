@@ -13,6 +13,8 @@ import type {
   JotformSubmissionsStructureResp,
   JotformFormsListReq,
   JotformFormsListResp,
+  JotformFormQuestionsGetReq,
+  JotformFormQuestionsGetResp,
   JotformLinkSubmissionReq,
   JotformLinkSubmissionResp,
   JotformSyncSelectionReq,
@@ -111,6 +113,9 @@ export const Jotform = {
       ...query,
       ...(Number((query as any)?.limit) > 500 ? { limit: 500 } : {}),
     } as any),
+
+  formQuestionsGet: (query: JotformFormQuestionsGetReq): Promise<JotformFormQuestionsGetResp> =>
+    api.get("jotformFormQuestionsGet", query),
 
   linkSubmission: (body: JotformLinkSubmissionReq): Promise<JotformLinkSubmissionResp> =>
     api.callIdem(

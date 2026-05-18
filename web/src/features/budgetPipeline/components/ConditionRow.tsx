@@ -3,10 +3,10 @@
 import React from "react";
 import type { TPipelineCondition } from "@types";
 import {
-  FIELD_BY_KEY,
   NORMALIZED_FIELDS,
   OPERATORS_BY_TYPE,
   NO_VALUE_OPERATORS,
+  type PipelineFieldDef,
 } from "../fieldDefs";
 
 const selectCls =
@@ -16,19 +16,34 @@ const inputCls =
 
 type Props = {
   condition: TPipelineCondition;
+  formTitle: string;
+  formFields: PipelineFieldDef[];
   onChange: (updated: TPipelineCondition) => void;
   onRemove: () => void;
 };
 
-export function ConditionRow({ condition, onChange, onRemove }: Props) {
-  const fieldDef = FIELD_BY_KEY.get(condition.field);
+export function ConditionRow({ condition, formTitle, formFields, onChange, onRemove }: Props) {
+  const fieldDefs = React.useMemo(
+    () => [...NORMALIZED_FIELDS, ...formFields],
+    [formFields],
+  );
+  const fieldByKey = React.useMemo(
+    () => new Map(fieldDefs.map((f) => [f.key, f])),
+    [fieldDefs],
+  );
+  const fieldDef = fieldByKey.get(condition.field);
   const type = fieldDef?.type ?? "text";
   const operators = OPERATORS_BY_TYPE[type];
   const needsValue = !NO_VALUE_OPERATORS.has(condition.operator);
   const isMulti = condition.operator === "in" || condition.operator === "not_in";
+  const hasOptions = (fieldDef?.options?.length ?? 0) > 0;
+  const usesOptionSelect =
+    type === "select" &&
+    hasOptions &&
+    (condition.operator === "equals" || condition.operator === "not_equals");
 
   function onFieldChange(key: string) {
-    const newDef = FIELD_BY_KEY.get(key);
+    const newDef = fieldByKey.get(key);
     const newType = newDef?.type ?? "text";
     const newOp = OPERATORS_BY_TYPE[newType][0].value;
     onChange({ ...condition, field: key, operator: newOp, value: "" });
@@ -46,9 +61,34 @@ export function ConditionRow({ condition, onChange, onRemove }: Props) {
 
     if (type === "select") {
       if (isMulti) {
-        const strVal = Array.isArray(condition.value)
-          ? condition.value.join(", ")
-          : String(condition.value);
+        const values = new Set(Array.isArray(condition.value) ? condition.value.map(String) : []);
+        const options = fieldDef?.options ?? [];
+        if (options.length > 0) {
+          return (
+            <div className="flex max-w-md flex-wrap gap-1.5">
+              {options.map((opt) => (
+                <label
+                  key={opt}
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-sky-500"
+                    checked={values.has(opt)}
+                    onChange={(e) => {
+                      const next = new Set(values);
+                      if (e.currentTarget.checked) next.add(opt);
+                      else next.delete(opt);
+                      onChange({ ...condition, value: Array.from(next) });
+                    }}
+                  />
+                  {opt}
+                </label>
+              ))}
+            </div>
+          );
+        }
+        const strVal = Array.isArray(condition.value) ? condition.value.join(", ") : String(condition.value);
         return (
           <input
             className={`${inputCls} w-40`}
@@ -64,18 +104,29 @@ export function ConditionRow({ condition, onChange, onRemove }: Props) {
           />
         );
       }
+      if (usesOptionSelect) {
+        return (
+          <select
+            className={selectCls}
+            value={String(condition.value)}
+            onChange={(e) => onChange({ ...condition, value: e.target.value })}
+          >
+            {["", ...(fieldDef?.options ?? [])].map((opt) => (
+              <option key={opt} value={opt}>
+                {opt || "(empty)"}
+              </option>
+            ))}
+          </select>
+        );
+      }
       return (
-        <select
-          className={selectCls}
+        <input
+          className={`${inputCls} w-44`}
+          type="text"
+          placeholder="value"
           value={String(condition.value)}
           onChange={(e) => onChange({ ...condition, value: e.target.value })}
-        >
-          {(fieldDef?.options ?? []).map((opt) => (
-            <option key={opt} value={opt}>
-              {opt || "(empty)"}
-            </option>
-          ))}
-        </select>
+        />
       );
     }
 
@@ -95,9 +146,8 @@ export function ConditionRow({ condition, onChange, onRemove }: Props) {
     if (type === "date") {
       return (
         <input
-          className={`${inputCls} w-28`}
-          type="text"
-          placeholder="YYYY-MM"
+          className={`${inputCls} w-36`}
+          type="date"
           value={String(condition.value)}
           onChange={(e) => onChange({ ...condition, value: e.target.value })}
         />
@@ -120,6 +170,11 @@ export function ConditionRow({ condition, onChange, onRemove }: Props) {
     <div className="flex items-center gap-2 py-0.5 flex-wrap">
       {/* Field selector */}
       <select className={selectCls} value={condition.field} onChange={(e) => onFieldChange(e.target.value)}>
+        {!fieldDef ? (
+          <optgroup label="Unavailable field">
+            <option value={condition.field}>{condition.field}</option>
+          </optgroup>
+        ) : null}
         <optgroup label="Normalized fields">
           {NORMALIZED_FIELDS.map((f) => (
             <option key={f.key} value={f.key}>
@@ -127,6 +182,15 @@ export function ConditionRow({ condition, onChange, onRemove }: Props) {
             </option>
           ))}
         </optgroup>
+        {formFields.length > 0 ? (
+          <optgroup label={formTitle || "Selected form fields"}>
+            {formFields.map((f) => (
+              <option key={f.key} value={f.key}>
+                {f.label}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
       </select>
 
       {/* Operator selector */}
@@ -140,6 +204,12 @@ export function ConditionRow({ condition, onChange, onRemove }: Props) {
 
       {/* Value input */}
       {renderValueInput()}
+
+      {fieldDef?.typeLabel ? (
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          Field type: {fieldDef.typeLabel}
+        </span>
+      ) : null}
 
       {/* Remove */}
       <button

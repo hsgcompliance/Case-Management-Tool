@@ -171,7 +171,7 @@ export function DuplicateChecker({
               className="btn btn-ghost btn-sm mt-3 border border-red-300 text-red-700 hover:bg-red-100"
               onClick={onOverride}
             >
-              I've reviewed the matches — continue anyway
+              I&apos;ve reviewed the matches — continue anyway
             </button>
           )}
         </div>

@@ -19,6 +19,7 @@ import {
   JotformSubmissionsAdminDeleteBody,
   JotformSyncBody,
   JotformFormsListQuery,
+  JotformFormQuestionsGetQuery,
   JotformLinkSubmissionBody,
   JotformSyncSelectionBody,
   JotformDigestUpsertBody,
@@ -35,6 +36,7 @@ import {
   getJotformSubmission,
   syncJotformSubmissions,
   listJotformForms,
+  getJotformFormQuestions,
   linkJotformSubmission,
   syncJotformSelection,
   upsertJotformDigestMap,
@@ -235,6 +237,17 @@ export const jotformFormsList = secureHandler(
     const rawSrc = (req.method === "GET" ? req.query : req.body) || {};
     const src = JotformFormsListQuery.parse(sanitizeFlatObject(rawSrc as any));
     const out = await listJotformForms(src);
+    res.status(200).json({ ok: true, ...out });
+  },
+  { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+);
+
+/** GET/POST /jotformFormQuestionsGet — direct form question metadata from Jotform API */
+export const jotformFormQuestionsGet = secureHandler(
+  async (req, res) => {
+    const rawSrc = (req.method === "GET" ? req.query : req.body) || {};
+    const src = JotformFormQuestionsGetQuery.parse(sanitizeFlatObject(rawSrc as any));
+    const out = await getJotformFormQuestions(String(src.formId));
     res.status(200).json({ ok: true, ...out });
   },
   { auth: "viewer", methods: ["GET", "POST", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }

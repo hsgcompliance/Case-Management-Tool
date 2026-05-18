@@ -74,6 +74,7 @@ export type {
   TJotformSubmission,
   TJotformSubmissionEntity,
   TJotformFormSummary,
+  TJotformQuestionField,
   TJotformDigestMap,
   TJotformDigestField,
   TJotformDigestSection,
@@ -123,6 +124,18 @@ export type {
   TUserExtras,
 
   TourFlowT,
+
+  TPipelineOperator,
+  TPipelineStatus,
+  TPipelineCondition,
+  TPipelineConditionGroup,
+  TPipelineRuleNode,
+  TBudgetPipeline,
+  TBudgetPipelineUpsertBody,
+  TBudgetPipelineListQuery,
+  TBudgetPipelineDeleteBody,
+  TBudgetPipelinePreviewBody,
+  TBudgetPipelinePreviewResult,
 } from "@hdb/contracts";
 
 export { GRANT_PIN_COLORS } from "@hdb/contracts";
@@ -251,6 +264,8 @@ export type JotformSubmissionsStructureReq = ReqOf<"jotformSubmissionsStructure"
 export type JotformSubmissionsStructureResp = RespOf<"jotformSubmissionsStructure">;
 export type JotformFormsListReq = ReqOf<"jotformFormsList">;
 export type JotformFormsListResp = RespOf<"jotformFormsList">;
+export type JotformFormQuestionsGetReq = ReqOf<"jotformFormQuestionsGet">;
+export type JotformFormQuestionsGetResp = RespOf<"jotformFormQuestionsGet">;
 export type JotformLinkSubmissionReq = ReqOf<"jotformLinkSubmission">;
 export type JotformLinkSubmissionResp = RespOf<"jotformLinkSubmission">;
 export type JotformSyncSelectionReq = ReqOf<"jotformSyncSelection">;

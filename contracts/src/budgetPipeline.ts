@@ -40,6 +40,28 @@ export const PipelineConditionGroup = z.object({
 });
 export type TPipelineConditionGroup = z.infer<typeof PipelineConditionGroup>;
 
+// Recursive Airtable-style condition tree. Each group has one conjunction for
+// its immediate children; children may be conditions or nested groups.
+export type TPipelineRuleNode =
+  | { id: string; type: "condition"; condition: TPipelineCondition }
+  | { id: string; type: "group"; logic: "AND" | "OR"; children: TPipelineRuleNode[] };
+
+export const PipelineRuleNode: z.ZodType<TPipelineRuleNode> = z.lazy(() =>
+  z.discriminatedUnion("type", [
+    z.object({
+      id: z.string(),
+      type: z.literal("condition"),
+      condition: PipelineCondition,
+    }),
+    z.object({
+      id: z.string(),
+      type: z.literal("group"),
+      logic: z.enum(["AND", "OR"]),
+      children: z.array(PipelineRuleNode),
+    }),
+  ])
+);
+
 // ─── Pipeline document ────────────────────────────────────────────────────────
 
 export const BudgetPipeline = z.object({
@@ -53,6 +75,8 @@ export const BudgetPipeline = z.object({
   sourceFormTitle: z.string().nullable(),
   includeGroups: z.array(PipelineConditionGroup),
   excludeGroups: z.array(PipelineConditionGroup),
+  includeTree: PipelineRuleNode.nullable().optional(),
+  excludeTree: PipelineRuleNode.nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   createdBy: z.string(),
@@ -72,6 +96,8 @@ export const BudgetPipelineUpsertBody = z.object({
   sourceFormTitle: z.string().nullable().optional(),
   includeGroups: z.array(PipelineConditionGroup).optional().default([]),
   excludeGroups: z.array(PipelineConditionGroup).optional().default([]),
+  includeTree: PipelineRuleNode.nullable().optional(),
+  excludeTree: PipelineRuleNode.nullable().optional(),
 });
 export type TBudgetPipelineUpsertBody = z.infer<typeof BudgetPipelineUpsertBody>;
 
@@ -95,6 +121,8 @@ export const BudgetPipelinePreviewBody = z.object({
   sourceFormId: z.string().nullable().optional(),
   includeGroups: z.array(PipelineConditionGroup),
   excludeGroups: z.array(PipelineConditionGroup),
+  includeTree: PipelineRuleNode.nullable().optional(),
+  excludeTree: PipelineRuleNode.nullable().optional(),
   pipelineId: z.string().optional(),
   month: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),

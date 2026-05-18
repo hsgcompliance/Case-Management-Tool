@@ -1,24 +1,23 @@
 "use client";
-// web/src/features/budgetPipeline/PipelineBuilderPage.tsx
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useGrants } from "@hooks/useGrants";
-import { useJotformForms } from "@hooks/useJotform";
+import { useJotformFormQuestions } from "@hooks/useJotform";
 import { usePipelineUpsert, usePipelinePreview, usePipeline } from "@hooks/useBudgetPipeline";
 import { toast } from "@lib/toast";
 import type {
   TBudgetPipeline,
-  TPipelineConditionGroup,
   TPipelineCondition,
+  TPipelineConditionGroup,
+  TPipelineRuleNode,
   TPipelineStatus,
   TBudgetPipelinePreviewResult,
 } from "@types";
-import { defaultOperatorForField, NORMALIZED_FIELDS } from "./fieldDefs";
-import { ConditionGroupBox } from "./components/ConditionGroupBox";
-import { FieldSidebar } from "./components/FieldSidebar";
+import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
+import { RuleTreeEditor } from "./components/RuleTreeEditor";
 import { PreviewTable } from "./components/PreviewTable";
-
-// ─── Local state shape ────────────────────────────────────────────────────────
+import type { PipelineFieldDef } from "./fieldDefs";
 
 type Draft = {
   id: string | null;
@@ -30,43 +29,115 @@ type Draft = {
   sourceFormTitle: string | null;
   includeGroups: TPipelineConditionGroup[];
   excludeGroups: TPipelineConditionGroup[];
+  includeTree: TPipelineRuleNode;
+  excludeTree: TPipelineRuleNode;
 };
 
-const EMPTY_DRAFT: Draft = {
-  id: null,
-  name: "New Pipeline",
-  status: "draft",
-  grantId: null,
-  lineItemId: null,
-  sourceFormId: null,
-  sourceFormTitle: null,
-  includeGroups: [],
-  excludeGroups: [],
-};
+const SOURCE_FORMS = [
+  { key: "creditCard", label: "Credit Card", title: "Line Items Card Checkout", id: LINE_ITEMS_FORM_IDS.creditCard },
+  { key: "invoice", label: "Invoice", title: "Line Items Invoice", id: LINE_ITEMS_FORM_IDS.invoice },
+] as const;
+
+type SourceFormKey = (typeof SOURCE_FORMS)[number]["key"];
+
+function newId() {
+  return crypto.randomUUID();
+}
+
+function emptyTree(logic: "AND" | "OR"): TPipelineRuleNode {
+  return { id: newId(), type: "group", logic, children: [] };
+}
+
+function makeEmptyDraft(): Draft {
+  const source = SOURCE_FORMS[0];
+  return {
+    id: null,
+    name: "New Pipeline",
+    status: "draft",
+    grantId: null,
+    lineItemId: null,
+    sourceFormId: source.id,
+    sourceFormTitle: source.title,
+    includeGroups: [],
+    excludeGroups: [],
+    includeTree: emptyTree("AND"),
+    excludeTree: emptyTree("OR"),
+  };
+}
+
+function conditionToNode(condition: TPipelineCondition): TPipelineRuleNode {
+  return { id: condition.id, type: "condition", condition };
+}
+
+function groupsToTree(groups: TPipelineConditionGroup[], rootLogic: "AND" | "OR"): TPipelineRuleNode {
+  return {
+    id: newId(),
+    type: "group",
+    logic: rootLogic,
+    children: groups.map((group) => ({
+      id: group.id,
+      type: "group",
+      logic: group.logic,
+      children: group.conditions.map(conditionToNode),
+    })),
+  };
+}
 
 function pipelineToDraft(p: TBudgetPipeline): Draft {
+  const source = SOURCE_FORMS.find((form) => form.id === p.sourceFormId) ?? SOURCE_FORMS[0];
   return {
     id: p.id,
     name: p.name,
     status: p.status,
     grantId: p.grantId,
     lineItemId: p.lineItemId,
-    sourceFormId: p.sourceFormId,
-    sourceFormTitle: p.sourceFormTitle,
-    includeGroups: p.includeGroups,
-    excludeGroups: p.excludeGroups,
+    sourceFormId: p.sourceFormId || source.id,
+    sourceFormTitle: p.sourceFormTitle || source.title,
+    includeGroups: p.includeGroups ?? [],
+    excludeGroups: p.excludeGroups ?? [],
+    includeTree: (p as any).includeTree ?? groupsToTree(p.includeGroups ?? [], "OR"),
+    excludeTree: (p as any).excludeTree ?? groupsToTree(p.excludeGroups ?? [], "OR"),
   };
 }
 
-function newGroup(kind: "include" | "exclude", logic: "AND" | "OR"): TPipelineConditionGroup {
-  return { id: crypto.randomUUID(), logic, kind, conditions: [] };
+function formKeyFromId(formId: string | null): SourceFormKey {
+  return SOURCE_FORMS.find((form) => form.id === formId)?.key ?? "creditCard";
 }
 
-function newCondition(field: string): TPipelineCondition {
-  return { id: crypto.randomUUID(), field, operator: defaultOperatorForField(field), value: "" };
+function toPipelineFields(
+  fields: Array<{
+    key: string;
+    label: string;
+    type: string;
+    options?: string[];
+    rawFieldId?: string;
+    rawType?: string;
+    logicType?: PipelineFieldDef["logicType"];
+    typeLabel?: string;
+  }>,
+): PipelineFieldDef[] {
+  return fields.map((field) => ({
+    key: field.key,
+    label: field.label || field.rawFieldId || field.key,
+    type:
+      field.type === "number" || field.type === "date" || field.type === "boolean" || field.type === "select"
+        ? field.type
+        : "text",
+    options: field.options,
+    rawFieldId: field.rawFieldId,
+    rawType: field.rawType,
+    logicType: field.logicType,
+    typeLabel: field.typeLabel,
+  }));
 }
 
-// ─── Sticky target bar ────────────────────────────────────────────────────────
+function fmtDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+  } catch {
+    return iso;
+  }
+}
 
 function StatusBadge({ status }: { status: TPipelineStatus }) {
   const colors: Record<TPipelineStatus, string> = {
@@ -74,19 +145,13 @@ function StatusBadge({ status }: { status: TPipelineStatus }) {
     active: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
     inactive: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   };
-  return (
-    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${colors[status]}`}>
-      {status}
-    </span>
-  );
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${colors[status]}`}>{status}</span>;
 }
-
-// ─── Main component ───────────────────────────────────────────────────────────
 
 type Props = {
   pipelineId?: string | null;
-  onBack?: () => void;          // provided when embedded in a tool panel
-  onSaved?: (id: string) => void; // called after save instead of router.push
+  onBack?: () => void;
+  onSaved?: (id: string) => void;
 };
 
 export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
@@ -94,27 +159,25 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
   const isNew = !pipelineId || pipelineId === "new";
   const isEmbedded = !!onBack;
 
-  const { data: existingPipeline, isLoading: isLoadingPipeline } = usePipeline(
-    isNew ? null : pipelineId ?? null,
-  );
+  const { data: existingPipeline, isLoading: isLoadingPipeline } = usePipeline(isNew ? null : pipelineId ?? null);
   const { data: grantsData = [] } = useGrants({ active: true, limit: 200 });
-  const { data: rawForms = [] } = useJotformForms();
-  const forms = rawForms as Array<{ id: string; title: string }>;
-
   const upsert = usePipelineUpsert();
   const preview = usePipelinePreview();
 
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<Draft>(() => makeEmptyDraft());
   const [previewResult, setPreviewResult] = useState<TBudgetPipelinePreviewResult | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Load existing pipeline into draft
   useEffect(() => {
     if (existingPipeline) setDraft(pipelineToDraft(existingPipeline));
   }, [existingPipeline]);
 
-  // Derived: selected grant's line items
+  const selectedSource = SOURCE_FORMS.find((form) => form.id === draft.sourceFormId) ?? SOURCE_FORMS[0];
+  const selectedSourceKey = formKeyFromId(selectedSource.id);
+  const questionsQ = useJotformFormQuestions(selectedSource.id, { enabled: !!selectedSource.id, staleTime: 10 * 60_000 });
+  const formFields = useMemo(() => toPipelineFields(questionsQ.data ?? []), [questionsQ.data]);
+
   const selectedGrant = useMemo(
     () => (grantsData as any[]).find((g: any) => g.id === draft.grantId) ?? null,
     [grantsData, draft.grantId],
@@ -124,106 +187,26 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
     [selectedGrant],
   );
 
-  // ─── Sidebar action handler ─────────────────────────────────────────────────
-
-  const handleSidebarAction = useCallback((action: string) => {
-    setDraft((d) => {
-      switch (action) {
-        case "add_condition": {
-          const field = NORMALIZED_FIELDS[0].key;
-          const cond = newCondition(field);
-          if (d.includeGroups.length === 0) {
-            return { ...d, includeGroups: [{ ...newGroup("include", "AND"), conditions: [cond] }] };
-          }
-          const groups = [...d.includeGroups];
-          const last = { ...groups[groups.length - 1], conditions: [...groups[groups.length - 1].conditions, cond] };
-          groups[groups.length - 1] = last;
-          return { ...d, includeGroups: groups };
-        }
-        case "add_and_group":
-          return { ...d, includeGroups: [...d.includeGroups, newGroup("include", "AND")] };
-        case "add_or_group":
-          return { ...d, includeGroups: [...d.includeGroups, newGroup("include", "OR")] };
-        case "add_exclusion":
-          return { ...d, excludeGroups: [...d.excludeGroups, newGroup("exclude", "AND")] };
-        case "add_amount_condition": {
-          const cond = newCondition("amount");
-          if (d.includeGroups.length === 0) {
-            return { ...d, includeGroups: [{ ...newGroup("include", "AND"), conditions: [cond] }] };
-          }
-          const groups = [...d.includeGroups];
-          const last = { ...groups[groups.length - 1], conditions: [...groups[groups.length - 1].conditions, cond] };
-          groups[groups.length - 1] = last;
-          return { ...d, includeGroups: groups };
-        }
-        case "add_date_condition": {
-          const cond = newCondition("month");
-          if (d.includeGroups.length === 0) {
-            return { ...d, includeGroups: [{ ...newGroup("include", "AND"), conditions: [cond] }] };
-          }
-          const groups = [...d.includeGroups];
-          const last = { ...groups[groups.length - 1], conditions: [...groups[groups.length - 1].conditions, cond] };
-          groups[groups.length - 1] = last;
-          return { ...d, includeGroups: groups };
-        }
-        default:
-          return d;
-      }
-    });
+  const selectSourceForm = useCallback((key: SourceFormKey) => {
+    const source = SOURCE_FORMS.find((form) => form.key === key) ?? SOURCE_FORMS[0];
+    setDraft((d) => ({ ...d, sourceFormId: source.id, sourceFormTitle: source.title }));
   }, []);
-
-  const handleAddField = useCallback((fieldKey: string) => {
-    setDraft((d) => {
-      const cond = newCondition(fieldKey);
-      if (d.includeGroups.length === 0) {
-        return { ...d, includeGroups: [{ ...newGroup("include", "AND"), conditions: [cond] }] };
-      }
-      const groups = [...d.includeGroups];
-      const last = { ...groups[groups.length - 1], conditions: [...groups[groups.length - 1].conditions, cond] };
-      groups[groups.length - 1] = last;
-      return { ...d, includeGroups: groups };
-    });
-  }, []);
-
-  // ─── Group CRUD ─────────────────────────────────────────────────────────────
-
-  const updateIncludeGroup = useCallback((groupId: string, updated: TPipelineConditionGroup) => {
-    setDraft((d) => ({
-      ...d,
-      includeGroups: d.includeGroups.map((g) => (g.id === groupId ? updated : g)),
-    }));
-  }, []);
-
-  const removeIncludeGroup = useCallback((groupId: string) => {
-    setDraft((d) => ({ ...d, includeGroups: d.includeGroups.filter((g) => g.id !== groupId) }));
-  }, []);
-
-  const updateExcludeGroup = useCallback((groupId: string, updated: TPipelineConditionGroup) => {
-    setDraft((d) => ({
-      ...d,
-      excludeGroups: d.excludeGroups.map((g) => (g.id === groupId ? updated : g)),
-    }));
-  }, []);
-
-  const removeExcludeGroup = useCallback((groupId: string) => {
-    setDraft((d) => ({ ...d, excludeGroups: d.excludeGroups.filter((g) => g.id !== groupId) }));
-  }, []);
-
-  // ─── Save ───────────────────────────────────────────────────────────────────
 
   async function handleSave(statusOverride?: TPipelineStatus) {
     setIsSaving(true);
     try {
       const result = await upsert.mutateAsync({
-        id: draft.id ?? undefined,
+        ...(draft.id ? { id: draft.id } : {}),
         name: draft.name || "Unnamed Pipeline",
         status: statusOverride ?? draft.status,
         grantId: draft.grantId,
         lineItemId: draft.lineItemId,
-        sourceFormId: draft.sourceFormId,
-        sourceFormTitle: draft.sourceFormTitle,
-        includeGroups: draft.includeGroups,
-        excludeGroups: draft.excludeGroups,
+        sourceFormId: draft.sourceFormId || selectedSource.id,
+        sourceFormTitle: draft.sourceFormTitle || selectedSource.title,
+        includeGroups: [],
+        excludeGroups: [],
+        includeTree: draft.includeTree,
+        excludeTree: draft.excludeTree,
       });
       const newId = (result as any)?.id as string | undefined;
       if (newId) {
@@ -239,26 +222,18 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
     }
   }
 
-  async function handleActivate() {
-    await handleSave("active");
-  }
-
-  async function handleDeactivate() {
-    await handleSave("inactive");
-  }
-
-  // ─── Preview ────────────────────────────────────────────────────────────────
-
   async function handlePreview() {
     setIsPreviewLoading(true);
     try {
       const result = await preview.mutateAsync({
         grantId: draft.grantId,
         lineItemId: draft.lineItemId,
-        sourceFormId: draft.sourceFormId,
-        includeGroups: draft.includeGroups,
-        excludeGroups: draft.excludeGroups,
-        pipelineId: draft.id ?? undefined,
+        sourceFormId: draft.sourceFormId || selectedSource.id,
+        includeGroups: [],
+        excludeGroups: [],
+        includeTree: draft.includeTree,
+        excludeTree: draft.excludeTree,
+        ...(draft.id ? { pipelineId: draft.id } : {}),
       });
       setPreviewResult(result as unknown as TBudgetPipelinePreviewResult);
     } catch {
@@ -271,7 +246,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
   if (!isNew && isLoadingPipeline) {
     return (
       <div className="flex items-center justify-center h-64 text-sm text-slate-400 dark:text-slate-500">
-        Loading pipeline…
+        Loading pipeline...
       </div>
     );
   }
@@ -282,29 +257,25 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* ── Sticky target bar ──────────────────────────────────────────────── */}
       <div className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm">
-        {/* Back button — only in embedded tool mode */}
-        {isEmbedded && (
+        {isEmbedded ? (
           <button
             type="button"
             onClick={onBack}
             className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors mr-1 shrink-0"
           >
-            ← Pipelines
+            Back to pipelines
           </button>
-        )}
-        {/* Grant selector */}
+        ) : null}
+
         <div className="flex items-center gap-1.5 min-w-0">
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Grant</label>
           <select
             className={`${selectCls} max-w-[180px]`}
             value={draft.grantId ?? ""}
-            onChange={(e) =>
-              setDraft((d) => ({ ...d, grantId: e.target.value || null, lineItemId: null }))
-            }
+            onChange={(e) => setDraft((d) => ({ ...d, grantId: e.target.value || null, lineItemId: null }))}
           >
-            <option value="">— any grant —</option>
+            <option value="">Any grant</option>
             {(grantsData as any[]).map((g: any) => (
               <option key={g.id} value={g.id}>
                 {g.name}
@@ -313,7 +284,6 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
           </select>
         </div>
 
-        {/* Line item selector */}
         <div className="flex items-center gap-1.5 min-w-0">
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Line Item</label>
           <select
@@ -322,7 +292,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
             onChange={(e) => setDraft((d) => ({ ...d, lineItemId: e.target.value || null }))}
             disabled={!draft.grantId}
           >
-            <option value="">— any line item —</option>
+            <option value="">Any line item</option>
             {lineItems.map((li) => (
               <option key={li.id} value={li.id}>
                 {li.label}
@@ -331,7 +301,6 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
           </select>
         </div>
 
-        {/* Pipe name */}
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Name</label>
           <input
@@ -343,188 +312,87 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
           />
         </div>
 
-        {/* Status badge */}
         <StatusBadge status={draft.status} />
 
-        {/* Action buttons */}
         <div className="flex items-center gap-2 ml-auto">
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
-            onClick={handlePreview}
-            disabled={isPreviewLoading || isSaving}
-          >
+          <button type="button" className="btn btn-sm btn-ghost" onClick={handlePreview} disabled={isPreviewLoading || isSaving}>
             Preview
           </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-secondary"
-            onClick={() => handleSave()}
-            disabled={isSaving}
-          >
-            {isSaving ? "Saving…" : "Save"}
+          <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleSave()} disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save"}
           </button>
           {draft.status !== "active" ? (
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={handleActivate}
-              disabled={isSaving}
-            >
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => void handleSave("active")} disabled={isSaving}>
               Activate
             </button>
           ) : (
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost text-slate-500"
-              onClick={handleDeactivate}
-              disabled={isSaving}
-            >
+            <button type="button" className="btn btn-sm btn-ghost text-slate-500" onClick={() => void handleSave("inactive")} disabled={isSaving}>
               Deactivate
             </button>
           )}
         </div>
       </div>
 
-      {/* ── Content area ───────────────────────────────────────────────────── */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Sidebar */}
-        <FieldSidebar onAction={handleSidebarAction} onAddField={handleAddField} />
-
-        {/* Main panel */}
-        <main className="flex-1 overflow-y-auto p-6 space-y-8">
-          {/* Source Form selector */}
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Source Form</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Restrict this pipeline to a specific Jotform. Leave blank to match all forms.
-            </p>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="radio"
-                  name="sourceForm"
-                  value=""
-                  checked={!draft.sourceFormId}
-                  onChange={() => setDraft((d) => ({ ...d, sourceFormId: null, sourceFormTitle: null }))}
-                  className="accent-sky-500"
-                />
-                <span className="text-slate-700 dark:text-slate-300">All forms</span>
-              </label>
-              {forms.map((form) => (
-                <label key={form.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="radio"
-                    name="sourceForm"
-                    value={form.id}
-                    checked={draft.sourceFormId === form.id}
-                    onChange={() =>
-                      setDraft((d) => ({ ...d, sourceFormId: form.id, sourceFormTitle: form.title }))
-                    }
-                    className="accent-sky-500"
-                  />
-                  <span className="text-slate-700 dark:text-slate-300">{form.title}</span>
-                  <span className="text-xs text-slate-400 dark:text-slate-500 font-mono">{form.id}</span>
-                </label>
-              ))}
-              {forms.length === 0 && (
-                <p className="text-xs text-slate-400 dark:text-slate-500 italic">
-                  No Jotform forms loaded. Sync forms from the Budget page first.
-                </p>
-              )}
+      <main className="flex-1 min-h-0 overflow-y-auto p-6 space-y-8">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Source form</div>
+              <div className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">{selectedSource.title}</div>
+              <div className="mt-0.5 font-mono text-xs text-slate-400">{selectedSource.id}</div>
             </div>
-          </section>
-
-          <hr className="border-slate-200 dark:border-slate-700" />
-
-          {/* Include rules */}
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Include Rules</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Transactions must match at least one group below. Empty = match all.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-xs btn-secondary"
-                onClick={() =>
-                  setDraft((d) => ({ ...d, includeGroups: [...d.includeGroups, newGroup("include", "AND")] }))
-                }
-              >
-                + Add group
-              </button>
-            </div>
-
-            {draft.includeGroups.length === 0 && (
-              <div className="rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
-                No include rules — this pipeline will match all pending transactions from the selected form.
-              </div>
-            )}
-            <div className="space-y-3">
-              {draft.includeGroups.map((group) => (
-                <ConditionGroupBox
-                  key={group.id}
-                  group={group}
-                  isExclude={false}
-                  onChange={(updated) => updateIncludeGroup(group.id, updated)}
-                  onRemove={() => removeIncludeGroup(group.id)}
-                />
+            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-inner dark:border-slate-700 dark:bg-slate-800">
+              {SOURCE_FORMS.map((source) => (
+                <button
+                  key={source.key}
+                  type="button"
+                  className={[
+                    "rounded-lg px-6 py-2.5 text-sm font-semibold transition",
+                    selectedSourceKey === source.key
+                      ? "bg-white text-slate-950 shadow-sm dark:bg-slate-950 dark:text-white"
+                      : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100",
+                  ].join(" ")}
+                  onClick={() => selectSourceForm(source.key)}
+                >
+                  {source.label}
+                </button>
               ))}
             </div>
-          </section>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className={questionsQ.isLoading ? "text-amber-600" : "text-emerald-600"}>
+              {questionsQ.isLoading ? "Loading form fields..." : `${formFields.length} form fields loaded`}
+            </span>
+            {questionsQ.isError ? <span className="text-rose-600">Could not load live Jotform fields.</span> : null}
+          </div>
+        </section>
 
-          <hr className="border-slate-200 dark:border-slate-700" />
+        <RuleTreeEditor
+          title="Include Rules"
+          description="Transactions must match this rule tree. Empty root = match all pending transactions from the selected form."
+          root={draft.includeTree}
+          tone="include"
+          formTitle={selectedSource.title}
+          formFields={formFields}
+          onChange={(includeTree) => setDraft((d) => ({ ...d, includeTree }))}
+        />
 
-          {/* Exclude rules */}
-          <section className="space-y-3">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Exclude Rules</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Transactions matching any group below are excluded even if they passed include rules.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-xs btn-secondary"
-                onClick={() =>
-                  setDraft((d) => ({ ...d, excludeGroups: [...d.excludeGroups, newGroup("exclude", "AND")] }))
-                }
-              >
-                + Add exclusion
-              </button>
-            </div>
+        <hr className="border-slate-200 dark:border-slate-700" />
 
-            {draft.excludeGroups.length === 0 && (
-              <div className="rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 py-6 text-center text-sm text-slate-400 dark:text-slate-500">
-                No exclusion rules.
-              </div>
-            )}
-            <div className="space-y-3">
-              {draft.excludeGroups.map((group) => (
-                <ConditionGroupBox
-                  key={group.id}
-                  group={group}
-                  isExclude={true}
-                  onChange={(updated) => updateExcludeGroup(group.id, updated)}
-                  onRemove={() => removeExcludeGroup(group.id)}
-                />
-              ))}
-            </div>
-          </section>
+        <RuleTreeEditor
+          title="Exclude Rules"
+          description="Transactions matching this rule tree are excluded even if they passed include rules."
+          root={draft.excludeTree}
+          tone="exclude"
+          formTitle={selectedSource.title}
+          formFields={formFields}
+          onChange={(excludeTree) => setDraft((d) => ({ ...d, excludeTree }))}
+        />
 
-          <hr className="border-slate-200 dark:border-slate-700" />
+        <hr className="border-slate-200 dark:border-slate-700" />
 
-          {/* Preview table */}
-          <PreviewTable
-            result={previewResult}
-            isLoading={isPreviewLoading}
-            onRun={handlePreview}
-          />
-        </main>
-      </div>
+        <PreviewTable result={previewResult} isLoading={isPreviewLoading} onRun={handlePreview} />
+      </main>
     </div>
   );
 }

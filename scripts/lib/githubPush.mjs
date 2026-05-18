@@ -8,7 +8,8 @@ import { spawnSync } from "node:child_process";
 function run(cmd, args, { stdio = "inherit", allowFailure = false } = {}) {
   const result = spawnSync(cmd, args, {
     stdio,
-    shell: process.platform === "win32",
+    shell: false,
+    env: process.env,
     encoding: "utf8",
   });
 

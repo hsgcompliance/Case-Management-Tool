@@ -258,3 +258,75 @@ export function metricTextClass(metricId: MetricColorId): string {
 export function metricProgressClass(metricId: MetricColorId): string {
   return toneProgressClass(metricTone(metricId));
 }
+
+// ─── Grant Accent Color palette ───────────────────────────────────────────────
+// 7-color palette for grant budget groups, cards, tags, and spending presets.
+// Chosen for max visual separation — one cool blue, one green, one warm yellow,
+// one purple, one red-pink, one orange, one neutral. Keep lookups here so every
+// feature (budget config, grant tags, spending views) stays in sync.
+//
+// Population semantics (pastels via TONE_CLASS_REGISTRY):
+//   Youth → sky  |  Family → amber  |  Individual → emerald
+//
+// Metric semantics (7 tones via ColorTone):
+//   sky=tasks/workflow  emerald=positive/available  amber=pending/attention
+//   orange=caseload/clients  violet=compliance/assessments  rose=urgent/overdue
+//   slate=neutral/system
+
+export const GRANT_ACCENT_COLORS = [
+  "sky", "emerald", "amber", "violet", "rose", "orange", "slate",
+] as const;
+
+export type GrantAccentColor = typeof GRANT_ACCENT_COLORS[number];
+
+type GrantAccentClasses = {
+  /** Badge / chip with light bg + dark mode variants */
+  chip: string;
+  /** Solid filled dot / strip */
+  solid: string;
+  /** Focus / selected ring color */
+  ring: string;
+  /** Left accent border on cards */
+  leftBorder: string;
+  /** Subtle tinted header background */
+  headerBg: string;
+};
+
+export const GRANT_ACCENT_REGISTRY: Record<GrantAccentColor, GrantAccentClasses> = {
+  sky:     { chip: "border-sky-300 bg-sky-100 text-sky-800 dark:border-sky-700 dark:bg-sky-900/40 dark:text-sky-200",         solid: "bg-sky-500",     ring: "ring-sky-400",     leftBorder: "border-l-sky-400",     headerBg: "bg-sky-50 dark:bg-sky-900/25"     },
+  emerald: { chip: "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200", solid: "bg-emerald-500", ring: "ring-emerald-400", leftBorder: "border-l-emerald-400", headerBg: "bg-emerald-50 dark:bg-emerald-900/25" },
+  amber:   { chip: "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200",    solid: "bg-amber-400",   ring: "ring-amber-400",   leftBorder: "border-l-amber-400",   headerBg: "bg-amber-50 dark:bg-amber-900/25"   },
+  violet:  { chip: "border-violet-300 bg-violet-100 text-violet-800 dark:border-violet-700 dark:bg-violet-900/40 dark:text-violet-200",  solid: "bg-violet-500",  ring: "ring-violet-400",  leftBorder: "border-l-violet-400",  headerBg: "bg-violet-50 dark:bg-violet-900/25"  },
+  rose:    { chip: "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-700 dark:bg-rose-900/40 dark:text-rose-200",      solid: "bg-rose-500",    ring: "ring-rose-400",    leftBorder: "border-l-rose-400",    headerBg: "bg-rose-50 dark:bg-rose-900/25"    },
+  orange:  { chip: "border-orange-300 bg-orange-100 text-orange-800 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-200",  solid: "bg-orange-500",  ring: "ring-orange-400",  leftBorder: "border-l-orange-400",  headerBg: "bg-orange-50 dark:bg-orange-900/25"  },
+  slate:   { chip: "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200",   solid: "bg-slate-400",   ring: "ring-slate-400",   leftBorder: "border-l-slate-400",   headerBg: "bg-slate-100 dark:bg-slate-800/40" },
+};
+
+export function isGrantAccentColor(color: unknown): color is GrantAccentColor {
+  return typeof color === "string" && (GRANT_ACCENT_COLORS as readonly string[]).includes(color);
+}
+
+const _defaultAccentEntry = GRANT_ACCENT_REGISTRY.slate;
+
+export function grantAccentChip(color: string | null | undefined): string {
+  const c = color && isGrantAccentColor(color) ? color : null;
+  return c ? GRANT_ACCENT_REGISTRY[c].chip : _defaultAccentEntry.chip;
+}
+
+export function grantAccentSolid(color: string | null | undefined): string {
+  const c = color && isGrantAccentColor(color) ? color : null;
+  return c ? GRANT_ACCENT_REGISTRY[c].solid : _defaultAccentEntry.solid;
+}
+
+export function grantAccentRing(color: string | null | undefined): string {
+  const c = color && isGrantAccentColor(color) ? color : null;
+  return c ? GRANT_ACCENT_REGISTRY[c].ring : _defaultAccentEntry.ring;
+}
+
+export function grantAccentLeftBorder(color: string | null | undefined): string | null {
+  return color && isGrantAccentColor(color) ? GRANT_ACCENT_REGISTRY[color].leftBorder : null;
+}
+
+export function grantAccentHeaderBg(color: string | null | undefined): string | null {
+  return color && isGrantAccentColor(color) ? GRANT_ACCENT_REGISTRY[color].headerBg : null;
+}

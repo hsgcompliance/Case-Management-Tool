@@ -1,5 +1,5 @@
 // functions/src/core/rbac.ts
-import { normTok } from "./norm";
+import { normTok, normRole } from "./norm";
 export type Claims = {
   [k: string]: unknown;
   uid?: string;
@@ -16,41 +16,39 @@ export type Claims = {
 
 export type RoleLevel = "public" | "authed" | "viewer" | "user" | "admin" | "dev";
 
-/** Canonical ladder roles (normalized). */
+/** Canonical ladder roles — stored with underscores, normalized via normRole. */
 const TOP_ROLES = {
-  UNVERIFIED: normTok("unverified"),
-  PUBLIC_USER: normTok("public_user"),
-  VIEWER: normTok("viewer"),
-  USER: normTok("user"),
-  ADMIN: normTok("admin"),
-  DEV: normTok("dev"),
-  ORG_DEV: normTok("org_dev"),
-  SUPER_DEV: normTok("super_dev"),
+  UNVERIFIED:  "unverified",
+  PUBLIC_USER: "public_user",
+  VIEWER:      "viewer",
+  USER:        "user",
+  ADMIN:       "admin",
+  DEV:         "dev",
+  ORG_DEV:     "org_dev",
+  SUPER_DEV:   "super_dev",
 } as const;
 
+// LADDER_SET uses normTok for tag-stripping (prevents roles[] escalation)
 const LADDER_SET = new Set<string>([
-  TOP_ROLES.UNVERIFIED,
-  TOP_ROLES.PUBLIC_USER,
-  TOP_ROLES.VIEWER,
-  TOP_ROLES.USER,
-  TOP_ROLES.ADMIN,
-  TOP_ROLES.DEV,
-  TOP_ROLES.ORG_DEV,
-  TOP_ROLES.SUPER_DEV,
-  normTok("public"),
-  normTok("authed"),
+  normTok("unverified"), normTok("public_user"), normTok("viewer"),
+  normTok("user"), normTok("admin"), normTok("dev"),
+  normTok("org_dev"), normTok("super_dev"),
+  normTok("public"), normTok("authed"),
 ]);
 
+// TOP_ROLE_SET uses normRole so both "super_dev" and legacy "superdev" match.
+const TOP_ROLE_SET = new Set<string>(
+  Object.values(TOP_ROLES).map(normRole)
+);
+
 /**
- * Authoritative topRole.
- * Rule: if user is authed but topRole missing -> treat as unverified.
+ * Authoritative topRole — always returns a canonical underscored string
+ * (e.g. "super_dev") or "" if unauthenticated.
+ * Handles both canonical ("super_dev") and legacy normTok ("superdev") forms.
  */
-
-const TOP_ROLE_SET = new Set<string>(Object.values(TOP_ROLES));
-
 export function topRoleFromClaims(c: Claims): string {
   if (!c?.uid) return "";
-  const tr = normTok(c.topRole);
+  const tr = normRole(c.topRole);
 
   // Only accept known ladder roles; anything else becomes unverified.
   if (!tr || !TOP_ROLE_SET.has(tr)) return TOP_ROLES.UNVERIFIED;

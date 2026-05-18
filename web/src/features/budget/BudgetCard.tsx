@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useGrantMetrics } from "@hooks/useMetrics";
 import { usePatchGrants } from "@hooks/useGrants";
-import { statusChipClass } from "@lib/colorRegistry";
+import { statusChipClass, grantAccentLeftBorder, grantAccentHeaderBg } from "@lib/colorRegistry";
 import type { TGrant as Grant } from "@types";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
@@ -182,15 +182,6 @@ function AddFundsForm({
 
 // ─── BudgetCard ────────────────────────────────────────────────────────────────
 
-const ACCENT_LEFT: Record<string, string> = {
-  sky: "border-l-sky-400", blue: "border-l-blue-400", indigo: "border-l-indigo-400",
-  violet: "border-l-violet-400", purple: "border-l-purple-400", pink: "border-l-pink-400",
-  rose: "border-l-rose-400", red: "border-l-red-400", orange: "border-l-orange-400",
-  amber: "border-l-amber-400", yellow: "border-l-yellow-400", lime: "border-l-lime-400",
-  green: "border-l-green-400", emerald: "border-l-emerald-400", teal: "border-l-teal-400",
-  cyan: "border-l-cyan-400", slate: "border-l-slate-400",
-};
-
 function getLineItemBudget(grant: Grant, lineItemId: string) {
   const lineItems = (grant as any)?.budget?.lineItems as Array<Record<string, unknown>> | undefined;
   const li = lineItems?.find((l) => l.id === lineItemId);
@@ -252,7 +243,8 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       ? "text-amber-600 dark:text-amber-400"
       : "text-emerald-600 dark:text-emerald-500";
 
-  const accentLeftClass = accentColor && ACCENT_LEFT[accentColor] ? ACCENT_LEFT[accentColor] : null;
+  const accentLeftClass = grantAccentLeftBorder(accentColor);
+  const accentHeaderBg = grantAccentHeaderBg(accentColor);
 
   // Display name: labelOverride > line item label > grant name
   const displayName = labelOverride || (liData?.label ? liData.label : String(grant.name || grant.id));
@@ -262,8 +254,8 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
   return (
     <div
       className={[
-        "group flex flex-col gap-0 rounded-xl border shadow-sm transition-shadow hover:shadow-md",
-        accentLeftClass ? `border-l-4 ${accentLeftClass}` : "",
+        "group flex flex-col gap-0 rounded-xl border-2 shadow-md transition-shadow hover:shadow-lg",
+        accentLeftClass ? `border-l-[5px] ${accentLeftClass}` : "",
         isClientAlloc
           ? "border-sky-200 bg-sky-50/60 dark:border-sky-900/50 dark:bg-sky-950/20"
           : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900",
@@ -273,7 +265,10 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       <button
         type="button"
         onClick={onClick}
-        className="flex items-start justify-between gap-2 rounded-t-xl p-4 text-left transition hover:opacity-80"
+        className={[
+          "flex items-start justify-between gap-2 rounded-t-xl p-4 text-left transition hover:opacity-80",
+          accentHeaderBg ? accentHeaderBg : "",
+        ].join(" ")}
       >
         <div className="min-w-0">
           {isClientAlloc && (
@@ -281,11 +276,11 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
               Client Allocation
             </div>
           )}
-          <div className="truncate font-bold text-slate-900 dark:text-slate-100 group-hover:text-sky-700 dark:group-hover:text-sky-400 transition-colors text-base leading-snug">
+          <div className="truncate font-bold text-slate-900 dark:text-slate-100 group-hover:text-sky-700 dark:group-hover:text-sky-400 transition-colors text-lg leading-snug">
             {displayName}
           </div>
           {contextLabel && (
-            <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500">
+            <div className="mt-0.5 truncate text-xs font-medium text-slate-600 dark:text-slate-300">
               {contextLabel}
             </div>
           )}

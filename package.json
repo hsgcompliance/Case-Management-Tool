@@ -7,8 +7,8 @@
     "functions"
   ],
   "dependencies": {
-    "firebase-admin": "^13.6.1",
-    "firebase-functions": "^7.0.5",
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^7.2.5",
     "rg": "^0.0.2"
   },
   "scripts": {
@@ -17,10 +17,12 @@
     "build:contracts": "npm -w contracts run build",
     "deploy:hosting": "node scripts/deploy-hosting-safe.mjs",
     "deploy:hosting:no-push": "node scripts/deploy-hosting-safe.mjs --no-push",
-    "deploy:functions": "node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2",
-    "deploy:functions:no-push": "node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --no-push",
-    "deploy:functions-hosting": "node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --hosting",
-    "deploy:functions-hosting:no-push": "node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --hosting --no-push",
+    "deploy:functions": "node scripts/deploy-functions-safe.mjs housing-db-v2",
+    "deploy:functions:no-push": "node scripts/deploy-functions-safe.mjs housing-db-v2 --no-push",
+    "deploy:functions:missing": "node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2",
+    "deploy:functions:missing:no-push": "node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --no-push",
+    "deploy:functions-hosting": "node scripts/deploy-functions-safe.mjs housing-db-v2 --hosting",
+    "deploy:functions-hosting:no-push": "node scripts/deploy-functions-safe.mjs housing-db-v2 --hosting --no-push",
     "deploy:reset-functions": "node scripts/reset-and-redeploy.mjs housing-db-v2",
     "deploy:reset-functions:no-push": "node scripts/reset-and-redeploy.mjs housing-db-v2 --no-push",
     "deploy:reset-functions-hosting": "node scripts/reset-and-redeploy.mjs housing-db-v2 --hosting",

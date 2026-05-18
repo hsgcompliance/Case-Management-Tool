@@ -4,7 +4,7 @@ import {
   onDocumentUpdated,
   onDocumentDeleted,
 } from "firebase-functions/v2/firestore";
-import { logger } from "firebase-functions";
+import * as logger from "firebase-functions/logger";
 import { db, RUNTIME, isoNow } from "../../core";
 
 const FN_JOTFORM_INDEXER = "onJotformSubmissionIndexer";

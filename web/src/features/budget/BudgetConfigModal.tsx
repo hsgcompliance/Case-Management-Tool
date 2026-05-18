@@ -6,40 +6,18 @@ import { Modal } from "@entities/ui/Modal";
 import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import type { BudgetGroupCfg, BudgetGroupItem, OrgDisplayConfig } from "@hooks/useOrgConfig";
 import type { TGrant as Grant } from "@types";
-
-// ─── Color palette ────────────────────────────────────────────────────────────
-
-const COLOR_DEFS: Record<string, { bg: string; ring: string; chip: string; dot: string }> = {
-  sky:     { bg: "bg-sky-500",     ring: "ring-sky-400",     chip: "bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-700",     dot: "bg-sky-500" },
-  blue:    { bg: "bg-blue-500",    ring: "ring-blue-400",    chip: "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700",    dot: "bg-blue-500" },
-  indigo:  { bg: "bg-indigo-500",  ring: "ring-indigo-400",  chip: "bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700",  dot: "bg-indigo-500" },
-  violet:  { bg: "bg-violet-500",  ring: "ring-violet-400",  chip: "bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-900/40 dark:text-violet-200 dark:border-violet-700",  dot: "bg-violet-500" },
-  purple:  { bg: "bg-purple-500",  ring: "ring-purple-400",  chip: "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-700",  dot: "bg-purple-500" },
-  pink:    { bg: "bg-pink-500",    ring: "ring-pink-400",    chip: "bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-900/40 dark:text-pink-200 dark:border-pink-700",    dot: "bg-pink-500" },
-  rose:    { bg: "bg-rose-500",    ring: "ring-rose-400",    chip: "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700",    dot: "bg-rose-500" },
-  red:     { bg: "bg-red-500",     ring: "ring-red-400",     chip: "bg-red-100 text-red-800 border-red-300 dark:bg-red-900/40 dark:text-red-200 dark:border-red-700",     dot: "bg-red-500" },
-  orange:  { bg: "bg-orange-500",  ring: "ring-orange-400",  chip: "bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-700",  dot: "bg-orange-500" },
-  amber:   { bg: "bg-amber-500",   ring: "ring-amber-400",   chip: "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700",   dot: "bg-amber-500" },
-  lime:    { bg: "bg-lime-500",    ring: "ring-lime-400",    chip: "bg-lime-100 text-lime-800 border-lime-300 dark:bg-lime-900/40 dark:text-lime-200 dark:border-lime-700",    dot: "bg-lime-500" },
-  green:   { bg: "bg-green-500",   ring: "ring-green-400",   chip: "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/40 dark:text-green-200 dark:border-green-700",   dot: "bg-green-500" },
-  emerald: { bg: "bg-emerald-500", ring: "ring-emerald-400", chip: "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700", dot: "bg-emerald-500" },
-  teal:    { bg: "bg-teal-500",    ring: "ring-teal-400",    chip: "bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-900/40 dark:text-teal-200 dark:border-teal-700",    dot: "bg-teal-500" },
-  cyan:    { bg: "bg-cyan-500",    ring: "ring-cyan-400",    chip: "bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-900/40 dark:text-cyan-200 dark:border-cyan-700",    dot: "bg-cyan-500" },
-  slate:   { bg: "bg-slate-500",   ring: "ring-slate-400",   chip: "bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600",   dot: "bg-slate-500" },
-};
-
-const COLOR_KEYS = Object.keys(COLOR_DEFS);
-
-function colorDef(key?: string) {
-  return (key && COLOR_DEFS[key]) ? COLOR_DEFS[key] : COLOR_DEFS.slate;
-}
+import { GRANT_ACCENT_COLORS, GRANT_ACCENT_REGISTRY, grantAccentChip, grantAccentSolid, grantAccentRing } from "@lib/colorRegistry";
 
 // ─── ColorPicker ─────────────────────────────────────────────────────────────
+
+function colorDef(key?: string) {
+  return key && key in GRANT_ACCENT_REGISTRY ? GRANT_ACCENT_REGISTRY[key as keyof typeof GRANT_ACCENT_REGISTRY] : GRANT_ACCENT_REGISTRY.slate;
+}
 
 function ColorPicker({ value, onChange }: { value?: string; onChange: (c: string) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {COLOR_KEYS.map((c) => (
+      {GRANT_ACCENT_COLORS.map((c) => (
         <button
           key={c}
           type="button"
@@ -47,8 +25,8 @@ function ColorPicker({ value, onChange }: { value?: string; onChange: (c: string
           onClick={() => onChange(c)}
           className={[
             "h-5 w-5 rounded-full transition",
-            COLOR_DEFS[c].dot,
-            value === c ? "ring-2 ring-offset-1 " + COLOR_DEFS[c].ring : "opacity-70 hover:opacity-100",
+            grantAccentSolid(c),
+            value === c ? "ring-2 ring-offset-1 " + grantAccentRing(c) : "opacity-70 hover:opacity-100",
           ].join(" ")}
         />
       ))}
@@ -291,7 +269,7 @@ function BucketItemChip({
         title="Click to edit display name and color"
       >
         {item.color && (
-          <span className={["inline-block h-2 w-2 rounded-full flex-shrink-0", cd.dot].join(" ")} />
+          <span className={["inline-block h-2 w-2 rounded-full flex-shrink-0", cd.solid].join(" ")} />
         )}
         <span className="truncate flex-1 min-w-0">{displayLabel}</span>
         {item.lineItemId && (
@@ -447,7 +425,7 @@ function GroupBucket({
       onDrop={handleDrop}
     >
       {/* Color accent strip */}
-      <div className={["h-1.5 w-full rounded-t-xl", cd.bg].join(" ")} />
+      <div className={["h-1.5 w-full rounded-t-xl", cd.solid].join(" ")} />
 
       {/* Bucket header */}
       <div ref={headerRef} className="border-b border-slate-100 dark:border-slate-800 px-3 py-2.5">
@@ -484,7 +462,7 @@ function GroupBucket({
               onClick={() => { setNameDraft(group.label); setEditingHeader(true); }}
               title="Click to edit group name, color, and columns"
             >
-              <span className={["inline-block h-2.5 w-2.5 rounded-full flex-shrink-0", cd.dot].join(" ")} />
+              <span className={["inline-block h-2.5 w-2.5 rounded-full flex-shrink-0", cd.solid].join(" ")} />
               <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{group.label}</span>
             </button>
             <div className="flex items-center gap-1 flex-shrink-0">

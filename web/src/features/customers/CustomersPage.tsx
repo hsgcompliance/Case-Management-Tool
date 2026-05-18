@@ -976,7 +976,9 @@ export function CustomersPage() {
                   {!isFetching && !isFilteringPool && !isError && displayRows.length === 0 ? (
                     <tr>
                       <td className="px-4 py-8 text-center text-gray-600" colSpan={7}>
-                        No results.
+                        {search.trim()
+                          ? "No customers match your search. Try a different name or ID, or expand the filters."
+                          : "No customers found. Try expanding your filters or adjusting the scope."}
                       </td>
                     </tr>
                   ) : null}

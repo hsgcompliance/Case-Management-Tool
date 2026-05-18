@@ -155,6 +155,7 @@ export const endpointsStrict = {
   jotformSubmissionsGet: { method: 'GET', path: 'jotformSubmissionsGet' },
   jotformSubmissionsStructure: { method: 'GET', path: 'jotformSubmissionsStructure' },
   jotformFormsList: { method: 'GET', path: 'jotformFormsList' },
+  jotformFormQuestionsGet: { method: 'GET', path: 'jotformFormQuestionsGet' },
   jotformLinkSubmission: { method: 'POST', path: 'jotformLinkSubmission' },
   jotformSyncSelection: { method: 'POST', path: 'jotformSyncSelection' },
   jotformDigestUpsert: { method: 'POST', path: 'jotformDigestUpsert' },
@@ -163,6 +164,13 @@ export const endpointsStrict = {
   jotformSyncSubmissions: { method: 'POST', path: 'jotformSyncSubmissions' },
   jotformApiSubmissionsList: { method: 'GET', path: 'jotformApiSubmissionsList' },
   jotformApiSubmissionGet: { method: 'GET', path: 'jotformApiSubmissionGet' },
+
+  // BUDGET PIPELINE
+  budgetPipelineList: { method: 'GET', path: 'budgetPipelineList' },
+  budgetPipelineGet: { method: 'GET', path: 'budgetPipelineGet' },
+  budgetPipelineUpsert: { method: 'POST', path: 'budgetPipelineUpsert' },
+  budgetPipelineDelete: { method: 'POST', path: 'budgetPipelineDelete' },
+  budgetPipelinePreview: { method: 'POST', path: 'budgetPipelinePreview' },
 
   // PAYMENTS
   paymentsGenerateProjections:   { method: 'POST', path: 'paymentsGenerateProjections' },

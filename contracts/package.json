@@ -12,31 +12,100 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
-
-    "./assessments": { "types": "./dist/assessments.d.ts", "import": "./dist/assessments.js", "require": "./dist/assessments.cjs" },
-    "./customers":   { "types": "./dist/customers.d.ts",   "import": "./dist/customers.js",   "require": "./dist/customers.cjs" },
-    "./creditCards": { "types": "./dist/creditCards.d.ts", "import": "./dist/creditCards.js", "require": "./dist/creditCards.cjs" },
-    "./enrollments": { "types": "./dist/enrollments.d.ts", "import": "./dist/enrollments.js", "require": "./dist/enrollments.cjs" },
-    "./gdrive":      { "types": "./dist/gdrive.d.ts",      "import": "./dist/gdrive.js",      "require": "./dist/gdrive.cjs" },
-    "./grants":      { "types": "./dist/grants.d.ts",      "import": "./dist/grants.js",      "require": "./dist/grants.cjs" },
-    "./inbox":       { "types": "./dist/inbox.d.ts",       "import": "./dist/inbox.js",       "require": "./dist/inbox.cjs" },
-    "./jotform":     { "types": "./dist/jotform.d.ts",     "import": "./dist/jotform.js",     "require": "./dist/jotform.cjs" },
-    "./ledger":      { "types": "./dist/ledger.d.ts",      "import": "./dist/ledger.js",      "require": "./dist/ledger.cjs" },
-    "./payments":    { "types": "./dist/payments.d.ts",    "import": "./dist/payments.js",    "require": "./dist/payments.cjs" },
-    "./tasks":       { "types": "./dist/tasks.d.ts",       "import": "./dist/tasks.js",       "require": "./dist/tasks.cjs" },
-    "./tours":       { "types": "./dist/tours.d.ts",       "import": "./dist/tours.js",       "require": "./dist/tours.cjs" },
-    "./users":       { "types": "./dist/users.d.ts",       "import": "./dist/users.js",       "require": "./dist/users.cjs" },
-    "./core":        { "types": "./dist/core.d.ts",        "import": "./dist/core.js",        "require": "./dist/core.cjs" },
-    "./http":        { "types": "./dist/http.d.ts",        "import": "./dist/http.js",        "require": "./dist/http.cjs" },
-    "./endpointMap": { "types": "./dist/endpointMap.d.ts", "import": "./dist/endpointMap.js", "require": "./dist/endpointMap.cjs" },
-    "./metrics":     { "types": "./dist/metrics.d.ts",     "import": "./dist/metrics.js",     "require": "./dist/metrics.cjs" }
+    "./assessments": {
+      "types": "./dist/assessments.d.ts",
+      "import": "./dist/assessments.js",
+      "require": "./dist/assessments.cjs"
+    },
+    "./customers": {
+      "types": "./dist/customers.d.ts",
+      "import": "./dist/customers.js",
+      "require": "./dist/customers.cjs"
+    },
+    "./creditCards": {
+      "types": "./dist/creditCards.d.ts",
+      "import": "./dist/creditCards.js",
+      "require": "./dist/creditCards.cjs"
+    },
+    "./enrollments": {
+      "types": "./dist/enrollments.d.ts",
+      "import": "./dist/enrollments.js",
+      "require": "./dist/enrollments.cjs"
+    },
+    "./gdrive": {
+      "types": "./dist/gdrive.d.ts",
+      "import": "./dist/gdrive.js",
+      "require": "./dist/gdrive.cjs"
+    },
+    "./grants": {
+      "types": "./dist/grants.d.ts",
+      "import": "./dist/grants.js",
+      "require": "./dist/grants.cjs"
+    },
+    "./inbox": {
+      "types": "./dist/inbox.d.ts",
+      "import": "./dist/inbox.js",
+      "require": "./dist/inbox.cjs"
+    },
+    "./jotform": {
+      "types": "./dist/jotform.d.ts",
+      "import": "./dist/jotform.js",
+      "require": "./dist/jotform.cjs"
+    },
+    "./ledger": {
+      "types": "./dist/ledger.d.ts",
+      "import": "./dist/ledger.js",
+      "require": "./dist/ledger.cjs"
+    },
+    "./payments": {
+      "types": "./dist/payments.d.ts",
+      "import": "./dist/payments.js",
+      "require": "./dist/payments.cjs"
+    },
+    "./tasks": {
+      "types": "./dist/tasks.d.ts",
+      "import": "./dist/tasks.js",
+      "require": "./dist/tasks.cjs"
+    },
+    "./tours": {
+      "types": "./dist/tours.d.ts",
+      "import": "./dist/tours.js",
+      "require": "./dist/tours.cjs"
+    },
+    "./users": {
+      "types": "./dist/users.d.ts",
+      "import": "./dist/users.js",
+      "require": "./dist/users.cjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js",
+      "require": "./dist/http.cjs"
+    },
+    "./endpointMap": {
+      "types": "./dist/endpointMap.d.ts",
+      "import": "./dist/endpointMap.js",
+      "require": "./dist/endpointMap.cjs"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "import": "./dist/metrics.js",
+      "require": "./dist/metrics.cjs"
+    }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/*.ts --format esm,cjs --outDir dist --clean && tsc -p tsconfig.build.json && node scripts/fix-dts-extensions.mjs"
   },
   "dependencies": {
-    "zod": "^4.1.12"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

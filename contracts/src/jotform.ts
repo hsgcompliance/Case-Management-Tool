@@ -287,6 +287,46 @@ export type TJotformFormsListQuery = z.infer<typeof JotformFormsListQuery>;
 export type TJotformFormSummary = z.infer<typeof JotformFormSummary>;
 export type TJotformFormsListResp = Ok<{ items: TJotformFormSummary[] }>;
 
+// ---------------- Form questions (GET /jotformFormQuestionsGet) ----------------
+export const JotformQuestionFieldType = z.enum(["text", "number", "date", "boolean", "select"]);
+export type TJotformQuestionFieldType = z.infer<typeof JotformQuestionFieldType>;
+export const JotformQuestionLogicType = z.enum([
+  "dropdown",
+  "single_select",
+  "multi_select",
+  "date",
+  "text",
+  "number",
+  "email",
+  "phone",
+  "file",
+  "unknown",
+]);
+export type TJotformQuestionLogicType = z.infer<typeof JotformQuestionLogicType>;
+
+export const JotformQuestionField = z
+  .object({
+    key: z.string().trim().min(1),
+    rawFieldId: z.string().trim().min(1),
+    label: z.string().trim().default(""),
+    rawType: z.string().trim().default(""),
+    type: JotformQuestionFieldType,
+    logicType: JotformQuestionLogicType,
+    typeLabel: z.string().trim().min(1),
+    options: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+export const JotformFormQuestionsGetQuery = z
+  .object({
+    formId: IdLike,
+  })
+  .passthrough();
+
+export type TJotformQuestionField = z.infer<typeof JotformQuestionField>;
+export type TJotformFormQuestionsGetQuery = z.infer<typeof JotformFormQuestionsGetQuery>;
+export type TJotformFormQuestionsGetResp = Ok<{ formId: string; fields: TJotformQuestionField[] }>;
+
 // ---------------- Link submission (POST /jotformLinkSubmission) ----------------
 export const JotformLinkSubmissionBody = z
   .object({

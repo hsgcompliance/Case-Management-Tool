@@ -1609,10 +1609,9 @@ function SubmissionsBlock({ customerId }: { customerId: string }) {
                             </div>
                             <button
                               type="button"
-                              onClick={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); void doLink(browseFormId, sid); }}
                               className="shrink-0 btn btn-xs btn-primary disabled:opacity-50"
                               disabled={alreadyLinked || busy}
-                              onClick={() => void doLink(browseFormId, sid)}
                             >
                               {alreadyLinked ? "Linked" : "Link"}
                             </button>

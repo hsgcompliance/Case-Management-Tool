@@ -84,7 +84,7 @@ export function ConditionGroupBox({ group, isExclude = false, onChange, onRemove
       {/* Conditions */}
       {group.conditions.length === 0 && (
         <p className="text-xs text-slate-400 dark:text-slate-500 italic px-1">
-          No conditions — click a field in the sidebar or "+ Add condition" below.
+          No conditions — click a field in the sidebar or &quot;+ Add condition&quot; below.
         </p>
       )}
       {group.conditions.map((cond, idx) => (
