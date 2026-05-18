@@ -204,7 +204,7 @@ export default function CustomerSearch({
       {/* No results hint */}
       {open && query.trim().length > 0 && results.length === 0 && !isLoading && (
         <div className="absolute z-50 mt-1 w-full rounded-xl border border-slate-200 bg-white shadow-lg px-3 py-2 text-sm text-slate-400">
-          No customers match "{query}"
+          No customers match &quot;{query}&quot;
         </div>
       )}
     </div>

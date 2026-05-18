@@ -6,6 +6,7 @@ import { useInvalidateMutation } from "./optimistic";
 import type {
   TJotformSubmissionEntity,
   TJotformFormSummary,
+  TJotformQuestionField,
   TJotformDigestMap,
   JotformFormsListReq,
   JotformLinkSubmissionReq,
@@ -26,6 +27,7 @@ const toIds = (value: string | string[]) =>
 
 export type JotformSubmission = TJotformSubmissionEntity;
 export type JotformForm = TJotformFormSummary;
+export type JotformQuestionField = TJotformQuestionField;
 export type JotformDigestMap = TJotformDigestMap;
 
 type JotformQueryOpts = {
@@ -167,6 +169,25 @@ export function useJotformFormsLite(
     ...opts,
     staleTime: opts?.staleTime ?? 300_000,
     refetchInterval: opts?.refetchInterval ?? false,
+  });
+}
+
+export function useJotformFormQuestions(
+  formId?: string,
+  opts?: JotformQueryOpts
+) {
+  const id = String(formId || "");
+  const enabled = (opts?.enabled ?? true) && !!id;
+  return useQuery<JotformQuestionField[]>({
+    ...RQ_DEFAULTS,
+    enabled,
+    staleTime: opts?.staleTime ?? 10 * 60_000,
+    refetchInterval: opts?.refetchInterval ?? false,
+    queryKey: qk.jotform.questions(id || "__none__"),
+    queryFn: async () => {
+      const res = await JotformAPI.formQuestionsGet({ formId: id });
+      return Array.isArray(res?.fields) ? (res.fields as JotformQuestionField[]) : [];
+    },
   });
 }
 

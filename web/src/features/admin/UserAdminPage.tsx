@@ -14,7 +14,7 @@ import {
 } from "@hooks/useUsers";
 import { toApiError } from "@client/api";
 import { toast } from "@lib/toast";
-import { topRoleNormalized } from "@lib/roles";
+import { topRoleNormalized, normalizeRole, isDevLike } from "@lib/roles";
 import { useAuth } from "@app/auth/AuthProvider";
 import Inbox from "@client/inbox";
 
@@ -28,12 +28,20 @@ const ROLE_OPTIONS: Array<{ value: ManagedTopRole; label: string; rank: number }
   { value: "user", label: "User", rank: 2 },
   { value: "admin", label: "Admin", rank: 3 },
   { value: "dev", label: "Dev", rank: 4 },
+  { value: "org_dev", label: "Org Dev", rank: 4 },
   { value: "super_dev", label: "Super Dev", rank: 5 },
 ];
 
+// Always offer these three in the invite form — the page is already admin-gated.
+const INVITE_ROLE_OPTIONS: Array<{ value: ManagedTopRole; label: string }> = [
+  { value: "viewer", label: "Viewer" },
+  { value: "user", label: "User" },
+  { value: "admin", label: "Admin" },
+];
+
 function topRoleRank(role: string) {
-  if (role === "org_dev") return 4;
-  return ROLE_OPTIONS.find((opt) => opt.value === role)?.rank ?? 0;
+  const norm = normalizeRole(role);
+  return ROLE_OPTIONS.find((opt) => opt.value === norm)?.rank ?? 0;
 }
 
 function normalizeTags(input: unknown): Tag[] {
@@ -96,10 +104,12 @@ function DetailField({ label, value }: { label: string; value: React.ReactNode }
 
 export default function AdminUsersPage() {
   const { user: authedUser, profile } = useAuth();
-  const viewerTopRole = String(profile?.topRole || "").toLowerCase();
+  const viewerTopRole = topRoleNormalized(profile as any, "");
   const viewerRank = topRoleRank(viewerTopRole);
-  const canCrossOrgManage =
-    viewerTopRole === "dev" || viewerTopRole === "org_dev" || viewerTopRole === "super_dev";
+  const canCrossOrgManage = isDevLike(profile as any);
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("[UserAdmin] role debug", { profileTopRole: profile?.topRole, viewerTopRole, viewerRank, canCrossOrgManage });
+  }
   const assignableRoles = React.useMemo(
     () => ROLE_OPTIONS.filter((opt) => opt.rank <= viewerRank),
     [viewerRank],
@@ -123,6 +133,7 @@ export default function AdminUsersPage() {
   const [sendingDigest, setSendingDigest] = React.useState(false);
   const [detailUser, setDetailUser] = React.useState<CompositeUser | null>(null);
   const [editDisplayName, setEditDisplayName] = React.useState("");
+  const [editTopRole, setEditTopRole] = React.useState<ManagedTopRole>("user");
 
   const {
     data,
@@ -190,11 +201,12 @@ export default function AdminUsersPage() {
   const openUserDetail = (u: CompositeUser) => {
     setDetailUser(u);
     setEditDisplayName(String(u.displayName || ""));
+    setEditTopRole((topRoleOf(u) as ManagedTopRole) || "user");
   };
 
   const persistTags = async (u: CompositeUser, tags: Tag[]) => {
     if (tags.length === 0) {
-      toast("At least one role tag is required.", { type: "error" });
+      toast("At least one role is required.", { type: "error" });
       return;
     }
     try {
@@ -222,7 +234,7 @@ export default function AdminUsersPage() {
       return;
     }
     if (inviteTopRole !== "viewer" && inviteTags.length === 0) {
-      toast("Select at least one role tag.", { type: "error" });
+      toast("Select at least one role.", { type: "error" });
       return;
     }
     if (topRoleRank(inviteTopRole) > viewerRank) {
@@ -311,7 +323,7 @@ export default function AdminUsersPage() {
   const approveUser = async (u: CompositeUser) => {
     const tags = rowTags[u.uid] || normalizeTags(u.roles);
     if (tags.length === 0) {
-      toast("Select at least one role tag before approval.", { type: "error" });
+      toast("Select at least one role before approval.", { type: "error" });
       return;
     }
     if (isSelf(u)) {
@@ -337,11 +349,11 @@ export default function AdminUsersPage() {
   const setTopRole = async (u: CompositeUser, topRole: ManagedTopRole) => {
     const tags = rowTags[u.uid] || normalizeTags(u.roles);
     if (topRole !== "viewer" && tags.length === 0) {
-      toast("Select at least one role tag.", { type: "error" });
+      toast("Select at least one role.", { type: "error" });
       return;
     }
     if (isSelf(u)) {
-      toast("Use another admin account to change your own top role.", { type: "error" });
+      toast("Use another admin account to change your own access level.", { type: "error" });
       return;
     }
     if (topRoleRank(topRole) > viewerRank) {
@@ -354,7 +366,7 @@ export default function AdminUsersPage() {
         roles: topRole === "viewer" ? [] : tags,
         topRole,
       } as any);
-      toast(`Top role set to ${topRole}.`, { type: "success" });
+      toast(`Access set to ${topRole}.`, { type: "success" });
     } catch (e: unknown) {
       toast(toApiError(e).error, { type: "error" });
     }
@@ -440,7 +452,7 @@ export default function AdminUsersPage() {
             />
           </label>
           <label className="text-sm">
-                  <span className="text-xs text-slate-600">Role</span>
+            <span className="text-xs text-slate-600">Role</span>
             <select
               className="select mt-1"
               value={inviteTopRole}
@@ -448,7 +460,7 @@ export default function AdminUsersPage() {
                 setInviteTopRole(e.currentTarget.value as ManagedTopRole)
               }
             >
-              {assignableRoles.map((role) => (
+              {INVITE_ROLE_OPTIONS.map((role) => (
                 <option key={role.value} value={role.value}>{role.label}</option>
               ))}
             </select>
@@ -537,7 +549,7 @@ export default function AdminUsersPage() {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <DetailField label="UID" value={selectedUser.uid} />
               <DetailField label="Email" value={selectedUser.email || "-"} />
-              <DetailField label="Top Role" value={topRoleOf(selectedUser)} />
+              <DetailField label="Access" value={topRoleOf(selectedUser)} />
               <DetailField label="Status" value={selectedUser.active ? "active" : "inactive"} />
               <DetailField label="Created" value={formatDateTime(selectedUser.createdAt)} />
               <DetailField label="Last Login" value={formatDateTime(selectedUser.lastLogin)} />
@@ -551,7 +563,34 @@ export default function AdminUsersPage() {
             </div>
 
             <div className="rounded border border-slate-200 p-3 dark:border-slate-700">
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Role Tags</div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Access Level</div>
+              {isSelf(selectedUser) ? (
+                <p className="text-xs text-slate-500">You cannot change your own access level.</p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <select
+                    className="select text-sm"
+                    value={editTopRole}
+                    onChange={(e) => setEditTopRole(e.currentTarget.value as ManagedTopRole)}
+                    disabled={busy}
+                  >
+                    {INVITE_ROLE_OPTIONS.filter((r) => topRoleRank(r.value) <= (viewerRank || 3)).map((role) => (
+                      <option key={role.value} value={role.value}>{role.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btn-sm"
+                    disabled={busy || editTopRole === topRoleOf(selectedUser)}
+                    onClick={() => void setTopRole(selectedUser, editTopRole)}
+                  >
+                    {setRoleMut.isPending ? "Saving…" : "Save Access"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded border border-slate-200 p-3 dark:border-slate-700">
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Role</div>
               <div className="flex flex-wrap gap-2">
                 {TAGS.map((tag) => (
                   <label key={tag} className="inline-flex items-center gap-1 text-xs">
@@ -664,8 +703,8 @@ export default function AdminUsersPage() {
           <thead className="text-left border-b bg-slate-50">
             <tr>
               <th className="p-2">User</th>
-              <th className="p-2">Top Role</th>
-              <th className="p-2">Tags</th>
+              <th className="p-2">Access</th>
+              <th className="p-2">Role</th>
               <th className="p-2">Status</th>
               <th className="p-2">Last Login</th>
               <th className="p-2 text-right">Actions</th>

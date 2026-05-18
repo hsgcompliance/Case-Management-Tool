@@ -13,6 +13,7 @@ import {
 } from "@entities/ui/DynamicFormFields";
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
+import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip } from "@lib/colorRegistry";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -57,32 +58,11 @@ const RENTAL_ASSISTANCE_TAG = "rental-assistance";
 
 // ── Pin system ────────────────────────────────────────────────────────────────
 
-const PIN_COLORS = ["red", "amber", "emerald", "sky", "violet", "rose", "orange"] as const;
-type PinColor = typeof PIN_COLORS[number];
-
-const PIN_COLOR_CHIP: Record<PinColor, string> = {
-  red:     "border-red-200 bg-red-50 text-red-700",
-  amber:   "border-amber-200 bg-amber-50 text-amber-700",
-  emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  sky:     "border-sky-200 bg-sky-50 text-sky-700",
-  violet:  "border-violet-200 bg-violet-50 text-violet-700",
-  rose:    "border-rose-200 bg-rose-50 text-rose-700",
-  orange:  "border-orange-200 bg-orange-50 text-orange-700",
-};
-
-const PIN_COLOR_DOT: Record<PinColor, string> = {
-  red:     "bg-red-500",
-  amber:   "bg-amber-400",
-  emerald: "bg-emerald-500",
-  sky:     "bg-sky-400",
-  violet:  "bg-violet-500",
-  rose:    "bg-rose-500",
-  orange:  "bg-orange-400",
-};
+const PIN_COLORS = GRANT_ACCENT_COLORS;
+type PinColor = GrantAccentColor;
 
 function pinColorChipCls(color: string | null | undefined): string {
-  if (color && color in PIN_COLOR_CHIP) return PIN_COLOR_CHIP[color as PinColor];
-  return "border-slate-200 bg-slate-50 text-slate-700";
+  return grantAccentChip(color);
 }
 
 function normalizeTags(value: unknown): string[] {

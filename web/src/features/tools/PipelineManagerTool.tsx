@@ -67,7 +67,7 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               Incoming Jotform payment items are automatically classified to a grant + line item
-              when they match an active pipeline's rules. First matching pipeline wins.
+              when they match an active pipeline&apos;s rules. First matching pipeline wins.
             </p>
           </div>
           <button
@@ -84,9 +84,9 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
           <p className="font-medium text-slate-700 dark:text-slate-300">How auto-allocation works</p>
           <ol className="list-decimal list-inside space-y-1 text-xs">
             <li>A Jotform CC or Invoice submission lands in the payment queue.</li>
-            <li>Active pipelines run in creation order against the new item's fields.</li>
+            <li>Active pipelines run in creation order against the new item&apos;s fields.</li>
             <li>The first pipeline whose <strong>include rules</strong> match (and no <strong>exclude rules</strong> match) wins.</li>
-            <li>That pipeline's Grant + Line Item are stamped onto the queue item.</li>
+            <li>That pipeline&apos;s Grant + Line Item are stamped onto the queue item.</li>
             <li>You review and post the item to the ledger from the Invoicing tool.</li>
           </ol>
         </div>

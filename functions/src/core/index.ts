@@ -115,7 +115,7 @@ export {
 /* -------- Normalization helpers -------- */
 
 export type { AnyScalar } from "./norm";
-export { toStr, normStr, normId, normTok, uniqNorm } from "./norm";
+export { toStr, normStr, normId, normTok, normRole, uniqNorm } from "./norm";
 
 /* -------- Security / sanitization -------- */
 

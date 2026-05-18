@@ -2,11 +2,25 @@
 import type { TPipelineOperator } from "@types";
 
 export type PipelineFieldType = "text" | "select" | "boolean" | "number" | "date";
+export type PipelineLogicType =
+  | "dropdown"
+  | "single_select"
+  | "multi_select"
+  | "date"
+  | "text"
+  | "number"
+  | "email"
+  | "phone"
+  | "file"
+  | "unknown";
 
 export type PipelineFieldDef = {
   key: string;
   label: string;
   type: PipelineFieldType;
+  rawType?: string;
+  logicType?: PipelineLogicType;
+  typeLabel?: string;
   options?: string[];
   sampleValues?: string[];
   rawFieldId?: string;

@@ -330,7 +330,8 @@ export function tick(state: GameState, keys: Set<string>): GameState {
     return { ...state, levelWinFrames: lw };
   }
 
-  let { balls, player, boss, score, tick, ladders, platforms } = state;
+  const { ladders, platforms } = state;
+  let { balls, player, boss, score, tick } = state;
   const { ballSpeed, maxBalls, throwInterval } = state;
 
   tick = tick + 1;

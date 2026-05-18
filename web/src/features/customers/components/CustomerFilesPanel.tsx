@@ -544,7 +544,7 @@ export function LinkFolderDialog({
               {indexLoading ? (
                 <div className="text-sm text-slate-500">Loading folders from Drive…</div>
               ) : suggestions.length === 0 ? (
-                <div className="text-sm text-slate-500">No close matches. Try "Paste URL / ID".</div>
+                <div className="text-sm text-slate-500">No close matches. Try &quot;Paste URL / ID&quot;.</div>
               ) : (
                 <div className="space-y-1 max-h-64 overflow-auto">
                   {suggestions.map((f) => (

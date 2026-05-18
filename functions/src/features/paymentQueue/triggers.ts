@@ -10,7 +10,7 @@ import {
   onDocumentDeleted,
   onDocumentWritten,
 } from "firebase-functions/v2/firestore";
-import { logger } from "firebase-functions";
+import * as logger from "firebase-functions/logger";
 import { RUNTIME } from "../../core";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
 import { upsertPaymentQueueItems, voidPaymentQueueItems } from "./service";

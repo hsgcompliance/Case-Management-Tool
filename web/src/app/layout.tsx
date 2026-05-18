@@ -13,7 +13,7 @@ const initThemeScript = `
     (function () {
       try {
         var root = document.documentElement;
-        var mode = localStorage.getItem("hdb_theme_mode") || "light";
+        var mode = localStorage.getItem("hdb_theme_mode") || "system";
         var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
         var shouldDark = mode === "dark" || (mode === "system" && prefersDark);
         if (shouldDark) root.classList.add("dark");

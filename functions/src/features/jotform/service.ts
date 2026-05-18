@@ -22,6 +22,7 @@ import {
 import {
   JotformSubmission,
   JotformFormSummary,
+  JotformQuestionField,
   JotformDigestMap,
   JotformSubmissionCalc,
   JotformSubmissionPatchBody,
@@ -149,6 +150,15 @@ type JotformFormApi = {
   submissionsCount?: number | string;
   last_submission?: string;
   url?: string;
+};
+
+type JotformQuestionApi = {
+  qid?: string | number;
+  name?: string;
+  text?: string;
+  type?: string;
+  order?: string | number;
+  options?: string | string[] | Record<string, unknown>;
 };
 
 /* ---------------- Budget helpers (server-derived totals) ---------------- */
@@ -761,6 +771,135 @@ export async function listJotformForms(src: any) {
     .slice(0, max);
 
   return { items };
+}
+
+function parseQuestionOptions(input: unknown): string[] | undefined {
+  const raw = Array.isArray(input)
+    ? input
+    : input && typeof input === "object"
+      ? Object.values(input as Record<string, unknown>)
+      : String(input ?? "")
+        .split("|")
+        .map((s) => s.trim());
+  const out = raw.map((v) => String(v || "").trim()).filter(Boolean);
+  return out.length ? Array.from(new Set(out)) : undefined;
+}
+
+function normalizeJotformField(input: JotformQuestionApi) {
+  const rawType = String(input.type || "").trim().toLowerCase();
+  const options = parseQuestionOptions(input.options);
+
+  let type: "text" | "number" | "date" | "boolean" | "select" = "text";
+  let logicType:
+    | "dropdown"
+    | "single_select"
+    | "multi_select"
+    | "date"
+    | "text"
+    | "number"
+    | "email"
+    | "phone"
+    | "file"
+    | "unknown" = "unknown";
+  let typeLabel = "Unknown";
+
+  switch (rawType) {
+    case "control_dropdown":
+      type = "select";
+      logicType = "dropdown";
+      typeLabel = "Dropdown";
+      break;
+    case "control_radio":
+      type = "select";
+      logicType = "single_select";
+      typeLabel = "Single-select";
+      break;
+    case "control_checkbox":
+      type = "select";
+      logicType = "multi_select";
+      typeLabel = "Multi-select";
+      break;
+    case "control_datetime":
+      type = "date";
+      logicType = "date";
+      typeLabel = "Date";
+      break;
+    case "control_number":
+      type = "number";
+      logicType = "number";
+      typeLabel = "Number";
+      break;
+    case "control_email":
+      logicType = "email";
+      typeLabel = "Email";
+      break;
+    case "control_phone":
+      logicType = "phone";
+      typeLabel = "Phone";
+      break;
+    case "control_fileupload":
+      logicType = "file";
+      typeLabel = "File upload";
+      break;
+    case "control_textbox":
+    case "control_textarea":
+      logicType = "text";
+      typeLabel = "Text";
+      break;
+    default:
+      if (/(dropdown|radio|checkbox|select|scale|matrix)/.test(rawType) || options?.length) {
+        type = "select";
+        logicType = "dropdown";
+        typeLabel = "Dropdown";
+      } else if (/(number|currency|calculation|spinner)/.test(rawType)) {
+        type = "number";
+        logicType = "number";
+        typeLabel = "Number";
+      } else if (/(datetime|date|time)/.test(rawType)) {
+        type = "date";
+        logicType = "date";
+        typeLabel = "Date";
+      } else if (/(yesno|toggle)/.test(rawType)) {
+        type = "boolean";
+        logicType = "single_select";
+        typeLabel = "Boolean";
+      } else if (rawType) {
+        logicType = "text";
+        typeLabel = "Text";
+      }
+  }
+
+  return {
+    rawType,
+    type,
+    logicType,
+    typeLabel,
+    options: type === "select" ? options : undefined,
+  };
+}
+
+export async function getJotformFormQuestions(formId: string) {
+  const id = String(formId || "").trim();
+  const content = await jotformFetch<Record<string, JotformQuestionApi> | JotformQuestionApi[]>(
+    `/form/${id}/questions`
+  );
+  const rows = Array.isArray(content) ? content : Object.values(content || {});
+  const fields = rows
+    .map((q) => {
+      const rawFieldId = String(q.qid || "").trim();
+      const normalized = normalizeJotformField(q);
+      return {
+        key: `raw:${rawFieldId}`,
+        rawFieldId,
+        label: String(q.text || q.name || rawFieldId).trim(),
+        ...normalized,
+        order: Number(q.order ?? rawFieldId) || 0,
+      };
+    })
+    .filter((q) => !!q.rawFieldId && !!q.label)
+    .sort((a, b) => a.order - b.order || Number(a.rawFieldId) - Number(b.rawFieldId))
+    .map(({order: _order, ...q}) => JotformQuestionField.parse(q));
+  return {formId: id, fields};
 }
 
 async function findCustomerIdByExternalId(field: "cwId" | "hmisId", value: string, targetOrg: string) {

@@ -26,6 +26,21 @@ export const normTok = (v: unknown): string =>
     .trim()
     .replace(/[\s_-]+/g, "");
 
+/**
+ * Role-specific normalizer: lowercase + trim, collapse spaces/hyphens to
+ * underscores, then resolve legacy no-underscore aliases (e.g. "superdev" →
+ * "super_dev") written by old normTok-based code.
+ */
+const _ROLE_ALIAS: Record<string, string> = {
+  superdev:   "super_dev",
+  orgdev:     "org_dev",
+  publicuser: "public_user",
+};
+export const normRole = (v: unknown): string => {
+  const s = String(v || "").toLowerCase().trim().replace(/[\s-]+/g, "_");
+  return _ROLE_ALIAS[s.replace(/_/g, "")] ?? s;
+};
+
 /** Unique, non-empty normalized strings given a list and a normalizer. */
 export function uniqNorm(
   vals: unknown[],

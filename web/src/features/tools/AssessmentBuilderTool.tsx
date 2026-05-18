@@ -324,7 +324,7 @@ function SettingsDrawer({
                 placeholder="e.g. acuity, waitlistPriority"
               />
               {lockedKind && (
-                <p className="mt-1 text-[11px] text-slate-400">Kind is locked to "{lockedKind}" for this tool.</p>
+                <p className="mt-1 text-[11px] text-slate-400">Kind is locked to &quot;{lockedKind}&quot; for this tool.</p>
               )}
             </div>
 

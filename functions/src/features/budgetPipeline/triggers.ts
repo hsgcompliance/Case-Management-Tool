@@ -5,7 +5,7 @@
 // Only fires when queueStatus === "pending" and grantId is still null.
 //
 import {onDocumentCreated} from 'firebase-functions/v2/firestore';
-import {logger} from 'firebase-functions';
+import * as logger from 'firebase-functions/logger';
 import {db, RUNTIME, isoNow} from '../../core';
 import {type TBudgetPipeline} from './schemas';
 import {matchesPipeline} from './service';

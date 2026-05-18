@@ -345,6 +345,8 @@ import type {
   TJotformSubmissionsStructureResp,
   TJotformFormsListQuery,
   TJotformFormsListResp,
+  TJotformFormQuestionsGetQuery,
+  TJotformFormQuestionsGetResp,
   TJotformLinkSubmissionBody,
   TJotformLinkSubmissionResp,
   TJotformSyncSelectionBody,
@@ -386,6 +388,8 @@ export type JotformSubmissionsStructureResp = TJotformSubmissionsStructureResp;
 
 export type JotformFormsListReq = TJotformFormsListQuery;
 export type JotformFormsListResp = TJotformFormsListResp;
+export type JotformFormQuestionsGetReq = TJotformFormQuestionsGetQuery;
+export type JotformFormQuestionsGetResp = TJotformFormQuestionsGetResp;
 
 export type JotformLinkSubmissionReq = TJotformLinkSubmissionBody;
 export type JotformLinkSubmissionResp = TJotformLinkSubmissionResp;
@@ -409,6 +413,29 @@ export type JotformApiListReq = TJotformApiListQuery;
 export type JotformApiListResp = TJotformApiListResp;
 export type JotformApiGetReq = TJotformApiGetQuery;
 export type JotformApiGetResp = TJotformApiGetResp;
+
+/* ============================================================================
+   Budget Pipeline
+============================================================================ */
+import type {
+  TBudgetPipeline,
+  TBudgetPipelineUpsertBody,
+  TBudgetPipelineListQuery,
+  TBudgetPipelineDeleteBody,
+  TBudgetPipelinePreviewBody,
+  TBudgetPipelinePreviewResult,
+} from "./budgetPipeline";
+
+export type BudgetPipelineListReq = TBudgetPipelineListQuery;
+export type BudgetPipelineListResp = Ok<{ items: TBudgetPipeline[]; count: number }>;
+export type BudgetPipelineGetReq = { id: string };
+export type BudgetPipelineGetResp = Ok<{ pipeline: TBudgetPipeline }>;
+export type BudgetPipelineUpsertReq = TBudgetPipelineUpsertBody;
+export type BudgetPipelineUpsertResp = Ok<{ id: string; pipeline: TBudgetPipeline }>;
+export type BudgetPipelineDeleteReq = TBudgetPipelineDeleteBody;
+export type BudgetPipelineDeleteResp = Ok<{ deleted: string }>;
+export type BudgetPipelinePreviewReq = TBudgetPipelinePreviewBody;
+export type BudgetPipelinePreviewResp = Ok<TBudgetPipelinePreviewResult>;
 
 
 /* ============================================================================
@@ -958,6 +985,7 @@ export interface EndpointMap {
   jotformSubmissionsGet: { req: JotformSubmissionsGetReq; resp: JotformSubmissionsGetResp };
   jotformSubmissionsStructure: { req: JotformSubmissionsStructureReq; resp: JotformSubmissionsStructureResp };
   jotformFormsList: { req: JotformFormsListReq; resp: JotformFormsListResp };
+  jotformFormQuestionsGet: { req: JotformFormQuestionsGetReq; resp: JotformFormQuestionsGetResp };
   jotformLinkSubmission: { req: JotformLinkSubmissionReq; resp: JotformLinkSubmissionResp };
   jotformSyncSelection: { req: JotformSyncSelectionReq; resp: JotformSyncSelectionResp };
   jotformDigestUpsert: { req: JotformDigestUpsertReq; resp: JotformDigestUpsertResp };
@@ -966,6 +994,13 @@ export interface EndpointMap {
   jotformSyncSubmissions: { req: JotformSyncSubmissionsReq; resp: JotformSyncSubmissionsResp };
   jotformApiSubmissionsList: { req: JotformApiListReq; resp: JotformApiListResp };
   jotformApiSubmissionGet: { req: JotformApiGetReq; resp: JotformApiGetResp };
+
+  // BUDGET PIPELINE
+  budgetPipelineList: { req: BudgetPipelineListReq; resp: BudgetPipelineListResp };
+  budgetPipelineGet: { req: BudgetPipelineGetReq; resp: BudgetPipelineGetResp };
+  budgetPipelineUpsert: { req: BudgetPipelineUpsertReq; resp: BudgetPipelineUpsertResp };
+  budgetPipelineDelete: { req: BudgetPipelineDeleteReq; resp: BudgetPipelineDeleteResp };
+  budgetPipelinePreview: { req: BudgetPipelinePreviewReq; resp: BudgetPipelinePreviewResp };
 
   // PAYMENTS 
   paymentsGenerateProjections: { req: PaymentsGenerateProjectionsReq; resp: PaymentsGenerateProjectionsResp };

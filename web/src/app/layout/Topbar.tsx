@@ -15,7 +15,8 @@ import { isAdminLike, isDevLike, isViewerLike } from "@lib/roles";
 const nav = [
   { to: "/reports", label: "Reports" },
   { to: "/customers", label: "Customers" },
-  { to: "/casemanagers", label: "Case Management" },
+  // NOTE: /casemanagers is intentionally hidden from nav — page exists but is not in use.
+  // Do not re-add this link without explicit instruction from the project owner.
   { to: "/budget", label: "Budget" },
   { to: "/programs", label: "Programs" },
   { to: "/tools", label: "Tools" },
@@ -119,7 +120,7 @@ export function Topbar() {
 
         {showNav ? (
           <nav aria-label="Primary" className="hidden md:flex items-center gap-1" data-tour="topbar-nav">
-            {(isViewer ? nav.filter((n) => n.to === "/budget" || n.to === "/casemanagers" || n.to === "/programs") : nav).map((n) => {
+            {(isViewer ? nav.filter((n) => n.to === "/budget" || n.to === "/programs") : nav).map((n) => {
               const active = isRouteActive(pathname, n.to);
               return (
                 <Link

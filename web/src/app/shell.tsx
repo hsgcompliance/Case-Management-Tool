@@ -26,12 +26,16 @@ function isPanelStyleRoute(pathname: string | null): boolean {
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isPanelStyle = isPanelStyleRoute(pathname);
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   const shellProfile = (profile || null) as ShellProfile | null;
   const textScalePref = parseTextScalePreference(shellProfile?.settings?.textScale);
   const themeMode = parseThemeMode(shellProfile?.settings?.themeMode);
 
   useEffect(() => {
+    // Don't touch the class while auth is still booting — initThemeScript already
+    // applied the correct class from localStorage, and running here with a null
+    // profile would reset it to "system" and cause a visible flash.
+    if (loading) return;
     if (typeof window === "undefined") return;
     const root = document.documentElement;
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
@@ -45,7 +49,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     apply();
     mql.addEventListener("change", apply);
     return () => mql.removeEventListener("change", apply);
-  }, [themeMode]);
+  }, [loading, themeMode]);
 
   return (
     <div className={`min-h-screen flex flex-col text-sm hdb-text-scale-${textScalePref}`}>

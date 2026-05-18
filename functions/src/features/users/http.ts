@@ -10,6 +10,7 @@ import {
   roleTagsFromClaims,
   isDev,
   isSuperDev,
+  normRole,
   OAUTH_CLIENT_ID,
   OAUTH_CLIENT_SECRET,
   OAUTH_REFRESH_TOKEN,
@@ -90,17 +91,19 @@ function canAssignElevatedTopRole(caller: Claims, topRole?: unknown) {
   return requestedRank <= topRoleRank(topRoleFromClaims(caller));
 }
 
+// Keys are canonical underscored names — normRole normalizes both incoming
+// body values ("org_dev") and legacy claims ("orgdev") to match.
 const TOP_ROLE_RANK: Record<string, number> = {
-  viewer: 1,
-  user: 2,
-  admin: 3,
-  dev: 4,
-  org_dev: 4,
+  viewer:    1,
+  user:      2,
+  admin:     3,
+  dev:       4,
+  org_dev:   4,
   super_dev: 5,
 };
 
 function topRoleRank(topRole?: unknown) {
-  return TOP_ROLE_RANK[String(topRole || "").trim().toLowerCase()] ?? 0;
+  return TOP_ROLE_RANK[normRole(topRole)] ?? 0;
 }
 
 // POST /usersCreate (admin)

@@ -16,8 +16,8 @@ export const DEFAULT_CUSTOMER_VIEW_FEATURE_FLAGS: CustomerViewFeatureFlags = {
   searchPlaceholder: "Search by name, CW ID, HMIS ID — Enter to search all",
   loadingMessage: "Loading customers...",
   errorMessage: "Error loading customers.",
-  emptyStateDefaultMessage: "No customers found.",
-  emptyStateSearchMessage: "No customers match your search.",
+  emptyStateDefaultMessage: "No customers found. Try expanding your filters or adjusting the scope.",
+  emptyStateSearchMessage: "No customers match your search. Try a different name or ID, or expand the filters.",
 };
 
 export function resolveCustomerViewFeatureFlags(

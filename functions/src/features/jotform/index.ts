@@ -8,6 +8,7 @@ export {
   jotformSubmissionsList,
   jotformSubmissionsGet,
   jotformFormsList,
+  jotformFormQuestionsGet,
   jotformLinkSubmission,
   jotformSyncSelection,
   jotformDigestUpsert,
@@ -23,4 +24,3 @@ export {
   onJotformSubmissionUpdate,
   onJotformSubmissionDelete,
 } from "./triggers";
-

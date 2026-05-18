@@ -488,7 +488,7 @@ function MissingFieldsBanner({
               <div key={key} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs">
                 <div>
                   <span className="font-mono text-slate-700">{key}</span>
-                  {preview ? <span className="ml-2 text-slate-500">"{preview.slice(0, 60)}{preview.length > 60 ? "…" : ""}"</span> : <span className="ml-2 italic text-slate-400">empty</span>}
+                  {preview ? <span className="ml-2 text-slate-500">&quot;{preview.slice(0, 60)}{preview.length > 60 ? "…" : ""}&quot;</span> : <span className="ml-2 italic text-slate-400">empty</span>}
                 </div>
                 <button className="btn btn-ghost btn-sm text-blue-600" onClick={() => onAddOne(key)}>+ Add</button>
               </div>
@@ -787,7 +787,7 @@ function AddFieldDialog({ newKeys, answers, onAdd, onClose }: AddFieldDialogProp
                     >
                       <div>
                         <div className="font-mono text-sm text-slate-700">{key}</div>
-                        {preview ? <div className="mt-0.5 truncate text-xs text-slate-500">"{preview.slice(0, 60)}"</div> : <div className="mt-0.5 text-xs italic text-slate-400">empty answer</div>}
+                        {preview ? <div className="mt-0.5 truncate text-xs text-slate-500">&quot;{preview.slice(0, 60)}&quot;</div> : <div className="mt-0.5 text-xs italic text-slate-400">empty answer</div>}
                       </div>
                       <span className="text-sm text-blue-500">+ Add</span>
                     </button>

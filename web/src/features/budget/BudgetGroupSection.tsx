@@ -2,29 +2,9 @@
 "use client";
 import React from "react";
 import { BudgetCard } from "./BudgetCard";
+import { grantAccentSolid } from "@lib/colorRegistry";
 import type { BudgetGroupItem } from "@hooks/useOrgConfig";
 import type { TGrant as Grant } from "@types";
-
-// Color key → header accent class
-const ACCENT: Record<string, string> = {
-  sky:     "bg-sky-500",
-  blue:    "bg-blue-500",
-  indigo:  "bg-indigo-500",
-  violet:  "bg-violet-500",
-  purple:  "bg-purple-500",
-  pink:    "bg-pink-500",
-  rose:    "bg-rose-500",
-  red:     "bg-red-500",
-  orange:  "bg-orange-500",
-  amber:   "bg-amber-500",
-  yellow:  "bg-yellow-500",
-  lime:    "bg-lime-500",
-  green:   "bg-green-500",
-  emerald: "bg-emerald-500",
-  teal:    "bg-teal-500",
-  cyan:    "bg-cyan-500",
-  slate:   "bg-slate-400",
-};
 
 const COL_CLASS: Record<number, string> = {
   1: "grid-cols-1",
@@ -72,7 +52,7 @@ export function BudgetGroupSection({
     groupSpent += Number((t.spent ?? b.spent ?? 0) as number);
   }
 
-  const accentClass = color && ACCENT[color] ? ACCENT[color] : "bg-slate-200 dark:bg-slate-600";
+  const accentClass = color ? grantAccentSolid(color) : "bg-slate-200 dark:bg-slate-600";
   const colClass = COL_CLASS[cols] ?? COL_CLASS[3];
 
   return (

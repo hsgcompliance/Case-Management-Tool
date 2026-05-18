@@ -124,6 +124,7 @@ export const qk = {
       ["jotform", "list", stable(filters || {})] as const,
     detail: (id: string) => ["jotform", "detail", id] as const,
     structure: () => ["jotform", "structure"] as const,
+    questions: (formId: string) => ["jotform", "questions", formId] as const,
     apiList: (formId: string, params?: Record<string, unknown>) =>
       ["jotform", "apiList", formId, stable(params || {})] as const,
     apiDetail: (id: string) => ["jotform", "apiDetail", id] as const,

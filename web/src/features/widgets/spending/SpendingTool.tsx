@@ -46,6 +46,7 @@ import { SpendDetailModal } from "./SpendDetailModal";
 import type { CardBudget } from "./SpendDetailModal";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets/jotform/jotformSubmissionView";
+import { GRANT_ACCENT_COLORS, grantAccentSolid, grantAccentChip } from "@lib/colorRegistry";
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -220,7 +221,7 @@ function sanitizeSavedSpendingView(value: unknown): SpendingSavedView | null {
     ? (raw.filterState as Partial<SpendingFilterState>)
     : null;
   if (!id || !name || !filterState) return null;
-  const VALID_COLORS = new Set(["slate", "sky", "emerald", "amber", "rose", "violet", "orange"]);
+  const VALID_COLORS = new Set(GRANT_ACCENT_COLORS);
   const color = typeof raw.color === "string" && VALID_COLORS.has(raw.color) ? raw.color : undefined;
   return {
     id,
@@ -234,25 +235,6 @@ function sanitizeSavedSpendingView(value: unknown): SpendingSavedView | null {
   };
 }
 
-const VIEW_COLOR_DOT: Record<string, string> = {
-  slate: "bg-slate-400",
-  sky: "bg-sky-400",
-  emerald: "bg-emerald-500",
-  amber: "bg-amber-400",
-  rose: "bg-rose-500",
-  violet: "bg-violet-500",
-  orange: "bg-orange-400",
-};
-
-const VIEW_COLOR_ACTIVE: Record<string, string> = {
-  slate: "border-slate-300 bg-slate-100 text-slate-800",
-  sky: "border-sky-200 bg-sky-50 text-sky-800",
-  emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  amber: "border-amber-200 bg-amber-50 text-amber-800",
-  rose: "border-rose-200 bg-rose-50 text-rose-800",
-  violet: "border-violet-200 bg-violet-50 text-violet-800",
-  orange: "border-orange-200 bg-orange-50 text-orange-800",
-};
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -725,15 +707,6 @@ function RowContextMenu({
   );
 }
 
-// Dot bg classes from BudgetConfigModal COLOR_DEFS — keyed by color name
-const BUDGET_COLOR_DOT: Record<string, string> = {
-  sky: "bg-sky-500", blue: "bg-blue-500", indigo: "bg-indigo-500",
-  violet: "bg-violet-500", purple: "bg-purple-500", pink: "bg-pink-500",
-  rose: "bg-rose-500", red: "bg-red-500", orange: "bg-orange-500",
-  amber: "bg-amber-500", lime: "bg-lime-500", green: "bg-green-500",
-  emerald: "bg-emerald-500", teal: "bg-teal-500", cyan: "bg-cyan-500",
-  slate: "bg-slate-400",
-};
 
 // ---------------------------------------------------------------------------
 // Filter Recorder — admin panel for inspecting + saving system-level presets
@@ -833,7 +806,7 @@ function FilterRecorder({
           {existingPresets.map((preset) => (
             <div key={preset.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
               {preset.color && (
-                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${VIEW_COLOR_DOT[preset.color] ?? "bg-slate-300"}`} />
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${grantAccentSolid(preset.color)}`} />
               )}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800">{preset.name}</div>
@@ -877,7 +850,7 @@ function FilterRecorder({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-slate-500">Color:</span>
-            {["", "slate", "sky", "emerald", "amber", "rose", "violet", "orange"].map((c) => (
+            {(["", ...GRANT_ACCENT_COLORS] as string[]).map((c) => (
               <button
                 key={c || "none"}
                 type="button"
@@ -885,7 +858,7 @@ function FilterRecorder({
                 className={[
                   "h-4 w-4 rounded-full border-2 transition",
                   presetColor === c ? "border-slate-600 scale-110" : "border-transparent hover:border-slate-400",
-                  c ? VIEW_COLOR_DOT[c] : "bg-white border border-slate-200",
+                  c ? grantAccentSolid(c) : "bg-white border border-slate-200",
                 ].join(" ")}
                 title={c || "No color"}
                 aria-label={`Color: ${c || "none"}`}
@@ -928,8 +901,8 @@ function ViewTab({
   onApply: () => void;
   onDelete?: () => void;
 }) {
-  const dotClass = view.color ? VIEW_COLOR_DOT[view.color] : null;
-  const activeClass = view.color && active ? VIEW_COLOR_ACTIVE[view.color] : "";
+  const dotClass = view.color ? grantAccentSolid(view.color) : null;
+  const activeClass = view.color && active ? grantAccentChip(view.color) : "";
   return (
     <span className="inline-flex overflow-hidden rounded border border-slate-200 bg-white">
       <button
@@ -2359,7 +2332,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
               />
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Color</span>
-                {["", "slate", "sky", "emerald", "amber", "rose", "violet", "orange"].map((c) => (
+                {(["", ...GRANT_ACCENT_COLORS] as string[]).map((c) => (
                   <button
                     key={c || "none"}
                     type="button"
@@ -2367,7 +2340,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                     className={[
                       "h-5 w-5 rounded-full border-2 transition",
                       saveViewColor === c ? "border-slate-700 scale-110" : "border-transparent hover:border-slate-400",
-                      c ? VIEW_COLOR_DOT[c] : "bg-white border border-slate-200",
+                      c ? grantAccentSolid(c) : "bg-white border border-slate-200",
                     ].join(" ")}
                     title={c || "No color"}
                     aria-label={`Color: ${c || "none"}`}
@@ -2903,7 +2876,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                           grantColorById.get(`${r.grantId}:${r.lineItemId}`) ??
                           grantColorById.get(`${r.grantId}:`) ??
                           null;
-                        const dotClass = colorKey ? (BUDGET_COLOR_DOT[colorKey] ?? "") : "";
+                        const dotClass = colorKey ? grantAccentSolid(colorKey) : "";
                         return (
                           <div className="flex items-center gap-1.5 truncate">
                             {dotClass && (
