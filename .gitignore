@@ -2,6 +2,7 @@
 .DS_Store
 Thumbs.db
 .vscode/
+.claude/settings.local.json
 
 # Logs and debug output
 logs/
@@ -36,6 +37,7 @@ node_modules/
 coverage/
 .nyc_output/
 .eslintcache
+web/test-results/
 
 # Firebase and emulator-local state
 .firebase/
@@ -60,8 +62,9 @@ web/.git/
 *credentials*.json
 scripts/env.config
 
-# Graphify cache (large blobs, rebuilt on demand)
+# Graphify cache and working files (rebuilt on demand)
 graphify-out/cache/
+.graphify_*
 
 # Generated build output
 **/.next/
@@ -77,7 +80,14 @@ functions_dump.txt
 
 # Internal-only data and non-deploy materials
 artifacts/
-docs/
+docs/*
+!docs/MAINTAINER_HANDOFF.md
+!docs/PRIVACY_AND_REPO_HYGIENE.md
+!docs/ARCHITECTURE_SPINE.md
+!docs/CONTRACTS_WORKFLOW.md
+!docs/PRODUCT_BACKLOG_NOTES.md
+!docs/DOC_REVIEW.md
+!docs/MIGRATION_HISTORY.md
 google Scripts Integration/
 scripts/out/
 scripts/prompts/
@@ -85,6 +95,7 @@ seeds/
 scripts/user-doc-audit/
 
 # Archived migration and seed artifacts (gitignored in new location)
+archive/migration/
 archive/migration/scripts/
 archive/migration/lib/
 archive/migration/artifacts/

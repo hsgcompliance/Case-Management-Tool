@@ -1,10 +1,9 @@
-````md
-# Grants (and Programs) — Backend Feature
+# Grants (and Programs) - Backend Feature
 
 This feature owns the **`grants`** collection and its HTTP surface area. It intentionally supports two closely-related concepts:
 
 - **Grant**: has a budget; tracks spending/projections against line items.
-- **Program**: a “budgetless grant”; same scheduling/metadata surface, but **budget is always `null`**.
+- **Program**: a "budgetless grant"; same scheduling/metadata surface, but **budget is always `null`**.
 
 The backend enforces these invariants. The frontend may *suggest* shape, but it does not get to decide truth.
 
@@ -34,9 +33,9 @@ The canonical switch is:
 
 **Coherence rule (server enforced):**
 - If `kind === "program"` **OR** `budgetMode === "none"`  
-  → server writes `{ kind:"program", budgetMode:"none", budget:null }`
+  -> server writes `{ kind:"program", budgetMode:"none", budget:null }`
 - Otherwise  
-  → server writes `{ kind:"grant", budgetMode:"budgeted" }` and allows `budget`
+  -> server writes `{ kind:"grant", budgetMode:"budgeted" }` and allows `budget`
 
 ### Status mirrors
 
@@ -67,7 +66,7 @@ Budget exists only when `kind:"grant"` / `budgetMode:"budgeted"`.
   - `remaining` is a compat alias of `balance`
   - window totals (optional): `projectedInWindow, spentInWindow, windowBalance, windowProjectedBalance`
 
-**Important:** Budget updates are treated as “special” in patching (see Patch semantics).
+**Important:** Budget updates are treated as "special" in patching (see Patch semantics).
 
 ---
 
@@ -75,9 +74,9 @@ Budget exists only when `kind:"grant"` / `budgetMode:"budgeted"`.
 
 Every operation resolves a **target org**:
 
-1. If caller has `orgId` in claims → **that is the target org**
-2. If caller is `dev` and provides explicit `orgId` (query/body) → **that org is target**
-3. Otherwise → request fails with `missing_org` / `forbidden`
+1. If caller has `orgId` in claims -> **that is the target org**
+2. If caller is `dev` and provides explicit `orgId` (query/body) -> **that org is target**
+3. Otherwise -> request fails with `missing_org` / `forbidden`
 
 **Non-dev callers cannot operate cross-org.**  
 Dev callers may, but only when an explicit target org is provided.
@@ -181,7 +180,7 @@ This feature maintains lightweight derived metadata:
   - `active` / `inactive`
   - `status.<status>`
 
-These are intentionally “best-effort” counters, not a ledger.
+These are intentionally "best-effort" counters, not a ledger.
 
 ---
 

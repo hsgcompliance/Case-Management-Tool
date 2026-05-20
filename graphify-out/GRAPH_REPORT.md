@@ -1,7 +1,8 @@
 # Graph Report - .  (2026-05-19)
 
 ## Corpus Check
-- Large corpus: 675 files · ~608,580 words. Semantic extraction will be expensive (many Claude tokens). Consider running on a subfolder, or use --no-semantic to run AST-only.
+- 636 files · ~599,831 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
 - 3543 nodes · 4654 edges · 615 communities detected
@@ -9,37 +10,37 @@
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_Core Service Layer|Core Service Layer]]
-- [[_COMMUNITY_Secret Games Engine|Secret Games Engine]]
-- [[_COMMUNITY_Spending Tool UI|Spending Tool UI]]
-- [[_COMMUNITY_Shared Utils|Shared Utils]]
-- [[_COMMUNITY_Enrollment Hooks|Enrollment Hooks]]
-- [[_COMMUNITY_Payment Hooks|Payment Hooks]]
-- [[_COMMUNITY_Assessment Services|Assessment Services]]
-- [[_COMMUNITY_Spend Detail Modal|Spend Detail Modal]]
-- [[_COMMUNITY_Space Invaders Game|Space Invaders Game]]
-- [[_COMMUNITY_Grant Modal UI|Grant Modal UI]]
-- [[_COMMUNITY_User Service|User Service]]
-- [[_COMMUNITY_Customer Hooks|Customer Hooks]]
-- [[_COMMUNITY_Jotform Extractor|Jotform Extractor]]
-- [[_COMMUNITY_Payment Editor Lab|Payment Editor Lab]]
-- [[_COMMUNITY_Rental Assist Digest|Rental Assist Digest]]
-- [[_COMMUNITY_Sheets Bridge Service|Sheets Bridge Service]]
-- [[_COMMUNITY_Budget Activity Tab|Budget Activity Tab]]
-- [[_COMMUNITY_Task Hooks|Task Hooks]]
-- [[_COMMUNITY_Customers Page|Customers Page]]
-- [[_COMMUNITY_Customer Files Panel|Customer Files Panel]]
-- [[_COMMUNITY_Payment Schedule Utils|Payment Schedule Utils]]
-- [[_COMMUNITY_Grant Details Tab|Grant Details Tab]]
-- [[_COMMUNITY_Spend Extractor|Spend Extractor]]
-- [[_COMMUNITY_Color Registry|Color Registry]]
-- [[_COMMUNITY_Date Utils|Date Utils]]
-- [[_COMMUNITY_Payment Schedule Builder|Payment Schedule Builder]]
-- [[_COMMUNITY_Payment Rows|Payment Rows]]
-- [[_COMMUNITY_User Admin Page|User Admin Page]]
-- [[_COMMUNITY_New Customer Flow|New Customer Flow]]
+- [[_COMMUNITY_Community 0|Community 0]]
+- [[_COMMUNITY_Community 1|Community 1]]
+- [[_COMMUNITY_Community 2|Community 2]]
+- [[_COMMUNITY_Community 3|Community 3]]
+- [[_COMMUNITY_Community 4|Community 4]]
+- [[_COMMUNITY_Community 5|Community 5]]
+- [[_COMMUNITY_Community 6|Community 6]]
+- [[_COMMUNITY_Community 7|Community 7]]
+- [[_COMMUNITY_Community 8|Community 8]]
+- [[_COMMUNITY_Community 9|Community 9]]
+- [[_COMMUNITY_Community 10|Community 10]]
+- [[_COMMUNITY_Community 11|Community 11]]
+- [[_COMMUNITY_Community 12|Community 12]]
+- [[_COMMUNITY_Community 13|Community 13]]
+- [[_COMMUNITY_Community 14|Community 14]]
+- [[_COMMUNITY_Community 15|Community 15]]
+- [[_COMMUNITY_Community 16|Community 16]]
+- [[_COMMUNITY_Community 17|Community 17]]
+- [[_COMMUNITY_Community 18|Community 18]]
+- [[_COMMUNITY_Community 19|Community 19]]
+- [[_COMMUNITY_Community 20|Community 20]]
+- [[_COMMUNITY_Community 21|Community 21]]
+- [[_COMMUNITY_Community 22|Community 22]]
+- [[_COMMUNITY_Community 23|Community 23]]
+- [[_COMMUNITY_Community 24|Community 24]]
+- [[_COMMUNITY_Community 25|Community 25]]
+- [[_COMMUNITY_Community 26|Community 26]]
+- [[_COMMUNITY_Community 27|Community 27]]
+- [[_COMMUNITY_Community 28|Community 28]]
 - [[_COMMUNITY_Community 29|Community 29]]
-- [[_COMMUNITY_Jotform Hooks|Jotform Hooks]]
+- [[_COMMUNITY_Community 30|Community 30]]
 - [[_COMMUNITY_Community 31|Community 31]]
 - [[_COMMUNITY_Community 32|Community 32]]
 - [[_COMMUNITY_Community 33|Community 33]]
@@ -651,119 +652,119 @@
 
 ## Communities
 
-### Community 0 - "Core Service Layer"
+### Community 0 - "Community 0"
 Cohesion: 0.06
 Nodes (68): assertDocOrgWritable(), assertTargetOrgAllowed(), backfillCaseManagerNames(), backfillCustomerNames(), buildContactCaseManagerIds(), canonicalKind(), cardMatchTerms(), caseManagerDisplayFromAuthUser() (+60 more)
 
-### Community 1 - "Secret Games Engine"
+### Community 1 - "Community 1"
 Cohesion: 0.08
 Nodes (59): applySmiteStrike(), applyUpgrade(), assignFormationMove(), assignTarget(), awardEnemyExperience(), awardKillDrops(), awardSoldierExperience(), buildCost() (+51 more)
 
-### Community 2 - "Spending Tool UI"
+### Community 2 - "Community 2"
 Cohesion: 0.06
 Nodes (27): advancedFilterMatches(), advancedQueueFieldValue(), builtInSpendingViews(), cardDisplayName(), cloneSpendingFilter(), close(), dateIso10(), fileSafeLabel() (+19 more)
 
-### Community 3 - "Shared Utils"
+### Community 3 - "Community 3"
 Cohesion: 0.1
 Nodes (27): addMonths(), addYears(), assertOrgAccess(), buildIdFromKey(), compositeKey(), dueMonth(), ensureMonthlySubtypeTag(), ensurePaymentIds() (+19 more)
 
-### Community 4 - "Enrollment Hooks"
+### Community 4 - "Community 4"
 Cohesion: 0.07
 Nodes (12): customerEnrollmentsQueryKey(), customerEnrollmentsQueryOptions(), findCachedEnrollment(), getStaleCustomerEnrollmentIds(), hasFreshCustomerEnrollmentsCache(), invalidateEnrollmentQueries(), preloadCustomerEnrollments(), useCustomerEnrollments() (+4 more)
 
-### Community 5 - "Payment Hooks"
+### Community 5 - "Community 5"
 Cohesion: 0.07
 Nodes (11): invalidateEnrollmentContext(), invalidateFromEnrollment(), patchEnrollmentLikePayments(), patchPaymentArray(), paymentBuilderMetaFromInput(), requireProjectionInput(), resolveEnrollmentContext(), toISO10() (+3 more)
 
-### Community 6 - "Assessment Services"
+### Community 6 - "Community 6"
 Cohesion: 0.19
 Nodes (32): addSnapshotUpdatesToBatch(), assertCustomerAccess(), assertEnrollmentAccess(), assertOrgScopedDoc(), batchCheckActiveStatus(), batchGetDocuments(), buildOutputEntry(), buildQuestionMap() (+24 more)
 
-### Community 7 - "Spend Detail Modal"
+### Community 7 - "Community 7"
 Cohesion: 0.09
 Nodes (20): asObject(), displayText(), firstText(), firstUsefulText(), handlePost(), handleReopen(), handleSaveQueueCorrection(), handleVoid() (+12 more)
 
-### Community 8 - "Space Invaders Game"
+### Community 8 - "Community 8"
 Cohesion: 0.12
 Nodes (22): drawEnemyShip(), drawFrame(), drawHud(), drawOverlay(), drawPlayer(), enemyCountForWave(), enemyFill(), isBossWave() (+14 more)
 
-### Community 9 - "Grant Modal UI"
+### Community 9 - "Community 9"
 Cohesion: 0.11
 Nodes (13): deepClone(), deriveBudget(), fromCents(), handleSave(), normalizeGrantForForm(), num(), recomputeBudgetTotals(), sanitizeBudgetForWrite() (+5 more)
 
-### Community 10 - "User Service"
+### Community 10 - "Community 10"
 Cohesion: 0.16
 Nodes (24): canonTopRole(), claimsFromShape(), createUserService(), dottedPrefixToNested(), getUserComposite(), inviteContinueUrl(), inviteUserService(), isRecord() (+16 more)
 
-### Community 11 - "Customer Hooks"
+### Community 11 - "Community 11"
 Cohesion: 0.1
 Nodes (13): applyUpsertToLists(), asArr(), attachIdsToFallbackRows(), extractUpsertIds(), extractUpsertRows(), getAllCustomerListKeys(), isActiveLike(), isDeletedLike() (+5 more)
 
-### Community 12 - "Jotform Extractor"
+### Community 12 - "Community 12"
 Cohesion: 0.23
 Nodes (25): asText(), bucketCard(), buildFallbackRow(), buildRawMeta(), canonicalCard(), computeFlex(), emptyTypedFiles(), extractCreditCard() (+17 more)
 
-### Community 13 - "Payment Editor Lab"
+### Community 13 - "Community 13"
 Cohesion: 0.17
 Nodes (25): amountNumber(), asRecord(), buildPaymentEditorEnrollmentOptions(), buildPaymentEditorGrantInfo(), buildPaymentEditorRows(), buildPaymentEditorSavePlan(), compliancePatchFromStatus(), complianceStatus() (+17 more)
 
-### Community 14 - "Rental Assist Digest"
+### Community 14 - "Community 14"
 Cohesion: 0.16
 Nodes (25): amountFromPayment(), assistanceTable(), budgetCell(), budgetColor(), budgetStrip(), buildAndSendRentalAssistanceDigest(), buildRentalAssistanceDigestData(), buildRentalAssistanceDigestHtml() (+17 more)
 
-### Community 15 - "Sheets Bridge Service"
+### Community 15 - "Community 15"
 Cohesion: 0.17
 Nodes (23): applyGrantLineItemDelete(), applyGrantLineItemUpsert(), applyGrantPatch(), applyPushOperation(), assertPaymentQueueOrg(), assertSheetsBridgeSecret(), buildGrantPatchPayload(), buildNextLineItems() (+15 more)
 
-### Community 16 - "Budget Activity Tab"
+### Community 16 - "Community 16"
 Cohesion: 0.13
 Nodes (18): addLineItem(), colorVal(), commit(), currency(), dateIso10(), handleFundsCommit(), isRentalAssistanceLineItem(), lineItemTypeKey() (+10 more)
 
-### Community 17 - "Task Hooks"
+### Community 17 - "Community 17"
 Cohesion: 0.1
 Nodes (5): applyOptimisticInboxStatusPatch(), applyOptimisticTasksListStatusPatch(), patchCollectionByStatus(), queryStatusFilter(), toTargetStatus()
 
-### Community 18 - "Customers Page"
+### Community 18 - "Community 18"
 Cohesion: 0.09
 Nodes (4): isDeletedCustomer(), matchesDeletedFilter(), readPersistedFilters(), writePersistedFilters()
 
-### Community 19 - "Customer Files Panel"
+### Community 19 - "Community 19"
 Cohesion: 0.12
 Nodes (14): buildFolderName(), buildTemplatePayload(), cleanLinkedFolders(), fileToBase64(), normalizeMatchText(), onAddFolder(), onLinkByUrl(), onLinkConfirm() (+6 more)
 
-### Community 20 - "Payment Schedule Utils"
+### Community 20 - "Community 20"
 Cohesion: 0.12
 Nodes (13): buildNoteTags(), computeRentCertDues(), firstOfNextMonth(), isConsecutiveMonth(), isISO(), isRentPayment(), monthDiff(), normalizePayments() (+5 more)
 
-### Community 21 - "Grant Details Tab"
+### Community 21 - "Community 21"
 Cohesion: 0.12
 Nodes (14): addCustomCategory(), asInvoiceOptions(), eligibilityDraftObject(), hasRentalAssistanceTag(), invoiceDocumentsFrom(), levelOfAssistanceFrom(), listFromUnknown(), mergeInvoiceOptions() (+6 more)
 
-### Community 22 - "Spend Extractor"
+### Community 22 - "Community 22"
 Cohesion: 0.32
 Nodes (21): asText(), bucketCard(), buildFallbackRow(), canonicalCard(), computeFlex(), emptyTypedFiles(), extractCreditCard(), extractFromDigest() (+13 more)
 
-### Community 23 - "Color Registry"
+### Community 23 - "Community 23"
 Cohesion: 0.16
 Nodes (23): grantAccentChip(), grantAccentHeaderBg(), grantAccentLeftBorder(), grantAccentRing(), grantAccentSolid(), isGrantAccentColor(), metricCardClass(), metricChipClass() (+15 more)
 
-### Community 24 - "Date Utils"
+### Community 24 - "Community 24"
 Cohesion: 0.15
 Nodes (19): addMonthsISO(), firstOfNextMonthISO(), fmtFromTsLike(), fmtMDY(), fmtShortMonthDay(), isISODate10(), isoToYearMonth(), itemMillis() (+11 more)
 
-### Community 25 - "Payment Schedule Builder"
+### Community 25 - "Community 25"
 Cohesion: 0.15
 Nodes (14): asPositiveInt(), asPositiveNumber(), cleanText(), defaultMonthlyPlan(), defaultServicePlan(), handleConfirmBuild(), handlePreviewSchedule(), invoiceDocsFromGrant() (+6 more)
 
-### Community 26 - "Payment Rows"
+### Community 26 - "Community 26"
 Cohesion: 0.16
 Nodes (17): asRecord(), buildCustomerPaymentRows(), buildGrantPaymentRows(), buildPaymentRows(), cents(), complianceLabel(), getPaymentRowsColumnValue(), iso10() (+9 more)
 
-### Community 27 - "User Admin Page"
+### Community 27 - "Community 27"
 Cohesion: 0.13
 Nodes (12): approveUser(), invite(), isPendingApproval(), isSelf(), normalizeTags(), onTagToggle(), openUserDetail(), persistTags() (+4 more)
 
-### Community 28 - "New Customer Flow"
+### Community 28 - "Community 28"
 Cohesion: 0.09
 Nodes (3): capEnrollmentEndDate(), createEnrollmentDraft(), isoToday()
 
@@ -771,7 +772,7 @@ Nodes (3): capEnrollmentEndDate(), createEnrollmentDraft(), isoToday()
 Cohesion: 0.19
 Nodes (21): buildAuthSelection(), buildCustomerFolder(), buildDriveContext(), buildInaccessibleFolderError(), buildServiceAccountContext(), buildSharedRefreshTokenContext(), buildUserAccessTokenContext(), collectAuthDiagnostics() (+13 more)
 
-### Community 30 - "Jotform Hooks"
+### Community 30 - "Community 30"
 Cohesion: 0.1
 Nodes (5): useJotformForms(), useJotformFormsLite(), useJotformSubmissions(), useJotformSubmissionsFrequent(), useJotformSubmissionsLite()
 
@@ -3714,17 +3715,17 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Should `Core Service Layer` be split into smaller, more focused modules?**
+- **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.06 - nodes in this community are weakly interconnected._
-- **Should `Secret Games Engine` be split into smaller, more focused modules?**
+- **Should `Community 1` be split into smaller, more focused modules?**
   _Cohesion score 0.08 - nodes in this community are weakly interconnected._
-- **Should `Spending Tool UI` be split into smaller, more focused modules?**
+- **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.06 - nodes in this community are weakly interconnected._
-- **Should `Shared Utils` be split into smaller, more focused modules?**
+- **Should `Community 3` be split into smaller, more focused modules?**
   _Cohesion score 0.1 - nodes in this community are weakly interconnected._
-- **Should `Enrollment Hooks` be split into smaller, more focused modules?**
+- **Should `Community 4` be split into smaller, more focused modules?**
   _Cohesion score 0.07 - nodes in this community are weakly interconnected._
-- **Should `Payment Hooks` be split into smaller, more focused modules?**
+- **Should `Community 5` be split into smaller, more focused modules?**
   _Cohesion score 0.07 - nodes in this community are weakly interconnected._
-- **Should `Spend Detail Modal` be split into smaller, more focused modules?**
+- **Should `Community 7` be split into smaller, more focused modules?**
   _Cohesion score 0.09 - nodes in this community are weakly interconnected._
