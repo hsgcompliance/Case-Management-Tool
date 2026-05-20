@@ -3,12 +3,7 @@
 import React from "react";
 import type { TPipelineCondition, TPipelineRuleNode } from "@types";
 import { ConditionRow } from "./ConditionRow";
-import {
-  NORMALIZED_FIELDS,
-  OPERATORS_BY_TYPE,
-  type PipelineFieldDef,
-  type PipelineFieldType,
-} from "../fieldDefs";
+import { NORMALIZED_FIELDS, OPERATORS_BY_TYPE, type PipelineFieldDef, type PipelineFieldType } from "../fieldDefs";
 
 const MAX_DEPTH = 3;
 
@@ -45,13 +40,11 @@ type Props = {
   description: string;
   root: TPipelineRuleNode;
   tone: "include" | "exclude";
-  formTitle: string;
-  formFields: PipelineFieldDef[];
+  fieldDefs: PipelineFieldDef[];
   onChange: (root: TPipelineRuleNode) => void;
 };
 
-export function RuleTreeEditor({ title, description, root, tone, formTitle, formFields, onChange }: Props) {
-  const allFields = React.useMemo(() => [...NORMALIZED_FIELDS, ...formFields], [formFields]);
+export function RuleTreeEditor({ title, description, root, tone, fieldDefs, onChange }: Props) {
 
   function updateNode(targetId: string, updater: (node: TPipelineRuleNode) => TPipelineRuleNode) {
     const visit = (node: TPipelineRuleNode): TPipelineRuleNode => {
@@ -82,8 +75,7 @@ export function RuleTreeEditor({ title, description, root, tone, formTitle, form
         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
           <ConditionRow
             condition={node.condition}
-            formTitle={formTitle}
-            formFields={formFields}
+            fieldDefs={fieldDefs}
             onChange={(condition) => updateNode(node.id, () => ({ ...node, condition }))}
             onRemove={() => {
               if (parentId) removeChild(parentId, node.id);
@@ -157,7 +149,7 @@ export function RuleTreeEditor({ title, description, root, tone, formTitle, form
           <button
             type="button"
             className="btn btn-xs btn-secondary"
-            onClick={() => addChild(node.id, newCondition(allFields))}
+            onClick={() => addChild(node.id, newCondition(fieldDefs))}
           >
             + Add condition
           </button>
@@ -165,7 +157,7 @@ export function RuleTreeEditor({ title, description, root, tone, formTitle, form
             type="button"
             className="btn btn-xs btn-ghost"
             disabled={depth >= MAX_DEPTH}
-            onClick={() => addChild(node.id, newGroup("AND", allFields))}
+            onClick={() => addChild(node.id, newGroup("AND", fieldDefs))}
             title={depth >= MAX_DEPTH ? "Maximum nesting depth reached" : undefined}
           >
             + Add condition group

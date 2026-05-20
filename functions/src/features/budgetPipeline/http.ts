@@ -51,7 +51,8 @@ export const budgetPipelineGet = secureHandler(async (req, res): Promise<void> =
     res.status(400).json({ok: false, error: 'id_required'});
     return;
   }
-  const pipeline = await getBudgetPipeline(id);
+  const orgId = resolveOrgId(req);
+  const pipeline = await getBudgetPipeline(id, orgId);
   if (!pipeline) {
     res.status(404).json({ok: false, error: 'not_found'});
     return;
@@ -71,8 +72,16 @@ export const budgetPipelineUpsert = secureHandler(async (req, res): Promise<void
   }
   const orgId = resolveOrgId(req);
   const uid = requireUid(req as any);
-  const result = await upsertBudgetPipeline(parsed.data, orgId, uid);
-  res.status(201).json({ok: true, ...result});
+  try {
+    const result = await upsertBudgetPipeline(parsed.data, orgId, uid);
+    res.status(201).json({ok: true, ...result});
+  } catch (err) {
+    if ((err as Error)?.message === 'not_found') {
+      res.status(404).json({ok: false, error: 'not_found'});
+      return;
+    }
+    throw err;
+  }
 }, {auth: 'user', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================
@@ -85,7 +94,12 @@ export const budgetPipelineDelete = secureHandler(async (req, res): Promise<void
     res.status(400).json({ok: false, error: 'invalid_body', issues: parsed.error.issues});
     return;
   }
-  await deleteBudgetPipeline(parsed.data.id);
+  const orgId = resolveOrgId(req);
+  const deleted = await deleteBudgetPipeline(parsed.data.id, orgId);
+  if (!deleted) {
+    res.status(404).json({ok: false, error: 'not_found'});
+    return;
+  }
   res.json({ok: true, deleted: parsed.data.id});
 }, {auth: 'user', methods: ['POST', 'OPTIONS']});
 

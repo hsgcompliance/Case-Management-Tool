@@ -11,6 +11,7 @@ import {
   MAX_PINNED_GRANTS,
 } from "@entities/Page/dashboardStyle/data/pinnedGrants";
 import type { TGrant as Grant } from "@types";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
 
@@ -42,12 +43,7 @@ export function useTogglePinnedGrant() {
 
 // ─── Formatting ───────────────────────────────────────────────────────────────
 
-const fmtUsd = (n: number) =>
-  Number(n || 0).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 
 function getGrantKind(g: Grant): "grant" | "program" {
   const k = String((g as any)?.kind || "").toLowerCase();

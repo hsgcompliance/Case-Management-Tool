@@ -43,6 +43,7 @@ export type PaymentQueueItem = Record<string, unknown> & {
   closedBypassLedger?: boolean;
   closedBypassLedgerAt?: string | null;
   rawAnswers?: Record<string, unknown>;
+  transactionFields?: Record<string, unknown>;
   reopenedAt?: string | null;
   rawMeta?: Record<string, unknown>;
   localModified?: boolean;

@@ -94,6 +94,13 @@ function deleteFutureTasksAfterEndDate(schedule: any[], endDateISO: string) {
   return { changed: next.length !== schedule.length, next };
 }
 
+function capEndDateToGrant(endDate: unknown, grantEndDate: unknown) {
+  const end = String(endDate || "").slice(0, 10);
+  const grantEnd = String(grantEndDate || "").slice(0, 10);
+  if (!end || !grantEnd) return end;
+  return end > grantEnd ? grantEnd : end;
+}
+
 export const enrollmentsPatch = secureHandler(
   async (req, res) => {
   const parsed = EnrollmentsPatchBody.parse(req.body);
@@ -135,11 +142,19 @@ export const enrollmentsPatch = secureHandler(
         updatedAt: FieldValue.serverTimestamp(),
       };
       const existing = existingById.get(String(id)) || {};
+      let grantEndDate = "";
+      if (existing.grantId) {
+        const grantSnap = await db.collection("grants").doc(String(existing.grantId)).get();
+        grantEndDate = String(grantSnap.data()?.endDate || "").slice(0, 10);
+      }
 
       // allow updates, but protect identity/finance/schedule
       for (const [k, v] of Object.entries(patch)) {
         if (ALWAYS_IMMUTABLE.has(k)) continue;
         data[k] = v;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, "endDate") && data.endDate) {
+        data.endDate = capEndDateToGrant(data.endDate, grantEndDate);
       }
 
       // apply unsets last so delete wins
@@ -181,24 +196,25 @@ export const enrollmentsPatch = secureHandler(
             existing.endDate ??
             ""
         ).slice(0, 10) || (closeLike ? toDateOnly(new Date()) : "");
+      const cappedEffectiveEndDate = capEndDateToGrant(effectiveEndDate, grantEndDate);
 
-      if (closeLike && effectiveEndDate) {
+      if (closeLike && cappedEffectiveEndDate) {
         if (explicitClose) {
           const lastPaymentDate = latestPaymentDueDate(Array.isArray(existing.payments) ? existing.payments : []);
-          if (lastPaymentDate && effectiveEndDate < lastPaymentDate) {
-            throw err(`close_date_before_last_payment (${effectiveEndDate} < ${lastPaymentDate})`, 400, {
+          if (lastPaymentDate && cappedEffectiveEndDate < lastPaymentDate) {
+            throw err(`close_date_before_last_payment (${cappedEffectiveEndDate} < ${lastPaymentDate})`, 400, {
               id,
-              closeDate: effectiveEndDate,
+              closeDate: cappedEffectiveEndDate,
               lastPaymentDate,
             });
           }
         }
-        if (!("endDate" in patch) && !existing.endDate) data.endDate = effectiveEndDate;
+        if (!("endDate" in patch) && !existing.endDate) data.endDate = cappedEffectiveEndDate;
         const schedule = Array.isArray(existing.taskSchedule) ? existing.taskSchedule : [];
         const taskChange =
           nextStatus === "deleted" || nextDeleted
-            ? deleteFutureTasksAfterEndDate(schedule, effectiveEndDate)
-            : closeFutureTasksAfterEndDate(schedule, effectiveEndDate, String(user?.uid || "system"));
+            ? deleteFutureTasksAfterEndDate(schedule, cappedEffectiveEndDate)
+            : closeFutureTasksAfterEndDate(schedule, cappedEffectiveEndDate, String(user?.uid || "system"));
         if (taskChange.changed) {
           data.taskSchedule = taskChange.next;
           data.taskStats = summarize(taskChange.next);

@@ -115,6 +115,7 @@ export const PaymentQueueItem = z.object({
   // ── Raw preservation ──────────────────────────────────────────────────────
   rawStatus: z.string(),
   rawAnswers: z.record(z.string(), z.unknown()),
+  transactionFields: z.record(z.string(), z.unknown()).default({}),
   rawMeta: z.object({
     id: z.string(),
     form_id: z.string(),

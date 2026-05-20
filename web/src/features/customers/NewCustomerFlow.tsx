@@ -4,7 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
-import type { CustomersUpsertReq, ReqOf, TCustomerEntity } from "@types";
+import type { CustomersUpsertReq, ReqOf, TCustomerEntity, TPayment } from "@types";
 import { AssessmentInput } from "@entities/assessments/AssessmentInput";
 import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
@@ -24,7 +24,6 @@ import { useTasksGenerateScheduleWrite } from "@hooks/useTasks";
 import { useMe, useUsers, type CompositeUser } from "@hooks/useUsers";
 import { useQueryClient } from "@tanstack/react-query";
 import CustomersAPI from "@client/customers";
-import { addYears, parseISO10, toISODate } from "@lib/date";
 import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
 import { findDuplicates, DUP_WARN_THRESHOLD } from "@lib/duplicateScore";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
@@ -45,6 +44,7 @@ type GrantOption = {
   id: string;
   label: string;
   status?: string | null;
+  endDate?: string | null;
 };
 type EnrollmentDraft = {
   grantId: string;
@@ -76,19 +76,20 @@ function isoToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function defaultEnrollmentEndDate(startDate?: string | null): string {
-  const base = parseISO10(String(startDate || "").trim()) ?? new Date();
-  return toISODate(addYears(base, 1));
+
+function capEnrollmentEndDate(endDate: string, grantEndDate?: string | null): string {
+  const grantEnd = String(grantEndDate || "").slice(0, 10);
+  if (!grantEnd || !endDate) return endDate;
+  return endDate > grantEnd ? grantEnd : endDate;
 }
 
 function createEnrollmentDraft(
   grantId: string,
-  seed?: Partial<Pick<EnrollmentDraft, "startDate" | "endDate" | "endDateManuallyEdited">>,
+  seed?: Partial<Pick<EnrollmentDraft, "startDate" | "endDate" | "endDateManuallyEdited">> & { grantEndDate?: string | null },
 ): EnrollmentDraft {
   const startDate = String(seed?.startDate || "").trim() || isoToday();
-  const endDate =
-    String(seed?.endDate || "").trim() ||
-    defaultEnrollmentEndDate(startDate);
+  const rawEnd = String(seed?.endDate || "").trim();
+  const endDate = rawEnd ? capEnrollmentEndDate(rawEnd, seed?.grantEndDate) : "";
   return {
     grantId,
     startDate,
@@ -430,10 +431,19 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         id: String(grant.id || "").trim(),
         label: grantLabel(grant),
         status: grant.status ? String(grant.status) : null,
+        endDate: grant.endDate ? String(grant.endDate).slice(0, 10) : null,
       }))
       .filter((grant) => !!grant.id)
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [grants]);
+
+  const grantEndDateById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const grant of grantOptions) {
+      if (grant.id && grant.endDate) map.set(grant.id, grant.endDate);
+    }
+    return map;
+  }, [grantOptions]);
 
   const caseManagerLabelById = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -543,6 +553,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         createEnrollmentDraft(grantId, {
           startDate: String(enrollment.startDate || "").slice(0, 10),
           endDate: String(enrollment.endDate || "").slice(0, 10),
+          grantEndDate: grantEndDateById.get(grantId) || null,
           endDateManuallyEdited: Boolean(enrollment.endDate),
         }),
       ];
@@ -550,7 +561,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     if (seeded.length) {
       setSelectedEnrollmentDrafts(seeded);
     }
-  }, [enrollments, existingGrantIds.size, selectedEnrollmentDrafts.length]);
+  }, [enrollments, existingGrantIds.size, grantEndDateById, selectedEnrollmentDrafts.length]);
 
   // Reset dup check when identifying fields change after a check was run
   React.useEffect(() => {
@@ -584,9 +595,11 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           id: String(enrollment.id || ""),
           label: formatEnrollmentLabel(enrollment as unknown as Record<string, unknown>),
           grantId: String(enrollment.grantId || ""),
+          endDate: enrollment.endDate ? String(enrollment.endDate).slice(0, 10) : null,
           statusLabel: status === "closed" || status === "deleted" ? ("closed" as const) : ("open" as const),
           lineItemIds,
           scheduleMeta: (enrollment as Record<string, unknown>).scheduleMeta,
+          payments: readPayments(enrollment) as unknown as TPayment[],
         };
       }),
     [enrollments],
@@ -806,14 +819,16 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             status: "active",
             active: true,
             startDate: draft.startDate || isoToday(),
-            endDate: draft.endDate || defaultEnrollmentEndDate(draft.startDate),
+            endDate: draft.endDate
+              ? capEnrollmentEndDate(draft.endDate, grantEndDateById.get(draft.grantId) || null)
+              : undefined,
             generateTaskSchedule: true,
           },
         });
       }
       await enrollmentsQ.refetch();
     },
-    [enrollCustomer, enrollmentsQ, existingGrantIds, selectedEnrollmentDrafts],
+    [enrollCustomer, enrollmentsQ, existingGrantIds, grantEndDateById, selectedEnrollmentDrafts],
   );
 
   const runDupCheck = React.useCallback(async () => {
@@ -1193,7 +1208,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     <StepFrame
       eyebrow="Page 3"
       title="Program enrollments"
-      description="Choose at least one program. Each selection creates an editable enrollment draft with a start date and a default end date one year later."
+      description="Choose at least one program. Each selection creates an editable enrollment draft. End dates are optional; if the grant has an end date the enrollment cannot extend past it."
     >
       <div className="space-y-4">
         {programsLocked ? (
@@ -1243,7 +1258,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                     setSelectedEnrollmentDrafts((current) =>
                       current.some((entry) => entry.grantId === grant.id)
                         ? current.filter((entry) => entry.grantId !== grant.id)
-                        : current.concat(createEnrollmentDraft(grant.id)),
+                        : current.concat(createEnrollmentDraft(grant.id, { grantEndDate: grant.endDate || null })),
                     )
                   }
                 >
@@ -1253,7 +1268,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                   </div>
                   <div className="mt-2 text-xs text-slate-500">
                     {selected
-                      ? `Start ${draft?.startDate || isoToday()} | End ${draft?.endDate || defaultEnrollmentEndDate()}`
+                      ? `Start ${draft?.startDate || isoToday()} | End ${draft?.endDate || "No end date"}`
                       : "Adds a dated enrollment draft"}
                   </div>
                 </button>
@@ -1276,8 +1291,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                                     ...entry,
                                     startDate: nextStartDate,
                                     endDate: entry.endDateManuallyEdited
-                                      ? entry.endDate
-                                      : defaultEnrollmentEndDate(nextStartDate),
+                                      ? capEnrollmentEndDate(entry.endDate, grant.endDate || null)
+                                      : "",
                                   },
                             ),
                           );
@@ -1285,14 +1300,15 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                       />
                     </label>
                     <label className="field">
-                      <span className="label">End date</span>
+                      <span className="label">End date (optional)</span>
                       <input
                         className="input"
                         type="date"
                         value={draft.endDate}
+                        max={grant.endDate || undefined}
                         disabled={programsLocked}
                         onChange={(e) => {
-                          const nextEndDate = e.currentTarget.value;
+                          const nextEndDate = capEnrollmentEndDate(e.currentTarget.value, grant.endDate || null);
                           setSelectedEnrollmentDrafts((current) =>
                             current.map((entry) =>
                               entry.grantId !== grant.id

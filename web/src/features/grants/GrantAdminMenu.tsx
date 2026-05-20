@@ -10,6 +10,7 @@ import {
 } from "@hooks/useGrants";
 import { toast } from "@lib/toast";
 import { toApiError } from "@client/api";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 interface Props {
   grantId: string;
@@ -65,11 +66,11 @@ export function GrantAdminMenu({ grantId }: Props) {
   };
 
   const handleClearEnrollments = async () => {
-    if (window.prompt('This soft-deletes ALL enrollments under this grant and removes their pending payment projections.\n\nType DELETE to confirm') !== "DELETE") return;
+    if (window.prompt('This hard-deletes ALL active and inactive enrollments under this grant and removes their pending payment projections.\n\nType DELETE to confirm') !== "DELETE") return;
     setOpen(false);
     setBusy(true);
     try {
-      const resp = await clearEnrollments.mutateAsync(grantId) as any;
+      const resp = await clearEnrollments.mutateAsync({ grantId }) as any;
       const cleared = resp?.cleared ?? {};
       const skip = resp?.skipped ?? {};
       const skipNote = skip.enrollments ? ` (${skip.enrollments} skipped — org mismatch)` : "";
@@ -89,7 +90,7 @@ export function GrantAdminMenu({ grantId }: Props) {
       const resp = await reconcile.mutateAsync(grantId) as any;
       const t = resp?.totals ?? {};
       const c = resp?.counts ?? {};
-      const fmt = (n: number) => Number(n ?? 0).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+      const fmt = (n: number) => fmtCurrencyUSD(n);
       toast(
         `Budget reconciled from ${c.ledger ?? 0} ledger + ${c.paymentQueue ?? 0} queue items. Spent: ${fmt(t.spent)} · Projected: ${fmt(t.projected)} · Balance: ${fmt(t.balance)}`,
         { type: "success" },

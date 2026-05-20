@@ -62,6 +62,17 @@ export const PipelineRuleNode: z.ZodType<TPipelineRuleNode> = z.lazy(() =>
   ])
 );
 
+export const PipelineFormSchema = z.object({
+  enabled: z.boolean().optional().default(true),
+  sourceFormId: z.string(),
+  sourceFormTitle: z.string(),
+  includeGroups: z.array(PipelineConditionGroup).optional().default([]),
+  excludeGroups: z.array(PipelineConditionGroup).optional().default([]),
+  includeTree: PipelineRuleNode.nullable().optional(),
+  excludeTree: PipelineRuleNode.nullable().optional(),
+});
+export type TPipelineFormSchema = z.infer<typeof PipelineFormSchema>;
+
 // ─── Pipeline document ────────────────────────────────────────────────────────
 
 export const BudgetPipeline = z.object({
@@ -73,6 +84,7 @@ export const BudgetPipeline = z.object({
   lineItemId: z.string().nullable(),
   sourceFormId: z.string().nullable(),
   sourceFormTitle: z.string().nullable(),
+  formSchemas: z.record(z.string(), PipelineFormSchema).optional(),
   includeGroups: z.array(PipelineConditionGroup),
   excludeGroups: z.array(PipelineConditionGroup),
   includeTree: PipelineRuleNode.nullable().optional(),
@@ -94,6 +106,7 @@ export const BudgetPipelineUpsertBody = z.object({
   lineItemId: z.string().nullable().optional(),
   sourceFormId: z.string().nullable().optional(),
   sourceFormTitle: z.string().nullable().optional(),
+  formSchemas: z.record(z.string(), PipelineFormSchema).optional(),
   includeGroups: z.array(PipelineConditionGroup).optional().default([]),
   excludeGroups: z.array(PipelineConditionGroup).optional().default([]),
   includeTree: PipelineRuleNode.nullable().optional(),

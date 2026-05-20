@@ -158,6 +158,7 @@ function buildProjectionQueueItem(args: {
     note: String(payment.comment || ''),
     rawStatus: state.queueStatus === 'posted' ? 'paid' : 'unpaid',
     rawAnswers: {},
+    transactionFields: {},
     rawMeta: {
       id: paymentId,
       form_id: 'projection',

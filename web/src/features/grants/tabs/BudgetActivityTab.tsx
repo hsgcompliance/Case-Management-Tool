@@ -985,7 +985,7 @@ export function BudgetActivityTab({
               </div>
             )}
             {!editing && budget.allocationEnabled && budget.perCustomerCap != null && (
-              <span className="text-xs text-slate-600">Cap: <span className="font-semibold">${num(budget.perCustomerCap).toLocaleString()}</span> / customer</span>
+              <span className="text-xs text-slate-600">Cap: <span className="font-semibold">{currency(num(budget.perCustomerCap))}</span> / customer</span>
             )}
           </div>
         </div>
@@ -1140,7 +1140,7 @@ export function BudgetActivityTab({
                         <div className="flex flex-wrap items-center justify-center gap-1">
                           <StatusChip label="Locked" active={!!li.locked} title={li.locked ? tip("This line item is locked.") : tip("This line item is editable.")} />
                           <StatusChip
-                            label={li.capEnabled && li.perCustomerCap != null ? `Cap ${num(li.perCustomerCap).toLocaleString()}` : "No Cap"}
+                            label={li.capEnabled && li.perCustomerCap != null ? `Cap ${currency(num(li.perCustomerCap))}` : "No Cap"}
                             active={!!li.capEnabled}
                             tone="amber"
                             title={li.capEnabled && li.perCustomerCap != null ? tip(`Per-customer spend cap: ${currency(num(li.perCustomerCap))}.`) : tip("No per-customer spend cap is configured.")}

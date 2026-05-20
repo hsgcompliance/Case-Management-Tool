@@ -186,6 +186,27 @@ export const UserPaymentMetrics = z
   })
   .partial();
 
+const UserUnknownRecord = z.record(z.string(), z.unknown());
+
+export const UserSettings = z
+  .object({
+    pageLayouts: UserUnknownRecord.optional(),
+    dashboardPrefs: UserUnknownRecord.optional(),
+    toolsPrefs: UserUnknownRecord.optional(),
+    spendingViews: UserUnknownRecord.optional(),
+  })
+  .catchall(z.unknown())
+  .partial();
+
+export const UserDigestSubs = z.record(z.string(), z.unknown());
+
+export const UserPinnedItem = z
+  .object({
+    type: z.string(),
+    id: z.string(),
+  })
+  .passthrough();
+
 /** Dashboard UI preferences stored as `dashboardPrefs` on userExtras. */
 export const UserDashboardPrefs = z
   .object({
@@ -198,6 +219,20 @@ export const UserDashboardPrefs = z
 
 /** Preferred customers page experience stored on `userExtras`. */
 export const UserCustomersPageMode = z.enum(["legacy", "new"]);
+
+/**
+ * User-level grant pin preferences stored as `grantPrefs` on userExtras.
+ * Distinct from system/org pins on the grant doc itself (those live in grant.pins).
+ *
+ *   pinnedGrantIds       — grants pinned to the grants-page detail card strip (max 6)
+ *   metricsPinnedGrantId — single grant pinned to the user's metrics bar/strip
+ */
+export const UserGrantPrefs = z.object({
+  pinnedGrantIds: z.array(z.string()).nullish(),
+  metricsPinnedGrantId: z.string().nullish(),
+  updatedAt: z.unknown().optional(),
+}).passthrough();
+export type TUserGrantPrefs = z.infer<typeof UserGrantPrefs>;
 
 export const TourProgressStatus = z.enum(["in_progress", "completed", "abandoned"]);
 export const TourProgressEntry = z.object({
@@ -239,16 +274,21 @@ export const UserExtras = z
   .object({
     // Human-editable
     notes: z.string().trim().nullable().optional(),
-    settings: z.record(z.string(), z.unknown()).nullable().optional(),
-    meta: z.record(z.string(), z.unknown()).nullable().optional(),
+    settings: UserSettings.nullable().optional(),
+    meta: UserUnknownRecord.nullable().optional(),
 
     // Feature sub-objects
     dashboardPrefs: UserDashboardPrefs.nullable().optional(),
+    digestSubs: UserDigestSubs.nullable().optional(),
+    pinnedItems: z.array(UserPinnedItem).nullable().optional(),
     tours: UserToursState.nullable().optional(),
     game_meta: UserGameMeta.optional(),
     // Legacy — kept readable so migration code can pull old scores
     gameHighScores: UserGameHighScores.optional(),
     quickBreakHighScore: z.number().int().nonnegative().optional(),
+
+    // User-level pin preferences
+    grantPrefs: UserGrantPrefs.nullable().optional(),
 
     // User preferences
     taskMode: z.enum(["viewer", "workflow"]).nullable().optional(),
@@ -260,7 +300,14 @@ export const UserExtras = z
 
     // --- Flat indexable metrics (top-level for Firestore query support) ---
     caseloadActive: z.number().int().nonnegative().nullable().optional(),
+    clientTotal: z.number().int().nonnegative().nullable().optional(),
+    clientActive: z.number().int().nonnegative().nullable().optional(),
+    clientInactive: z.number().int().nonnegative().nullable().optional(),
+    clientPopulationCounts: z.record(z.string(), z.number().int().nonnegative()).nullable().optional(),
     enrollmentCount: z.number().int().nonnegative().nullable().optional(),
+    enrollmentActive: z.number().int().nonnegative().nullable().optional(),
+    enrollmentInactive: z.number().int().nonnegative().nullable().optional(),
+    enrollmentPopulationCounts: z.record(z.string(), z.number().int().nonnegative()).nullable().optional(),
     acuityScoreSum: z.number().nullable().optional(),
     acuityScoreCount: z.number().nonnegative().nullable().optional(),
     acuityScoreAvg: z.number().nullable().optional(),
@@ -286,6 +333,9 @@ export type TTopRoleLadder = z.infer<typeof TopRoleLadder>;
 export type TUserMetrics = z.infer<typeof UserMetrics>;
 export type TUserTaskMetrics = z.infer<typeof UserTaskMetrics>;
 export type TUserPaymentMetrics = z.infer<typeof UserPaymentMetrics>;
+export type TUserSettings = z.infer<typeof UserSettings>;
+export type TUserDigestSubs = z.infer<typeof UserDigestSubs>;
+export type TUserPinnedItem = z.infer<typeof UserPinnedItem>;
 export type TUserDashboardPrefs = z.infer<typeof UserDashboardPrefs>;
 export type TUserCustomersPageMode = z.infer<typeof UserCustomersPageMode>;
 export type TTourProgressStatus = z.infer<typeof TourProgressStatus>;

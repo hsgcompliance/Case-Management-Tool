@@ -14,6 +14,8 @@
 import type { Request, Response } from "express";
 import { db, rolesFromClaims, orgIdFromClaims, isoNow } from "../../core";
 import { syncEnrollmentProjectionQueueItems, upsertPaymentQueueItems } from "./service";
+import { inferTransactionWindowModel, type TransactionWindowModel } from "@hdb/contracts";
+import { getJotformFormQuestions } from "../jotform/service";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
 
 const PAGE = 200;
@@ -108,6 +110,7 @@ export async function adminSyncPaymentQueueHandler(
 
   let jotCursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
   let jotDone = false;
+  const transactionModels = new Map<string, TransactionWindowModel>();
 
   while (!jotDone) {
     let q = db
@@ -137,7 +140,13 @@ export async function adminSyncPaymentQueueHandler(
       if (!active) continue;
 
       results.jotformProcessed++;
-      const extracted = extractSpendItems(sub as any);
+      let transactionModel = transactionModels.get(formId);
+      if (!transactionModel) {
+        const liveQuestions = await getJotformFormQuestions(formId);
+        transactionModel = inferTransactionWindowModel(formId, liveQuestions.fields);
+        transactionModels.set(formId, transactionModel);
+      }
+      const extracted = extractSpendItems(sub as any, transactionModel);
       if (extracted.length === 0) continue;
 
       if (dryRun) {

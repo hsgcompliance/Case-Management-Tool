@@ -26,6 +26,7 @@ import { BudgetConfigModal } from "./BudgetConfigModal";
 import { NewCreditCardModal } from "./NewCreditCardModal";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import PinnedGrantCards from "@features/grants/PinnedGrantCards";
+import { HelpButton } from "@entities/help/HelpButton";
 
 type FilterMode = "active" | "inactive";
 type ViewMode = "custom" | "all";
@@ -342,9 +343,12 @@ export function BudgetPage() {
           {/* Page header */}
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-                Budget
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                  Budget
+                </h1>
+                <HelpButton pageKey="budget" />
+              </div>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                 Budget overview by funding source. Click any card to view details and activity.
               </p>

@@ -130,11 +130,13 @@ export function DynamicFieldsEditor({
   onChange,
   hiddenKeys,
   nonDeletableKeys,
+  showExistingFields = true,
 }: {
   value: AnyRecord;
   onChange: OnChange;
   hiddenKeys?: Iterable<string>;
   nonDeletableKeys?: Iterable<string>;
+  showExistingFields?: boolean;
 }) {
   const hidden = new Set(Array.from(hiddenKeys ?? []).map(String));
   const nonDeletable = new Set(Array.from(nonDeletableKeys ?? []).map(String));
@@ -188,11 +190,11 @@ export function DynamicFieldsEditor({
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
       <div className="text-sm font-semibold text-slate-800">Additional Fields</div>
-      {pairs.length === 0 && (
+      {showExistingFields && pairs.length === 0 && (
         <p className="text-sm text-slate-600">No custom fields yet.</p>
       )}
 
-      {sortedPairs.map(([k, v]) => (
+      {showExistingFields && sortedPairs.map(([k, v]) => (
         <FieldRow
           key={k}
           fieldKey={k}

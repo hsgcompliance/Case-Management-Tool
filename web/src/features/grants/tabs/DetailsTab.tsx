@@ -13,7 +13,8 @@ import {
 } from "@entities/ui/DynamicFormFields";
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
-import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip } from "@lib/colorRegistry";
+import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -63,6 +64,10 @@ type PinColor = GrantAccentColor;
 
 function pinColorChipCls(color: string | null | undefined): string {
   return grantAccentChip(color);
+}
+
+function pinColorDotCls(color: string | null | undefined): string {
+  return grantAccentSolid(color);
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -209,19 +214,55 @@ function invoiceText(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-function InvoiceInfoPanel({ value }: { value: unknown }) {
+const PROMOTED_DETAIL_KEYS = [
+  "orgId",
+  "kind",
+  "deleted",
+  "active",
+  "_tags",
+  "meta",
+  "metrics",
+  "system",
+  "pins",
+  "taskTypes",
+  "tasks",
+  "tags",
+  "eligibility",
+  "levelOfAssistanceEligibility",
+  "services",
+  "lengthOfAssistance",
+  "maximumLengthOfAssistance",
+  "maximumAssistance",
+  "description",
+  "invoicing",
+  "invoiceDocuments",
+  "levelOfAssistance",
+  "servicesOffered",
+  "duration",
+  "maxAmount",
+  "maximumAmount",
+  "maxAssistanceAmount",
+  "Invoice Docs",
+  "Invoice Documents",
+  "Level of Assistance",
+  "Maximum Length of Assistance",
+];
+
+const PROMOTED_DETAIL_KEY_SET = new Set(PROMOTED_DETAIL_KEYS);
+
+function InvoiceInfoPanel({ value, invoiceDocuments = [] }: { value: unknown; invoiceDocuments?: string[] }) {
   const inv = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   const grantCode = invoiceText(inv.grantCode);
   const functionalGroup = invoiceText(inv.functionalGroup || "Housing");
   const categories = asInvoiceOptions(inv.expenseCategories).filter((row) => row.enabled);
   const descriptions = asInvoiceOptions(inv.descriptionTemplates).filter((row) => row.enabled);
 
-  if (!grantCode && categories.length === 0 && descriptions.length === 0) return null;
+  if (!grantCode && categories.length === 0 && descriptions.length === 0 && invoiceDocuments.length === 0) return null;
 
   return (
     <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Invoice Defaults</div>
+        <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Invoice Info</div>
         {functionalGroup ? (
           <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
             {functionalGroup}
@@ -257,6 +298,18 @@ function InvoiceInfoPanel({ value }: { value: unknown }) {
                   <div className="text-sm font-medium text-slate-800">{row.label}</div>
                   <div className="mt-0.5 text-xs text-slate-500">{row.template || "-"}</div>
                 </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {invoiceDocuments.length ? (
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Invoice Docs</div>
+            <div className="flex flex-wrap gap-1.5">
+              {invoiceDocuments.map((doc) => (
+                <span key={doc} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700">
+                  {doc}
+                </span>
               ))}
             </div>
           </div>
@@ -306,7 +359,7 @@ function InvoiceInfoEditor({
   return (
     <div className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/20">
       <div>
-        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Invoice Defaults</div>
+        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Invoice Info</div>
         <p className="mt-1 text-xs text-slate-500">
           Select the values this grant should surface in payment and invoice workflows.
         </p>
@@ -738,7 +791,7 @@ function RecommendedGrantInfoEditor({
       />
 
       <ListRecommendedEditor
-        title="Invoicing Docs"
+        title="Invoice Docs"
         description="Optional default documents expected before payment/invoice processing."
         value={invoiceDocuments}
         defaults={DEFAULT_INVOICE_DOCUMENTS}
@@ -763,7 +816,7 @@ function GrantInfoPanel({
 }) {
   const g = (grant ?? model) as Record<string, any>;
   const fmt = (n: number) =>
-    n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    fmtCurrencyUSD(n);
   const fmtFn = currency ?? fmt;
 
   const startDate     = String(g.startDate   || "").slice(0, 10);
@@ -771,7 +824,6 @@ function GrantInfoPanel({
   const duration      = String(g.duration || "").trim();
   const description   = String(g.description || "").trim();
   const maxLen        = grantMaxLengthFrom(g);
-  const maxAmount     = String(g.maxAmount   ?? g.maximumAmount ?? g.maxAssistanceAmount ?? "").trim();
   const services      = g.servicesOffered;
   const eligibility   = g.eligibility;
   const levelRows     = Object.entries(levelOfAssistanceFrom(g));
@@ -779,7 +831,6 @@ function GrantInfoPanel({
 
   const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
   const hasEligibility = Object.keys(normalizeEligibility(eligibility)).length > 0;
-  const hasMaxAmount  = !!maxAmount && maxAmount.toLowerCase() !== "n/a" && maxAmount !== "0";
 
   // Budget strip values
   const total    = derived?.total    ?? 0;
@@ -840,57 +891,47 @@ function GrantInfoPanel({
         {description && <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{description}</p>}
       </FieldBlock>
 
-      {/* Duration */}
-      <FieldBlock label="Duration" empty={!duration}>
-        {duration && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{duration}</span>}
-      </FieldBlock>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <FieldBlock label="Duration" empty={!duration}>
+            {duration && <span className="text-sm font-semibold text-slate-900">{duration}</span>}
+          </FieldBlock>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <FieldBlock label="Max Length" empty={!maxLen}>
+            {maxLen && <span className="text-sm font-semibold text-slate-900">{maxLen}</span>}
+          </FieldBlock>
+        </div>
+        <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
+          <FieldBlock label="Services Offered" empty={!hasServices}>
+            <ServicesOfferedDisplay value={services} />
+          </FieldBlock>
+        </div>
+      </div>
 
-      {/* Max Length of Assistance */}
-      <FieldBlock label="Max Length of Assistance" empty={!maxLen}>
-        {maxLen && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{maxLen}</span>}
-      </FieldBlock>
+      <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr]">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+          <FieldBlock label="Eligibility" empty={!hasEligibility}>
+            <EligibilityDisplay value={eligibility} />
+          </FieldBlock>
+        </div>
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+          <FieldBlock label="Level of Assistance" empty={!levelRows.length}>
+            {levelRows.length ? (
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                {levelRows.map(([key, value]) => (
+                  <React.Fragment key={key}>
+                    <span className="font-medium text-slate-600">{key}</span>
+                    <span className="text-slate-800">{String(value)}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : null}
+          </FieldBlock>
+        </div>
+      </div>
 
-      {/* Max Amount of Assistance */}
-      <FieldBlock label="Max Amount of Assistance" empty={!hasMaxAmount}>
-        {hasMaxAmount && <span className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-800">{maxAmount}</span>}
-      </FieldBlock>
-
-      {/* Services Offered */}
-      <FieldBlock label="Services Offered" empty={!hasServices}>
-        <ServicesOfferedDisplay value={services} />
-      </FieldBlock>
-
-      {/* Eligibility */}
-      <FieldBlock label="Eligibility" empty={!hasEligibility}>
-        <EligibilityDisplay value={eligibility} />
-      </FieldBlock>
-
-      <FieldBlock label="Level of Assistance" empty={!levelRows.length}>
-        {levelRows.length ? (
-          <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            {levelRows.map(([key, value]) => (
-              <React.Fragment key={key}>
-                <span className="font-medium text-slate-600">{key}</span>
-                <span className="text-slate-800">{String(value)}</span>
-              </React.Fragment>
-            ))}
-          </div>
-        ) : null}
-      </FieldBlock>
-
-      <FieldBlock label="Invoicing Docs" empty={!invoiceDocs.length}>
-        {invoiceDocs.length ? (
-          <div className="flex flex-wrap gap-1.5">
-            {invoiceDocs.map((doc) => (
-              <span key={doc} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700">
-                {doc}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </FieldBlock>
-
-      <InvoiceInfoPanel value={g.invoicing} />
+      <InvoiceInfoPanel value={g.invoicing} invoiceDocuments={invoiceDocs} />
     </div>
   );
 }
@@ -944,14 +985,9 @@ export function DetailsTab({
   const commitStart = useCallback(() => {
     const raw = iso10(startB.buf);
     const iso = toISOOrEmpty(raw);
-    let nextEnd = model?.endDate ? String(model.endDate) : "";
-    if (!nextEnd && iso) {
-      const d = parseISO10(iso);
-      if (d) nextEnd = toISODate(addDays(addYears(d, 1), -1));
-    }
-    console.debug("[DetailsTab] commit startDate ->", { raw, iso, autoEnd: nextEnd || null });
-    setModel((m) => ({ ...m, startDate: iso, endDate: m?.endDate ? m.endDate : nextEnd }));
-  }, [startB.buf, model?.endDate, setModel]);
+    console.debug("[DetailsTab] commit startDate ->", { raw, iso });
+    setModel((m) => ({ ...m, startDate: iso }));
+  }, [startB.buf, setModel]);
 
   const commitEnd = useCallback(() => {
     const raw = iso10(endB.buf);
@@ -1240,7 +1276,7 @@ export function DetailsTab({
                               (model?.pins?.important?.color ?? "") === c
                                 ? "border-slate-600 scale-110"
                                 : "border-transparent hover:border-slate-400",
-                              c ? PIN_COLOR_DOT[c as PinColor] : "bg-white border border-slate-300",
+                              c ? pinColorDotCls(c as PinColor) : "bg-white border border-slate-300",
                             ].join(" ")}
                             title={c || "No color"}
                           />
@@ -1347,18 +1383,18 @@ export function DetailsTab({
               <div className="border-t border-slate-200 p-4">
                 <DynamicFieldsEditor
                   value={dynamicValue}
-                  hiddenKeys={["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description", "invoicing", "invoiceDocuments", "levelOfAssistance", "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance"]}
+                  hiddenKeys={PROMOTED_DETAIL_KEYS}
+                  showExistingFields={false}
                   onChange={(next) => {
                     const candidate = next as Record<string, any>;
                     const nonMeta: Record<string, any> = {};
-                    const SKIP = new Set(["orgId", "kind", "deleted", "tags", "eligibility", "lengthOfAssistance", "description", "invoicing", "invoiceDocuments", "levelOfAssistance", "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance"]);
                     for (const [k, v] of Object.entries(candidate)) {
-                      if (!META_KEYS.has(k) && !SKIP.has(k)) nonMeta[k] = v;
+                      if (!META_KEYS.has(k) && !PROMOTED_DETAIL_KEY_SET.has(k)) nonMeta[k] = v;
                     }
                     setModel((m) => {
                       const nextModel = { ...(m || {}) };
                       for (const key of Object.keys(nextModel)) {
-                        if (!META_KEYS.has(key) && !SKIP.has(key)) delete nextModel[key];
+                        if (!META_KEYS.has(key) && !PROMOTED_DETAIL_KEY_SET.has(key)) delete nextModel[key];
                       }
                       return { ...nextModel, ...nonMeta };
                     });
@@ -1457,7 +1493,7 @@ function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
     "tags", "eligibility", "lengthOfAssistance",
     "invoicing", "invoiceDocuments", "levelOfAssistance",
     "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance",
-    "description", "servicesOffered", "maxAmount", "maximumAmount", "maxAssistanceAmount",
+    "description", "servicesOffered", "duration", "maxAmount", "maximumAmount", "maxAssistanceAmount",
     "maxLengthOfAssistance", "details",
   ]);
 

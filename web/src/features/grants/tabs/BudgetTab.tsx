@@ -252,7 +252,7 @@ export function BudgetTab({
             )}
             {!editing && budget.allocationEnabled && budget.perCustomerCap != null && (
               <span className="text-xs text-slate-600 dark:text-slate-300">
-                Cap: <span className="font-semibold">${num(budget.perCustomerCap).toLocaleString()}</span> / customer
+                Cap: <span className="font-semibold">{currency(num(budget.perCustomerCap))}</span> / customer
               </span>
             )}
           </div>
@@ -399,8 +399,8 @@ export function BudgetTab({
                           {li.capEnabled ? "🚧" : "–"}
                         </button>
                       ) : li.capEnabled && li.perCustomerCap != null ? (
-                        <span className="text-xs font-medium text-amber-700" title={`Per-customer cap: $${li.perCustomerCap}`}>
-                          🚧 ${num(li.perCustomerCap).toLocaleString()}
+                        <span className="text-xs font-medium text-amber-700" title={`Per-customer cap: ${currency(num(li.perCustomerCap))}`}>
+                          🚧 {currency(num(li.perCustomerCap))}
                         </span>
                       ) : (
                         <span className="text-slate-300">–</span>

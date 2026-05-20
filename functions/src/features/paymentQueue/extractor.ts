@@ -5,9 +5,15 @@
  * Kept in sync manually; schema constants are duplicated here to avoid
  * cross-package imports from the web workspace.
  *
- * Call `extractSpendItems(sub)` to get one or more PaymentQueueExtracted items
+ * Call `extractSpendItems(sub, transactionModel)` to get one or more PaymentQueueExtracted items
  * from a raw Jotform submission Firestore document.
  */
+
+import {
+  transactionFieldKey,
+  type LogicalTransactionWindow,
+  type TransactionWindowModel,
+} from "@hdb/contracts";
 
 // ─── Schema version ───────────────────────────────────────────────────────────
 /** Bump when extraction logic changes in a way that produces different output. */
@@ -33,6 +39,7 @@ export const SPEND_ERR = {
   DIGEST_INCOMPLETE: "SPEND_ERR_DIGEST_INCOMPLETE",
   EMPTY_RESULT: "SPEND_ERR_EMPTY_RESULT",
   PARTIAL: "SPEND_ERR_PARTIAL",
+  SCHEMA_MISMATCH: "SPEND_ERR_SCHEMA_MISMATCH",
   AMOUNT_UNPARSEABLE: "SPEND_ERR_AMOUNT_UNPARSEABLE",
   AMOUNT_MISMATCH: "SPEND_ERR_AMOUNT_MISMATCH",
 } as const;
@@ -71,6 +78,7 @@ export type ExtractedSpendItem = {
     fieldIds?: Record<string, string | null>;
     fieldOrders?: Record<string, number | null>;
   };
+  transactionFields: Record<string, unknown>;
   merchant: string;
   expenseType: string;
   program: string;
@@ -242,6 +250,48 @@ function getFiles(answers: AnyObj, ids: readonly string[]): string[] {
   return Array.from(new Set(out)).filter(Boolean);
 }
 
+function firstMeaningfulAnswer(answers: AnyObj, fieldIds: readonly string[]): unknown {
+  let fallback: unknown = "";
+  for (const id of fieldIds) {
+    const value = getAns(answers, id);
+    if (fallback === "") fallback = value;
+    if (asText(value)) return value;
+  }
+  return fallback;
+}
+
+function transactionValues(
+  answers: AnyObj,
+  window: LogicalTransactionWindow,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(window.fieldIdsByKey).map(([key, fieldIds]) => [
+      key,
+      firstMeaningfulAnswer(answers, fieldIds),
+    ]),
+  );
+}
+
+function txText(values: Record<string, unknown>, label: string): string {
+  return asText(values[transactionFieldKey(label)]);
+}
+
+function txRawId(window: LogicalTransactionWindow, label: string): string | null {
+  return window.fieldIdsByKey[transactionFieldKey(label)]?.[0] ?? null;
+}
+
+function windowFieldIds(window: LogicalTransactionWindow): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(window.fieldIdsByKey).map(([key, ids]) => [key, ids[0] ?? null]),
+  );
+}
+
+function windowFieldOrders(window: LogicalTransactionWindow): Record<string, number | null> {
+  return Object.fromEntries(
+    Object.entries(window.fieldOrdersByKey).map(([key, orders]) => [key, orders[0] ?? null]),
+  );
+}
+
 function fieldOrders(answers: AnyObj, fieldIds: Record<string, string | null>): Record<string, number | null> {
   return Object.fromEntries(
       Object.entries(fieldIds).map(([key, id]) => {
@@ -380,6 +430,7 @@ function buildFallbackRow(
     files: [], files_txn: [], files_uploadAll: [],
     files_typed: emptyTypedFiles(),
     notes: "", note: "",
+    transactionFields: {},
     rawStatus: asText(sub.status || ""),
     rawAnswers: answers,
     rawMeta: buildRawMeta(sub),
@@ -390,7 +441,13 @@ function buildFallbackRow(
 
 // ─── Credit-card extraction ───────────────────────────────────────────────────
 
-function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formTitle: string): ExtractedSpendItem[] {
+function extractCreditCard(
+  sub: AnyObj,
+  formId: string,
+  formAlias: string,
+  formTitle: string,
+  transactionModel: TransactionWindowModel,
+): ExtractedSpendItem[] {
   const answers = (sub.answers || {}) as AnyObj;
   const rawStatus = asText(sub.status || "");
   const returnSubmission = isReturnSubmission(answers);
@@ -476,6 +533,7 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
       files: txnFiles, files_txn: txnFiles, files_uploadAll: [],
       files_typed: emptyTypedFiles(),
       notes, note: "", rawStatus,
+      transactionFields: {},
       rawAnswers: answers, rawMeta: buildRawMeta(sub),
       extractionErrors: errors,
       extractionPath: "hardcoded",
@@ -491,41 +549,30 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
     }));
   }
 
-  const orderRanges: Array<[number, number]> = [[13, 25], [27, 41], [43, 56], [59, 71], [73, 85]];
-
-  for (let i = 0; i < CC_SCHEMA.transactions.length; i++) {
+  for (let i = 0; i < transactionModel.windows.length; i++) {
     if (i >= txnLimit) break;
-    const tx = CC_SCHEMA.transactions[i];
-    const amountAbs = Math.abs(parseMoney(getAns(answers, tx.cost), errors, tx.cost));
+    const window = transactionModel.windows[i];
+    const values = transactionValues(answers, window);
+    const amountFieldId = txRawId(window, "Cost");
+    const amountAbs = Math.abs(parseMoney(txText(values, "Cost"), errors, amountFieldId ?? undefined));
     const amount = amountAbs;
-    const merchant = asText(getAns(answers, tx.merchant));
-    const expenseType = asText(getAns(answers, tx.expenseType));
-    const purpose = asText(getAns(answers, tx.purpose));
-    const supportiveProgram = asText(getAns(answers, tx.supportiveProgram));
-    const programOperations = asText(getAns(answers, (tx as any).programOperations ?? null));
-    const customer = asText(getAns(answers, tx.customerName));
-    const notes = tx.notes ? asText(getAns(answers, tx.notes)) : "";
-    const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
-    const txnFiles = getFiles(answers, tx.files);
+    const merchant = txText(values, "Merchant");
+    const expenseType = txText(values, "Expense Type");
+    const purpose = txText(values, "Purpose");
+    const supportiveProgram = txText(values, "Supportive Services Program");
+    const tssCategory = txText(values, "TSS Spend Category");
+    const programOperations = txText(values, "Program Operations for:");
+    const customer = txText(values, "Customer Name");
+    const notes = txText(values, "Notes (optional)");
+    const isFlexTxn = parseYes(txText(values, "Is this YHDP Flex Funds?"));
+    const txnFiles = getFiles(answers, CC_SCHEMA.transactions[i]?.files ?? []);
     const uploadAllForTxn = i === 0 ? uploadAll : [];
     const files = Array.from(new Set([...txnFiles, ...uploadAllForTxn]));
-    const txFieldIds = {
-      cardUsed: CC_SCHEMA.globals.cardUsed,
-      merchant: tx.merchant,
-      expenseType: tx.expenseType,
-      supportiveProgram: tx.supportiveProgram,
-      programOperations: (tx as any).programOperations ?? null,
-      customerName: tx.customerName,
-      flexToggle: tx.flexToggle,
-      purpose: tx.purpose,
-      cost: tx.cost,
-      files: tx.files[0] ?? null,
-      notes: tx.notes ?? null,
-    };
+    const txFieldIds = windowFieldIds(window);
 
     const program = expenseType.toLowerCase().includes("customer")
-      ? supportiveProgram
-      : programOperations || supportiveProgram;
+      ? supportiveProgram || tssCategory
+      : programOperations || tssCategory || supportiveProgram;
 
     const hasCore = merchant || expenseType || supportiveProgram || programOperations || purpose || amount !== 0 || txnFiles.length > 0;
     if (!hasCore) continue;
@@ -541,13 +588,13 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
       createdAt, month, amount, amountAbs,
       direction: "charge",
       directionFieldId: CC_SCHEMA.globals.type,
-      amountFieldId: tx.cost,
+      amountFieldId,
       extractionGroup: {
         kind: "purchase",
         index: i + 1,
-        orderRange: orderRanges[i] ?? null,
+        orderRange: window.orderRange,
         fieldIds: txFieldIds,
-        fieldOrders: fieldOrders(answers, txFieldIds),
+        fieldOrders: windowFieldOrders(window),
       },
       merchant, expenseType, program,
       billedTo: "", project: "", purchasePath: "",
@@ -557,6 +604,7 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
       files, files_txn: txnFiles, files_uploadAll: uploadAllForTxn,
       files_typed: emptyTypedFiles(),
       notes, note: "", rawStatus,
+      transactionFields: values,
       rawAnswers: answers, rawMeta: buildRawMeta(sub),
       extractionErrors: errors,
       extractionPath: "hardcoded",
@@ -566,26 +614,16 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
 
   // Empty-txn fallback
   if (items.length === 0) {
-    const tx0 = CC_SCHEMA.transactions[0];
-    const amountAbs = Math.abs(parseMoney(getAns(answers, tx0.cost), errors, tx0.cost));
+    const window = transactionModel.windows[0];
+    const values = transactionValues(answers, window);
+    const amountFieldId = txRawId(window, "Cost");
+    const amountAbs = Math.abs(parseMoney(txText(values, "Cost"), errors, amountFieldId ?? undefined));
     const amount = amountAbs;
-    const isFlexTxn = parseYes(getAns(answers, tx0.flexToggle));
-    const txnFiles = getFiles(answers, tx0.files);
+    const isFlexTxn = parseYes(txText(values, "Is this YHDP Flex Funds?"));
+    const txnFiles = getFiles(answers, CC_SCHEMA.transactions[0]?.files ?? []);
     const files = Array.from(new Set([...txnFiles, ...uploadAll]));
-    const customer = asText(getAns(answers, tx0.customerName));
-    const fallbackFieldIds = {
-      cardUsed: CC_SCHEMA.globals.cardUsed,
-      merchant: tx0.merchant,
-      expenseType: tx0.expenseType,
-      supportiveProgram: tx0.supportiveProgram,
-      programOperations: (tx0 as any).programOperations ?? null,
-      customerName: tx0.customerName,
-      flexToggle: tx0.flexToggle,
-      purpose: tx0.purpose,
-      cost: tx0.cost,
-      files: tx0.files[0] ?? null,
-      notes: tx0.notes ?? null,
-    };
+    const customer = txText(values, "Customer Name");
+    const fallbackFieldIds = windowFieldIds(window);
     anyFlex = anyFlex || isFlexTxn;
     errors.push({ code: SPEND_ERR.EMPTY_RESULT, message: "No non-empty transactions found; using Tx1 as fallback" });
     items.push({
@@ -594,25 +632,26 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
       source: "credit-card", createdAt, month, amount, amountAbs,
       direction: "charge",
       directionFieldId: CC_SCHEMA.globals.type,
-      amountFieldId: tx0.cost,
+      amountFieldId,
       extractionGroup: {
         kind: "fallback",
         index: 1,
-        orderRange: orderRanges[0],
+        orderRange: window.orderRange,
         fieldIds: fallbackFieldIds,
-        fieldOrders: fieldOrders(answers, fallbackFieldIds),
+        fieldOrders: windowFieldOrders(window),
       },
-      merchant: asText(getAns(answers, tx0.merchant)),
-      expenseType: asText(getAns(answers, tx0.expenseType)),
-      program: asText(getAns(answers, tx0.supportiveProgram)) || asText(getAns(answers, (tx0 as any).programOperations ?? null)),
+      merchant: txText(values, "Merchant"),
+      expenseType: txText(values, "Expense Type"),
+      program: txText(values, "Supportive Services Program") || txText(values, "Program Operations for:") || txText(values, "TSS Spend Category"),
       billedTo: "", project: "", purchasePath: "",
       card, cardBucket, txnNumber: 1,
-      purpose: asText(getAns(answers, tx0.purpose)),
+      purpose: txText(values, "Purpose"),
       paymentMethod: "", serviceType: "", otherService: "", serviceScope: "", wex: "", descriptor: "",
       customer, customerKey: makeCustomerKey(customer), purchaser, email,
       files, files_txn: txnFiles, files_uploadAll: uploadAll,
       files_typed: emptyTypedFiles(),
-      notes: tx0.notes ? asText(getAns(answers, tx0.notes)) : "",
+      notes: txText(values, "Notes (optional)"),
+      transactionFields: values,
       note: "", rawStatus, rawAnswers: answers, rawMeta: buildRawMeta(sub),
       extractionErrors: errors, extractionPath: "hardcoded",
       _txnFlex: isFlexTxn,
@@ -630,7 +669,13 @@ function extractCreditCard(sub: AnyObj, formId: string, formAlias: string, formT
 
 // ─── Invoice extraction ───────────────────────────────────────────────────────
 
-function extractInvoice(sub: AnyObj, formId: string, formAlias: string, formTitle: string): ExtractedSpendItem[] {
+function extractInvoice(
+  sub: AnyObj,
+  formId: string,
+  formAlias: string,
+  formTitle: string,
+  transactionModel: TransactionWindowModel,
+): ExtractedSpendItem[] {
   const answers = (sub.answers || {}) as AnyObj;
   const rawStatus = asText(sub.status || "");
   const createdAt =
@@ -686,56 +731,128 @@ function extractInvoice(sub: AnyObj, formId: string, formAlias: string, formTitl
     isFlex: subFlex.isFlex, flexReasons: subFlex.reasons, submissionIsFlex: subFlex.isFlex,
     files: filesAll, files_txn: [], files_uploadAll: [], files_typed,
     notes: "", note, rawStatus, rawAnswers: answers, rawMeta: buildRawMeta(sub),
+    transactionFields: {},
     extractionErrors: errors, extractionPath: "hardcoded",
   };
+
+  const rows = transactionModel.windows.map((window) => ({
+    window,
+    values: transactionValues(answers, window),
+  }));
 
   // Customer path
   if (isCustomerPath) {
     const multi = parseYes(getAns(answers, INVOICE_SCHEMA.customerPath.multiToggle));
     if (multi) {
-      const projects = (INVOICE_SCHEMA.customerPath.projects as readonly string[]).map((id) => asText(getAns(answers, id)));
-      const projOther = (INVOICE_SCHEMA.customerPath.projectOther as readonly string[]).map((id) => asText(getAns(answers, id)));
-      const amounts = (INVOICE_SCHEMA.customerPath.amounts as readonly string[]).map((id) => parseMoney(getAns(answers, id), errors, id));
       const splits: ExtractedSpendItem[] = [];
-      for (let i = 0; i < projects.length; i++) {
-        const p = projects[i] || "";
-        const o = projOther[i] || "";
+      for (let i = 0; i < rows.length; i++) {
+        const {values} = rows[i];
+        const p = txText(values, "Project");
+        const o = txText(values, "Other");
         const label = p && !/other/i.test(p) ? p : o || p;
-        const amt = amounts[i] || 0;
+        const amountFieldId = txRawId(rows[i].window, "Amount to bill");
+        const amt = parseMoney(txText(values, "Amount to bill"), errors, amountFieldId ?? undefined);
         if (!label && !amt) continue;
-        splits.push({ ...common, id: `${sub.id}-${i}`, amount: amt, program: label, billedTo: "", project: label, txnNumber: null });
+        splits.push({
+          ...common,
+          id: `${sub.id}-${i}`,
+          amount: amt,
+          amountFieldId,
+          program: label,
+          billedTo: "",
+          project: label,
+          txnNumber: null,
+          transactionFields: values,
+          extractionGroup: {
+            kind: "purchase",
+            index: rows[i].window.index,
+            orderRange: rows[i].window.orderRange,
+            fieldIds: windowFieldIds(rows[i].window),
+            fieldOrders: windowFieldOrders(rows[i].window),
+          },
+        });
       }
       if (splits.length) return splits;
     }
-    const project = (INVOICE_SCHEMA.customerPath.projects as readonly string[]).map((id) => asText(getAns(answers, id))).find((v) => v) || "";
-    const projOther = (INVOICE_SCHEMA.customerPath.projectOther as readonly string[]).map((id) => asText(getAns(answers, id))).find((v) => v) || "";
+    const first = rows.find(({values}) => txText(values, "Project") || txText(values, "Other")) ?? rows[0];
+    const project = first ? txText(first.values, "Project") : "";
+    const projOther = first ? txText(first.values, "Other") : "";
     const program = projOther || project || "";
-    return [{ ...common, id: asText(sub.id), amount: costSingle, program, billedTo: "", project, txnNumber: null }];
+    return [{
+      ...common,
+      id: asText(sub.id),
+      amount: costSingle,
+      program,
+      billedTo: "",
+      project,
+      txnNumber: null,
+      transactionFields: first?.values ?? {},
+      extractionGroup: first ? {
+        kind: "fallback",
+        index: first.window.index,
+        orderRange: first.window.orderRange,
+        fieldIds: windowFieldIds(first.window),
+        fieldOrders: windowFieldOrders(first.window),
+      } : undefined,
+    }];
   }
 
   // Program path
   const multi = parseYes(getAns(answers, INVOICE_SCHEMA.programPath.multiToggle));
-  const billTo = (INVOICE_SCHEMA.programPath.billToList as readonly string[]).map((id) => asText(getAns(answers, id)));
-  const billToOther = (INVOICE_SCHEMA.programPath.billToOther as readonly string[]).map((id) => asText(getAns(answers, id)));
-  const amounts = (INVOICE_SCHEMA.programPath.amounts as readonly string[]).map((id) => parseMoney(getAns(answers, id), errors, id));
 
   if (multi) {
     const splits: ExtractedSpendItem[] = [];
-    for (let i = 0; i < billTo.length; i++) {
-      const bt = billTo[i] || "";
-      const other = billToOther[i] || "";
+    for (let i = 0; i < rows.length; i++) {
+      const {values} = rows[i];
+      const bt = txText(values, "Bill To");
+      const other = txText(values, "Other");
       const label = bt && !/other/i.test(bt) ? bt : other || "";
-      const amt = amounts[i] || 0;
+      const amountFieldId = txRawId(rows[i].window, "Amount to bill");
+      const amt = parseMoney(txText(values, "Amount to bill"), errors, amountFieldId ?? undefined);
       if (!label && !amt) continue;
-      splits.push({ ...common, id: `${sub.id}-${i}`, amount: amt, program: label, billedTo: label, project: "", txnNumber: null });
+      splits.push({
+        ...common,
+        id: `${sub.id}-${i}`,
+        amount: amt,
+        amountFieldId,
+        program: label,
+        billedTo: label,
+        project: "",
+        txnNumber: null,
+        transactionFields: values,
+        extractionGroup: {
+          kind: "purchase",
+          index: rows[i].window.index,
+          orderRange: rows[i].window.orderRange,
+          fieldIds: windowFieldIds(rows[i].window),
+          fieldOrders: windowFieldOrders(rows[i].window),
+        },
+      });
     }
     if (splits.length) return splits;
   }
 
-  const bt0 = billTo[0] || "";
-  const o0 = billToOther[0] || "";
+  const first = rows.find(({values}) => txText(values, "Bill To") || txText(values, "Other")) ?? rows[0];
+  const bt0 = first ? txText(first.values, "Bill To") : "";
+  const o0 = first ? txText(first.values, "Other") : "";
   const label = bt0 && !/other/i.test(bt0) ? bt0 : o0 || bt0;
-  return [{ ...common, id: asText(sub.id), amount: costSingle, program: label, billedTo: label, project: "", txnNumber: null }];
+  return [{
+    ...common,
+    id: asText(sub.id),
+    amount: costSingle,
+    program: label,
+    billedTo: label,
+    project: "",
+    txnNumber: null,
+    transactionFields: first?.values ?? {},
+    extractionGroup: first ? {
+      kind: "fallback",
+      index: first.window.index,
+      orderRange: first.window.orderRange,
+      fieldIds: windowFieldIds(first.window),
+      fieldOrders: windowFieldOrders(first.window),
+    } : undefined,
+  }];
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -744,7 +861,10 @@ function extractInvoice(sub: AnyObj, formId: string, formAlias: string, formTitl
  * Extract one or more SpendLineItems from a Jotform submission Firestore doc.
  * Never throws — always returns at least one item (possibly a fallback row).
  */
-export function extractSpendItems(sub: AnyObj): ExtractedSpendItem[] {
+export function extractSpendItems(
+  sub: AnyObj,
+  transactionModel?: TransactionWindowModel,
+): ExtractedSpendItem[] {
   const formId = String(sub?.form_id || sub?.formId || "").trim();
   const formAlias = String(sub?.formAlias || "").trim();
   const formTitle = String(sub?.formTitle || sub?.formAlias || "Jotform Submission").trim();
@@ -755,10 +875,16 @@ export function extractSpendItems(sub: AnyObj): ExtractedSpendItem[] {
   }
 
   if (formId === SPENDING_FORM_IDS.creditCard) {
-    return extractCreditCard(sub, formId, formAlias, formTitle);
+    if (!transactionModel) {
+      throw new Error(`${SPEND_ERR.SCHEMA_MISMATCH}: missing live transaction window model for credit-card form`);
+    }
+    return extractCreditCard(sub, formId, formAlias, formTitle, transactionModel);
   }
   if (formId === SPENDING_FORM_IDS.invoice) {
-    return extractInvoice(sub, formId, formAlias, formTitle);
+    if (!transactionModel) {
+      throw new Error(`${SPEND_ERR.SCHEMA_MISMATCH}: missing live transaction window model for invoice form`);
+    }
+    return extractInvoice(sub, formId, formAlias, formTitle, transactionModel);
   }
 
   const err: SpendExtractionError = {

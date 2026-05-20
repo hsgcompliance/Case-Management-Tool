@@ -5,46 +5,33 @@ import { Modal } from "@entities/ui/Modal";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { PaymentScheduleBuildInput } from "@hooks/usePayments";
 import type { TPayment } from "@types";
-import { isISODate10, todayISO as libTodayISO } from "@lib/date";
+import { isISODate10, todayISO, addMonthsISO, firstOfNextMonthISO, isoToYearMonth, fmtShortMonthDay } from "@lib/date";
+import { fmtCurrencyUSD } from "@lib/formatters";
 import { useGrant } from "@hooks/useGrants";
 import { SpreadsheetBuilderView, type SSRow, newSSRow } from "./SpreadsheetBuilderView";
+import { TripleToggle, certDueToggleValue } from "@entities/ui/TripleToggle";
 import dynamic from "next/dynamic";
 const GrantBudgetStrip = dynamic(
   () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
   { ssr: false, loading: () => <div className="h-10 animate-pulse rounded bg-slate-100" /> },
 );
 
-function isISO(s: string): boolean { return isISODate10(s); }
-function lastDayOfMonth(y: number, mo: number): number {
-  return new Date(y, mo, 0).getDate(); // mo is 1-based; day 0 = last of prior month
-}
-function addMonthsISO(iso: string, m: number): string {
-  if (!isISO(iso)) return "";
-  const [y0, mo0, d0] = iso.split("-").map(Number);
-  const total = y0 * 12 + (mo0 - 1) + m;
-  const y = Math.floor(total / 12);
-  const mo = (total % 12) + 1;
-  const d = Math.min(d0, lastDayOfMonth(y, mo));
-  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-function firstOfNextMonth(iso: string): string {
-  if (!isISO(iso)) return "";
-  const [y0, mo0] = iso.split("-").map(Number);
-  const total = y0 * 12 + (mo0 - 1) + 1;
-  const y = Math.floor(total / 12);
-  const mo = (total % 12) + 1;
-  return `${y}-${String(mo).padStart(2, "0")}-01`;
-}
+const isISO = isISODate10;
 
 type EnrollmentOption = {
   id: string;
   label: string;
   grantId?: string;
+  endDate?: string | null;
   statusLabel?: "open" | "closed";
   lineItemIds?: string[];
   scheduleMeta?: unknown;
   payments?: TPayment[];
 };
+
+function isOpenEnrollmentOption(enrollment: EnrollmentOption): boolean {
+  return enrollment.statusLabel !== "closed";
+}
 
 type Props = {
   open: boolean;
@@ -64,17 +51,17 @@ type MonthlyPlan = {
   months: string;
   monthlyAmount: string;
   lineItemId: string;
-  vendor: string;
   comment: string;
+  advancedOpen?: boolean;
 };
 
 type SinglePlan = {
-  enabled: boolean;
   date: string;
   amount: string;
   lineItemId: string;
   vendor: string;
   comment: string;
+  advancedOpen?: boolean;
 };
 
 type ServicePlan = {
@@ -87,6 +74,17 @@ type ServicePlan = {
   comment: string;
 };
 
+type CertTaskPlan = {
+  enabled: boolean;
+  cadenceMonths: "3" | "4" | "6" | "12";
+  endDate: string;
+  bucket: "task" | "compliance";
+  title: string;
+  advancedOpen: boolean;
+};
+
+type CertPreviewRow = { dueDate: string; targetDate: string; label: string };
+
 type PreviewRow = {
   dueDate: string;
   type: "monthly" | "deposit" | "prorated" | "service";
@@ -95,52 +93,33 @@ type PreviewRow = {
   note?: string;
 };
 
-type MonthlyOverlapWarning = {
-  month: string;
-  count: number;
-  labels: string[];
-};
+type PreviewTableRow =
+  | { key: string; dueDate: string; status: "paid" | "remove"; type: string; note: string; lineItemId: string; amount: number }
+  | { key: string; dueDate: string; status: "new"; type: PreviewRow["type"]; note: string; lineItemId: string; amount: number };
 
-type CertTaskPlan = {
-  enabled: boolean;
-  title: string;
-  startDate: string;
-  cadenceMonths: "3" | "4" | "6" | "12";
-  endDate: string;
-  bucket: "task" | "compliance";
-};
+type CompletionState = "empty" | "partial" | "complete";
 
-type InvoiceDocsPlan = {
-  enabled: boolean;
-  dueDate: string;
-  bucket: "task" | "compliance";
-};
-
-function todayISO(): string {
-  return libTodayISO();
+function completionState(required: (string | boolean)[], anyFilled: (string | boolean)[]): CompletionState {
+  const hasAny = anyFilled.some((v) => !!v);
+  const allReq = required.every((v) => !!v);
+  if (!hasAny) return "empty";
+  if (allReq) return "complete";
+  return "partial";
 }
 
-function plusOneYearISO(iso?: string): string {
-  const base = iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : todayISO();
-  return addMonthsISO(base, 12);
+function stateClasses(s: CompletionState): string {
+  if (s === "complete") return "border-green-300 bg-green-50/40 dark:border-green-700 dark:bg-green-950/20";
+  if (s === "partial")  return "border-amber-300 bg-amber-50/50 dark:border-amber-700 dark:bg-amber-950/20";
+  return "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900";
 }
 
-function money(v: number): string {
-  return Number(v || 0).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+const money = fmtCurrencyUSD;
 
 function rowId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function cleanText(value: string): string {
-  return String(value || "").trim();
-}
+function cleanText(value: string): string { return String(value || "").trim(); }
 
 function listFromUnknown(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
@@ -178,35 +157,51 @@ function asPositiveInt(value: string, max = 120): number {
   return Math.min(max, Math.floor(n));
 }
 
-function isoMonth(iso: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "")) ? String(iso).slice(0, 7) : "";
+const isoMonth = isoToYearMonth;
+const fmtMonth = fmtShortMonthDay;
+
+function minISODate(...values: Array<string | null | undefined>): string {
+  return values
+    .map((value) => String(value || "").slice(0, 10))
+    .filter(isISO)
+    .sort()[0] || "";
+}
+
+function maxPaymentDueDate(rows: Array<Pick<PreviewRow, "dueDate"> | TPayment>): string {
+  let max = "";
+  for (const row of rows) {
+    const due = String((row as { dueDate?: unknown }).dueDate || "").slice(0, 10);
+    if (isISO(due) && (!max || due > max)) max = due;
+  }
+  return max;
 }
 
 function defaultMonthlyPlan(kind: MonthlyPlanKind, lineItemId = "", baseDate?: string): MonthlyPlan {
-  const seed = baseDate && isISO(baseDate) ? baseDate : todayISO();
+  const seed = baseDate && isISO(baseDate) ? baseDate : "";
   return {
     id: rowId(kind),
     kind,
-    firstDue: firstOfNextMonth(seed),
-    months: "12",
+    firstDue: seed ? firstOfNextMonthISO(seed) : "",
+    months: seed ? "12" : "",
     monthlyAmount: "",
     lineItemId,
-    vendor: "",
     comment: "",
+    advancedOpen: false,
   };
 }
 
 function defaultServicePlan(lineItemId = "", baseDate?: string): ServicePlan {
   const seed = baseDate && isISO(baseDate) ? baseDate : todayISO();
-  return {
-    id: rowId("service"),
-    note: "",
-    date: seed,
-    amount: "",
-    lineItemId,
-    vendor: "",
-    comment: "",
-  };
+  return { id: rowId("service"), note: "", date: seed, amount: "", lineItemId, vendor: "", comment: "" };
+}
+
+function defaultSinglePlan(lineItemId = "", baseDate?: string): SinglePlan {
+  const seed = baseDate && isISO(baseDate) ? baseDate : "";
+  return { date: seed, amount: "", lineItemId, vendor: "", comment: "", advancedOpen: false };
+}
+
+function singlePlanHasAny(plan: SinglePlan): boolean {
+  return Boolean(plan.date || plan.amount || plan.vendor || plan.comment || plan.lineItemId);
 }
 
 function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: string) {
@@ -216,25 +211,24 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
     (Array.isArray(rows) ? rows : []).map((raw) => {
       const r = (raw && typeof raw === "object") ? (raw as Record<string, unknown>) : {};
       return {
-        id: rowId(kind),
-        kind,
+        id: rowId(kind), kind,
         firstDue: String(r.firstDue || seedDate),
         months: String(r.months || ""),
         monthlyAmount: String(r.monthly ?? r.monthlyAmount ?? ""),
         lineItemId: String(r.lineItemId || fallbackLineItemId || ""),
-        vendor: String(r.vendor || ""),
         comment: String(r.comment || ""),
+        advancedOpen: false,
       };
     });
   const mapSingle = (raw: unknown): SinglePlan => {
     const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
     return {
-      enabled: Boolean(r.enabled),
       date: String(r.date || seedDate),
       amount: String(r.amount || ""),
       lineItemId: String(r.lineItemId || fallbackLineItemId || ""),
       vendor: String(r.vendor || ""),
       comment: String(r.comment || ""),
+      advancedOpen: false,
     };
   };
   const mapServices = (rows: unknown): ServicePlan[] =>
@@ -256,98 +250,487 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
     deposit: mapSingle(m.deposit),
     prorated: mapSingle(m.prorated),
     services: mapServices(m.services),
-    invoiceDocsTask: m.invoiceDocsTask && typeof m.invoiceDocsTask === "object"
-      ? {
-          enabled: (m.invoiceDocsTask as Record<string, unknown>).enabled === true,
-          dueDate: String((m.invoiceDocsTask as Record<string, unknown>).dueDate || seedDate),
-          bucket: String((m.invoiceDocsTask as Record<string, unknown>).bucket || "compliance") === "task" ? "task" as const : "compliance" as const,
-        }
-      : null,
   };
 }
 
-function MonthlyPlanEditor({
-  label,
-  plans,
-  onChange,
-  onAdd,
-  onRemove,
-  grantId,
-  fallbackLineItemIds,
-  vendor,
-  onVendorChange,
+// ─── Chevron icon ────────────────────────────────────────────────────────────
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+// ─── Rent row ────────────────────────────────────────────────────────────────
+function RentRow({
+  plan, onChange, onRemove, canRemove, grantId, fallbackLineItemIds, globalLineItemId,
 }: {
-  label: string;
-  plans: MonthlyPlan[];
-  onChange: (id: string, patch: Partial<MonthlyPlan>) => void;
-  onAdd: () => void;
-  onRemove: (id: string) => void;
+  plan: MonthlyPlan;
+  onChange: (patch: Partial<MonthlyPlan>) => void;
+  onRemove: () => void;
+  canRemove: boolean;
   grantId?: string | null;
   fallbackLineItemIds: string[];
-  vendor: string;
-  onVendorChange: (v: string) => void;
+  globalLineItemId: string;
 }) {
+  const state = completionState(
+    [isISO(plan.firstDue) ? plan.firstDue : "", asPositiveInt(plan.months) > 0 ? "y" : "", asPositiveNumber(plan.monthlyAmount) > 0 ? "y" : ""],
+    [plan.firstDue, plan.months, plan.monthlyAmount],
+  );
+  const effectiveLI = plan.lineItemId || globalLineItemId;
+  const allFB = effectiveLI && !fallbackLineItemIds.includes(effectiveLI)
+    ? [effectiveLI, ...fallbackLineItemIds]
+    : fallbackLineItemIds;
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{label}</div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onAdd}>+ Add row</button>
+    <div className={`rounded-lg border p-3 transition-colors ${stateClasses(state)}`}>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-sm" style={{ minWidth: 140 }}>
+          <div className="mb-1 text-xs text-slate-500">Start Date</div>
+          <input
+            type="date"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            value={plan.firstDue}
+            onChange={(e) => onChange({ firstDue: e.currentTarget.value })}
+          />
+        </label>
+        <label className="text-sm" style={{ minWidth: 80 }}>
+          <div className="mb-1 text-xs text-slate-500">Months</div>
+          <input
+            type="number" min={1} max={120}
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            value={plan.months}
+            onChange={(e) => onChange({ months: e.currentTarget.value })}
+          />
+        </label>
+        <label className="text-sm" style={{ minWidth: 110 }}>
+          <div className="mb-1 text-xs text-slate-500">Amount / mo</div>
+          <input
+            type="number" min={0} step="0.01" placeholder="0.00"
+            className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            value={plan.monthlyAmount}
+            onChange={(e) => onChange({ monthlyAmount: e.currentTarget.value })}
+          />
+        </label>
+        <div className="flex items-end gap-2 pb-0.5">
+          <button
+            type="button"
+            className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            onClick={() => onChange({ advancedOpen: !plan.advancedOpen })}
+          >
+            {plan.advancedOpen ? "Less ▲" : "Advanced ▼"}
+          </button>
+          {canRemove && (
+            <button type="button" onClick={onRemove} className="text-xs text-rose-400 hover:text-rose-600">
+              Remove
+            </button>
+          )}
+        </div>
       </div>
-      <div className="mb-3">
-        <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Vendor (optional)</div>
-        <input
-          className="w-full max-w-sm rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          value={vendor}
-          onChange={(e) => onVendorChange(e.currentTarget.value)}
-          placeholder="e.g. Parkview Apartments"
-        />
-      </div>
-      {plans.length === 0 ? (
-        <div className="text-xs text-slate-500 dark:text-slate-400">No rows yet.</div>
-      ) : (
-        <div className="space-y-3">
-          {plans.map((plan) => (
-            <div key={plan.id} className="rounded border border-slate-200 p-2 dark:border-slate-700">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-xs text-slate-600 dark:text-slate-400">{label} plan</div>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove(plan.id)}>Remove</button>
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="text-sm">
-                  <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">First Due</div>
-                  <input type="date" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={plan.firstDue} onChange={(e) => onChange(plan.id, { firstDue: e.currentTarget.value })} />
-                </label>
-                <label className="text-sm">
-                  <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Months</div>
-                  <input type="number" min={1} max={120} className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={plan.months} onChange={(e) => onChange(plan.id, { months: e.currentTarget.value })} />
-                </label>
-                <label className="text-sm">
-                  <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Monthly Amount</div>
-                  <input type="number" min={0} step="0.01" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={plan.monthlyAmount} onChange={(e) => onChange(plan.id, { monthlyAmount: e.currentTarget.value })} placeholder="0.00" />
-                </label>
-                <label className="text-sm">
-                  <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Line Item</div>
-                  <LineItemSelect
-                    grantId={grantId || null}
-                    value={plan.lineItemId}
-                    onChange={(next) => onChange(plan.id, { lineItemId: String(next || "") })}
-                    fallbackLineItemIds={fallbackLineItemIds}
-                    inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Comment (optional)</div>
-                  <input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={plan.comment} onChange={(e) => onChange(plan.id, { comment: e.currentTarget.value })} />
-                </label>
-              </div>
-            </div>
-          ))}
+      {plan.advancedOpen && (
+        <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 dark:border-slate-800 md:grid-cols-2">
+          <label className="text-sm">
+            <div className="mb-1 text-xs text-slate-500">Line Item override</div>
+            <LineItemSelect
+              grantId={grantId || null}
+              value={plan.lineItemId || null}
+              onChange={(next) => onChange({ lineItemId: String(next || "") })}
+              fallbackLineItemIds={allFB}
+              placeholderLabel={`Default (${globalLineItemId || "none"})`}
+              allowEmpty
+              inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </label>
+          <label className="text-sm">
+            <div className="mb-1 text-xs text-slate-500">Comment</div>
+            <input
+              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              value={plan.comment}
+              onChange={(e) => onChange({ comment: e.currentTarget.value })}
+            />
+          </label>
         </div>
       )}
     </div>
   );
 }
 
+// ─── Single plan (Deposit / Prorated) ────────────────────────────────────────
+function SinglePlanCard({
+  label, plan, onChange, grantId, fallbackLineItemIds, globalLineItemId, globalVendor,
+}: {
+  label: string;
+  plan: SinglePlan;
+  open?: boolean;
+  onToggle?: () => void;
+  onChange: (patch: Partial<SinglePlan>) => void;
+  grantId?: string | null;
+  fallbackLineItemIds: string[];
+  globalLineItemId: string;
+  globalVendor: string;
+}) {
+  const state = completionState(
+    [isISO(plan.date) ? plan.date : "", asPositiveNumber(plan.amount) > 0 ? "y" : ""],
+    [plan.date, plan.amount],
+  );
+  const effectiveLI = plan.lineItemId || globalLineItemId;
+  const allFB = effectiveLI && !fallbackLineItemIds.includes(effectiveLI)
+    ? [effectiveLI, ...fallbackLineItemIds]
+    : fallbackLineItemIds;
+
+  return (
+    <div className={`rounded-lg border transition-colors ${stateClasses(state)}`}>
+      <div className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left">
+        <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{label}</span>
+        <div className="flex items-center gap-2">
+          {state !== "empty" && (
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              state === "complete" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+            }`}>
+              {state === "complete" ? "Ready" : "Incomplete"}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="border-t border-slate-100 px-3 pb-3 pt-3 dark:border-slate-800">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-sm" style={{ minWidth: 140 }}>
+              <div className="mb-1 text-xs text-slate-500">Date</div>
+              <input
+                type="date"
+                className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                value={plan.date}
+                onChange={(e) => onChange({ date: e.currentTarget.value })}
+              />
+            </label>
+            <label className="text-sm" style={{ minWidth: 110 }}>
+              <div className="mb-1 text-xs text-slate-500">Amount</div>
+              <input
+                type="number" min={0} step="0.01" placeholder="0.00"
+                className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                value={plan.amount}
+                onChange={(e) => onChange({ amount: e.currentTarget.value })}
+              />
+            </label>
+            <div className="pb-0.5">
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                onClick={() => onChange({ advancedOpen: !plan.advancedOpen })}
+              >
+                {plan.advancedOpen ? "Less ▲" : "Advanced ▼"}
+              </button>
+            </div>
+          </div>
+          {plan.advancedOpen && (
+            <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 dark:border-slate-800 md:grid-cols-3">
+              <label className="text-sm">
+                <div className="mb-1 text-xs text-slate-500">Line Item override</div>
+                <LineItemSelect
+                  grantId={grantId || null}
+                  value={plan.lineItemId || null}
+                  onChange={(next) => onChange({ lineItemId: String(next || "") })}
+                  fallbackLineItemIds={allFB}
+                  placeholderLabel={`Default (${globalLineItemId || "none"})`}
+                  allowEmpty
+                  inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+              <label className="text-sm">
+                <div className="mb-1 text-xs text-slate-500">Vendor override</div>
+                <input
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  value={plan.vendor}
+                  placeholder={globalVendor || ""}
+                  onChange={(e) => onChange({ vendor: e.currentTarget.value })}
+                />
+              </label>
+              <label className="text-sm">
+                <div className="mb-1 text-xs text-slate-500">Comment</div>
+                <input
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  value={plan.comment}
+                  onChange={(e) => onChange({ comment: e.currentTarget.value })}
+                />
+              </label>
+            </div>
+          )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Collapsible section wrapper ──────────────────────────────────────────────
+function CollapsibleSection({
+  label, count, open, onToggle, children,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+        onClick={onToggle}
+      >
+        <ChevronIcon open={open} />
+        <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{label}</span>
+        {count > 0 && (
+          <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            {count}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 px-3 pb-3 pt-3 dark:border-slate-800">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Draft Preview Modal ──────────────────────────────────────────────────────
+function DraftPreviewModal({
+  open, onCancel, onConfirm, busy,
+  previewRows, certPreviewRows, existingPayments, certCutoffDate,
+  grantId, budgetProjectionDelta, budgetLineItemDeltas,
+  replaceUnpaid, setReplaceUnpaid,
+  updateGrantBudgets, setUpdateGrantBudgets,
+  recalcGrantProjected, setRecalcGrantProjected,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+  previewRows: PreviewRow[];
+  certPreviewRows: CertPreviewRow[];
+  existingPayments: TPayment[];
+  certCutoffDate?: string;
+  grantId?: string | null;
+  budgetProjectionDelta: number;
+  budgetLineItemDeltas: Record<string, number>;
+  replaceUnpaid: boolean;
+  setReplaceUnpaid: (v: boolean) => void;
+  updateGrantBudgets: boolean;
+  setUpdateGrantBudgets: (v: boolean) => void;
+  recalcGrantProjected: boolean;
+  setRecalcGrantProjected: (v: boolean) => void;
+}) {
+  const newTotal = previewRows.reduce((s, r) => s + r.amount, 0);
+
+  const paidRows = React.useMemo(
+    () => existingPayments
+      .filter((p) => p.paid && !p.void && p.amount > 0 && isISO(String(p.dueDate || "")))
+      .sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || ""))),
+    [existingPayments],
+  );
+  const unpaidRows = React.useMemo(
+    () => existingPayments
+      .filter((p) => !p.paid && !p.void && p.amount > 0 && isISO(String(p.dueDate || "")))
+      .sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || ""))),
+    [existingPayments],
+  );
+
+  const paidTotal = paidRows.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const removedTotal = replaceUnpaid ? unpaidRows.reduce((s, p) => s + Number(p.amount || 0), 0) : 0;
+  const grandAfterBuild = paidTotal + newTotal;
+
+  const hasPaid = paidRows.length > 0;
+  const hasUnpaid = unpaidRows.length > 0;
+  const isRebuild = hasPaid || hasUnpaid;
+
+  // Build month lookup sets for the cert column
+  const certDueMonths = React.useMemo(() => new Set(certPreviewRows.map((r) => isoMonth(r.dueDate))), [certPreviewRows]);
+  const certUpcomingMonths = React.useMemo(
+    () => new Set(certPreviewRows.map((r) => isoMonth(addMonthsISO(r.dueDate, -1))).filter(Boolean)),
+    [certPreviewRows],
+  );
+  const hasCert = certPreviewRows.length > 0;
+
+  const colSpanBase = 5;
+  const tableRows = React.useMemo<PreviewTableRow[]>(() => {
+    const fromPayment = (p: TPayment, status: "paid" | "remove", idx: number): PreviewTableRow => ({
+      key: `${status}:${p.id || idx}`,
+      dueDate: String(p.dueDate || "").slice(0, 10),
+      status,
+      type: String(p.type || "-"),
+      note: Array.isArray(p.note) ? p.note.filter(Boolean).join(", ") : String(p.note || "-"),
+      lineItemId: String(p.lineItemId || ""),
+      amount: Number(p.amount || 0),
+    });
+    return [
+      ...paidRows.map((p, idx) => fromPayment(p, "paid", idx)),
+      ...(replaceUnpaid ? unpaidRows.map((p, idx) => fromPayment(p, "remove", idx)) : []),
+      ...previewRows.map((row, idx): PreviewTableRow => ({
+        key: `new:${row.type}:${row.dueDate}:${row.lineItemId}:${idx}`,
+        dueDate: row.dueDate,
+        status: "new",
+        type: row.type,
+        note: row.note || "-",
+        lineItemId: row.lineItemId,
+        amount: row.amount,
+      })),
+    ].sort((a, b) => `${a.dueDate}|${a.status}|${a.type}`.localeCompare(`${b.dueDate}|${b.status}|${b.type}`));
+  }, [paidRows, previewRows, replaceUnpaid, unpaidRows]);
+
+  const statusPill = (status: PreviewTableRow["status"]) => {
+    const cls =
+      status === "paid"
+        ? "border-slate-200 bg-slate-50 text-slate-500"
+        : status === "remove"
+          ? "border-amber-200 bg-amber-50 text-amber-700"
+          : "border-sky-200 bg-sky-50 text-sky-700";
+    const label = status === "paid" ? "Paid" : status === "remove" ? "Remove" : "New";
+    return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>{label}</span>;
+  };
+
+  return (
+    <Modal
+      isOpen={open}
+      title="Schedule Preview"
+      onClose={onCancel}
+      widthClass="max-w-4xl"
+      disableOverlayClose
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-300">
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={replaceUnpaid} onChange={(e) => setReplaceUnpaid(e.currentTarget.checked)} />
+              Replace unpaid rows
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={updateGrantBudgets} onChange={(e) => setUpdateGrantBudgets(e.currentTarget.checked)} />
+              Update grant budgets
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={recalcGrantProjected} onChange={(e) => setRecalcGrantProjected(e.currentTarget.checked)} />
+              Recalculate grant projected
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>← Back</button>
+            <button className="btn btn-sm" onClick={onConfirm} disabled={busy}>
+              {busy ? "Building..." : "Confirm & Build"}
+            </button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {grantId && (
+          <GrantBudgetStrip
+            grantId={grantId}
+            projectionDelta={budgetProjectionDelta}
+            lineItemDeltas={budgetLineItemDeltas}
+          />
+        )}
+
+        {previewRows.length === 0 && !isRebuild ? (
+          <div className="text-xs text-slate-500 dark:text-slate-400">No rows to preview.</div>
+        ) : (
+          <div className="overflow-x-auto rounded border border-slate-200 dark:border-slate-700">
+            <table className="min-w-full text-xs">
+              <thead className="bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                <tr>
+                  <th className="px-2 py-1.5 text-left">Due</th>
+                  <th className="px-2 py-1.5 text-left">Status</th>
+                  <th className="px-2 py-1.5 text-left">Type</th>
+                  <th className="px-2 py-1.5 text-left">Note</th>
+                  <th className="px-2 py-1.5 text-left">Line Item</th>
+                  <th className="px-2 py-1.5 text-right">Amount</th>
+                  {hasCert && <th className="px-2 py-1.5 text-center" title="Rent Cert Due">Cert</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {/* Paid rows — always shown when present */}
+                {tableRows.map((row) => {
+                  const month = isoMonth(row.dueDate);
+                  const certVal = hasCert && row.status === "new" ? certDueToggleValue(month, certDueMonths, certUpcomingMonths) : 0;
+                  const removed = row.status === "remove";
+                  return (
+                    <tr key={row.key} className={[
+                      "border-t border-slate-100 dark:border-slate-700 dark:text-slate-300",
+                      row.status === "paid" ? "bg-slate-50 text-slate-500 dark:bg-slate-800/40 dark:text-slate-500" : "",
+                      removed ? "bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400" : "",
+                    ].join(" ")}>
+                      <td className="px-2 py-1"><span className={removed ? "line-through" : ""}>{row.dueDate}</span></td>
+                      <td className="px-2 py-1">{statusPill(row.status)}</td>
+                      <td className="px-2 py-1">{row.type}</td>
+                      <td className="px-2 py-1">{row.note}</td>
+                      <td className="px-2 py-1 font-mono text-[11px]">{row.lineItemId}</td>
+                      <td className="px-2 py-1 text-right"><span className={removed ? "line-through" : ""}>{money(row.amount)}</span></td>
+                      {hasCert && (
+                        <td className="px-2 py-1 text-center">
+                          {certVal > 0 && <TripleToggle value={certVal} readOnly />}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+
+                {/* Unpaid rows being replaced */}
+                <tr className="border-t border-slate-200 bg-slate-50 font-semibold dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                  <td className="px-2 py-1.5 text-right" colSpan={colSpanBase}>New rows subtotal</td>
+                  <td className="px-2 py-1.5 text-right">{money(newTotal)}</td>
+                  {hasCert && <td className="px-2 py-1.5" />}
+                </tr>
+                {replaceUnpaid && removedTotal > 0 ? (
+                  <tr className="border-t border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
+                    <td className="px-2 py-1 text-right text-amber-600 dark:text-amber-400" colSpan={colSpanBase}>Removed subtotal</td>
+                    <td className="px-2 py-1 text-right font-medium text-amber-600 dark:text-amber-400">{money(removedTotal)}</td>
+                    {hasCert && <td className="px-2 py-1" />}
+                  </tr>
+                ) : null}
+                {paidTotal > 0 ? (
+                  <tr className="border-t border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
+                    <td className="px-2 py-1 text-right text-slate-500 dark:text-slate-500" colSpan={colSpanBase}>Paid subtotal</td>
+                    <td className="px-2 py-1 text-right font-medium text-slate-500 dark:text-slate-500">{money(paidTotal)}</td>
+                    {hasCert && <td className="px-2 py-1" />}
+                  </tr>
+                ) : null}
+
+                {/* Grand total after build */}
+                {isRebuild && (
+                  <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100">
+                    <td className="px-2 py-2 text-right" colSpan={colSpanBase}>
+                      Total after build
+                      <span className="ml-2 font-normal text-slate-400 dark:text-slate-400">
+                        ({paidRows.length} paid + {previewRows.length} new)
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-right">{money(grandAfterBuild)}</td>
+                    {hasCert && <td className="px-2 py-2" />}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {hasCert && (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+            <TripleToggle value={2} readOnly size="xs" />
+            <span className="font-semibold">Rent Cert Reminders: {certPreviewRows.length}</span>
+            <span>Shown in the Cert column.</span>
+            {certCutoffDate ? <span>Stops at {certCutoffDate}.</span> : null}
+          </div>
+        )}
+
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Main dialog ──────────────────────────────────────────────────────────────
 export default function PaymentScheduleBuilderDialog({
   open,
   enrollments,
@@ -361,165 +744,193 @@ export default function PaymentScheduleBuilderDialog({
   const [updateGrantBudgets, setUpdateGrantBudgets] = React.useState(true);
   const [recalcGrantProjected, setRecalcGrantProjected] = React.useState(true);
 
+  // Global defaults
+  const [globalLineItemId, setGlobalLineItemId] = React.useState("");
+  const [globalVendor, setGlobalVendor] = React.useState("");
+
+  // Section open state
+  const [servicesOpen, setServicesOpen] = React.useState(false);
+  const [utilitiesOpen, setUtilitiesOpen] = React.useState(false);
+  const [showPreview, setShowPreview] = React.useState(false);
+
   const [rentPlans, setRentPlans] = React.useState<MonthlyPlan[]>([]);
-  const [rentVendor, setRentVendor] = React.useState("");
   const [utilityPlans, setUtilityPlans] = React.useState<MonthlyPlan[]>([]);
-  const [utilityVendor, setUtilityVendor] = React.useState("");
-  const [deposit, setDeposit] = React.useState<SinglePlan>({ enabled: false, date: todayISO(), amount: "", lineItemId: "", vendor: "", comment: "" });
-  const [prorated, setProrated] = React.useState<SinglePlan>({ enabled: false, date: todayISO(), amount: "", lineItemId: "", vendor: "", comment: "" });
+  const [deposit, setDeposit] = React.useState<SinglePlan>(defaultSinglePlan());
+  const [prorated, setProrated] = React.useState<SinglePlan>(defaultSinglePlan());
   const [services, setServices] = React.useState<ServicePlan[]>([]);
-  const [certTask, setCertTask] = React.useState<CertTaskPlan>({
-    enabled: false,
-    title: "Rent Certification",
-    startDate: todayISO(),
-    cadenceMonths: "3",
-    endDate: plusOneYearISO(),
-    bucket: "compliance",
-  });
-  const [invoiceDocsTask, setInvoiceDocsTask] = React.useState<InvoiceDocsPlan>({
-    enabled: false,
-    dueDate: todayISO(),
-    bucket: "compliance",
-  });
-  const [error, setError] = React.useState<string | null>(null);
   const [viewMode, setViewMode] = React.useState<"builder" | "spreadsheet">("builder");
   const [ssRows, setSsRows] = React.useState<SSRow[]>(() => [newSSRow()]);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const [certTask, setCertTask] = React.useState<CertTaskPlan>({
+    enabled: true,
+    cadenceMonths: "3",
+    endDate: "",
+    bucket: "compliance",
+    title: "Rent Certification",
+    advancedOpen: false,
+  });
+
+  // Invoice docs task — kept for payload compatibility, no UI
+  const [invoiceDocsTask] = React.useState({ enabled: false, dueDate: todayISO(), bucket: "compliance" as const });
+  const openEnrollments = React.useMemo(() => enrollments.filter(isOpenEnrollmentOption), [enrollments]);
 
   const seedFromEnrollment = React.useCallback((enr?: EnrollmentOption) => {
     const firstLineItem = enr?.lineItemIds?.[0] || "";
     const seedDate = todayISO();
     const saved = savedMetaSeed(enr?.scheduleMeta, firstLineItem, seedDate);
     setEnrollmentId(enr?.id || "");
+    setGlobalLineItemId(firstLineItem);
+    setGlobalVendor(saved?.rentPlans?.[0]?.vendor || "");
     setReplaceUnpaid(true);
     setUpdateGrantBudgets(true);
     setRecalcGrantProjected(true);
     setRentPlans(saved?.rentPlans?.length ? saved.rentPlans : [defaultMonthlyPlan("rent", firstLineItem, seedDate)]);
-    setRentVendor(saved?.rentPlans?.[0]?.vendor || "");
     setUtilityPlans(saved?.utilityPlans || []);
-    setUtilityVendor(saved?.utilityPlans?.[0]?.vendor || "");
-    setDeposit(saved?.deposit || { enabled: false, date: seedDate, amount: "", lineItemId: firstLineItem, vendor: "", comment: "" });
-    setProrated(saved?.prorated || { enabled: false, date: seedDate, amount: "", lineItemId: firstLineItem, vendor: "", comment: "" });
+    setDeposit(saved?.deposit || defaultSinglePlan(firstLineItem));
+    setProrated(saved?.prorated || defaultSinglePlan(firstLineItem));
     setServices(saved?.services || []);
-    setCertTask({
-      enabled: false,
-      title: "Rent Certification",
-      startDate: seedDate,
-      cadenceMonths: "3",
-      endDate: plusOneYearISO(seedDate),
-      bucket: "compliance",
-    });
-    setInvoiceDocsTask(saved?.invoiceDocsTask || { enabled: false, dueDate: seedDate, bucket: "compliance" });
+    setServicesOpen(false);
+    setUtilitiesOpen(false);
+    setShowPreview(false);
+    setCertTask({ enabled: true, cadenceMonths: "3", endDate: "", bucket: "compliance", title: "Rent Certification", advancedOpen: false });
     setError(null);
-    const ssBase = newSSRow("monthly-rent", firstOfNextMonth(seedDate));
+    const ssBase = newSSRow("monthly-rent", firstOfNextMonthISO(seedDate));
     ssBase.lineItemId = firstLineItem;
     setSsRows([ssBase]);
   }, []);
 
   React.useEffect(() => {
     if (!open) return;
-    seedFromEnrollment(enrollments[0]);
-  }, [open, enrollments, seedFromEnrollment]);
+    seedFromEnrollment(openEnrollments[0]);
+  }, [open, openEnrollments, seedFromEnrollment]);
+
+  // Auto-add empty rent row when all are filled
+  React.useEffect(() => {
+    if (viewMode !== "builder") return;
+    const isRentFilled = (p: MonthlyPlan) =>
+      isISO(p.firstDue) && asPositiveInt(p.months) > 0 && asPositiveNumber(p.monthlyAmount) > 0;
+    const filled = rentPlans.filter(isRentFilled);
+    if (filled.length === rentPlans.length && rentPlans.length > 0) {
+      setRentPlans((prev) => [...prev, defaultMonthlyPlan("rent", globalLineItemId)]);
+    }
+  }, [rentPlans, globalLineItemId, viewMode]);
 
   const selectedEnrollment = React.useMemo(
-    () => enrollments.find((e) => e.id === enrollmentId) || null,
-    [enrollmentId, enrollments],
+    () => openEnrollments.find((e) => e.id === enrollmentId) || null,
+    [enrollmentId, openEnrollments],
+  );
+  const { data: selectedGrant } = useGrant(selectedEnrollment?.grantId, { enabled: !!selectedEnrollment?.grantId });
+  const enrollmentEndDate = String(selectedEnrollment?.endDate || "").slice(0, 10);
+  const grantEndDate = String((selectedGrant as Record<string, unknown> | null | undefined)?.endDate || "").slice(0, 10);
+
+  const certStartDate = React.useMemo(
+    () => rentPlans.find((p) => isISO(p.firstDue))?.firstDue || todayISO(),
+    [rentPlans],
   );
 
+  const existingPayments = React.useMemo(
+    () => (selectedEnrollment?.payments || []) as TPayment[],
+    [selectedEnrollment?.payments],
+  );
+
+  const scheduleEditWarning = React.useMemo(() => {
+    const meta = selectedEnrollment?.scheduleMeta;
+    if (!meta || typeof meta !== "object") {
+      // No saved meta but has payments — was built before meta was tracked
+      return existingPayments.some((p) => p.paid) ? "has-paid" as const : null;
+    }
+    const m = meta as Record<string, unknown>;
+    if (m.version !== 1) return null;
+    if (typeof m.editedAt === "string" && m.editedAt) return "edited" as const;
+    if (existingPayments.some((p) => p.paid)) return "has-paid" as const;
+    return null;
+  }, [selectedEnrollment?.scheduleMeta, existingPayments]);
+
   const fallbackLineItemIds = selectedEnrollment?.lineItemIds || [];
-  const { data: selectedGrant } = useGrant(selectedEnrollment?.grantId, { enabled: !!selectedEnrollment?.grantId });
   const invoiceDocs = React.useMemo(
     () => invoiceDocsFromGrant((selectedGrant || null) as Record<string, unknown> | null),
     [selectedGrant],
   );
 
-  const patchMonthlyPlans = (
-    setter: React.Dispatch<React.SetStateAction<MonthlyPlan[]>>,
-    id: string,
-    patch: Partial<MonthlyPlan>,
-  ) => {
-    setter((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-  };
+  const resolvedDepositLI = cleanText(deposit.lineItemId) || globalLineItemId;
+  const resolvedProratedLI = cleanText(prorated.lineItemId) || globalLineItemId;
 
   const previewRows = React.useMemo<PreviewRow[]>(() => {
     const rows: PreviewRow[] = [];
 
-    const pushMonthly = (plans: MonthlyPlan[], kind: MonthlyPlanKind) => {
-      for (const plan of plans) {
-        const count = asPositiveInt(plan.months, 120);
-        const amt = asPositiveNumber(plan.monthlyAmount);
-        if (!count || !amt || !isISO(plan.firstDue) || !cleanText(plan.lineItemId)) continue;
-        for (let i = 0; i < count; i++) {
-          const due = addMonthsISO(plan.firstDue, i);
-          if (!due) continue;
-          rows.push({
-            dueDate: due,
-            type: "monthly",
-            amount: amt,
-            lineItemId: cleanText(plan.lineItemId),
-            note: kind,
-          });
-        }
-      }
-    };
-
-    pushMonthly(rentPlans, "rent");
-    pushMonthly(utilityPlans, "utility");
-
-    if (deposit.enabled) {
-      const amt = asPositiveNumber(deposit.amount);
-      if (amt && isISO(deposit.date) && cleanText(deposit.lineItemId)) {
-        rows.push({ dueDate: deposit.date, type: "deposit", amount: amt, lineItemId: cleanText(deposit.lineItemId), note: "Security Deposit" });
+    for (const plan of rentPlans) {
+      const count = asPositiveInt(plan.months, 120);
+      const amt = asPositiveNumber(plan.monthlyAmount);
+      const li = cleanText(plan.lineItemId) || globalLineItemId;
+      if (!count || !amt || !isISO(plan.firstDue) || !li) continue;
+      for (let i = 0; i < count; i++) {
+        const due = addMonthsISO(plan.firstDue, i);
+        if (!due) continue;
+        rows.push({ dueDate: due, type: "monthly", amount: amt, lineItemId: li, note: "rent" });
       }
     }
 
-    if (prorated.enabled) {
-      const amt = asPositiveNumber(prorated.amount);
-      if (amt && isISO(prorated.date) && cleanText(prorated.lineItemId)) {
-        rows.push({ dueDate: prorated.date, type: "prorated", amount: amt, lineItemId: cleanText(prorated.lineItemId), note: "Prorated Rent" });
+    for (const plan of utilityPlans) {
+      const count = asPositiveInt(plan.months, 120);
+      const amt = asPositiveNumber(plan.monthlyAmount);
+      const li = cleanText(plan.lineItemId) || globalLineItemId;
+      if (!count || !amt || !isISO(plan.firstDue) || !li) continue;
+      for (let i = 0; i < count; i++) {
+        const due = addMonthsISO(plan.firstDue, i);
+        if (!due) continue;
+        rows.push({ dueDate: due, type: "monthly", amount: amt, lineItemId: li, note: "utility" });
       }
+    }
+
+    const depositAmt = asPositiveNumber(deposit.amount);
+    if (depositAmt && isISO(deposit.date) && resolvedDepositLI) {
+      rows.push({ dueDate: deposit.date, type: "deposit", amount: depositAmt, lineItemId: resolvedDepositLI, note: "Security Deposit" });
+    }
+
+    const proratedAmt = asPositiveNumber(prorated.amount);
+    if (proratedAmt && isISO(prorated.date) && resolvedProratedLI) {
+      rows.push({ dueDate: prorated.date, type: "prorated", amount: proratedAmt, lineItemId: resolvedProratedLI, note: "Prorated Rent" });
     }
 
     for (const svc of services) {
       const amt = asPositiveNumber(svc.amount);
-      if (amt && isISO(svc.date) && cleanText(svc.lineItemId) && cleanText(svc.note)) {
-        rows.push({ dueDate: svc.date, type: "service", amount: amt, lineItemId: cleanText(svc.lineItemId), note: cleanText(svc.note) });
+      const li = cleanText(svc.lineItemId) || globalLineItemId;
+      if (amt && isISO(svc.date) && li && cleanText(svc.note)) {
+        rows.push({ dueDate: svc.date, type: "service", amount: amt, lineItemId: li, note: cleanText(svc.note) });
       }
     }
 
     rows.sort((a, b) => `${a.dueDate}|${a.type}`.localeCompare(`${b.dueDate}|${b.type}`));
     return rows;
-  }, [rentPlans, utilityPlans, deposit, prorated, services]);
+  }, [rentPlans, utilityPlans, deposit, prorated, services, globalLineItemId, resolvedDepositLI, resolvedProratedLI]);
 
-  const totals = React.useMemo(() => {
-    const monthlyCount = previewRows.filter((r) => r.type === "monthly").length;
-    const monthlyTotal = previewRows.filter((r) => r.type === "monthly").reduce((s, r) => s + r.amount, 0);
-    const depositTotal = previewRows.filter((r) => r.type === "deposit").reduce((s, r) => s + r.amount, 0);
-    const proratedTotal = previewRows.filter((r) => r.type === "prorated").reduce((s, r) => s + r.amount, 0);
-    const serviceTotal = previewRows.filter((r) => r.type === "service").reduce((s, r) => s + r.amount, 0);
-    const grandTotal = previewRows.reduce((s, r) => s + r.amount, 0);
-    return { monthlyCount, monthlyTotal, depositTotal, proratedTotal, serviceTotal, grandTotal };
-  }, [previewRows]);
+  const certCutoffDate = React.useMemo(
+    () => {
+      const retainedExisting = existingPayments.filter((payment) => !payment.void && (payment.paid || !replaceUnpaid));
+      return minISODate(maxPaymentDueDate([...previewRows, ...retainedExisting]), enrollmentEndDate, grantEndDate, certTask.endDate);
+    },
+    [certTask.endDate, enrollmentEndDate, existingPayments, grantEndDate, previewRows, replaceUnpaid],
+  );
 
-  const monthlyOverlapWarnings = React.useMemo<MonthlyOverlapWarning[]>(() => {
-    const buckets = new Map<string, { count: number; labels: string[] }>();
-    for (const row of previewRows) {
-      if (row.type !== "monthly") continue;
-      const month = isoMonth(row.dueDate);
-      if (!month) continue;
-      const key = `${month}|${row.lineItemId}`;
-      const slot = buckets.get(key) || { count: 0, labels: [] };
-      slot.count += 1;
-      if (row.note && !slot.labels.includes(String(row.note))) slot.labels.push(String(row.note));
-      buckets.set(key, slot);
+  const certPreviewRows = React.useMemo<CertPreviewRow[]>(() => {
+    if (!certTask.enabled) return [];
+    const cadence = Math.max(1, Number(certTask.cadenceMonths) || 3);
+    const rows: CertPreviewRow[] = [];
+    for (const plan of rentPlans) {
+      const months = asPositiveInt(plan.months);
+      if (!months || !isISO(plan.firstDue)) continue;
+      for (let offset = cadence; offset < months; offset += cadence) {
+        const targetDate = addMonthsISO(plan.firstDue, offset);
+        const dueDate = addMonthsISO(targetDate, -1);
+        if (!isISO(dueDate)) continue;
+        if (certTask.endDate && isISO(certTask.endDate) && dueDate > certTask.endDate) continue;
+        if (certCutoffDate && (dueDate > certCutoffDate || targetDate > certCutoffDate)) continue;
+        rows.push({ dueDate, targetDate, label: `${fmtMonth(targetDate)} cert — due ${fmtMonth(dueDate)}` });
+      }
     }
-    return Array.from(buckets.entries())
-      .filter(([, v]) => v.count > 1)
-      .slice(0, 6)
-      .map(([key, v]) => {
-        const [month] = key.split("|");
-        return { month, count: v.count, labels: v.labels };
-      });
-  }, [previewRows]);
+    return rows.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  }, [certCutoffDate, certTask, rentPlans]);
 
   const ssTotals = React.useMemo(() => {
     let grand = 0;
@@ -545,21 +956,18 @@ export default function PaymentScheduleBuilderDialog({
       if (!key || !Number.isFinite(amount) || amount <= 0) return;
       lineItemDeltas[key] = (lineItemDeltas[key] || 0) + amount;
     };
-
     if (viewMode === "spreadsheet") {
       for (const row of ssRows) {
         const amount = asPositiveNumber(row.amount);
         if (!amount || !row.lineItemId) continue;
         const multiplier =
           row.typeKey === "monthly-rent" || row.typeKey === "monthly-utility"
-            ? asPositiveInt(row.months, 120) || 1
-            : 1;
+            ? asPositiveInt(row.months, 120) || 1 : 1;
         add(row.lineItemId, amount * multiplier);
       }
     } else {
       for (const row of previewRows) add(row.lineItemId, row.amount);
     }
-
     if (replaceUnpaid) {
       for (const payment of selectedEnrollment?.payments || []) {
         if (payment?.paid) continue;
@@ -569,11 +977,7 @@ export default function PaymentScheduleBuilderDialog({
         lineItemDeltas[lineItemId] = (lineItemDeltas[lineItemId] || 0) - amount;
       }
     }
-
-    return {
-      total: Object.values(lineItemDeltas).reduce((sum, amount) => sum + amount, 0),
-      lineItemDeltas,
-    };
+    return { total: Object.values(lineItemDeltas).reduce((s, a) => s + a, 0), lineItemDeltas };
   }, [previewRows, replaceUnpaid, selectedEnrollment?.payments, ssRows, viewMode]);
 
   const ssSubmit = () => {
@@ -594,268 +998,216 @@ export default function PaymentScheduleBuilderDialog({
         const months = asPositiveInt(r.months, 120) || 1;
         monthlyPlans.push({
           kind: r.typeKey === "monthly-rent" ? "rent" : "utility",
-          startDate: r.date,
-          months,
-          monthlyAmount: amt,
-          lineItemId: r.lineItemId,
+          startDate: r.date, months, monthlyAmount: amt, lineItemId: r.lineItemId,
           ...(vendor ? { vendor } : {}),
           ...(note ? { comment: note } : {}),
         });
       } else {
         const defaultNote: Record<string, string> = { prorated: "Prorated Rent", deposit: "Security Deposit" };
         additions.push({
-          amount: amt,
-          dueDate: r.date,
-          lineItemId: r.lineItemId,
+          amount: amt, dueDate: r.date, lineItemId: r.lineItemId,
           type: r.typeKey as "prorated" | "deposit" | "service",
           note: note || defaultNote[r.typeKey] || r.typeKey,
           ...(vendor ? { vendor } : {}),
         });
       }
     }
-    onBuild({
-      enrollmentId,
-      replaceUnpaid,
-      monthlyPlans,
-      additions,
-      options: { updateGrantBudgets, recalcGrantProjected, activeOnly: true },
-    });
+    onBuild({ enrollmentId, replaceUnpaid, monthlyPlans, additions, options: { updateGrantBudgets, recalcGrantProjected, activeOnly: true } });
   };
 
-  const submit = () => {
-    setError(null);
-    if (!enrollmentId) return setError("Select an enrollment.");
-    if (previewRows.length === 0) return setError("Add at least one valid payment row to build the schedule.");
-
+  const validate = (): string | null => {
+    if (!enrollmentId) return "Select an enrollment.";
+    if (previewRows.length === 0) return "Add at least one valid payment row to build the schedule.";
     for (const plan of [...rentPlans, ...utilityPlans]) {
-      if (!isISO(plan.firstDue)) return setError("Monthly plan first due date must be YYYY-MM-DD.");
-      if (plan.months !== "" && asPositiveInt(plan.months, 120) === 0) return setError("Monthly plan months must be between 1 and 120.");
-      if (plan.monthlyAmount !== "" && asPositiveNumber(plan.monthlyAmount) === 0) return setError("Monthly plan amount must be greater than 0.");
+      if (!isISO(plan.firstDue)) return "Monthly plan first due date must be YYYY-MM-DD.";
+      if (plan.months !== "" && asPositiveInt(plan.months, 120) === 0) return "Monthly plan months must be between 1 and 120.";
+      if (plan.monthlyAmount !== "" && asPositiveNumber(plan.monthlyAmount) === 0) return "Monthly plan amount must be greater than 0.";
     }
-    if (deposit.enabled && !isISO(deposit.date)) return setError("Deposit date must be YYYY-MM-DD.");
-    if (prorated.enabled && !isISO(prorated.date)) return setError("Prorated date must be YYYY-MM-DD.");
-    if (services.some((s) => s.date && !isISO(s.date))) return setError("Service dates must be YYYY-MM-DD.");
+    if (singlePlanHasAny(deposit) && (!isISO(deposit.date) || asPositiveNumber(deposit.amount) <= 0)) {
+      return "Deposit needs both a date and an amount.";
+    }
+    if (singlePlanHasAny(prorated) && (!isISO(prorated.date) || asPositiveNumber(prorated.amount) <= 0)) {
+      return "Prorated rent needs both a date and an amount.";
+    }
+    if (services.some((s) => s.date && !isISO(s.date))) return "Service dates must be YYYY-MM-DD.";
+    return null;
+  };
 
+  const handlePreviewSchedule = () => {
+    setError(null);
+    const err = validate();
+    if (err) return setError(err);
+    setShowPreview(true);
+  };
+
+  const handleConfirmBuild = () => {
     const additions: NonNullable<PaymentScheduleBuildInput["additions"]> = [];
 
-    if (deposit.enabled) {
-      const amt = asPositiveNumber(deposit.amount);
-      const lineItemId = cleanText(deposit.lineItemId);
-      if (amt && lineItemId && isISO(deposit.date)) {
-        additions.push({
-          amount: amt,
-          dueDate: deposit.date,
-          lineItemId,
-          type: "deposit",
-          note: ["Security Deposit"],
-          ...(cleanText(deposit.vendor) ? { vendor: cleanText(deposit.vendor) } : {}),
-          ...(cleanText(deposit.comment) ? { comment: cleanText(deposit.comment) } : {}),
-        });
-      }
+    const depositAmt = asPositiveNumber(deposit.amount);
+    const depositLi = resolvedDepositLI;
+    if (depositAmt && depositLi && isISO(deposit.date)) {
+      additions.push({
+        amount: depositAmt, dueDate: deposit.date, lineItemId: depositLi, type: "deposit",
+        note: ["Security Deposit"],
+        ...(cleanText(deposit.vendor || globalVendor) ? { vendor: cleanText(deposit.vendor || globalVendor) } : {}),
+        ...(cleanText(deposit.comment) ? { comment: cleanText(deposit.comment) } : {}),
+      });
     }
 
-    if (prorated.enabled) {
-      const amt = asPositiveNumber(prorated.amount);
-      const lineItemId = cleanText(prorated.lineItemId);
-      if (amt && lineItemId && isISO(prorated.date)) {
-        additions.push({
-          amount: amt,
-          dueDate: prorated.date,
-          lineItemId,
-          type: "prorated",
-          note: ["Prorated Rent"],
-          ...(cleanText(prorated.vendor) ? { vendor: cleanText(prorated.vendor) } : {}),
-          ...(cleanText(prorated.comment) ? { comment: cleanText(prorated.comment) } : {}),
-        });
-      }
+    const proratedAmt = asPositiveNumber(prorated.amount);
+    const proratedLi = resolvedProratedLI;
+    if (proratedAmt && proratedLi && isISO(prorated.date)) {
+      additions.push({
+        amount: proratedAmt, dueDate: prorated.date, lineItemId: proratedLi, type: "prorated",
+        note: ["Prorated Rent"],
+        ...(cleanText(prorated.vendor || globalVendor) ? { vendor: cleanText(prorated.vendor || globalVendor) } : {}),
+        ...(cleanText(prorated.comment) ? { comment: cleanText(prorated.comment) } : {}),
+      });
     }
 
     for (const svc of services) {
       const amt = asPositiveNumber(svc.amount);
-      const lineItemId = cleanText(svc.lineItemId);
+      const li = cleanText(svc.lineItemId) || globalLineItemId;
       const note = cleanText(svc.note);
-      if (!amt || !lineItemId || !note || !isISO(svc.date)) continue;
+      if (!amt || !li || !note || !isISO(svc.date)) continue;
       additions.push({
-        amount: amt,
-        dueDate: svc.date,
-        lineItemId,
-        type: "service",
-        note,
-        ...(cleanText(svc.vendor) ? { vendor: cleanText(svc.vendor) } : {}),
+        amount: amt, dueDate: svc.date, lineItemId: li, type: "service", note,
+        ...(cleanText(svc.vendor || globalVendor) ? { vendor: cleanText(svc.vendor || globalVendor) } : {}),
         ...(cleanText(svc.comment) ? { comment: cleanText(svc.comment) } : {}),
       });
     }
 
     const taskDefs: unknown[] = [];
-    const rentCertTaskPrefix = "payment_rent_cert_";
-    const invoiceDocsTaskPrefix = "payment_invoice_docs_";
     if (certTask.enabled) {
-      const certStart = certTask.startDate;
-      const certEnd = certTask.endDate;
-      if (!isISO(certStart)) return setError("Certification task start date must be YYYY-MM-DD.");
-      if (certEnd && !isISO(certEnd)) return setError("Certification task end date must be YYYY-MM-DD.");
-
       const cadence = Math.max(1, Number(certTask.cadenceMonths) || 3);
-      const monthLabel = (iso: string) => {
-        if (!isISO(iso)) return iso;
-        const [, month, day] = iso.split("-");
-        const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        return `${names[Math.max(0, Math.min(11, Number(month) - 1))]} ${Number(day)}`;
-      };
-      rentPlans.forEach((plan, planIndex) => {
-        const months = asPositiveInt(plan.months);
-        const lineItemId = cleanText(plan.lineItemId) || `rent_${planIndex + 1}`;
-        for (let offset = cadence; offset < months; offset += cadence) {
+      const filledRentPlans = rentPlans.filter(
+        (p) => isISO(p.firstDue) && asPositiveInt(p.months) > 0 && asPositiveNumber(p.monthlyAmount) > 0,
+      );
+      for (const plan of filledRentPlans) {
+        const planMonths = asPositiveInt(plan.months);
+        for (let offset = cadence; offset < planMonths; offset += cadence) {
           const targetDate = addMonthsISO(plan.firstDue, offset);
           const dueDate = addMonthsISO(targetDate, -1);
-          if (!isISO(targetDate) || !isISO(dueDate)) continue;
-          if (certEnd && dueDate > certEnd) continue;
-          const label = `${monthLabel(targetDate)} rent cert due ${monthLabel(dueDate)}`;
-          const idBase = `${rentCertTaskPrefix}${lineItemId}_${targetDate}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+          if (!isISO(dueDate)) continue;
+          if (certTask.endDate && isISO(certTask.endDate) && dueDate > certTask.endDate) continue;
+          if (certCutoffDate && (dueDate > certCutoffDate || targetDate > certCutoffDate)) continue;
+          const label = `${fmtMonth(targetDate)} rent cert due ${fmtMonth(dueDate)}`;
+          const idBase = `payment_rent_cert_${cleanText(plan.lineItemId) || globalLineItemId}_${targetDate}`
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, "_");
+          const desc = certTask.title || "Rent Certification";
           taskDefs.push(
             {
-              id: `${idBase}_cm`,
-              name: label,
-              kind: "one-off",
-              dueDate,
-              bucket: certTask.bucket,
-              notify: true,
-              assignedToGroup: "casemanager",
-              notes: `Collect updated rent certification documents from the customer and landlord by ${monthLabel(dueDate)} for ${monthLabel(targetDate)} assistance.`,
-              description: certTask.title.trim() || "Rent Certification",
+              id: `${idBase}_cm`, name: label, kind: "one-off", dueDate, bucket: certTask.bucket, notify: true,
+              assignedToGroup: "casemanager", description: desc,
+              notes: `Collect updated rent certification documents from the customer and landlord by ${fmtMonth(dueDate)} for ${fmtMonth(targetDate)} assistance.`,
             },
             {
-              id: `${idBase}_compliance`,
-              name: label,
-              kind: "one-off",
-              dueDate,
-              bucket: certTask.bucket,
-              notify: true,
-              assignedToGroup: "compliance",
-              notes: `Prepare and send the updated rent certification / notice by ${monthLabel(dueDate)} for ${monthLabel(targetDate)} assistance.`,
-              description: certTask.title.trim() || "Rent Certification",
+              id: `${idBase}_compliance`, name: label, kind: "one-off", dueDate, bucket: certTask.bucket, notify: true,
+              assignedToGroup: "compliance", description: desc,
+              notes: `Prepare and send the updated rent certification / notice by ${fmtMonth(dueDate)} for ${fmtMonth(targetDate)} assistance.`,
             },
           );
         }
-      });
-    }
-
-    if (invoiceDocsTask.enabled) {
-      if (!isISO(invoiceDocsTask.dueDate)) return setError("Invoice docs task due date must be YYYY-MM-DD.");
-      const docs = invoiceDocs.length ? invoiceDocs : ["Invoice documentation packet"];
-      taskDefs.push({
-        id: `${invoiceDocsTaskPrefix}${enrollmentId}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "_"),
-        name: "Collect invoice documentation",
-        kind: "one-off",
-        dueDate: invoiceDocsTask.dueDate,
-        bucket: invoiceDocsTask.bucket,
-        notify: true,
-        assignedToGroup: "compliance",
-        notes: `Collect invoice docs before payment processing: ${docs.join(", ")}.`,
-        description: "Invoice documentation",
-      });
+      }
     }
 
     onBuild({
       enrollmentId,
       replaceUnpaid,
       monthlyPlans: [
-        ...rentPlans.map((plan) => ({
-          kind: "rent" as const,
-          startDate: plan.firstDue,
-          months: asPositiveInt(plan.months, 120),
-          monthlyAmount: asPositiveNumber(plan.monthlyAmount),
-          lineItemId: cleanText(plan.lineItemId),
-          ...(cleanText(rentVendor) ? { vendor: cleanText(rentVendor) } : {}),
-          ...(cleanText(plan.comment) ? { comment: cleanText(plan.comment) } : {}),
-        })),
-        ...utilityPlans.map((plan) => ({
-          kind: "utility" as const,
-          startDate: plan.firstDue,
-          months: asPositiveInt(plan.months, 120),
-          monthlyAmount: asPositiveNumber(plan.monthlyAmount),
-          lineItemId: cleanText(plan.lineItemId),
-          ...(cleanText(utilityVendor) ? { vendor: cleanText(utilityVendor) } : {}),
-          ...(cleanText(plan.comment) ? { comment: cleanText(plan.comment) } : {}),
-        })),
+        ...rentPlans
+          .filter((p) => isISO(p.firstDue) && asPositiveInt(p.months) > 0 && asPositiveNumber(p.monthlyAmount) > 0)
+          .map((plan) => ({
+            kind: "rent" as const,
+            startDate: plan.firstDue,
+            months: asPositiveInt(plan.months, 120),
+            monthlyAmount: asPositiveNumber(plan.monthlyAmount),
+            lineItemId: cleanText(plan.lineItemId) || globalLineItemId,
+            ...(cleanText(globalVendor) ? { vendor: cleanText(globalVendor) } : {}),
+            ...(cleanText(plan.comment) ? { comment: cleanText(plan.comment) } : {}),
+          })),
+        ...utilityPlans
+          .filter((p) => isISO(p.firstDue) && asPositiveInt(p.months) > 0 && asPositiveNumber(p.monthlyAmount) > 0)
+          .map((plan) => ({
+            kind: "utility" as const,
+            startDate: plan.firstDue,
+            months: asPositiveInt(plan.months, 120),
+            monthlyAmount: asPositiveNumber(plan.monthlyAmount),
+            lineItemId: cleanText(plan.lineItemId) || globalLineItemId,
+            ...(cleanText(globalVendor) ? { vendor: cleanText(globalVendor) } : {}),
+            ...(cleanText(plan.comment) ? { comment: cleanText(plan.comment) } : {}),
+          })),
       ],
       additions,
-      options: {
-        updateGrantBudgets,
-        recalcGrantProjected,
-        activeOnly: true,
-      },
-      invoiceDocsTask: {
-        enabled: invoiceDocsTask.enabled,
-        dueDate: invoiceDocsTask.dueDate,
-        bucket: invoiceDocsTask.bucket,
-        docs: invoiceDocs,
-      },
+      options: { updateGrantBudgets, recalcGrantProjected, activeOnly: true },
+      invoiceDocsTask: { enabled: false, dueDate: invoiceDocsTask.dueDate, bucket: invoiceDocsTask.bucket, docs: invoiceDocs },
       taskDefs,
-      replaceTaskDefPrefixes: [rentCertTaskPrefix, invoiceDocsTaskPrefix, "pay_cert_"],
+      replaceTaskDefPrefixes: ["payment_rent_cert_", "payment_invoice_docs_", "pay_cert_"],
     });
   };
 
-  return (
-    <Modal
-      tourId="payment-schedule-builder-dialog"
-      isOpen={open}
-      title={customerName ? `Build Payment Schedule - ${customerName}` : "Build Payment Schedule"}
-      onClose={onCancel}
-      widthClass="max-w-6xl"
-      footer={
-        <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 dark:text-slate-300">
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={replaceUnpaid} onChange={(e) => setReplaceUnpaid(e.currentTarget.checked)} />
-              Overwrite unpaid schedule, keep paid rows
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={updateGrantBudgets} onChange={(e) => setUpdateGrantBudgets(e.currentTarget.checked)} />
-              Update grant budgets
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={recalcGrantProjected} onChange={(e) => setRecalcGrantProjected(e.currentTarget.checked)} />
-              Recalculate grant projected totals
-            </label>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
-            <button className="btn btn-sm" onClick={viewMode === "spreadsheet" ? ssSubmit : submit} disabled={busy}>{busy ? "Building..." : "Build Schedule"}</button>
-          </div>
-        </div>
-      }
-    >
-      <div className="relative space-y-4">
-        {busy ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white/80 backdrop-blur-[1px] dark:bg-slate-900/80">
-            <div className="rounded border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-              Building payment schedule...
-            </div>
-          </div>
-        ) : null}
-        {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div> : null}
-        {monthlyOverlapWarnings.length ? (
-          <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-            Multiple monthly rows are scheduled in the same month for the same line item. This usually means you created more than one monthly plan stream (for example rent + utility, or duplicate rent rows).
-            <div className="mt-1">
-              {monthlyOverlapWarnings.map((w) => (
-                <div key={`${w.month}:${w.count}`}>
-                  {w.month}: {w.count} monthly rows{w.labels.length ? ` (${w.labels.join(", ")})` : ""}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
+  const serviceCount = services.filter((s) => s.note || s.amount).length;
+  const utilityCount = utilityPlans.filter((p) => p.firstDue || p.monthlyAmount).length;
 
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Schedule setup</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Build projected rows for one enrollment and preview grant impact before posting.
+  return (
+    <>
+      <Modal
+        tourId="payment-schedule-builder-dialog"
+        isOpen={open}
+        title={customerName ? `Build Payment Schedule — ${customerName}` : "Build Payment Schedule"}
+        onClose={onCancel}
+        widthClass="max-w-5xl"
+        footer={
+          <div className="flex w-full items-center justify-end gap-2">
+            <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
+            {viewMode === "spreadsheet" ? (
+              <button className="btn btn-sm" onClick={ssSubmit} disabled={busy}>{busy ? "Building..." : "Build Schedule"}</button>
+            ) : (
+              <button className="btn btn-sm" onClick={handlePreviewSchedule} disabled={busy}>Preview Schedule →</button>
+            )}
+          </div>
+        }
+      >
+        <div className="relative space-y-4">
+          {busy && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white/80 backdrop-blur-[1px] dark:bg-slate-900/80">
+              <div className="rounded border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                Building payment schedule...
               </div>
             </div>
+          )}
+          {error && <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div>}
+
+          {scheduleEditWarning && (
+            <div className={`rounded border px-3 py-2 text-xs ${
+              scheduleEditWarning === "edited"
+                ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+                : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-700 dark:bg-sky-950/30 dark:text-sky-300"
+            }`}>
+              {scheduleEditWarning === "edited" ? (
+                <><span className="font-semibold">Schedule edited after build</span> — individual payment adjustments have been made. Review the preview carefully before rebuilding.</>
+              ) : (
+                <><span className="font-semibold">Active schedule</span> — this enrollment has paid rows. The preview will show what stays, what is removed, and what is added.</>
+              )}
+            </div>
+          )}
+
+          {/* ── Header row ── */}
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex-1 text-sm" style={{ minWidth: 220 }}>
+              <div className="mb-1 text-xs text-slate-500">Enrollment</div>
+              <select
+                className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                value={enrollmentId}
+                onChange={(e) => seedFromEnrollment(openEnrollments.find((x) => x.id === e.currentTarget.value))}
+              >
+                <option value="">-- Select enrollment --</option>
+                {openEnrollments.map((e) => (
+                  <option key={e.id} value={e.id}>{e.label}{e.statusLabel ? ` (${e.statusLabel})` : ""}</option>
+                ))}
+              </select>
+            </label>
             <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800">
               {(["builder", "spreadsheet"] as const).map((mode) => (
                 <button
@@ -874,339 +1226,325 @@ export default function PaymentScheduleBuilderDialog({
             </div>
           </div>
 
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="flex-1 text-sm" style={{ minWidth: "220px" }}>
-            <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Enrollment</div>
-            <select
-              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-              value={enrollmentId}
-              onChange={(e) => seedFromEnrollment(enrollments.find((x) => x.id === e.currentTarget.value))}
-            >
-              <option value="">-- Select enrollment --</option>
-              {enrollments.map((e) => (
-                <option key={e.id} value={e.id}>{e.label}{e.statusLabel ? ` (${e.statusLabel})` : ""}</option>
-              ))}
-            </select>
-          </label>
-
-          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {viewMode === "spreadsheet" ? (
-              <>
-                <div>Overall Total: <b>{money(ssTotals.grand)}</b></div>
-                <div>Length of Assistance (months): <b>{ssTotals.monthlyCount}</b></div>
-              </>
-            ) : (
-              <>
-                <div>Rows: <b>{previewRows.length}</b></div>
-                <div>Total: <b>{money(totals.grandTotal)}</b></div>
-                {previewRows.length ? (
-                  <div>Range: <b>{previewRows[0]?.dueDate}</b> {"->"} <b>{previewRows[previewRows.length - 1]?.dueDate}</b></div>
-                ) : null}
-              </>
-            )}
-          </div>
-        </div>
-        </div>
-
-        <GrantBudgetStrip
-          grantId={selectedEnrollment?.grantId}
-          projectionDelta={budgetPreview.total}
-          lineItemDeltas={budgetPreview.lineItemDeltas}
-        />
-
-        {viewMode === "spreadsheet" ? (
-          <SpreadsheetBuilderView
-            rows={ssRows}
-            setRows={setSsRows}
+          {/* ── Budget strip ── */}
+          <GrantBudgetStrip
             grantId={selectedEnrollment?.grantId}
+            projectionDelta={budgetPreview.total}
+            lineItemDeltas={budgetPreview.lineItemDeltas}
           />
-        ) : null}
 
-        {viewMode === "builder" ? (<>
-        <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
-          <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
-            <input
-              type="checkbox"
-              checked={invoiceDocsTask.enabled}
-              onChange={(e) => setInvoiceDocsTask((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
-            />
-            Build invoice docs task
-          </label>
-          {invoiceDocsTask.enabled ? (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Due Date</div>
-                <input
-                  type="date"
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={invoiceDocsTask.dueDate}
-                  onChange={(e) => setInvoiceDocsTask((prev) => ({ ...prev, dueDate: e.currentTarget.value }))}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Bucket</div>
-                <select
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={invoiceDocsTask.bucket}
-                  onChange={(e) => setInvoiceDocsTask((prev) => ({ ...prev, bucket: e.currentTarget.value as InvoiceDocsPlan["bucket"] }))}
-                >
-                  <option value="compliance">compliance</option>
-                  <option value="task">task</option>
-                </select>
-              </label>
-              <div className="flex items-end text-xs text-slate-600 dark:text-slate-400">
-                {invoiceDocs.length
-                  ? `Docs: ${invoiceDocs.slice(0, 5).join(", ")}${invoiceDocs.length > 5 ? ` +${invoiceDocs.length - 5}` : ""}`
-                  : "No grant invoice docs saved yet; creates a generic invoice documentation task."}
+          {viewMode === "spreadsheet" ? (
+            <>
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <span>Overall Total: <b>{money(ssTotals.grand)}</b></span>
+                <span className="ml-4">Length of Assistance: <b>{ssTotals.monthlyCount} mo</b></span>
               </div>
-            </div>
+              <SpreadsheetBuilderView rows={ssRows} setRows={setSsRows} grantId={selectedEnrollment?.grantId} />
+            </>
           ) : (
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              Optional: create a compliance task from the grant&apos;s invoicing docs defaults.
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-          <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
-            <input
-              type="checkbox"
-              checked={certTask.enabled}
-              onChange={(e) => {
-                const checked = e.currentTarget.checked;
-                setCertTask((prev) => ({ ...prev, enabled: checked }));
-              }}
-            />
-            Build recurring certification tasks (CM + Compliance)
-          </label>
-          {certTask.enabled ? (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Task Title</div>
-                <input
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={certTask.title}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setCertTask((prev) => ({ ...prev, title: value }));
-                  }}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Start Date</div>
-                <input
-                  type="date"
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={certTask.startDate}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setCertTask((prev) => ({ ...prev, startDate: value }));
-                  }}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Cadence</div>
-                <select
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={certTask.cadenceMonths}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value as CertTaskPlan["cadenceMonths"];
-                    setCertTask((prev) => ({ ...prev, cadenceMonths: value }));
-                  }}
-                >
-                  <option value="3">Every 3 months</option>
-                  <option value="4">Every 4 months</option>
-                  <option value="6">Every 6 months</option>
-                  <option value="12">Yearly</option>
-                </select>
-              </label>
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">End Date</div>
-                <input
-                  type="date"
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={certTask.endDate}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setCertTask((prev) => ({ ...prev, endDate: value }));
-                  }}
-                />
-              </label>
-              <label className="text-sm">
-                <div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Bucket</div>
-                <select
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={certTask.bucket}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value as CertTaskPlan["bucket"];
-                    setCertTask((prev) => ({ ...prev, bucket: value }));
-                  }}
-                >
-                  <option value="compliance">compliance</option>
-                  <option value="task">task</option>
-                </select>
-              </label>
-              <div className="flex items-end text-xs text-slate-600 dark:text-slate-400">
-                Creates a sequential two-step recurring task (case manager {"->"} compliance).
-              </div>
-            </div>
-          ) : (
-            <div className="text-xs text-slate-500 dark:text-slate-400">Optional: build rent-cert reminder tasks alongside payment projections.</div>
-          )}
-        </div>
-
-        <MonthlyPlanEditor
-          label="Rent"
-          plans={rentPlans}
-          onChange={(id, patch) => patchMonthlyPlans(setRentPlans, id, patch)}
-          onAdd={() => setRentPlans((prev) => [...prev, defaultMonthlyPlan("rent", fallbackLineItemIds[0] || "")])}
-          onRemove={(id) => setRentPlans((prev) => prev.filter((p) => p.id !== id))}
-          grantId={selectedEnrollment?.grantId || null}
-          fallbackLineItemIds={fallbackLineItemIds}
-          vendor={rentVendor}
-          onVendorChange={setRentVendor}
-        />
-
-        <MonthlyPlanEditor
-          label="Utilities"
-          plans={utilityPlans}
-          onChange={(id, patch) => patchMonthlyPlans(setUtilityPlans, id, patch)}
-          onAdd={() => setUtilityPlans((prev) => [...prev, defaultMonthlyPlan("utility", fallbackLineItemIds[0] || "")])}
-          onRemove={(id) => setUtilityPlans((prev) => prev.filter((p) => p.id !== id))}
-          grantId={selectedEnrollment?.grantId || null}
-          fallbackLineItemIds={fallbackLineItemIds}
-          vendor={utilityVendor}
-          onVendorChange={setUtilityVendor}
-        />
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-            <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
-              <input
-                type="checkbox"
-                checked={deposit.enabled}
-                onChange={(e) => {
-                  const checked = e.currentTarget.checked;
-                  setDeposit((prev) => ({ ...prev, enabled: checked }));
-                }}
-              />
-              Security Deposit
-            </label>
-            {deposit.enabled ? (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Date</div><input type="date" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={deposit.date} onChange={(e) => { const value = e.currentTarget.value; setDeposit((prev) => ({ ...prev, date: value })); }} /></label>
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Amount</div><input type="number" min={0} step="0.01" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={deposit.amount} onChange={(e) => { const value = e.currentTarget.value; setDeposit((prev) => ({ ...prev, amount: value })); }} /></label>
-                <label className="text-sm md:col-span-2"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Line Item</div><LineItemSelect grantId={selectedEnrollment?.grantId || null} value={deposit.lineItemId} onChange={(next) => setDeposit((prev) => ({ ...prev, lineItemId: String(next || "") }))} fallbackLineItemIds={fallbackLineItemIds} inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" /></label>
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Vendor (optional)</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={deposit.vendor} onChange={(e) => { const value = e.currentTarget.value; setDeposit((prev) => ({ ...prev, vendor: value })); }} /></label>
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Comment (optional)</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={deposit.comment} onChange={(e) => { const value = e.currentTarget.value; setDeposit((prev) => ({ ...prev, comment: value })); }} /></label>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-500 dark:text-slate-400">Enable to add a one-time deposit row.</div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-            <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
-              <input
-                type="checkbox"
-                checked={prorated.enabled}
-                onChange={(e) => {
-                  const checked = e.currentTarget.checked;
-                  setProrated((prev) => ({ ...prev, enabled: checked }));
-                }}
-              />
-              Prorated Rent
-            </label>
-            {prorated.enabled ? (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Date</div><input type="date" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={prorated.date} onChange={(e) => { const value = e.currentTarget.value; setProrated((prev) => ({ ...prev, date: value })); }} /></label>
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Amount</div><input type="number" min={0} step="0.01" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={prorated.amount} onChange={(e) => { const value = e.currentTarget.value; setProrated((prev) => ({ ...prev, amount: value })); }} /></label>
-                <label className="text-sm md:col-span-2"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Line Item</div><LineItemSelect grantId={selectedEnrollment?.grantId || null} value={prorated.lineItemId} onChange={(next) => setProrated((prev) => ({ ...prev, lineItemId: String(next || "") }))} fallbackLineItemIds={fallbackLineItemIds} inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" /></label>
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Vendor (optional)</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={prorated.vendor} onChange={(e) => { const value = e.currentTarget.value; setProrated((prev) => ({ ...prev, vendor: value })); }} /></label>
-                <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Comment (optional)</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={prorated.comment} onChange={(e) => { const value = e.currentTarget.value; setProrated((prev) => ({ ...prev, comment: value })); }} /></label>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-500 dark:text-slate-400">Enable to add a one-time prorated rent row.</div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Support Services</div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setServices((prev) => [...prev, defaultServicePlan(fallbackLineItemIds[0] || "")])}>+ Add service</button>
-          </div>
-          {services.length === 0 ? (
-            <div className="text-xs text-slate-500 dark:text-slate-400">No service rows yet.</div>
-          ) : (
-            <div className="space-y-3">
-              {services.map((svc) => (
-                <div key={svc.id} className="rounded border border-slate-200 p-2 dark:border-slate-700">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-xs text-slate-600 dark:text-slate-400">Service row</div>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setServices((prev) => prev.filter((s) => s.id !== svc.id))}>Remove</button>
+            <>
+              {/* ── Settings card ── */}
+              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Defaults</div>
+                <div className="flex flex-wrap gap-3">
+                  <div className="flex-1" style={{ minWidth: 200 }}>
+                    <div className="mb-1 text-xs text-slate-500">Default Line Item</div>
+                    <LineItemSelect
+                      grantId={selectedEnrollment?.grantId || null}
+                      value={globalLineItemId || null}
+                      onChange={(next) => setGlobalLineItemId(String(next || ""))}
+                      fallbackLineItemIds={fallbackLineItemIds}
+                      allowEmpty
+                      placeholderLabel="None"
+                      inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    />
                   </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Service Note</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={svc.note} onChange={(e) => { const value = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, note: value } : s)); }} placeholder="Transportation, childcare, etc." /></label>
-                    <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Amount</div><input type="number" min={0} step="0.01" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={svc.amount} onChange={(e) => { const value = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, amount: value } : s)); }} /></label>
-                    <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Date</div><input type="date" className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={svc.date} onChange={(e) => { const value = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, date: value } : s)); }} /></label>
-                    <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Line Item</div><LineItemSelect grantId={selectedEnrollment?.grantId || null} value={svc.lineItemId} onChange={(next) => setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, lineItemId: String(next || "") } : s))} fallbackLineItemIds={fallbackLineItemIds} inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" /></label>
-                    <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Vendor (optional)</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={svc.vendor} onChange={(e) => { const value = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, vendor: value } : s)); }} /></label>
-                    <label className="text-sm"><div className="mb-1 text-xs text-slate-600 dark:text-slate-400">Comment (optional)</div><input className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" value={svc.comment} onChange={(e) => { const value = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, comment: value } : s)); }} /></label>
+                  <div className="flex-1" style={{ minWidth: 160 }}>
+                    <div className="mb-1 text-xs text-slate-500">Default Vendor</div>
+                    <input
+                      className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      value={globalVendor}
+                      onChange={(e) => setGlobalVendor(e.currentTarget.value)}
+                      placeholder="e.g. Parkview Apartments"
+                    />
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Overall Total</span>
-            <span className="text-lg font-bold text-slate-900 dark:text-slate-100">{money(totals.grandTotal)}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-            <div>Length of Assistance (months): <b>{totals.monthlyCount}</b></div>
-            <div>Monthly total: <b>{money(totals.monthlyTotal)}</b></div>
-            <div>Deposit total: <b>{money(totals.depositTotal)}</b></div>
-            <div>Prorated total: <b>{money(totals.proratedTotal)}</b></div>
-            <div>Service total: <b>{money(totals.serviceTotal)}</b></div>
-          </div>
-        </div>
+              {/* ── Deposit ── */}
+              <SinglePlanCard
+                label="Security Deposit"
+                plan={deposit}
+                onChange={(patch) => setDeposit((prev) => ({ ...prev, ...patch }))}
+                grantId={selectedEnrollment?.grantId}
+                fallbackLineItemIds={fallbackLineItemIds}
+                globalLineItemId={globalLineItemId}
+                globalVendor={globalVendor}
+              />
 
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-2 text-sm font-medium text-slate-900 dark:text-slate-100">Draft Preview</div>
-          {previewRows.length === 0 ? (
-            <div className="text-xs text-slate-500 dark:text-slate-400">Build rows above to preview the schedule.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs">
-                <thead className="bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                  <tr>
-                    <th className="px-2 py-1 text-left">Due</th>
-                    <th className="px-2 py-1 text-left">Type</th>
-                    <th className="px-2 py-1 text-left">Note</th>
-                    <th className="px-2 py-1 text-left">Line Item</th>
-                    <th className="px-2 py-1 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((row, idx) => (
-                    <tr key={`${row.type}:${row.dueDate}:${row.lineItemId}:${idx}`} className="border-t border-slate-100 dark:border-slate-700 dark:text-slate-300">
-                      <td className="px-2 py-1">{row.dueDate}</td>
-                      <td className="px-2 py-1">{row.type}</td>
-                      <td className="px-2 py-1">{row.note || "-"}</td>
-                      <td className="px-2 py-1 font-mono text-[11px]">{row.lineItemId}</td>
-                      <td className="px-2 py-1 text-right">{money(row.amount)}</td>
-                    </tr>
+              {/* ── Prorated ── */}
+              <SinglePlanCard
+                label="Prorated Rent"
+                plan={prorated}
+                onChange={(patch) => setProrated((prev) => ({ ...prev, ...patch }))}
+                grantId={selectedEnrollment?.grantId}
+                fallbackLineItemIds={fallbackLineItemIds}
+                globalLineItemId={globalLineItemId}
+                globalVendor={globalVendor}
+              />
+
+              {/* ── Recurring Rent ── */}
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Recurring Rent</div>
+                {rentPlans.map((plan, idx) => (
+                  <RentRow
+                    key={plan.id}
+                    plan={plan}
+                    onChange={(patch) => setRentPlans((prev) => prev.map((p) => p.id === plan.id ? { ...p, ...patch } : p))}
+                    onRemove={() => setRentPlans((prev) => prev.filter((p) => p.id !== plan.id))}
+                    canRemove={rentPlans.length > 1 || idx < rentPlans.length - 1}
+                    grantId={selectedEnrollment?.grantId}
+                    fallbackLineItemIds={fallbackLineItemIds}
+                    globalLineItemId={globalLineItemId}
+                  />
+                ))}
+              </div>
+
+              {/* ── Rent Cert Reminders ── */}
+              <div className="mt-1 border-t border-dashed border-slate-200 pt-2 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="certTask-enabled"
+                    type="checkbox"
+                    checked={certTask.enabled}
+                    onChange={(e) => setCertTask((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
+                    className="rounded"
+                  />
+                  <label htmlFor="certTask-enabled" className="flex-1 cursor-pointer select-none text-xs text-slate-600 dark:text-slate-300">
+                    Rent Cert Reminders
+                    {certTask.enabled && certPreviewRows.length > 0 && (
+                      <span className="ml-1 text-slate-400">
+                        ({certPreviewRows.length} task{certPreviewRows.length !== 1 ? "s" : ""})
+                      </span>
+                    )}
+                  </label>
+                  {certTask.enabled && (
+                    <button
+                      type="button"
+                      className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                      onClick={() => setCertTask((prev) => ({ ...prev, advancedOpen: !prev.advancedOpen }))}
+                    >
+                      {certTask.advancedOpen ? "Less ▲" : "Advanced ▼"}
+                    </button>
+                  )}
+                </div>
+                {certTask.enabled && (
+                  <div className="mt-1 text-[10px] text-slate-400">
+                    Starts {certStartDate} · every {certTask.cadenceMonths} mo
+                  </div>
+                )}
+                {certTask.enabled && certTask.advancedOpen && (
+                  <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 dark:border-slate-800 md:grid-cols-2 lg:grid-cols-4">
+                    <label className="text-sm">
+                      <div className="mb-1 text-xs text-slate-500">Cadence</div>
+                      <select
+                        className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        value={certTask.cadenceMonths}
+                        onChange={(e) => setCertTask((prev) => ({ ...prev, cadenceMonths: e.currentTarget.value as CertTaskPlan["cadenceMonths"] }))}
+                      >
+                        <option value="3">Every 3 months</option>
+                        <option value="4">Every 4 months</option>
+                        <option value="6">Every 6 months</option>
+                        <option value="12">Annually</option>
+                      </select>
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-xs text-slate-500">End Date (optional)</div>
+                      <input
+                        type="date"
+                        className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        value={certTask.endDate}
+                        onChange={(e) => setCertTask((prev) => ({ ...prev, endDate: e.currentTarget.value }))}
+                      />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-xs text-slate-500">Bucket</div>
+                      <select
+                        className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        value={certTask.bucket}
+                        onChange={(e) => setCertTask((prev) => ({ ...prev, bucket: e.currentTarget.value as CertTaskPlan["bucket"] }))}
+                      >
+                        <option value="compliance">Compliance</option>
+                        <option value="task">Task</option>
+                      </select>
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-xs text-slate-500">Task Title</div>
+                      <input
+                        className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        value={certTask.title}
+                        placeholder="Rent Certification"
+                        onChange={(e) => setCertTask((prev) => ({ ...prev, title: e.currentTarget.value }))}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Utility Assistance ── */}
+              <CollapsibleSection
+                label="Utility Assistance"
+                count={utilityCount}
+                open={utilitiesOpen}
+                onToggle={() => setUtilitiesOpen((v) => !v)}
+              >
+                <div className="space-y-2">
+                  {utilityPlans.length === 0 && (
+                    <div className="text-xs text-slate-400">No utility rows.</div>
+                  )}
+                  {utilityPlans.map((plan) => (
+                    <RentRow
+                      key={plan.id}
+                      plan={plan}
+                      onChange={(patch) => setUtilityPlans((prev) => prev.map((p) => p.id === plan.id ? { ...p, ...patch } : p))}
+                      onRemove={() => setUtilityPlans((prev) => prev.filter((p) => p.id !== plan.id))}
+                      canRemove
+                      grantId={selectedEnrollment?.grantId}
+                      fallbackLineItemIds={fallbackLineItemIds}
+                      globalLineItemId={globalLineItemId}
+                    />
                   ))}
-                </tbody>
-              </table>
-            </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setUtilityPlans((prev) => [...prev, defaultMonthlyPlan("utility", globalLineItemId)])}
+                  >
+                    + Add utility row
+                  </button>
+                </div>
+              </CollapsibleSection>
+
+              {/* ── Support Services ── */}
+              <CollapsibleSection
+                label="Support Services"
+                count={serviceCount}
+                open={servicesOpen}
+                onToggle={() => setServicesOpen((v) => !v)}
+              >
+                <div className="space-y-2">
+                  {services.length === 0 && (
+                    <div className="text-xs text-slate-400">No service rows.</div>
+                  )}
+                  {services.map((svc) => {
+                    const svcState = completionState(
+                      [svc.note, svc.amount, isISO(svc.date) ? svc.date : ""],
+                      [svc.note, svc.amount, svc.date],
+                    );
+                    return (
+                      <div key={svc.id} className={`rounded-lg border p-3 transition-colors ${stateClasses(svcState)}`}>
+                        <div className="flex flex-wrap items-end gap-3">
+                          <label className="flex-1 text-sm" style={{ minWidth: 140 }}>
+                            <div className="mb-1 text-xs text-slate-500">Service Note</div>
+                            <input
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              value={svc.note}
+                              placeholder="Transportation, childcare…"
+                              onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, note: v } : s)); }}
+                            />
+                          </label>
+                          <label className="text-sm" style={{ minWidth: 100 }}>
+                            <div className="mb-1 text-xs text-slate-500">Amount</div>
+                            <input
+                              type="number" min={0} step="0.01" placeholder="0.00"
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              value={svc.amount}
+                              onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, amount: v } : s)); }}
+                            />
+                          </label>
+                          <label className="text-sm" style={{ minWidth: 130 }}>
+                            <div className="mb-1 text-xs text-slate-500">Date</div>
+                            <input
+                              type="date"
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              value={svc.date}
+                              onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, date: v } : s)); }}
+                            />
+                          </label>
+                          <div className="pb-0.5">
+                            <button
+                              type="button"
+                              className="text-xs text-rose-400 hover:text-rose-600"
+                              onClick={() => setServices((prev) => prev.filter((s) => s.id !== svc.id))}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+                          <label className="text-sm">
+                            <div className="mb-1 text-xs text-slate-500">Line Item</div>
+                            <LineItemSelect
+                              grantId={selectedEnrollment?.grantId || null}
+                              value={svc.lineItemId || globalLineItemId || null}
+                              onChange={(next) => { const v = String(next || ""); setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, lineItemId: v } : s)); }}
+                              fallbackLineItemIds={fallbackLineItemIds}
+                              inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                            />
+                          </label>
+                          <label className="text-sm">
+                            <div className="mb-1 text-xs text-slate-500">Vendor</div>
+                            <input
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              value={svc.vendor}
+                              placeholder={globalVendor}
+                              onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, vendor: v } : s)); }}
+                            />
+                          </label>
+                          <label className="text-sm">
+                            <div className="mb-1 text-xs text-slate-500">Comment</div>
+                            <input
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              value={svc.comment}
+                              onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, comment: v } : s)); }}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setServices((prev) => [...prev, defaultServicePlan(globalLineItemId)])}
+                  >
+                    + Add service
+                  </button>
+                </div>
+              </CollapsibleSection>
+            </>
           )}
         </div>
-        </>) : null}
-      </div>
-    </Modal>
+      </Modal>
+
+      <DraftPreviewModal
+        open={showPreview}
+        onCancel={() => setShowPreview(false)}
+        onConfirm={handleConfirmBuild}
+        busy={busy}
+        previewRows={previewRows}
+        certPreviewRows={certPreviewRows}
+        existingPayments={existingPayments}
+        certCutoffDate={certCutoffDate}
+        grantId={selectedEnrollment?.grantId}
+        budgetProjectionDelta={budgetPreview.total}
+        budgetLineItemDeltas={budgetPreview.lineItemDeltas}
+        replaceUnpaid={replaceUnpaid}
+        setReplaceUnpaid={setReplaceUnpaid}
+        updateGrantBudgets={updateGrantBudgets}
+        setUpdateGrantBudgets={setUpdateGrantBudgets}
+        recalcGrantProjected={recalcGrantProjected}
+        setRecalcGrantProjected={setRecalcGrantProjected}
+      />
+    </>
   );
 }

@@ -186,15 +186,24 @@ export const ConditionalTaskRule = z
 export type TConditionalTaskRule = z.infer<typeof ConditionalTaskRule>;
 
 // ─── Pins ─────────────────────────────────────────────────────────────────────
-// Stored on the grant doc. User-level pins (Dashboard, Favorite) live on userExtras.
+// Org-visible pins stored on the grant doc itself.
+// User-level pins (metrics, dashboard detail cards) live on userExtras.grantPrefs.
+//
+// System pins (set by admins, affect org-wide behavior):
+//   digest             → Budget Digest email
+//   rentalAssistance   → Rental Assistance Digest email
+//   invoice            → Invoicing Tab grant filter
+//
+// Legacy pins (from previous system, preserved for backward compat):
+//   important          → bold badge + float-to-top display flag
 
 export const GRANT_PIN_COLORS = ["red", "amber", "emerald", "sky", "violet", "rose", "orange"] as const;
 export type TGrantPinColor = typeof GRANT_PIN_COLORS[number];
 
 /**
- * Important Pin — org-visible flag on the grant object.
- * Surfaces a bold badge in the UI and floats the grant to the top of lists.
- * `meta` is an open passthrough for future feature hooks.
+ * @legacy — from previous system. Surfaces a bold badge and floats the grant
+ * to the top of lists. Preserved for backward compat; prefer named system pins
+ * for new feature hooks.
  */
 export const GrantPinImportant = z.object({
   enabled: z.boolean().default(false),
@@ -208,8 +217,9 @@ export const GrantPinImportant = z.object({
 export type TGrantPinImportant = z.infer<typeof GrantPinImportant>;
 
 /**
- * Digest Pin — when enabled, this grant is forced into org-wide budget digests
- * regardless of individual CM subscriptions.
+ * Budget Digest Pin (stored as `pins.digest`) — when enabled, this grant is
+ * included in the org-wide monthly budget digest email. Grants without this
+ * pin are excluded from the digest and from aggregate digest totals.
  */
 export const GrantPinDigest = z.object({
   enabled: z.boolean().default(false),
@@ -219,8 +229,19 @@ export const GrantPinDigest = z.object({
 export type TGrantPinDigest = z.infer<typeof GrantPinDigest>;
 
 /**
- * Invoice Pin - surfaces this grant in invoice/payment editing workflows
- * without changing invoice or ledger source-of-truth records.
+ * Rental Assistance Digest Pin — when enabled, includes this grant in the
+ * org-wide rental assistance digest email.
+ */
+export const GrantPinRentalAssistance = z.object({
+  enabled: z.boolean().default(false),
+  pinnedAt: TsLike.nullish(),
+  pinnedBy: z.string().trim().nullish(),
+}).passthrough();
+export type TGrantPinRentalAssistance = z.infer<typeof GrantPinRentalAssistance>;
+
+/**
+ * Invoicing Tab Pin — surfaces this grant as a selectable filter in the
+ * invoicing tool. Does not affect ledger or payment source-of-truth records.
  */
 export const GrantPinInvoice = z.object({
   enabled: z.boolean().default(false),
@@ -232,9 +253,12 @@ export const GrantPinInvoice = z.object({
 export type TGrantPinInvoice = z.infer<typeof GrantPinInvoice>;
 
 export const GrantPins = z.object({
-  important: GrantPinImportant.nullish(),
+  // System pins
   digest: GrantPinDigest.nullish(),
+  rentalAssistance: GrantPinRentalAssistance.nullish(),
   invoice: GrantPinInvoice.nullish(),
+  // Legacy
+  important: GrantPinImportant.nullish(),
 }).passthrough();
 export type TGrantPins = z.infer<typeof GrantPins>;
 
@@ -570,7 +594,8 @@ type AmountCount = { count: number; amount: number };
 export type TGrantsAdminPreviewResp = Ok<{
   ledger: { enrollmentSpends: AmountCount; ccInvoice: AmountCount };
   paymentQueue: { projections: AmountCount; ccInvoice: AmountCount };
-  enrollments: { active: number; inactive: number; total: number };
+  spendMirrors: AmountCount;
+  enrollments: { active: number; inactive: number; deleted: number; total: number };
   currentBudget: { total: number; spent: number; projected: number; balance: number; projectedBalance: number };
 }>;
 
@@ -581,7 +606,7 @@ export const GrantsAdminClearPaymentsBody = z.object({
 });
 export type TGrantsAdminClearPaymentsBody = z.infer<typeof GrantsAdminClearPaymentsBody>;
 export type TGrantsAdminClearPaymentsResp = Ok<{
-  deleted: { ledger: number; paymentQueue: number };
+  deleted: { ledger: number; paymentQueue: number; spendMirrors: number };
   skipped: { ledger: number; paymentQueue: number };
   totals: Record<string, number>;
   counts: { ledger: number; paymentQueue: number };
@@ -591,10 +616,11 @@ export type TGrantsAdminClearPaymentsResp = Ok<{
 export const GrantsAdminClearEnrollmentsBody = z.object({
   grantId: IdLike,
   confirm: z.literal("DELETE"),
+  statuses: z.array(z.enum(["active", "inactive", "deleted"])).min(1).optional(),
 });
 export type TGrantsAdminClearEnrollmentsBody = z.infer<typeof GrantsAdminClearEnrollmentsBody>;
 export type TGrantsAdminClearEnrollmentsResp = Ok<{
-  cleared: { enrollments: number; paymentQueue: number };
+  cleared: { enrollments: number; paymentQueue: number; spendMirrors: number };
   skipped: { enrollments: number };
 }>;
 

@@ -732,39 +732,35 @@ export const reconcileMetricsWeekly = onSchedule(
           caseManager: { id: uid, name },
           updatedAt: FieldValue.serverTimestamp(),
           reconciledAt: FieldValue.serverTimestamp(),
-          ...(hasClients ? {
-            customers: {
-              total: clients.total,
-              active: clients.active,
-              inactive: clients.inactive,
-              byPopulation: {
-                youth: clients.populationCounts.Youth,
-                family: clients.populationCounts.Family,
-                individual: clients.populationCounts.Individual,
-                unknown: clients.populationCounts.unknown,
-              },
-              refs: cmCustomerRefs,
-            },
-          } : {}),
-          ...(hasCaseload ? {
-            enrollments: {
-              total: cl.enrollmentCount,
-              active: cl.caseloadActive,
-              inactive: cl.enrollmentCount - cl.caseloadActive,
-              byPopulation: enrollPop,
-            },
-          } : {}),
-          ...(hasAcuity ? {
-            acuity: {
-              scoreSum: ac.sum,
-              scoreCount: ac.count,
-              scoreAvg: acuityAvg,
-            },
-          } : {}),
+          customers: {
+            total: hasClients ? clients.total : 0,
+            active: hasClients ? clients.active : 0,
+            inactive: hasClients ? clients.inactive : 0,
+            byPopulation: hasClients
+              ? {
+                  youth: clients.populationCounts.Youth,
+                  family: clients.populationCounts.Family,
+                  individual: clients.populationCounts.Individual,
+                  unknown: clients.populationCounts.unknown,
+                }
+              : emptyPopByLower(),
+            refs: hasClients ? cmCustomerRefs : [],
+          },
+          enrollments: {
+            total: hasCaseload ? cl.enrollmentCount : 0,
+            active: hasCaseload ? cl.caseloadActive : 0,
+            inactive: hasCaseload ? cl.enrollmentCount - cl.caseloadActive : 0,
+            byPopulation: hasCaseload ? enrollPop : emptyPopByLower(),
+          },
+          acuity: {
+            scoreSum: hasAcuity ? ac.sum : 0,
+            scoreCount: hasAcuity ? ac.count : 0,
+            scoreAvg: hasAcuity ? acuityAvg : null,
+          },
           tasks: FieldValue.delete(),
           payments: p,
         },
-        { merge: true },
+        { merge: false },
       );
 
       for (const month of [prev2, prev, cur, next]) {

@@ -27,6 +27,9 @@ import {
   Timestamp,
   secureHandler,
   computeBudgetTotals,
+  fromBudgetCents,
+  sumBudgetField,
+  toBudgetCents,
   removeUndefinedDeep,
   makeIdempoKey,
   ensureIdempotent,
@@ -627,14 +630,8 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
       }
 
       const baseTotals = computeBudgetTotals(lineItems as any[]);
-      const projectedInWindow = lineItems.reduce(
-        (s: number, i: any) => s + Number(i?.projectedInWindow || 0),
-        0
-      );
-      const spentInWindow = lineItems.reduce(
-        (s: number, i: any) => s + Number(i?.spentInWindow || 0),
-        0
-      );
+      const projectedInWindow = sumBudgetField(lineItems, "projectedInWindow");
+      const spentInWindow = sumBudgetField(lineItems, "spentInWindow");
 
       const existingTotals =
         grant?.budget?.totals && typeof grant.budget.totals === "object"
@@ -648,9 +645,9 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
         projectedSpend: baseTotals.projectedSpend,
         projectedInWindow,
         spentInWindow,
-        windowBalance: Number(baseTotals.total || 0) - spentInWindow,
+        windowBalance: fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow)),
         windowProjectedBalance:
-          Number(baseTotals.total || 0) - (spentInWindow + projectedInWindow),
+          fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow) - toBudgetCents(projectedInWindow)),
       };
 
       trx.update(gRef, {

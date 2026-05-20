@@ -231,8 +231,8 @@ export const Grants = {
   adminClearPayments: (grantId: string) =>
     api.post("grantsAdminClearPayments", { grantId, confirm: "DELETE" }),
 
-  adminClearEnrollments: (grantId: string) =>
-    api.post("grantsAdminClearEnrollments", { grantId, confirm: "DELETE" }),
+  adminClearEnrollments: (grantId: string, opts?: { statuses?: ("active" | "inactive" | "deleted")[] }) =>
+    api.post("grantsAdminClearEnrollments", { grantId, confirm: "DELETE", ...opts }),
 
   adminReconcileBudget: (grantId: string) =>
     api.post("grantsAdminReconcileBudget", { grantId }),

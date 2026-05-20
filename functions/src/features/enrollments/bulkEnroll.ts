@@ -17,6 +17,16 @@ import type { TEnrollmentsBulkEnrollBody } from "./schemas";
 import { deriveEnrollmentNames } from "./derive";
 import { generateTaskScheduleForEnrollments } from "../tasks/generateScheduleWrite";
 
+function applyGrantEndDateDefault(extra: Record<string, any>, grant: Record<string, any>) {
+  const grantEndDate = String(grant?.endDate || "").slice(0, 10);
+  if (!grantEndDate) return extra;
+  const requestedEndDate = String(extra?.endDate || "").slice(0, 10);
+  return {
+    ...extra,
+    endDate: !requestedEndDate || requestedEndDate > grantEndDate ? grantEndDate : requestedEndDate,
+  };
+}
+
 export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
   const parsed = EnrollmentsBulkEnrollBody.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -95,10 +105,11 @@ export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
         ...extra,
         ...stripReservedFields(sanitizeNestedObject(perCustomerExtra?.[customerId] || {})),
       };
+      const enrollmentExtra = applyGrantEndDateDefault(merged as Record<string, any>, grant as Record<string, any>);
       const derived = await deriveEnrollmentNames({
         grantId: String(grantId),
         customerId: String(customerId),
-        startDate: (merged as any)?.startDate,
+        startDate: (enrollmentExtra as any)?.startDate,
         grantDoc: grant,
         customerDoc: cust,
       });
@@ -119,12 +130,12 @@ export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
         updatedAt: now,
         by: { uid: user.uid || null, email: user.email || null },
 
-        ...merged,
+        ...enrollmentExtra,
         ...derived,
       });
 
       let taskGeneration: unknown = null;
-      if ((merged as any)?.generateTaskSchedule !== false) {
+      if ((enrollmentExtra as any)?.generateTaskSchedule !== false) {
         try {
           taskGeneration = await generateTaskScheduleForEnrollments(
             {

@@ -17,6 +17,8 @@ import {
   toDate,
   toUtcIso,
   JOTFORM_API_KEY_SECRET,
+  fromBudgetCents,
+  toBudgetCents,
   type Claims,
 } from "../../core";
 import {
@@ -34,6 +36,7 @@ import {
 } from "./schemas";
 import { isSpendingFormId, extractSpendItems, type ExtractedSpendItem } from "../paymentQueue/extractor";
 import { upsertPaymentQueueItems } from "../paymentQueue/service";
+import { inferTransactionWindowModel } from "@hdb/contracts";
 import { refreshCreditCardBudgets } from "../creditCards/refreshBudget";
 
 const CC_FORM_ID = "251878265158166";
@@ -164,7 +167,7 @@ type JotformQuestionApi = {
 /* ---------------- Budget helpers (server-derived totals) ---------------- */
 
 function sum(nums: number[]) {
-  return nums.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  return fromBudgetCents(nums.reduce((a, b) => a + toBudgetCents(b), 0));
 }
 
 export function normalizeBudget(input?: TJotformBudget | null): TJotformBudget | null {
@@ -187,13 +190,18 @@ export function normalizeBudget(input?: TJotformBudget | null): TJotformBudget |
 
   const projected = sum(items.map((i) => i.projected));
   const spent = sum(items.map((i) => i.spent));
-  const balance = totalCap - spent;
-  const projectedBalance = totalCap - (spent + projected);
+  const totalCapCents = toBudgetCents(totalCap);
+  const spentCents = toBudgetCents(spent);
+  const projectedCents = toBudgetCents(projected);
+  const balance = fromBudgetCents(totalCapCents - spentCents);
+  const projectedBalance = fromBudgetCents(totalCapCents - spentCents - projectedCents);
 
   const projectedInWindow = sum(items.map((i) => i.projectedInWindow || 0));
   const spentInWindow = sum(items.map((i) => i.spentInWindow || 0));
-  const windowBalance = totalCap - spentInWindow;
-  const windowProjectedBalance = totalCap - (spentInWindow + projectedInWindow);
+  const spentInWindowCents = toBudgetCents(spentInWindow);
+  const projectedInWindowCents = toBudgetCents(projectedInWindow);
+  const windowBalance = fromBudgetCents(totalCapCents - spentInWindowCents);
+  const windowProjectedBalance = fromBudgetCents(totalCapCents - spentInWindowCents - projectedInWindowCents);
 
   const totals = {
     total: totalCap,
@@ -886,19 +894,22 @@ export async function getJotformFormQuestions(formId: string) {
   const rows = Array.isArray(content) ? content : Object.values(content || {});
   const fields = rows
     .map((q) => {
-      const rawFieldId = String(q.qid || "").trim();
+      const rawOrder = Number(q.order ?? 0) || 0;
+      const rawFieldId =
+        String(q.qid || "").trim() ||
+        `meta:${rawOrder}:${String(q.name || "field").trim() || "field"}`;
       const normalized = normalizeJotformField(q);
       return {
         key: `raw:${rawFieldId}`,
         rawFieldId,
         label: String(q.text || q.name || rawFieldId).trim(),
         ...normalized,
-        order: Number(q.order ?? rawFieldId) || 0,
+        order: rawOrder,
       };
     })
     .filter((q) => !!q.rawFieldId && !!q.label)
-    .sort((a, b) => a.order - b.order || Number(a.rawFieldId) - Number(b.rawFieldId))
-    .map(({order: _order, ...q}) => JotformQuestionField.parse(q));
+    .sort((a, b) => a.order - b.order || a.rawFieldId.localeCompare(b.rawFieldId))
+    .map((q) => JotformQuestionField.parse(q));
   return {formId: id, fields};
 }
 
@@ -1379,8 +1390,10 @@ export async function syncJotformSubmissions(body: unknown, caller: Claims, targ
       // trigger to backfill paymentQueue after this HTTP request returns.
       if (isSpendingFormId(formId)) {
         try {
+          const liveQuestions = await getJotformFormQuestions(String(formId));
+          const transactionModel = inferTransactionWindowModel(String(formId), liveQuestions.fields);
           const queueItems = normalized.flatMap((sub) =>
-            extractSpendItems(sub as any).map((extracted: ExtractedSpendItem) => {
+            extractSpendItems(sub as any, transactionModel).map((extracted: ExtractedSpendItem) => {
               if (extracted.source === "credit-card" && extracted.card && orgCreditCards.length) {
                 extracted.creditCardId = resolveCreditCardId(extracted.card, orgCreditCards) || null;
               }

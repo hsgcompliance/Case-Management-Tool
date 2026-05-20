@@ -61,7 +61,7 @@ export default function SignInPage() {
           <div className="p-6 md:p-8">
             {/* Logo/Title */}
             <div className="mb-6 text-center">
-              <div className="text-2xl font-semibold tracking-tight">Compliance Dashboard</div>
+              <div className="text-2xl font-semibold tracking-tight">Case Management Dashboard</div>
               <div className="text-sm text-slate-500 dark:text-slate-400">Sign in</div>
             </div>
 

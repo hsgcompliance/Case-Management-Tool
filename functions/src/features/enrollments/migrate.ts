@@ -421,7 +421,7 @@ export const migrateEnrollment = secureHandler(
             ? `${String((toGrant as any)?.name || toGrantId)} - ${cutover}`
             : undefined,
           startDate: cutover,
-          endDate: null,
+          endDate: String((toGrant as any)?.endDate || "").slice(0, 10) || null,
           active: true,
           status: "active",
           deleted: false,

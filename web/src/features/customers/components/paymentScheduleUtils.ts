@@ -4,7 +4,7 @@
 // Generic date normalization/validation now lives in @lib/date.
 
 import type { Payment, ScheduleMeta } from "@types";
-import { isISODate10, safeISODate10, todayISO as localTodayISO, toISODate } from "@lib/date";
+import { isISODate10, safeISODate10, todayISO as localTodayISO, toISODate, addMonthsISO as libAddMonthsISO, fmtShortMonthDay } from "@lib/date";
 
 /* ----------------------- date & money utils ----------------------- */
 
@@ -26,21 +26,7 @@ export function todayISO(): string {
   return localTodayISO();
 }
 
-/**
- * Adds `m` months to an ISO date WITHOUT crossing time zones or DST.
- * Clamps the day to the last valid day in the target month.
- */
-export function addMonthsISO(iso: string, m: number): string {
-  if (!isISO(iso)) return "";
-  const [y0, mo0, d0] = iso.split("-").map(Number);
-  const total = (y0 * 12 + (mo0 - 1)) + m;
-  const y = Math.floor(total / 12);
-  const mo = (total % 12) + 1;
-
-  const lastDay = lastDayOfMonth(y, mo);
-  const d = Math.min(d0, lastDay);
-  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
+export const addMonthsISO = libAddMonthsISO;
 
 export function firstOfNextMonth(iso: string): string {
   if (!isISO(iso)) return "";
@@ -242,12 +228,7 @@ export function nextRentCertDue(
   return sorted.find((due) => due.targetPaymentDate >= todayISO()) || null;
 }
 
-function fmtShortMonth(iso: string): string {
-  if (!isISO(iso)) return iso;
-  const [, m, d] = iso.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[Math.max(0, Math.min(11, Number(m) - 1))]} ${Number(d)}`;
-}
+const fmtShortMonth = fmtShortMonthDay;
 
 export function tmpId(): string {
   return `tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;

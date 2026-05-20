@@ -9,6 +9,9 @@ import {
   FieldValue,
   secureHandler,
   computeBudgetTotals,
+  fromBudgetCents,
+  sumBudgetField,
+  toBudgetCents,
 } from '../../core';
 import type {Request, Response} from 'express';
 import {
@@ -137,14 +140,8 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
       }
 
       const baseTotals = computeBudgetTotals(lineItems as any[]);
-      const projectedInWindow = lineItems.reduce(
-          (s, i) => s + Number((i as any).projectedInWindow || 0),
-          0,
-      );
-      const spentInWindow = lineItems.reduce(
-          (s, i) => s + Number((i as any).spentInWindow || 0),
-          0,
-      );
+      const projectedInWindow = sumBudgetField(lineItems, 'projectedInWindow');
+      const spentInWindow = sumBudgetField(lineItems, 'spentInWindow');
 
       const existingTotals =
         grant?.budget?.totals && typeof grant.budget.totals === 'object' ?
@@ -157,9 +154,9 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
         remaining: baseTotals.balance,
         projectedInWindow,
         spentInWindow,
-        windowBalance: Number(baseTotals.total || 0) - spentInWindow,
+        windowBalance: fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow)),
         windowProjectedBalance:
-          Number(baseTotals.total || 0) - (spentInWindow + projectedInWindow),
+          fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow) - toBudgetCents(projectedInWindow)),
         projectedSpend: baseTotals.projectedSpend,
       };
 

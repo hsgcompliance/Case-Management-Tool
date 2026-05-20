@@ -18,6 +18,7 @@ export type EnrollmentMigrateGrantOption = {
   id: string;
   name?: string;
   code?: string;
+  endDate?: string | null;
   budget?: { lineItems?: Array<{ id: string; name?: string; label?: string }> };
 };
 
@@ -108,6 +109,7 @@ function EnrollmentMigrateDialogUI({
         : [],
     [destGrant],
   );
+  const destGrantEndDate = String(destGrant?.endDate || "").slice(0, 10);
 
   const destLineItemIdSet = React.useMemo(() => {
     return new Set((destLineItems ?? []).map((li: { id: string }) => String(li.id)));
@@ -313,6 +315,12 @@ function EnrollmentMigrateDialogUI({
             />
           </label>
         </div>
+
+        {destGrantEndDate ? (
+          <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Destination enrollment will use the destination grant end date: <span className="font-semibold">{destGrantEndDate}</span>.
+          </div>
+        ) : null}
 
         {/* REQUIRED: migrate paid items? */}
         <div className="rounded border p-3">
@@ -568,6 +576,7 @@ export function EnrollmentMigrateDialog({
           id: String(g.id || ""),
           name: g.name ? String(g.name) : undefined,
           code: g.code ? String(g.code) : undefined,
+          endDate: g.endDate ? String(g.endDate).slice(0, 10) : null,
           budget: {
             lineItems: Array.isArray(g?.budget?.lineItems)
               ? g.budget.lineItems.map((li) => ({

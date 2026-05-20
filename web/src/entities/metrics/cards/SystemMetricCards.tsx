@@ -22,10 +22,10 @@ export function buildSystemMetricItems(
     {
       id: "system-case-managers",
       label: "Case Managers",
-      value: formatNumber(sys?.caseManagers.total),
+      value: formatNumber(sys?.caseManagers?.total),
       subtext:
         sys?.caseManagers
-          ? `Active ${formatNumber(sys.caseManagers.active)} | Inactive ${formatNumber(sys.caseManagers.inactive)}`
+          ? `Active ${formatNumber(sys.caseManagers?.active)} | Inactive ${formatNumber(sys.caseManagers?.inactive)}`
           : undefined,
       metricId: "system-case-managers",
       loading: sysLoading,
@@ -33,10 +33,10 @@ export function buildSystemMetricItems(
     {
       id: "system-customers",
       label: "Customers",
-      value: formatNumber(sys?.customers.total),
+      value: formatNumber(sys?.customers?.total),
       subtext:
         sys?.customers
-          ? `Active ${formatNumber(sys.customers.active)} | Inactive ${formatNumber(sys.customers.inactive)}`
+          ? `Active ${formatNumber(sys.customers?.active)} | Inactive ${formatNumber(sys.customers?.inactive)}`
           : undefined,
       metricId: "system-customers",
       loading: sysLoading,
@@ -44,10 +44,10 @@ export function buildSystemMetricItems(
     {
       id: "system-enrollments",
       label: "Enrollments",
-      value: formatNumber(sys?.enrollments.total),
+      value: formatNumber(sys?.enrollments?.total),
       subtext:
         sys?.enrollments
-          ? `Active ${formatNumber(sys.enrollments.active)} | Inactive ${formatNumber(sys.enrollments.inactive)}`
+          ? `Active ${formatNumber(sys.enrollments?.active)} | Inactive ${formatNumber(sys.enrollments?.inactive)}`
           : undefined,
       metricId: "system-enrollments",
       loading: sysLoading,
@@ -55,10 +55,10 @@ export function buildSystemMetricItems(
     {
       id: "system-grants",
       label: "Grants & Programs",
-      value: formatNumber(sys?.grants.total),
+      value: formatNumber(sys?.grants?.total),
       subtext:
         sys?.grants
-          ? `Active ${formatNumber(sys.grants.active)} | Inactive ${formatNumber(sys.grants.inactive)}`
+          ? `Active ${formatNumber(sys.grants?.active)} | Inactive ${formatNumber(sys.grants?.inactive)}`
           : undefined,
       metricId: "system-grants",
       loading: sysLoading,
@@ -66,10 +66,10 @@ export function buildSystemMetricItems(
     {
       id: "system-open-tasks",
       label: `Open Tasks (${month})`,
-      value: formatNumber(sysMonth?.tasks.open),
+      value: formatNumber(sysMonth?.tasks?.open),
       subtext:
         sysMonth?.tasks
-          ? `Done ${formatNumber(sysMonth.tasks.done)} | Total ${formatNumber(sysMonth.tasks.total)}`
+          ? `Done ${formatNumber(sysMonth.tasks?.done)} | Total ${formatNumber(sysMonth.tasks?.total)}`
           : undefined,
       metricId: "open-tasks",
       loading: monthLoading,
@@ -77,10 +77,10 @@ export function buildSystemMetricItems(
     {
       id: "system-spending",
       label: `Spent (${month})`,
-      value: formatCurrency(sysMonth?.spending.spent),
+      value: formatCurrency(sysMonth?.spending?.spent),
       subtext:
         sysMonth?.spending
-          ? `Projected ${formatCurrency(sysMonth.spending.projected)}`
+          ? `Projected ${formatCurrency(sysMonth.spending?.projected)}`
           : undefined,
       metricId: "system-spend",
       loading: monthLoading,

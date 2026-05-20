@@ -4,6 +4,7 @@ import React from "react";
 import { useGrantMetrics } from "@hooks/useMetrics";
 import {
   formatCurrency,
+  formatNumber,
   MetricCards,
   type BuiltMetricCardsProps,
   type MetricCardItem,
@@ -29,10 +30,10 @@ export function buildGrantMetricItems(
     {
       id: "grant-active-enrollments",
       label: "Active Enrollments",
-      value: data?.enrollments.active ?? 0,
+      value: formatNumber(data?.enrollments?.active),
       subtext:
         data?.enrollments
-          ? `Total ${data.enrollments.total} | ${summarizePopulations(data.enrollments.byPopulation) ?? "Population mix pending"}`
+          ? `Total ${formatNumber(data.enrollments?.total)} | ${summarizePopulations(data.enrollments?.byPopulation) ?? "Population mix pending"}`
           : "Population mix pending",
       metricId: "grant-active-enrollments",
       loading: isLoading,
@@ -40,10 +41,10 @@ export function buildGrantMetricItems(
     {
       id: "grant-unique-clients",
       label: "Unique Clients",
-      value: data?.customers.uniqueTotal ?? 0,
+      value: formatNumber(data?.customers?.uniqueTotal),
       subtext:
         data?.customers
-          ? `Active ${data.customers.activeUniqueTotal} | Inactive ${data.customers.inactiveUniqueTotal}`
+          ? `Active ${formatNumber(data.customers?.activeUniqueTotal)} | Inactive ${formatNumber(data.customers?.inactiveUniqueTotal)}`
           : undefined,
       metricId: "grant-unique-clients",
       loading: isLoading,
@@ -51,18 +52,18 @@ export function buildGrantMetricItems(
     {
       id: "grant-case-managers",
       label: "Case Managers",
-      value: data?.caseManagers.total ?? 0,
-      subtext: summarizeRefs(data?.caseManagers.refs) ?? "No case managers assigned",
+      value: formatNumber(data?.caseManagers?.total),
+      subtext: summarizeRefs(data?.caseManagers?.refs) ?? "No case managers assigned",
       metricId: "system-case-managers",
       loading: isLoading,
     },
     {
       id: "grant-budget-spent",
       label: "Budget Spent",
-      value: formatCurrency(data?.spending.spent),
+      value: formatCurrency(data?.spending?.spent),
       subtext:
         data?.spending
-          ? `Projected ${formatCurrency(data.spending.projected)} | Line items ${data.spending.lineItemsActive ?? 0}`
+          ? `Projected ${formatCurrency(data.spending?.projected)} | Line items ${formatNumber(data.spending?.lineItemsActive)}`
           : undefined,
       metricId: "system-spend",
       loading: isLoading,

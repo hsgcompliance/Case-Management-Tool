@@ -7,17 +7,15 @@ import { statusChipClass, grantAccentLeftBorder, grantAccentHeaderBg } from "@li
 import type { TGrant as Grant } from "@types";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
 }
 
-const fmtUsd = (n: number) =>
-  Number(n || 0).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+const fmtUsd = (n: number) => fmtCurrencyUSD(n);
+const toCents = (n: number) => Math.round(Number(n || 0) * 100);
+const fromCents = (cents: number) => cents / 100;
 
 function getBudget(g: Partial<Grant>) {
   const b = (g?.budget || {}) as Record<string, unknown>;
@@ -25,13 +23,16 @@ function getBudget(g: Partial<Grant>) {
   const total = Number((b?.total ?? b?.startAmount ?? 0) as number);
   const spent = Number((t?.spent ?? b?.spent ?? 0) as number);
   const projected = Number((t?.projected ?? b?.projected ?? 0) as number);
+  const totalCents = toCents(total);
+  const spentCents = toCents(spent);
+  const projectedCents = toCents(projected);
   return {
-    total,
-    spent,
-    projected,
-    remaining: total - spent,
-    projectedToSpend: spent + projected,
-    available: total - spent - projected,
+    total: fromCents(totalCents),
+    spent: fromCents(spentCents),
+    projected: fromCents(projectedCents),
+    remaining: fromCents(totalCents - spentCents),
+    projectedToSpend: fromCents(spentCents + projectedCents),
+    available: fromCents(totalCents - spentCents - projectedCents),
     rawBudget: b,
   };
 }
@@ -131,7 +132,7 @@ function AddFundsForm({
     e.stopPropagation();
     const add = Number(amount.replace(/[^0-9.-]/g, ""));
     if (!Number.isFinite(add) || add <= 0) return;
-    const newTotal = currentTotal + add;
+    const newTotal = fromCents(toCents(currentTotal) + toCents(add));
 
     // If exactly 1 line item, keep it in sync with the overall total
     const lineItems = Array.isArray(currentBudget.lineItems) ? currentBudget.lineItems as Record<string, unknown>[] : [];
@@ -189,13 +190,16 @@ function getLineItemBudget(grant: Grant, lineItemId: string) {
   const amount = Number(li.amount ?? 0);
   const spent = Number(li.spent ?? 0);
   const projected = Number(li.projected ?? 0);
+  const amountCents = toCents(amount);
+  const spentCents = toCents(spent);
+  const projectedCents = toCents(projected);
   return {
-    total: amount,
-    spent,
-    projected,
-    remaining: amount - spent,
-    projectedToSpend: spent + projected,
-    available: amount - spent - projected,
+    total: fromCents(amountCents),
+    spent: fromCents(spentCents),
+    projected: fromCents(projectedCents),
+    remaining: fromCents(amountCents - spentCents),
+    projectedToSpend: fromCents(spentCents + projectedCents),
+    available: fromCents(amountCents - spentCents - projectedCents),
     rawBudget: (grant as any)?.budget ?? {},
     label: String(li.label ?? li.id ?? ""),
   };
@@ -364,8 +368,8 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
         <span className="text-xs text-slate-400 dark:text-slate-500">
           {gm ? (
             <>
-              {gm.enrollments.active} enrolled
-              {gm.caseManagers.total > 0 && ` · ${gm.caseManagers.total} CMs`}
+              {gm.enrollments?.active} enrolled
+              {(gm.caseManagers?.total ?? 0) > 0 && ` · ${gm.caseManagers?.total} CMs`}
             </>
           ) : null}
         </span>

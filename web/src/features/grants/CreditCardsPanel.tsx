@@ -19,6 +19,7 @@ import {
 import { toast } from "@lib/toast";
 import { LINE_ITEMS_FORM_IDS } from "@widgets/jotform/lineItemsFormMap";
 import { isViewerLike } from "@lib/roles";
+import { fmtCurrencyUSD } from "@lib/formatters";
 import type { CreditCardEntity, TLedgerEntry } from "@types";
 
 type CardHealth = "active" | "warning" | "over";
@@ -89,12 +90,7 @@ type CreateCardDraft = {
   notes: string;
 };
 
-const fmtUsd0 = (n: number) =>
-  Number(n || 0).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+const fmtUsd0 = (n: number) => fmtCurrencyUSD(n);
 
 const fmtUsd2 = (n: number) =>
   Number(n || 0).toLocaleString(undefined, {

@@ -14,6 +14,8 @@ import {
   normStr,
   sanitizeFlatObject,
   newBulkWriter,
+  fromBudgetCents,
+  toBudgetCents,
   z,
   type AuthedRequest,
   type Claims,
@@ -687,11 +689,28 @@ export const grantsAdminPreview = secureHandler(
     }
 
     // ── Enrollment breakdown ────────────────────────────────────────────────
-    let activeEnrollments = 0; let inactiveEnrollments = 0;
+    let activeEnrollments = 0; let inactiveEnrollments = 0; let deletedEnrollments = 0;
+    let spendMirrorCount = 0; let spendMirrorAmount = 0;
     for (const d of enrollSnap.docs) {
       const row = d.data() as Record<string, unknown>;
       if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
-      if (row.active === true) activeEnrollments++; else inactiveEnrollments++;
+      if (row.deleted === true || row.status === "deleted") deletedEnrollments++;
+      else if (row.active === true) activeEnrollments++;
+      else inactiveEnrollments++;
+
+      const embeddedSpends = Array.isArray(row.spends) ? row.spends : [];
+      for (const spend of embeddedSpends) {
+        const amount = Number((spend as Record<string, unknown>)?.amount ?? 0);
+        if (Number.isFinite(amount)) spendMirrorAmount += amount;
+        spendMirrorCount++;
+      }
+
+      const subSpendSnap = await d.ref.collection("spends").get();
+      spendMirrorCount += subSpendSnap.size;
+      for (const spendDoc of subSpendSnap.docs) {
+        const amount = Number((spendDoc.data() as Record<string, unknown>)?.amount ?? 0);
+        if (Number.isFinite(amount)) spendMirrorAmount += amount;
+      }
     }
 
     const budget = (gData.budget || {}) as Record<string, unknown>;
@@ -707,10 +726,12 @@ export const grantsAdminPreview = secureHandler(
         projections: { count: projCount, amount: projAmount },
         ccInvoice: { count: ccQueueCount, amount: ccQueueAmount },
       },
+      spendMirrors: { count: spendMirrorCount, amount: spendMirrorAmount },
       enrollments: {
         active: activeEnrollments,
         inactive: inactiveEnrollments,
-        total: activeEnrollments + inactiveEnrollments,
+        deleted: deletedEnrollments,
+        total: activeEnrollments + inactiveEnrollments + deletedEnrollments,
       },
       currentBudget: {
         total: Number(budget.total ?? 0),
@@ -772,20 +793,22 @@ async function recomputeAndWriteBudget(
       .get(),
   ]);
 
-  const spentByLine: Record<string, number> = {};
+  const spentByLineCents: Record<string, number> = {};
   let ledgerCounted = 0;
   for (const d of ledgerSnap.docs) {
     const row = d.data() as Record<string, unknown>;
     if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
     const lineId = normStr(row.lineItemId) || "__none__";
-    const amount = Number(row.amountCents != null ? Number(row.amountCents) / 100 : row.amount ?? 0);
-    if (Number.isFinite(amount)) {
-      spentByLine[lineId] = (spentByLine[lineId] ?? 0) + amount;
+    const amountCents = row.amountCents != null
+      ? Math.round(Number(row.amountCents) || 0)
+      : toBudgetCents(row.amount);
+    if (amountCents) {
+      spentByLineCents[lineId] = (spentByLineCents[lineId] ?? 0) + amountCents;
       ledgerCounted++;
     }
   }
 
-  const projectedByLine: Record<string, number> = {};
+  const projectedByLineCents: Record<string, number> = {};
   let queueCounted = 0;
   for (const d of queueSnap.docs) {
     const row = d.data() as Record<string, unknown>;
@@ -793,9 +816,9 @@ async function recomputeAndWriteBudget(
     const source = normStr(row.source) || "";
     if (!["projection", "invoice", "credit-card"].includes(source)) continue;
     const lineId = normStr(row.lineItemId) || "__none__";
-    const amount = Number(row.amount ?? 0);
-    if (Number.isFinite(amount) && amount !== 0) {
-      projectedByLine[lineId] = (projectedByLine[lineId] ?? 0) + amount;
+    const amountCents = toBudgetCents(row.amount);
+    if (amountCents) {
+      projectedByLineCents[lineId] = (projectedByLineCents[lineId] ?? 0) + amountCents;
       queueCounted++;
     }
   }
@@ -806,22 +829,33 @@ async function recomputeAndWriteBudget(
 
   const updatedLineItems = lineItems.map((li) => {
     const liId = String(li.id || "");
-    return { ...li, spent: spentByLine[liId] ?? 0, projected: projectedByLine[liId] ?? 0 };
+    const spent = fromBudgetCents(spentByLineCents[liId] ?? 0);
+    const projected = fromBudgetCents(projectedByLineCents[liId] ?? 0);
+    return { ...li, spent, projected, spentInWindow: spent, projectedInWindow: projected };
   });
 
-  const totalSpent =
-    updatedLineItems.reduce((a, li) => a + Number(li.spent ?? 0), 0) +
-    (spentByLine["__none__"] ?? 0);
-  const totalProjected =
-    updatedLineItems.reduce((a, li) => a + Number(li.projected ?? 0), 0) +
-    (projectedByLine["__none__"] ?? 0);
+  const totalCents = toBudgetCents(total);
+  const totalSpentCents =
+    updatedLineItems.reduce((a, li) => a + toBudgetCents(li.spent), 0) +
+    (spentByLineCents["__none__"] ?? 0);
+  const totalProjectedCents =
+    updatedLineItems.reduce((a, li) => a + toBudgetCents(li.projected), 0) +
+    (projectedByLineCents["__none__"] ?? 0);
+  const totalSpent = fromBudgetCents(totalSpentCents);
+  const totalProjected = fromBudgetCents(totalProjectedCents);
 
   const newTotals = {
+    total,
     spent: totalSpent,
     projected: totalProjected,
-    projectedSpend: totalSpent + totalProjected,
-    balance: total - totalSpent,
-    projectedBalance: total - (totalSpent + totalProjected),
+    projectedSpend: fromBudgetCents(totalSpentCents + totalProjectedCents),
+    balance: fromBudgetCents(totalCents - totalSpentCents),
+    projectedBalance: fromBudgetCents(totalCents - totalSpentCents - totalProjectedCents),
+    remaining: fromBudgetCents(totalCents - totalSpentCents),
+    spentInWindow: totalSpent,
+    projectedInWindow: totalProjected,
+    windowBalance: fromBudgetCents(totalCents - totalSpentCents),
+    windowProjectedBalance: fromBudgetCents(totalCents - totalSpentCents - totalProjectedCents),
   };
 
   await db.collection("grants").doc(grantId).update({
@@ -839,8 +873,9 @@ async function recomputeAndWriteBudget(
  * POST /grantsAdminClearPayments
  *
  * Deletes ONLY enrollment-sourced ledger entries (has enrollmentId, source not
- * CC/invoice) and ONLY enrollment projection queue items (source === "projection")
- * for the given grant.  CC and invoice ledger/queue entries are never touched.
+ * CC/invoice), enrollment spend mirror docs/arrays, and ONLY enrollment
+ * projection queue items (source === "projection") for the given grant.
+ * CC and invoice ledger/queue entries are never touched.
  *
  * Every candidate doc is checked against the verified grantId AND orgId before
  * deletion — the Firestore query predicate is not the only gate.
@@ -874,6 +909,7 @@ export const grantsAdminClearPayments = secureHandler(
 
     let ledgerSkipped = 0;
     let queueSkipped = 0;
+    let spendMirrorsDeleted = 0;
     const bw = newBulkWriter();
 
     for (const d of ledgerSnap.docs) {
@@ -898,6 +934,31 @@ export const grantsAdminClearPayments = secureHandler(
       bw.delete(d.ref);
     }
 
+    const enrollSnap = await db
+      .collection("customerEnrollments")
+      .where("grantId", "==", grantId)
+      .get();
+
+    for (const d of enrollSnap.docs) {
+      const row = d.data() as Record<string, unknown>;
+      if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
+
+      const spendSnap = await d.ref.collection("spends").get();
+      for (const spendDoc of spendSnap.docs) {
+        bw.delete(spendDoc.ref);
+        spendMirrorsDeleted++;
+      }
+
+      const embeddedSpends = Array.isArray(row.spends) ? row.spends : [];
+      if (embeddedSpends.length > 0) {
+        bw.update(d.ref, {
+          spends: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        spendMirrorsDeleted += embeddedSpends.length;
+      }
+    }
+
     await bw.close();
 
     // Recompute budget from what actually remains — never blindly zero
@@ -908,6 +969,7 @@ export const grantsAdminClearPayments = secureHandler(
       deleted: {
         ledger: ledgerSnap.size - ledgerSkipped,
         paymentQueue: queueSnap.size - queueSkipped,
+        spendMirrors: spendMirrorsDeleted,
       },
       skipped: { ledger: ledgerSkipped, paymentQueue: queueSkipped },
       totals: newTotals,
@@ -927,13 +989,20 @@ export const grantsAdminClearPayments = secureHandler(
 export const grantsAdminClearEnrollments = secureHandler(
   async (req, res) => {
     const parsed = z
-      .object({ grantId: z.string().min(1), confirm: z.literal("DELETE") })
+      .object({
+        grantId: z.string().min(1),
+        confirm: z.literal("DELETE"),
+        statuses: z
+          .array(z.enum(["active", "inactive", "deleted"]))
+          .min(1)
+          .default(["active", "inactive"]),
+      })
       .safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: "invalid_body", issues: parsed.error.issues });
       return;
     }
-    const { grantId } = parsed.data;
+    const { grantId, statuses } = parsed.data;
     const caller = req.user!;
     const targetOrg = getTargetOrg(req, req.body);
 
@@ -949,15 +1018,29 @@ export const grantsAdminClearEnrollments = secureHandler(
       .get();
 
     const bw = newBulkWriter();
-    const now = FieldValue.serverTimestamp();
     const validEnrollIds: string[] = [];
     let enrollSkipped = 0;
+    let spendMirrorsDeleted = 0;
 
     for (const d of enrollSnap.docs) {
       const row = d.data() as Record<string, unknown>;
       // Hard guard: must genuinely belong to this grant + org
       if (!_docBelongsToGrant(row, grantId, grantOrg)) { enrollSkipped++; continue; }
-      bw.update(d.ref, { deleted: true, active: false, status: "inactive", updatedAt: now });
+
+      // Status filter — only process docs matching the requested statuses
+      const isDeleted = row.deleted === true || row.status === "deleted";
+      const isActive  = !isDeleted && row.active === true;
+      const docStatus = isDeleted ? "deleted" : isActive ? "active" : "inactive";
+      if (!(statuses as string[]).includes(docStatus)) continue;
+
+      const spendSnap = await d.ref.collection("spends").get();
+      for (const spendDoc of spendSnap.docs) {
+        bw.delete(spendDoc.ref);
+        spendMirrorsDeleted++;
+      }
+      spendMirrorsDeleted += Array.isArray(row.spends) ? row.spends.length : 0;
+
+      bw.delete(d.ref);
       validEnrollIds.push(d.id);
     }
 
@@ -986,7 +1069,7 @@ export const grantsAdminClearEnrollments = secureHandler(
 
     res.status(200).json({
       ok: true,
-      cleared: { enrollments: validEnrollIds.length, paymentQueue: queueDeleted },
+      cleared: { enrollments: validEnrollIds.length, paymentQueue: queueDeleted, spendMirrors: spendMirrorsDeleted },
       skipped: { enrollments: enrollSkipped },
     });
   },

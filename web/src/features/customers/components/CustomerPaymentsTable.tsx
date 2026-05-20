@@ -208,7 +208,9 @@ export default function CustomerPaymentsTable({
                       </label>
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-slate-800">{formatEnrollmentLabel(row.enrollment, { fallback: String(row.enrollmentId || "") })}</td>
+                  <td className="px-3 py-2 text-base font-semibold leading-snug text-slate-900">
+                    {formatEnrollmentLabel(row.enrollment, { fallback: String(row.enrollmentId || "") })}
+                  </td>
                   <td className="px-3 py-2">
                     <ActionMenu
                       items={[

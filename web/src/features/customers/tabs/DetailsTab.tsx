@@ -3,6 +3,7 @@
 
 import React from "react";
 import { parseISO10Strict } from "@lib/date";
+import { fmtDateOrDash } from "@lib/formatters";
 
 type AnyRecord = Record<string, any>;
 type Status = "active" | "inactive";
@@ -41,7 +42,7 @@ function display(value: unknown, fallback = "-") {
 
 function ViewField({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+    <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-1 select-text break-words text-sm font-medium text-slate-900">{display(value)}</div>
     </div>
@@ -153,7 +154,7 @@ export function DetailsTab({
     : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100";
   const statusChipLabel = statusIsActive ? "Active" : "Inactive";
   const statusChipTitle = statusIsActive ? "Mark inactive" : "Mark active";
-  const detailsTitle = creating ? "New customer details" : "Customer details";
+  const detailsTitle = creating ? "New customer details" : "General";
 
   const editForm = (
     <>
@@ -245,7 +246,7 @@ export function DetailsTab({
         <ViewField label="First name" value={model?.firstName} />
         <ViewField label="Last name" value={model?.lastName} />
         <ViewField label="Population" value={model?.population} />
-        <ViewField label="DOB" value={model?.dob} />
+        <ViewField label="DOB" value={fmtDateOrDash(model?.dob)} />
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <ViewField label="CW ID" value={model?.cwId} />
@@ -257,11 +258,14 @@ export function DetailsTab({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
         <div className="space-y-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h4 className="text-sm font-semibold text-slate-900">{detailsTitle}</h4>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{detailsTitle}</h4>
+              <div className="mt-1 truncate text-lg font-semibold text-slate-950">
+                {computedName || display(model?.name, creating ? "New customer" : "Customer")}
+              </div>
               {editing && !computedName ? (
                 <p className="mt-1 text-xs text-amber-700">
                   First + Last are required to satisfy the backend-required name field.
@@ -273,7 +277,7 @@ export function DetailsTab({
               <button
                 type="button"
                 className={[
-                  "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition",
+                  "inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-semibold transition",
                   statusChipClass,
                   statusBusy ? "cursor-wait opacity-70" : "",
                 ].join(" ")}
@@ -290,7 +294,7 @@ export function DetailsTab({
               >
                 {statusBusy ? "Updating..." : statusChipLabel}
               </button>
-              <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-slate-700">
+              <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
                 <span className="text-slate-500">Age</span>
                 <span className="font-medium">{age === null ? "-" : String(age)}</span>
               </div>
@@ -303,13 +307,10 @@ export function DetailsTab({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between gap-3">
           <div>
             <h4 className="text-sm font-semibold text-slate-900">Notes</h4>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {onSaveNotes ? "Editable without switching to edit mode." : "Internal notes."}
-            </p>
           </div>
           <div className="text-xs text-slate-500">
             {notesSaving ? "Saving..." : notesSaveError ? "Save failed" : notesSaved ? "Saved" : ""}

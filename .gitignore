@@ -60,6 +60,9 @@ web/.git/
 *credentials*.json
 scripts/env.config
 
+# Graphify cache (large blobs, rebuilt on demand)
+graphify-out/cache/
+
 # Generated build output
 **/.next/
 **/*.tsbuildinfo
@@ -79,6 +82,7 @@ google Scripts Integration/
 scripts/out/
 scripts/prompts/
 seeds/
+scripts/user-doc-audit/
 
 # Archived migration and seed artifacts (gitignored in new location)
 archive/migration/scripts/

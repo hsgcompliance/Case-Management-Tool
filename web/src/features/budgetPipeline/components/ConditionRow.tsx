@@ -1,9 +1,8 @@
-"use client";
+﻿"use client";
 // web/src/features/budgetPipeline/components/ConditionRow.tsx
 import React from "react";
 import type { TPipelineCondition } from "@types";
 import {
-  NORMALIZED_FIELDS,
   OPERATORS_BY_TYPE,
   NO_VALUE_OPERATORS,
   type PipelineFieldDef,
@@ -16,23 +15,29 @@ const inputCls =
 
 type Props = {
   condition: TPipelineCondition;
-  formTitle: string;
-  formFields: PipelineFieldDef[];
+  fieldDefs: PipelineFieldDef[];
   onChange: (updated: TPipelineCondition) => void;
   onRemove: () => void;
 };
 
-export function ConditionRow({ condition, formTitle, formFields, onChange, onRemove }: Props) {
-  const fieldDefs = React.useMemo(
-    () => [...NORMALIZED_FIELDS, ...formFields],
-    [formFields],
-  );
+export function ConditionRow({ condition, fieldDefs, onChange, onRemove }: Props) {
   const fieldByKey = React.useMemo(
     () => new Map(fieldDefs.map((f) => [f.key, f])),
     [fieldDefs],
   );
   const fieldDef = fieldByKey.get(condition.field);
   const type = fieldDef?.type ?? "text";
+  const typeLabel =
+    fieldDef?.typeLabel ??
+    (type === "select"
+      ? "Dropdown"
+      : type === "date"
+        ? "Date"
+        : type === "number"
+          ? "Number"
+          : type === "boolean"
+            ? "Boolean"
+            : "Text");
   const operators = OPERATORS_BY_TYPE[type];
   const needsValue = !NO_VALUE_OPERATORS.has(condition.operator);
   const isMulti = condition.operator === "in" || condition.operator === "not_in";
@@ -41,6 +46,12 @@ export function ConditionRow({ condition, formTitle, formFields, onChange, onRem
     type === "select" &&
     hasOptions &&
     (condition.operator === "equals" || condition.operator === "not_equals");
+  const fieldSelectLabel = fieldDef?.label ?? condition.field;
+  const fieldHelp = fieldDef?.description ?? (
+    condition.field.startsWith("tx:")
+      ? "Live transaction field inferred from the current form schema."
+      : "Normalized payment queue field."
+  );
 
   function onFieldChange(key: string) {
     const newDef = fieldByKey.get(key);
@@ -154,7 +165,6 @@ export function ConditionRow({ condition, formTitle, formFields, onChange, onRem
       );
     }
 
-    // text default
     return (
       <input
         className={`${inputCls} w-44`}
@@ -167,34 +177,33 @@ export function ConditionRow({ condition, formTitle, formFields, onChange, onRem
   }
 
   return (
-    <div className="flex items-center gap-2 py-0.5 flex-wrap">
-      {/* Field selector */}
-      <select className={selectCls} value={condition.field} onChange={(e) => onFieldChange(e.target.value)}>
+    <div className="flex min-w-0 items-center gap-2 py-0.5 flex-wrap">
+      <select
+        className={`${selectCls} min-w-0 w-full max-w-[22rem]`}
+        title={`${fieldSelectLabel}: ${fieldHelp}`}
+        value={condition.field}
+        onChange={(e) => onFieldChange(e.target.value)}
+      >
         {!fieldDef ? (
           <optgroup label="Unavailable field">
             <option value={condition.field}>{condition.field}</option>
           </optgroup>
         ) : null}
         <optgroup label="Normalized fields">
-          {NORMALIZED_FIELDS.map((f) => (
-            <option key={f.key} value={f.key}>
+          {fieldDefs.map((f) => (
+            <option key={f.key} value={f.key} title={f.description}>
               {f.label}
             </option>
           ))}
         </optgroup>
-        {formFields.length > 0 ? (
-          <optgroup label={formTitle || "Selected form fields"}>
-            {formFields.map((f) => (
-              <option key={f.key} value={f.key}>
-                {f.label}
-              </option>
-            ))}
-          </optgroup>
-        ) : null}
       </select>
 
-      {/* Operator selector */}
-      <select className={selectCls} value={condition.operator} onChange={(e) => onOpChange(e.target.value)}>
+      <select
+        className={selectCls}
+        value={condition.operator}
+        onChange={(e) => onOpChange(e.target.value)}
+        title="Positive matches require an answered field. Negative matches pass when the field is empty."
+      >
         {operators.map((op) => (
           <option key={op.value} value={op.value}>
             {op.label}
@@ -202,16 +211,15 @@ export function ConditionRow({ condition, formTitle, formFields, onChange, onRem
         ))}
       </select>
 
-      {/* Value input */}
       {renderValueInput()}
 
-      {fieldDef?.typeLabel ? (
-        <span className="text-xs text-slate-500 dark:text-slate-400">
-          Field type: {fieldDef.typeLabel}
+      {fieldDef ? (
+        <span className="text-xs whitespace-nowrap text-slate-500 dark:text-slate-400" title={fieldHelp}>
+          Field type: {typeLabel}
+          {fieldDef.options?.length ? ` · ${fieldDef.options.length} live options` : ""}
         </span>
       ) : null}
 
-      {/* Remove */}
       <button
         type="button"
         onClick={onRemove}

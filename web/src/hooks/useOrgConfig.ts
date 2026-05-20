@@ -72,6 +72,14 @@ export type OrgDisplayConfig = {
   spendingPresets?: SpendingPreset[];
   /** Secret-games admin configuration. */
   secretGames?: unknown;
+  /** Per-page rich-text help content (HTML strings), editable by admins. */
+  helpContent?: {
+    customers?: string;
+    customersModal?: string;
+    budget?: string;
+    budgetPipeline?: string;
+    invoiceTool?: string;
+  };
 };
 
 // ─── Default config ───────────────────────────────────────────────────────────
@@ -165,6 +173,7 @@ async function fetchOrgConfig(): Promise<OrgConfigQueryResult> {
       ? (value.spendingPresets as SpendingPreset[])
       : undefined,
     secretGames: value?.secretGames,
+    helpContent: (value?.helpContent as OrgDisplayConfig["helpContent"] | undefined) ?? undefined,
   };
 
   return { configId: displayDoc.id, config };

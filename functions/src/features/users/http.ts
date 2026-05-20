@@ -46,6 +46,7 @@ import {
   upsertDevOrgService,
   patchDevOrgTeamsService,
   updateMeExtrasService,
+  normalizeUserExtrasForRead,
 } from "./service";
 
 function normalizeTeamIds(raw: unknown): string[] | undefined {
@@ -353,7 +354,7 @@ export const usersMe = secureHandler(
       authAdmin.getUser(uid).catch(() => null),
     ]);
 
-    const extra = (snap?.exists ? snap.data() : {}) as Record<string, unknown>;
+    const extra = normalizeUserExtrasForRead(snap?.exists ? snap.data() : {});
     const ccRaw = (rec?.customClaims || {}) as Partial<Claims>;
 
     // Build canonical Claims for RBAC
