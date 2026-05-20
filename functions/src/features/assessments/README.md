@@ -1,5 +1,3 @@
-### `functions/src/features/assessments/README.md`
-
 # Assessments (Feature)
 
 Unified assessment engine:
@@ -68,7 +66,7 @@ All endpoints use `secureHandler` (CORS, ID token auth, optional App Check).
 
 ---
 
-## Example payloads
+## Example Payloads
 
 **Upsert an acuity rubric template**
 
@@ -109,14 +107,4 @@ All endpoints use `secureHandler` (CORS, ID token auth, optional App Check).
   ]
 }
 ```
-
-```
-POST /acuityRubricsSet
-POST /acuitySubmitAnswers
-POST /acuityRecalcRubric
-```
-
-(Or wire quick curl calls similar to your customers script.)
-
----
 
