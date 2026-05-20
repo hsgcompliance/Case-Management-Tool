@@ -11,6 +11,8 @@ import {
   requireOrg,
   isDev,
   newBulkWriter,
+  fromBudgetCents,
+  toBudgetCents,
   type Claims,
 } from "../../core";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
@@ -27,7 +29,7 @@ import {
 /* ---------------- Budget helpers (server-derived totals) ---------------- */
 
 function sum(nums: number[]) {
-  return nums.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  return fromBudgetCents(nums.reduce((a, b) => a + toBudgetCents(b), 0));
 }
 
 function slugifyLineItemType(label: string) {
@@ -93,13 +95,18 @@ export function normalizeBudget(
 
   const projected = sum(items.map((i) => i.projected));
   const spent = sum(items.map((i) => i.spent));
-  const balance = totalCap - spent;
-  const projectedBalance = totalCap - (spent + projected);
+  const totalCapCents = toBudgetCents(totalCap);
+  const spentCents = toBudgetCents(spent);
+  const projectedCents = toBudgetCents(projected);
+  const balance = fromBudgetCents(totalCapCents - spentCents);
+  const projectedBalance = fromBudgetCents(totalCapCents - spentCents - projectedCents);
 
   const projectedInWindow = sum(items.map((i) => i.projectedInWindow || 0));
   const spentInWindow = sum(items.map((i) => i.spentInWindow || 0));
-  const windowBalance = totalCap - spentInWindow;
-  const windowProjectedBalance = totalCap - (spentInWindow + projectedInWindow);
+  const spentInWindowCents = toBudgetCents(spentInWindow);
+  const projectedInWindowCents = toBudgetCents(projectedInWindow);
+  const windowBalance = fromBudgetCents(totalCapCents - spentInWindowCents);
+  const windowProjectedBalance = fromBudgetCents(totalCapCents - spentInWindowCents - projectedInWindowCents);
 
   const totals = {
     total: totalCap,
@@ -107,7 +114,7 @@ export function normalizeBudget(
     spent,
     balance,
     projectedBalance,
-    projectedSpend: spent + projected,
+    projectedSpend: fromBudgetCents(spentCents + projectedCents),
     remaining: balance, // compat alias
     projectedInWindow,
     spentInWindow,

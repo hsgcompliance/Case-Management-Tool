@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 // web/src/features/tools/PipelineManagerTool.tsx
 //
 // Replaces BudgetMapTool as the single pipeline management surface.
@@ -9,8 +9,9 @@ import { usePipelines, usePipelineDelete } from "@hooks/useBudgetPipeline";
 import { PipelineBuilderPage } from "@features/budgetPipeline/PipelineBuilderPage";
 import { toast } from "@lib/toast";
 import type { TBudgetPipeline } from "@types";
+import { HelpButton } from "@entities/help/HelpButton";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function fmtDate(iso: string) {
   try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" }); }
@@ -32,7 +33,36 @@ function StatusDot({ status }: { status: TBudgetPipeline["status"] }) {
   );
 }
 
-// ─── List panel ───────────────────────────────────────────────────────────────
+function enabledSchemaLabels(p: TBudgetPipeline): string {
+  const schemas = Object.values((p as any).formSchemas ?? {}).filter((schema: any) => schema?.enabled !== false);
+  if (schemas.length > 0) {
+    return schemas.map((schema: any) => String(schema.sourceFormTitle || schema.sourceFormId).replace(/^Line Items /, "")).join(" + ");
+  }
+  return p.sourceFormTitle ?? "all forms";
+}
+
+function countRuleConditions(node: any): number {
+  if (!node) return 0;
+  if (node.type === "condition") return 1;
+  return Array.isArray(node.children)
+    ? node.children.reduce((total: number, child: any) => total + countRuleConditions(child), 0)
+    : 0;
+}
+
+function schemaRuleSummary(p: TBudgetPipeline): string {
+  const schemas = Object.values((p as any).formSchemas ?? {}).filter((schema: any) => schema?.enabled !== false);
+  if (schemas.length > 0) {
+    return schemas
+      .map((schema: any) => {
+        const label = String(schema.sourceFormTitle || "Form").replace(/^Line Items /, "");
+        return `${label}: ${countRuleConditions(schema.includeTree)} in / ${countRuleConditions(schema.excludeTree)} out`;
+      })
+      .join(" · ");
+  }
+  return `${countRuleConditions((p as any).includeTree)} include · ${countRuleConditions((p as any).excludeTree)} exclude`;
+}
+
+// â”€â”€â”€ List panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type ListPanelProps = {
   onNew: () => void;
@@ -63,11 +93,11 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              Budget Pipelines
+              Budget Pipelines <HelpButton pageKey="budgetPipeline" />
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               Incoming Jotform payment items are automatically classified to a grant + line item
-              when they match an active pipeline&apos;s rules. First matching pipeline wins.
+              when they match an active pipeline&apos;s rules. A pipeline can hold separate Credit Card and Invoice schemas under the same budget target. First matching pipeline wins.
             </p>
           </div>
           <button
@@ -177,11 +207,10 @@ function PipelineTable({ title, rows, onEdit, onDelete, muted }: TableProps) {
                     : <span className="text-slate-300 dark:text-slate-600 font-sans italic">any</span>}
                 </td>
                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs truncate max-w-[120px]">
-                  {p.sourceFormTitle ?? <span className="text-slate-300 dark:text-slate-600 italic">all forms</span>}
+                  {enabledSchemaLabels(p)}
                 </td>
                 <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs tabular-nums">
-                  {p.includeGroups.reduce((n, g) => n + g.conditions.length, 0)} include
-                  {p.excludeGroups.length > 0 && ` · ${p.excludeGroups.reduce((n, g) => n + g.conditions.length, 0)} exclude`}
+                  {schemaRuleSummary(p)}
                 </td>
                 <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs">
                   {fmtDate(p.updatedAt)}
@@ -204,7 +233,7 @@ function PipelineTable({ title, rows, onEdit, onDelete, muted }: TableProps) {
   );
 }
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type View =
   | { kind: "list" }
@@ -230,3 +259,4 @@ export function PipelineManagerMain() {
     />
   );
 }
+

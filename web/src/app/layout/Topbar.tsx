@@ -120,7 +120,7 @@ export function Topbar() {
 
         {showNav ? (
           <nav aria-label="Primary" className="hidden md:flex items-center gap-1" data-tour="topbar-nav">
-            {(isViewer ? nav.filter((n) => n.to === "/budget" || n.to === "/programs") : nav).map((n) => {
+            {(isViewer ? nav.filter((n) => n.to === "/customers" || n.to === "/budget" || n.to === "/programs") : nav).map((n) => {
               const active = isRouteActive(pathname, n.to);
               return (
                 <Link

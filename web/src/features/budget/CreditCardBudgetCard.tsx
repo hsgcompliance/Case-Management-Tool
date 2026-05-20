@@ -2,17 +2,14 @@
 "use client";
 import React from "react";
 import type { CreditCardSummaryItem } from "@types";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
 }
 
 const fmtUsd = (cents: number) =>
-  (cents / 100).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+  fmtCurrencyUSD(cents / 100);
 
 interface CreditCardBudgetCardProps {
   card: CreditCardSummaryItem;

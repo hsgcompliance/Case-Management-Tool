@@ -25,6 +25,7 @@ import {
 } from "@features/secret-games";
 
 import PageHeader from "@entities/Page/PageHeader";
+import { HelpButton } from "@entities/help/HelpButton";
 import RefreshButton from "@entities/ui/RefreshButton";
 import ActionMenu from "@entities/ui/ActionMenu";
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
@@ -745,6 +746,7 @@ export function CustomersPage() {
           subtitle={pageModeToggle}
           actions={
             <>
+              <HelpButton pageKey="customers" />
               <RefreshButton
                 queryKeys={isViewer ? [qk.customers.root] : [qk.customers.root, qk.enrollments.root]}
                 onRefresh={handleManualRefresh}

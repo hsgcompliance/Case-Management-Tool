@@ -38,6 +38,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
 import { GrantBudgetStrip } from "@entities/grants/GrantBudgetStrip";
+import { HelpButton } from "@entities/help/HelpButton";
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
 import { filterRows, SmartFilterHeader, sortRows, useTableColumnFilters, useTableSort, type TableColumnPart } from "@hooks/useTableSort";
 import { monthKeyOffsetDays } from "../utils";
@@ -941,6 +942,7 @@ type SpendingToolProps = {
 
 export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const { profile, reloadProfile } = useAuth();
+  const canSyncJotforms = isAdminLike(profile as { topRole?: unknown; role?: unknown } | null);
   const { grants, enrollments, grantNameById, customerNameById, sharedDataLoading, sharedDataError, customers } = useDashboardSharedData();
   const { data: orgConfig } = useOrgConfig();
 
@@ -1967,6 +1969,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   }
 
   async function onRefreshJotforms() {
+    if (!canSyncJotforms) {
+      toast("Admin access is required to sync Jotforms.", { type: "error" });
+      return;
+    }
     try {
       const result = await syncJotformSelection.mutateAsync({
         mode: "formIds",
@@ -1991,6 +1997,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   }
 
   async function onReconcileJotforms() {
+    if (!canSyncJotforms) {
+      toast("Admin access is required to sync Jotforms.", { type: "error" });
+      return;
+    }
     try {
       const result = await syncJotformSelection.mutateAsync({
         mode: "formIds",
@@ -2184,6 +2194,24 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   return (
     <div className="space-y-3">
       <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-slate-800">Invoicing</h2>
+              <HelpButton pageKey="invoiceTool" />
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Filter payment objects, review enrollment/card/invoice rows, and post finalized spend to the ledger.
+            </p>
+          </div>
+          <a
+            href="/tools/budget-map"
+            className="shrink-0 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+            title="Open Budget Pipelines to manage automatic grant and line-item assignment rules."
+          >
+            Budget Pipelines
+          </a>
+        </div>
         {/* ── Saved view strip ──────────────────────────────────────────── */}
         <div className="flex flex-wrap items-start gap-1.5">
 
@@ -2572,11 +2600,13 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 {
                   key: "jotforms",
                   label: "Refresh Jotforms",
+                  disabled: !canSyncJotforms,
                   onSelect: () => void onRefreshJotforms(),
                 },
                 {
                   key: "jotforms-reconcile",
                   label: "Reconcile with Jotform",
+                  disabled: !canSyncJotforms,
                   onSelect: () => void onReconcileJotforms(),
                 },
               ]}

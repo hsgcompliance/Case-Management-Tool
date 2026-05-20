@@ -3,13 +3,13 @@
 import React from "react";
 import { useGrantActivity } from "@hooks/useGrants";
 import { fmtFromTsLike } from "@lib/date";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 export function ActivityTab({ grantId }: { grantId: string }) {
   const { data = [] } = useGrantActivity(grantId, 50);
   const items = Array.isArray(data) ? data : [];
 
-  const fmtCurrency = (n: number) =>
-    Number(n || 0).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const fmtCurrency = (n: number) => fmtCurrencyUSD(n);
 
   if (items.length === 0) return <div className="text-sm text-slate-600 dark:text-slate-400 mt-4">No spend activity yet.</div>;
 

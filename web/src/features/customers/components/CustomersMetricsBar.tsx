@@ -57,9 +57,9 @@ export function CustomersMetricsBar({ myUid }: CustomersMetricsBarProps) {
       {
         id: "my-customers",
         label: "My Customers",
-        value: formatNumber(myMetrics?.customers.total),
+        value: formatNumber(myMetrics?.customers?.total),
         subtext: myMetrics?.customers
-          ? `Active ${formatNumber(myMetrics.customers.active)} | Total ${formatNumber(myMetrics.customers.total)}`
+          ? `Active ${formatNumber(myMetrics.customers?.active)} | Total ${formatNumber(myMetrics.customers?.total)}`
           : undefined,
         loading: !!myUid && myMetricsLoading,
         disabled: !myUid,
@@ -67,9 +67,9 @@ export function CustomersMetricsBar({ myUid }: CustomersMetricsBarProps) {
       {
         id: "my-enrollments",
         label: "My Enrollments",
-        value: formatNumber(myMetrics?.enrollments.total),
+        value: formatNumber(myMetrics?.enrollments?.total),
         subtext: myMetrics?.enrollments
-          ? `Active ${formatNumber(myMetrics.enrollments.active)} | Total ${formatNumber(myMetrics.enrollments.total)}`
+          ? `Active ${formatNumber(myMetrics.enrollments?.active)} | Total ${formatNumber(myMetrics.enrollments?.total)}`
           : undefined,
         loading: !!myUid && myMetricsLoading,
         disabled: !myUid,
@@ -77,10 +77,10 @@ export function CustomersMetricsBar({ myUid }: CustomersMetricsBarProps) {
       {
         id: "my-acuity",
         label: "My Acuity",
-        value: formatAcuity(myMetrics?.acuity.scoreAvg),
+        value: formatAcuity(myMetrics?.acuity?.scoreAvg),
         subtext:
-          myMetrics?.acuity.scoreSum != null && myMetrics?.acuity.scoreCount != null
-            ? `Sum ${formatNumber(myMetrics.acuity.scoreSum)} | Count ${formatNumber(myMetrics.acuity.scoreCount)}`
+          myMetrics?.acuity?.scoreSum != null && myMetrics?.acuity?.scoreCount != null
+            ? `Sum ${formatNumber(myMetrics.acuity?.scoreSum)} | Count ${formatNumber(myMetrics.acuity?.scoreCount)}`
             : undefined,
         loading: !!myUid && myMetricsLoading,
         disabled: !myUid,
@@ -99,45 +99,45 @@ export function CustomersMetricsBar({ myUid }: CustomersMetricsBarProps) {
       {
         id: "system-case-managers",
         label: "Total Case Managers",
-        value: formatNumber(systemMetrics?.caseManagers.total),
+        value: formatNumber(systemMetrics?.caseManagers?.total),
         subtext: systemMetrics?.caseManagers
-          ? `Active ${formatNumber(systemMetrics.caseManagers.active)} | Inactive ${formatNumber(systemMetrics.caseManagers.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.caseManagers?.active)} | Inactive ${formatNumber(systemMetrics.caseManagers?.inactive)}`
           : undefined,
         loading: systemMetricsLoading,
       },
       {
         id: "system-customers",
         label: "Total Customers",
-        value: formatNumber(systemMetrics?.customers.total),
+        value: formatNumber(systemMetrics?.customers?.total),
         subtext: systemMetrics?.customers
-          ? `Active ${formatNumber(systemMetrics.customers.active)} | Inactive ${formatNumber(systemMetrics.customers.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.customers?.active)} | Inactive ${formatNumber(systemMetrics.customers?.inactive)}`
           : undefined,
         loading: systemMetricsLoading,
       },
       {
         id: "system-enrollments",
         label: "Total Enrollments",
-        value: formatNumber(systemMetrics?.enrollments.total),
+        value: formatNumber(systemMetrics?.enrollments?.total),
         subtext: systemMetrics?.enrollments
-          ? `Active ${formatNumber(systemMetrics.enrollments.active)} | Inactive ${formatNumber(systemMetrics.enrollments.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.enrollments?.active)} | Inactive ${formatNumber(systemMetrics.enrollments?.inactive)}`
           : undefined,
         loading: systemMetricsLoading,
       },
       {
         id: "system-grants",
         label: "Grants & Programs",
-        value: formatNumber(systemMetrics?.grants.total),
+        value: formatNumber(systemMetrics?.grants?.total),
         subtext: systemMetrics?.grants
-          ? `Active ${formatNumber(systemMetrics.grants.active)} | Inactive ${formatNumber(systemMetrics.grants.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.grants?.active)} | Inactive ${formatNumber(systemMetrics.grants?.inactive)}`
           : undefined,
         loading: systemMetricsLoading,
       },
       {
         id: "system-spend",
         label: "Total Spend Amount",
-        value: formatCurrency(systemMonth?.spending.spent),
+        value: formatCurrency(systemMonth?.spending?.spent),
         subtext: systemMonth?.spending
-          ? `Projected ${formatCurrency(systemMonth.spending.projected)} | ${month}`
+          ? `Projected ${formatCurrency(systemMonth.spending?.projected)} | ${month}`
           : month,
         loading: systemMonthLoading,
       },

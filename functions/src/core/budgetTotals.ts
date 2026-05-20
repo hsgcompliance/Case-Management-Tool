@@ -4,6 +4,28 @@
 
 import type { BudgetLineItemLike, BudgetTotals } from "@hdb/contracts";
 
+export function toBudgetCents(value: unknown): number {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
+export function fromBudgetCents(value: number): number {
+  return value / 100;
+}
+
+export function sumBudgetField(
+  items: Array<Record<string, unknown> | null | undefined>,
+  field: string,
+): number {
+  return fromBudgetCents(
+    (Array.isArray(items) ? items : []).reduce(
+      (sum, item) => sum + toBudgetCents(item?.[field]),
+      0,
+    ),
+  );
+}
+
 /**
  * Given an array of budget line items, compute the canonical totals.
  *
@@ -18,21 +40,24 @@ export function computeBudgetTotals(
 ): BudgetTotals {
   const src = Array.isArray(items) ? items : [];
 
-  let total = 0;
-  let spent = 0;
-  let projected = 0;
+  let totalCents = 0;
+  let spentCents = 0;
+  let projectedCents = 0;
 
   for (const raw of src) {
     if (!raw) continue;
     const i: any = raw;
-    total += Number(i.amount || 0) || 0;
-    spent += Number(i.spent || 0) || 0;
-    projected += Number(i.projected || 0) || 0;
+    totalCents += toBudgetCents(i.amount);
+    spentCents += toBudgetCents(i.spent);
+    projectedCents += toBudgetCents(i.projected);
   }
 
-  const balance = total - spent;
-  const projectedBalance = total - (spent + projected);
-  const projectedSpend = spent + projected;
+  const total = fromBudgetCents(totalCents);
+  const spent = fromBudgetCents(spentCents);
+  const projected = fromBudgetCents(projectedCents);
+  const balance = fromBudgetCents(totalCents - spentCents);
+  const projectedBalance = fromBudgetCents(totalCents - spentCents - projectedCents);
+  const projectedSpend = fromBudgetCents(spentCents + projectedCents);
 
   return { total, spent, balance, projected, projectedBalance, projectedSpend };
 }

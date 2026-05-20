@@ -47,9 +47,11 @@ type EnrollmentOption = {
   id: string;
   label: string;
   grantId?: string;
+  endDate?: string | null;
   statusLabel?: "open" | "closed";
   lineItemIds?: string[];
   scheduleMeta?: unknown;
+  payments?: TPayment[];
 };
 
 type LoadedEnrollmentMap = Record<string, Enrollment[]>;
@@ -107,9 +109,11 @@ function toEnrollmentOption(enrollment: Enrollment): EnrollmentOption {
     id: String(enrollment.id || ""),
     label: enrollmentLabel(enrollment),
     grantId: String(enrollment.grantId || "").trim() || undefined,
+    endDate: enrollment.endDate ? String(enrollment.endDate).slice(0, 10) : null,
     statusLabel,
     lineItemIds,
     scheduleMeta: (enrollment as Record<string, unknown>).scheduleMeta,
+    payments: payments as unknown as TPayment[],
   };
 }
 

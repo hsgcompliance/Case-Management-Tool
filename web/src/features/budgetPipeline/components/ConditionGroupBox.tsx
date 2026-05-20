@@ -96,6 +96,7 @@ export function ConditionGroupBox({ group, isExclude = false, onChange, onRemove
           <div className={idx > 0 ? "flex items-center gap-2 w-full" : "w-full"}>
             <ConditionRow
               condition={cond}
+              fieldDefs={NORMALIZED_FIELDS}
               onChange={(updated) => updateCondition(idx, updated)}
               onRemove={() => removeCondition(idx)}
             />

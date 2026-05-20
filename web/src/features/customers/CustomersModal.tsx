@@ -5,6 +5,7 @@ import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@entities/ui/Modal";
+import { HelpButton } from "@entities/help/HelpButton";
 import { useAuth } from "@app/auth/AuthProvider";
 import { isViewerLike } from "@lib/roles";
 import { useCustomer, usePatchCustomers, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
@@ -393,13 +394,16 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
   };
 
   const modalTitle = (
-    <div className="min-w-0">
-      <div className="text-base font-semibold truncate">
-        {creating ? "New Customer" : titleName}
+    <div className="flex items-center gap-2 min-w-0">
+      <div className="min-w-0">
+        <div className="text-base font-semibold truncate">
+          {creating ? "New Customer" : titleName}
+        </div>
+        {customerId ? (
+          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{customerId}</div>
+        ) : null}
       </div>
-      {customerId ? (
-        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{customerId}</div>
-      ) : null}
+      <HelpButton pageKey="customersModal" />
     </div>
   );
 

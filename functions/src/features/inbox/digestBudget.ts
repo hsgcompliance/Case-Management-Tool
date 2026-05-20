@@ -95,6 +95,7 @@ export async function buildBudgetDigestData(opts: {
   for (const doc of grantsSnap.docs) {
     const g = doc.data() as Record<string, unknown>;
     if (g.kind === "program") continue; // skip umbrella programs, only concrete grants
+    if (!(g.pins as any)?.digest?.enabled) continue; // must have budget digest pin enabled
 
     const name  = String(g.name || g.code || doc.id);
     const code  = String(g.code || "");

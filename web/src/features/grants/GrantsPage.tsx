@@ -21,18 +21,14 @@ import type { TGrant as Grant } from "@types";
 import CreditCardsPanel from "./CreditCardsPanel";
 import PinnedGrantCards, { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 type GrantBucket = "grant" | "program";
 type FilterMode = "active" | "inactive";
 
 const isVisible = (g?: Partial<Grant> | null) => !!g && g.status !== "deleted" && g.deleted !== true;
 
-const fmtUsd0 = (n: number) =>
-  Number(n || 0).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+const fmtUsd0 = (n: number) => fmtCurrencyUSD(n);
 
 const getBudget = (g: Partial<Grant>) => {
   const b = (g?.budget || {}) as Record<string, unknown>;
@@ -131,9 +127,9 @@ function GrantRow({
         </div>
         <div
           className="col-span-5 text-right text-xs text-slate-500 dark:text-slate-400 md:col-span-1"
-          title={gm ? `Active: ${gm.enrollments.active} · Total: ${gm.enrollments.total}` : undefined}
+          title={gm?.enrollments ? `Active: ${gm.enrollments?.active} · Total: ${gm.enrollments?.total}` : undefined}
         >
-          {gm ? gm.enrollments.active : (grant as any)?.metrics?.enrollmentCounts?.active ?? "—"} enrolled
+          {gm?.enrollments ? gm.enrollments?.active : (grant as any)?.metrics?.enrollmentCounts?.active ?? "—"} enrolled
         </div>
       </button>
       <PinButtons
@@ -179,11 +175,11 @@ function ProgramRow({
   onToggleDashPin: () => void;
 }) {
   const { data: gm, isLoading } = useGrantMetrics(grant.id);
-  const enrollActive = gm?.enrollments.active ?? (grant as any)?.metrics?.enrollmentCounts?.active ?? "—";
-  const enrollTotal = gm?.enrollments.total ?? null;
-  const uniqueClients = gm?.customers.uniqueTotal ?? "—";
-  const cmCount = gm?.caseManagers.total ?? "—";
-  const pop = gm?.enrollments.byPopulation;
+  const enrollActive = gm?.enrollments?.active ?? (grant as any)?.metrics?.enrollmentCounts?.active ?? "—";
+  const enrollTotal = gm?.enrollments?.total ?? null;
+  const uniqueClients = gm?.customers?.uniqueTotal ?? "—";
+  const cmCount = gm?.caseManagers?.total ?? "—";
+  const pop = gm?.enrollments?.byPopulation;
 
   // Fallback: use embedded grant metrics population if grantMetrics not yet reconciled
   const embeddedPop = (grant as any)?.metrics?.enrollmentCounts?.population as Record<string, number> | undefined;
@@ -216,7 +212,7 @@ function ProgramRow({
         {/* Unique clients */}
         <div
           className={["col-span-5 text-right text-sm font-semibold md:col-span-2", metricTextClass("grant-unique-clients")].join(" ")}
-          title={gm ? `Unique clients: ${gm.customers.uniqueTotal} (${gm.customers.activeUniqueTotal} active)` : undefined}
+          title={gm?.customers ? `Unique clients: ${gm.customers?.uniqueTotal} (${gm.customers?.activeUniqueTotal} active)` : undefined}
         >
           {isLoading ? "…" : uniqueClients}
         </div>
@@ -232,7 +228,7 @@ function ProgramRow({
         {/* CM count */}
         <div
           className="col-span-5 text-right text-xs text-slate-500 dark:text-slate-400 md:col-span-1"
-          title={gm?.caseManagers.refs?.map((r) => r.name ?? r.id).join(", ")}
+          title={gm?.caseManagers?.refs?.map((r) => r.name ?? r.id).join(", ")}
         >
           {isLoading ? "…" : (cmCount !== "—" && cmCount > 0 ? `${cmCount} CMs` : "—")}
         </div>

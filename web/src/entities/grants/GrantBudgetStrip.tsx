@@ -14,6 +14,9 @@ type Props = {
   className?: string;
 };
 
+const toCents = (value: unknown) => Math.round(Number(value || 0) * 100);
+const fromCents = (cents: number) => cents / 100;
+
 function Stat({
   label,
   value,
@@ -28,8 +31,8 @@ function Stat({
   bold?: boolean;
 }) {
   if (value == null) return null;
-  const adjusted = value + delta;
-  const hasDelta = delta !== 0;
+  const adjusted = fromCents(toCents(value) + toCents(delta));
+  const hasDelta = toCents(delta) !== 0;
   const isOverspend = warnNegative && adjusted < 0;
 
   return (
@@ -149,8 +152,8 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
   }
 
   const projectedBalance =
-    totals.projectedBalance ?? totals.total - totals.spent - totals.projected;
-  const adjustedBalance = projectedBalance - projectionDelta;
+    totals.projectedBalance ?? fromCents(toCents(totals.total) - toCents(totals.spent) - toCents(totals.projected));
+  const adjustedBalance = fromCents(toCents(projectedBalance) - toCents(projectionDelta));
   const isOverspend = adjustedBalance < 0;
   const lineItems = Array.isArray(grant?.budget?.lineItems) ? grant.budget.lineItems : [];
   const visibleLineItemImpacts = Object.entries(lineItemDeltas || {})
@@ -163,13 +166,13 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
       const projected = Number(li?.projected || 0);
       const spent = Number(li?.spent || 0);
       const cap = Number(li?.amount || 0);
-      const after = projected + Number(delta || 0);
+      const after = fromCents(toCents(projected) + toCents(delta));
       return {
         lineItemId,
         label,
-        delta: Number(delta || 0),
+        delta: fromCents(toCents(delta)),
         after,
-        overBy: Math.max(0, spent + after - cap),
+        overBy: Math.max(0, fromCents(toCents(spent) + toCents(after) - toCents(cap))),
       };
     })
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
@@ -217,7 +220,7 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
           </div>
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-x-5 gap-y-2">
+      <div className="flex flex-wrap gap-x-8 gap-y-2 justify-evenly">
         <Stat label="Budget" value={totals.total} />
         <Stat label="Spent" value={totals.spent} />
         <Stat label="Projected" value={totals.projected} delta={projectionDelta} />

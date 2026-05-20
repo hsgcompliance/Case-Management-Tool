@@ -7,15 +7,11 @@ import React, { useEffect, useState } from "react";
 import { useGrantCustomerAllocations } from "@hooks/useGrantCustomerAllocations";
 import { useRecomputeGrantAllocations } from "@hooks/usePaymentQueue";
 import { toast } from "@lib/toast";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 const PAGE_SIZE = 15;
 
-const fmtUsd = (n: number) =>
-  Number(n || 0).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 
 interface AllocationTabProps {
   grantId: string;

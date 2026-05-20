@@ -5,6 +5,7 @@ import { BudgetCard } from "./BudgetCard";
 import { grantAccentSolid } from "@lib/colorRegistry";
 import type { BudgetGroupItem } from "@hooks/useOrgConfig";
 import type { TGrant as Grant } from "@types";
+import { fmtCurrencyUSD } from "@lib/formatters";
 
 const COL_CLASS: Record<number, string> = {
   1: "grid-cols-1",
@@ -13,8 +14,9 @@ const COL_CLASS: Record<number, string> = {
   4: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
 };
 
-const fmtUsd = (n: number) =>
-  Number(n || 0).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const fmtUsd = (n: number) => fmtCurrencyUSD(n);
+const toCents = (n: unknown) => Math.round(Number(n || 0) * 100);
+const fromCents = (cents: number) => cents / 100;
 
 interface BudgetGroupSectionProps {
   label: string;
@@ -42,15 +44,17 @@ export function BudgetGroupSection({
   if (resolved.length === 0) return null;
 
   // Group-level totals (grant-level items only; line items add noise to group totals)
-  let groupTotal = 0;
-  let groupSpent = 0;
+  let groupTotalCents = 0;
+  let groupSpentCents = 0;
   for (const { item, grant } of resolved) {
     if (item.lineItemId) continue; // skip line-item sub-cards for group totals
     const b = (grant.budget || {}) as Record<string, unknown>;
     const t = ((b.totals as Record<string, unknown>) || {}) as Record<string, unknown>;
-    groupTotal += Number((b.total ?? b.startAmount ?? 0) as number);
-    groupSpent += Number((t.spent ?? b.spent ?? 0) as number);
+    groupTotalCents += toCents(b.total ?? b.startAmount ?? 0);
+    groupSpentCents += toCents(t.spent ?? b.spent ?? 0);
   }
+  const groupTotal = fromCents(groupTotalCents);
+  const groupSpent = fromCents(groupSpentCents);
 
   const accentClass = color ? grantAccentSolid(color) : "bg-slate-200 dark:bg-slate-600";
   const colClass = COL_CLASS[cols] ?? COL_CLASS[3];

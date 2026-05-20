@@ -23,7 +23,7 @@ import { TasksGrantRegenDialog } from "@entities/dialogs/tasks/TasksGrantRegenDi
 import { toast } from "@lib/toast";
 import { noUndefined } from "@lib/safeData";
 import { parseISO10, safeISODate10, toISODate } from "@lib/date";
-import { fmtDateOrDash } from "@lib/formatters";
+import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { isAdminLike, isViewerLike } from "@lib/roles";
 import { toApiError } from "@client/api";
 import type { TGrant as Grant, ISODate } from "@types";
@@ -37,12 +37,17 @@ const num = (n: unknown, fallback = 0) => {
   return Number.isFinite(v) ? v : fallback;
 };
 
-const currency = (x: number) =>
-  x.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+const currency = (x: number) => fmtCurrencyUSD(x);
+
+function toCents(value: unknown): number {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
+function fromCents(value: number): number {
+  return value / 100;
+}
 
 const deepClone = <T,>(v: T): T => JSON.parse(JSON.stringify(v ?? {}));
 
@@ -83,25 +88,28 @@ function recomputeBudgetTotals(budget: unknown) {
       projected: num(item.projected, num(item.future, 0)),
     };
   });
-  const spent = normalized.reduce(
-    (acc, it) => acc + num((it as { spent?: unknown }).spent, 0),
+  const totalCents = toCents(total);
+  const spentCents = normalized.reduce(
+    (acc, it) => acc + toCents((it as { spent?: unknown }).spent),
     0,
   );
-  const projected = normalized.reduce(
-    (acc, it) => acc + num((it as { projected?: unknown }).projected, 0),
+  const projectedCents = normalized.reduce(
+    (acc, it) => acc + toCents((it as { projected?: unknown }).projected),
     0,
   );
+  const spent = fromCents(spentCents);
+  const projected = fromCents(projectedCents);
 
   return {
     ...b,
-    total,
+    total: fromCents(totalCents),
     lineItems: normalized,
     totals: {
       ...((b.totals || {}) as Record<string, unknown>),
       spent,
       projected,
-      balance: total - spent,
-      projectedBalance: total - (spent + projected),
+      balance: fromCents(totalCents - spentCents),
+      projectedBalance: fromCents(totalCents - spentCents - projectedCents),
     },
   };
 }
@@ -132,8 +140,8 @@ function deriveBudget(budget: unknown) {
     total,
     spent,
     projected,
-    balance: total - spent,
-    projectedBalance: total - (spent + projected),
+    balance: fromCents(toCents(total) - toCents(spent)),
+    projectedBalance: fromCents(toCents(total) - toCents(spent) - toCents(projected)),
     lineItems,
   };
 }

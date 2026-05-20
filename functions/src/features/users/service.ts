@@ -104,9 +104,113 @@ function canonTopRole(topRole?: TTopRole): TTopRoleLadder {
    Utilities
 -------------------------------------------- */
 
+const DOTTED_PAYMENT_FIELDS = [
+  "paymentMetrics.amountNextMonth",
+  "paymentMetrics.amountThisMonth",
+  "paymentMetrics.amountTotal",
+  "paymentMetrics.unpaidNextMonth",
+  "paymentMetrics.unpaidThisMonth",
+  "paymentMetrics.unpaidTotal",
+  "paymentMetrics.updatedAt",
+  "paymentMetrics.reconciledAt",
+] as const;
+
+const DOTTED_TASK_FIELDS = [
+  "taskMetrics.openThisMonth",
+  "taskMetrics.openNextMonth",
+  "taskMetrics.updatedAt",
+  "taskMetrics.reconciledAt",
+  "taskMetrics.byType.assessment.thisMonth",
+  "taskMetrics.byType.assessment.nextMonth",
+  "taskMetrics.byType.compliance.thisMonth",
+  "taskMetrics.byType.compliance.nextMonth",
+  "taskMetrics.byType.other.thisMonth",
+  "taskMetrics.byType.other.nextMonth",
+] as const;
+
+const DOTTED_CORRUPT_FIELDS = [
+  ...DOTTED_PAYMENT_FIELDS,
+  ...DOTTED_TASK_FIELDS,
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function withoutCorruptDottedFields(input: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!DOTTED_CORRUPT_FIELDS.includes(key as (typeof DOTTED_CORRUPT_FIELDS)[number])) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function dottedPrefixToNested(input: Record<string, unknown>, prefix: string, fields: readonly string[]) {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(input, field)) continue;
+    const parts = field.slice(prefix.length + 1).split(".");
+    let cur = out;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const key = parts[i];
+      cur[key] = isRecord(cur[key]) ? cur[key] : {};
+      cur = cur[key] as Record<string, unknown>;
+    }
+    cur[parts[parts.length - 1]] = input[field];
+  }
+  return out;
+}
+
+function mergeRecordsDeep(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const out: Record<string, unknown> = { ...left };
+  for (const [key, value] of Object.entries(right)) {
+    out[key] = isRecord(out[key]) && isRecord(value)
+      ? mergeRecordsDeep(out[key] as Record<string, unknown>, value)
+      : value;
+  }
+  return out;
+}
+
+export function normalizeUserExtrasForRead(rawExtras: unknown): Record<string, unknown> {
+  const raw = isRecord(rawExtras) ? rawExtras : {};
+  const cleaned = withoutCorruptDottedFields(raw);
+  const settings = isRecord(cleaned.settings) ? cleaned.settings : {};
+  const paymentMetrics = {
+    amountNextMonth: 0,
+    amountThisMonth: 0,
+    amountTotal: 0,
+    unpaidNextMonth: 0,
+    unpaidThisMonth: 0,
+    unpaidTotal: 0,
+    ...dottedPrefixToNested(raw, "paymentMetrics", DOTTED_PAYMENT_FIELDS),
+    ...(isRecord(cleaned.paymentMetrics) ? cleaned.paymentMetrics : {}),
+  };
+  const taskMetrics = mergeRecordsDeep(
+    dottedPrefixToNested(raw, "taskMetrics", DOTTED_TASK_FIELDS),
+    isRecord(cleaned.taskMetrics) ? cleaned.taskMetrics : {},
+  );
+
+  return {
+    ...cleaned,
+    meta: isRecord(cleaned.meta) ? cleaned.meta : {},
+    digestSubs: isRecord(cleaned.digestSubs) ? cleaned.digestSubs : {},
+    paymentMetrics,
+    ...(Object.keys(taskMetrics).length ? { taskMetrics } : {}),
+    settings: {
+      ...settings,
+      pageLayouts: isRecord(settings.pageLayouts) ? settings.pageLayouts : {},
+      dashboardPrefs: isRecord(settings.dashboardPrefs) ? settings.dashboardPrefs : {},
+      toolsPrefs: isRecord(settings.toolsPrefs) ? settings.toolsPrefs : {},
+      spendingViews: isRecord(settings.spendingViews) ? settings.spendingViews : {},
+    },
+  };
+}
+
 export async function getUserComposite(u: UserRecord) {
   const extraSnap = await db.collection("userExtras").doc(u.uid).get().catch(() => null);
-  const extras = extraSnap?.exists ? extraSnap.data() || {} : {};
+  const extras = normalizeUserExtrasForRead(extraSnap?.exists ? extraSnap.data() || {} : {});
 
   const cc: any = u.customClaims || {};
   return {
@@ -598,5 +702,5 @@ export async function updateMeExtrasService(
 
   await ref.set(toSet, { merge: true });
   const snap = await ref.get();
-  return { uid, extras: snap.data() || {} };
+  return { uid, extras: normalizeUserExtrasForRead(snap.data() || {}) };
 }

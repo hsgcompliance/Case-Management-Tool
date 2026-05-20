@@ -101,9 +101,9 @@ export function SharedPageMetricsBar() {
         id: "my-customers",
         metricId: "my-customers",
         label: "My Customers",
-        value: formatNumber(caseManagerMetrics?.customers.active),
+        value: formatNumber(caseManagerMetrics?.customers?.active),
         subtext: caseManagerMetrics?.customers
-          ? `Total ${formatNumber(caseManagerMetrics.customers.total)} | Inactive ${formatNumber(caseManagerMetrics.customers.inactive)}`
+          ? `Total ${formatNumber(caseManagerMetrics.customers?.total)} | Inactive ${formatNumber(caseManagerMetrics.customers?.inactive)}`
           : undefined,
         loading: !!myUid && caseManagerLoading,
         disabled: !myUid || !isCaseManager,
@@ -112,9 +112,9 @@ export function SharedPageMetricsBar() {
         id: "my-enrollments",
         metricId: "my-enrollments",
         label: "My Enrollments",
-        value: formatNumber(caseManagerMetrics?.enrollments.active),
+        value: formatNumber(caseManagerMetrics?.enrollments?.active),
         subtext: caseManagerMetrics?.enrollments
-          ? `Total ${formatNumber(caseManagerMetrics.enrollments.total)} | Inactive ${formatNumber(caseManagerMetrics.enrollments.inactive)}`
+          ? `Total ${formatNumber(caseManagerMetrics.enrollments?.total)} | Inactive ${formatNumber(caseManagerMetrics.enrollments?.inactive)}`
           : undefined,
         loading: !!myUid && caseManagerLoading,
         disabled: !myUid || !isCaseManager,
@@ -123,10 +123,10 @@ export function SharedPageMetricsBar() {
         id: "my-acuity",
         metricId: "my-acuity",
         label: "My Acuity",
-        value: formatAcuity(caseManagerMetrics?.acuity.scoreAvg),
+        value: formatAcuity(caseManagerMetrics?.acuity?.scoreAvg),
         subtext:
-          caseManagerMetrics?.acuity.scoreSum != null && caseManagerMetrics?.acuity.scoreCount != null
-            ? `Sum ${formatNumber(caseManagerMetrics.acuity.scoreSum)} | Count ${formatNumber(caseManagerMetrics.acuity.scoreCount)}`
+          caseManagerMetrics?.acuity?.scoreSum != null && caseManagerMetrics?.acuity?.scoreCount != null
+            ? `Sum ${formatNumber(caseManagerMetrics.acuity?.scoreSum)} | Count ${formatNumber(caseManagerMetrics.acuity?.scoreCount)}`
             : undefined,
         loading: !!myUid && caseManagerLoading,
         disabled: !myUid || !isCaseManager,
@@ -150,9 +150,9 @@ export function SharedPageMetricsBar() {
         id: "system-case-managers",
         metricId: "system-case-managers",
         label: "Total Case Managers",
-        value: formatNumber(systemMetrics?.caseManagers.total),
+        value: formatNumber(systemMetrics?.caseManagers?.total),
         subtext: systemMetrics?.caseManagers
-          ? `Active ${formatNumber(systemMetrics.caseManagers.active)} | Inactive ${formatNumber(systemMetrics.caseManagers.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.caseManagers?.active)} | Inactive ${formatNumber(systemMetrics.caseManagers?.inactive)}`
           : undefined,
         loading: systemLoading,
       },
@@ -160,9 +160,9 @@ export function SharedPageMetricsBar() {
         id: "system-customers",
         metricId: "system-customers",
         label: "Total Customers",
-        value: formatNumber(systemMetrics?.customers.total),
+        value: formatNumber(systemMetrics?.customers?.total),
         subtext: systemMetrics?.customers
-          ? `Active ${formatNumber(systemMetrics.customers.active)} | Inactive ${formatNumber(systemMetrics.customers.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.customers?.active)} | Inactive ${formatNumber(systemMetrics.customers?.inactive)}`
           : undefined,
         loading: systemLoading,
       },
@@ -170,9 +170,9 @@ export function SharedPageMetricsBar() {
         id: "system-enrollments",
         metricId: "system-enrollments",
         label: "Total Enrollments",
-        value: formatNumber(systemMetrics?.enrollments.total),
+        value: formatNumber(systemMetrics?.enrollments?.total),
         subtext: systemMetrics?.enrollments
-          ? `Active ${formatNumber(systemMetrics.enrollments.active)} | Inactive ${formatNumber(systemMetrics.enrollments.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.enrollments?.active)} | Inactive ${formatNumber(systemMetrics.enrollments?.inactive)}`
           : undefined,
         loading: systemLoading,
       },
@@ -180,9 +180,9 @@ export function SharedPageMetricsBar() {
         id: "system-grants",
         metricId: "system-grants",
         label: "Grants & Programs",
-        value: formatNumber(systemMetrics?.grants.total),
+        value: formatNumber(systemMetrics?.grants?.total),
         subtext: systemMetrics?.grants
-          ? `Active ${formatNumber(systemMetrics.grants.active)} | Inactive ${formatNumber(systemMetrics.grants.inactive)}`
+          ? `Active ${formatNumber(systemMetrics.grants?.active)} | Inactive ${formatNumber(systemMetrics.grants?.inactive)}`
           : undefined,
         loading: systemLoading,
       },
@@ -190,9 +190,9 @@ export function SharedPageMetricsBar() {
         id: "system-spend",
         metricId: "system-spend",
         label: "Total Spend",
-        value: fmtUsd(systemMonthMetrics?.spending.spent),
+        value: fmtUsd(systemMonthMetrics?.spending?.spent),
         subtext: systemMonthMetrics?.spending
-          ? `Proj. ${fmtUsd(systemMonthMetrics.spending.projected)} · ${month}`
+          ? `Proj. ${fmtUsd(systemMonthMetrics.spending?.projected)} · ${month}`
           : month,
         loading: systemMonthLoading,
       },
@@ -204,33 +204,33 @@ export function SharedPageMetricsBar() {
         id: "pop-youth",
         metricId: "pop-youth",
         label: "Youth",
-        value: formatNumber(systemMetrics?.populations.youth.activeCustomerTotal),
-        subtext: systemMetrics?.populations.youth
-          ? `${formatNumber(systemMetrics.populations.youth.caseManagerTotal)} CMs`
+        value: formatNumber(systemMetrics?.populations?.youth?.activeCustomerTotal),
+        subtext: systemMetrics?.populations?.youth
+          ? `${formatNumber(systemMetrics.populations?.youth?.caseManagerTotal)} CMs`
           : undefined,
-        tooltip: popTooltip(systemMetrics?.populations.youth),
+        tooltip: popTooltip(systemMetrics?.populations?.youth),
         loading: systemLoading,
       },
       {
         id: "pop-family",
         metricId: "pop-family",
         label: "Family",
-        value: formatNumber(systemMetrics?.populations.family.activeCustomerTotal),
-        subtext: systemMetrics?.populations.family
-          ? `${formatNumber(systemMetrics.populations.family.caseManagerTotal)} CMs`
+        value: formatNumber(systemMetrics?.populations?.family?.activeCustomerTotal),
+        subtext: systemMetrics?.populations?.family
+          ? `${formatNumber(systemMetrics.populations?.family?.caseManagerTotal)} CMs`
           : undefined,
-        tooltip: popTooltip(systemMetrics?.populations.family),
+        tooltip: popTooltip(systemMetrics?.populations?.family),
         loading: systemLoading,
       },
       {
         id: "pop-individual",
         metricId: "pop-individual",
         label: "Individual",
-        value: formatNumber(systemMetrics?.populations.individual.activeCustomerTotal),
-        subtext: systemMetrics?.populations.individual
-          ? `${formatNumber(systemMetrics.populations.individual.caseManagerTotal)} CMs`
+        value: formatNumber(systemMetrics?.populations?.individual?.activeCustomerTotal),
+        subtext: systemMetrics?.populations?.individual
+          ? `${formatNumber(systemMetrics.populations?.individual?.caseManagerTotal)} CMs`
           : undefined,
-        tooltip: popTooltip(systemMetrics?.populations.individual),
+        tooltip: popTooltip(systemMetrics?.populations?.individual),
         loading: systemLoading,
       },
     ];

@@ -20,22 +20,22 @@ export function buildCaseManagerMetricItems(
     {
       id: "case-manager-customers",
       label: "Customers",
-      value: data?.customers.total ?? 0,
+      value: formatNumber(data?.customers?.total),
       subtext:
         data?.customers
-          ? `Active ${formatNumber(data.customers.active)} | Inactive ${formatNumber(data.customers.inactive)}`
+          ? `Active ${formatNumber(data.customers?.active)} | Inactive ${formatNumber(data.customers?.inactive)}`
           : undefined,
       metricId: "system-customers",
-      tooltip: summarizeRefs(data?.customers.refs),
+      tooltip: summarizeRefs(data?.customers?.refs),
       loading: isLoading,
     },
     {
       id: "case-manager-enrollments",
       label: "Enrollments",
-      value: data?.enrollments.total ?? 0,
+      value: formatNumber(data?.enrollments?.total),
       subtext:
         data?.enrollments
-          ? `Active ${formatNumber(data.enrollments.active)} | Inactive ${formatNumber(data.enrollments.inactive)}`
+          ? `Active ${formatNumber(data.enrollments?.active)} | Inactive ${formatNumber(data.enrollments?.inactive)}`
           : undefined,
       metricId: "system-enrollments",
       loading: isLoading,
@@ -43,10 +43,10 @@ export function buildCaseManagerMetricItems(
     {
       id: "case-manager-acuity",
       label: "Acuity Avg",
-      value: formatIntegerOrDecimal(data?.acuity.scoreAvg),
+      value: formatIntegerOrDecimal(data?.acuity?.scoreAvg),
       subtext:
         data?.acuity
-          ? `Sum ${formatNumber(data.acuity.scoreSum)} | Clients ${formatNumber(data.acuity.scoreCount)}`
+          ? `Sum ${formatNumber(data.acuity?.scoreSum)} | Clients ${formatNumber(data.acuity?.scoreCount)}`
           : undefined,
       metricId: "my-acuity",
       loading: isLoading,

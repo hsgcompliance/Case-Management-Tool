@@ -7,6 +7,7 @@ import {
   type TBudgetPipelinePreviewBody,
   type TPipelineCondition,
   type TPipelineConditionGroup,
+  type TPipelineFormSchema,
   type TPipelineOperator,
   type TPipelineRuleNode,
 } from './schemas';
@@ -17,6 +18,10 @@ const QUEUE_COLLECTION = 'paymentQueue';
 // ─── Field extraction ─────────────────────────────────────────────────────────
 
 function getFieldValue(item: Record<string, unknown>, field: string): unknown {
+  if (field.startsWith('tx:')) {
+    const transactionFields = item.transactionFields as Record<string, unknown> | undefined;
+    return transactionFields?.[field] ?? '';
+  }
   if (field.startsWith('raw:')) {
     const fieldId = field.slice(4);
     const answers = item.rawAnswers as Record<string, unknown> | undefined;
@@ -35,8 +40,6 @@ function getFieldValue(item: Record<string, unknown>, field: string): unknown {
   return item[field];
 }
 
-// ─── Condition evaluation ─────────────────────────────────────────────────────
-
 function evalCondition(
   item: Record<string, unknown>,
   cond: TPipelineCondition,
@@ -47,46 +50,47 @@ function evalCondition(
   const condVal = cond.value;
   const cStr = String(condVal ?? '').toLowerCase().trim();
   const fieldLabel = cond.field.startsWith('raw:') ? `raw:${cond.field.slice(4)}` : cond.field;
+  const empty = !fStr;
 
   switch (op) {
     case 'equals':
-      return {match: fStr === cStr, reason: `${fieldLabel} = "${condVal}"`};
+      return {match: !empty && fStr === cStr, reason: `${fieldLabel} = "${condVal}"`};
     case 'not_equals':
-      return {match: fStr !== cStr, reason: `${fieldLabel} ≠ "${condVal}"`};
+      return {match: empty || fStr !== cStr, reason: `${fieldLabel} != "${condVal}"`};
     case 'contains':
-      return {match: fStr.includes(cStr), reason: `${fieldLabel} contains "${condVal}"`};
+      return {match: !empty && fStr.includes(cStr), reason: `${fieldLabel} contains "${condVal}"`};
     case 'not_contains':
-      return {match: !fStr.includes(cStr), reason: `${fieldLabel} not contains "${condVal}"`};
+      return {match: empty || !fStr.includes(cStr), reason: `${fieldLabel} not contains "${condVal}"`};
     case 'starts_with':
-      return {match: fStr.startsWith(cStr), reason: `${fieldLabel} starts with "${condVal}"`};
+      return {match: !empty && fStr.startsWith(cStr), reason: `${fieldLabel} starts with "${condVal}"`};
     case 'in': {
       const vals = Array.isArray(condVal) ? condVal.map((v) => String(v).toLowerCase()) : [cStr];
-      return {match: vals.includes(fStr), reason: `${fieldLabel} in [${vals.join(', ')}]`};
+      return {match: !empty && vals.includes(fStr), reason: `${fieldLabel} in [${vals.join(', ')}]`};
     }
     case 'not_in': {
       const vals = Array.isArray(condVal) ? condVal.map((v) => String(v).toLowerCase()) : [cStr];
-      return {match: !vals.includes(fStr), reason: `${fieldLabel} not in [${vals.join(', ')}]`};
+      return {match: empty || !vals.includes(fStr), reason: `${fieldLabel} not in [${vals.join(', ')}]`};
     }
     case 'gte':
-      return {match: Number(rawVal) >= Number(condVal), reason: `${fieldLabel} ≥ ${condVal}`};
+      return {match: !empty && Number(rawVal) >= Number(condVal), reason: `${fieldLabel} >= ${condVal}`};
     case 'lte':
-      return {match: Number(rawVal) <= Number(condVal), reason: `${fieldLabel} ≤ ${condVal}`};
+      return {match: !empty && Number(rawVal) <= Number(condVal), reason: `${fieldLabel} <= ${condVal}`};
     case 'gt':
-      return {match: Number(rawVal) > Number(condVal), reason: `${fieldLabel} > ${condVal}`};
+      return {match: !empty && Number(rawVal) > Number(condVal), reason: `${fieldLabel} > ${condVal}`};
     case 'lt':
-      return {match: Number(rawVal) < Number(condVal), reason: `${fieldLabel} < ${condVal}`};
+      return {match: !empty && Number(rawVal) < Number(condVal), reason: `${fieldLabel} < ${condVal}`};
     case 'is_true':
-      return {match: Boolean(rawVal) === true || fStr === 'true', reason: `${fieldLabel} is true`};
+      return {match: !empty && (Boolean(rawVal) === true || fStr === 'true'), reason: `${fieldLabel} is true`};
     case 'is_false':
-      return {match: !Boolean(rawVal) || fStr === 'false', reason: `${fieldLabel} is false`};
+      return {match: empty || !Boolean(rawVal) || fStr === 'false', reason: `${fieldLabel} is false`};
     case 'before':
-      return {match: fStr < cStr, reason: `${fieldLabel} before ${condVal}`};
+      return {match: !empty && fStr < cStr, reason: `${fieldLabel} before ${condVal}`};
     case 'after':
-      return {match: fStr > cStr, reason: `${fieldLabel} after ${condVal}`};
+      return {match: !empty && fStr > cStr, reason: `${fieldLabel} after ${condVal}`};
     case 'is_empty':
-      return {match: !fStr, reason: `${fieldLabel} is empty`};
+      return {match: empty, reason: `${fieldLabel} is empty`};
     case 'is_not_empty':
-      return {match: !!fStr, reason: `${fieldLabel} is not empty`};
+      return {match: !empty, reason: `${fieldLabel} is not empty`};
     default:
       return {match: false, reason: 'unknown operator'};
   }
@@ -189,6 +193,82 @@ function evalExcludes(
   return {excluded: false, reasons: []};
 }
 
+type RuleSet = {
+  includeGroups: TPipelineConditionGroup[];
+  excludeGroups: TPipelineConditionGroup[];
+  includeTree?: TPipelineRuleNode | null;
+  excludeTree?: TPipelineRuleNode | null;
+};
+
+function normalizeFormSchemas(
+  value: TBudgetPipelineUpsertBody['formSchemas'] | TBudgetPipeline['formSchemas'] | undefined,
+): Record<string, TPipelineFormSchema> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const entries = Object.entries(value)
+    .filter(([, schema]) => !!schema && typeof schema === 'object' && !!schema.sourceFormId)
+    .map(([key, schema]) => [
+      key,
+      {
+        enabled: schema.enabled !== false,
+        sourceFormId: schema.sourceFormId,
+        sourceFormTitle: schema.sourceFormTitle || schema.sourceFormId,
+        includeGroups: schema.includeGroups ?? [],
+        excludeGroups: schema.excludeGroups ?? [],
+        includeTree: schema.includeTree ?? null,
+        excludeTree: schema.excludeTree ?? null,
+      } satisfies TPipelineFormSchema,
+    ] as const);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function enabledFormSchemas(pipeline: TBudgetPipeline): TPipelineFormSchema[] {
+  return Object.values(pipeline.formSchemas ?? {}).filter((schema) => schema && schema.enabled !== false);
+}
+
+function rulesForItem(
+  item: Record<string, unknown>,
+  pipeline: TBudgetPipeline,
+): RuleSet | null {
+  const schemas = enabledFormSchemas(pipeline);
+  if (schemas.length > 0) {
+    const formId = String(item.formId ?? '');
+    const schema = schemas.find((candidate) => candidate.sourceFormId === formId);
+    if (!schema) return null;
+    return {
+      includeGroups: schema.includeGroups ?? [],
+      excludeGroups: schema.excludeGroups ?? [],
+      includeTree: schema.includeTree ?? null,
+      excludeTree: schema.excludeTree ?? null,
+    };
+  }
+
+  if (pipeline.sourceFormId && item.formId !== pipeline.sourceFormId) return null;
+  return {
+    includeGroups: pipeline.includeGroups ?? [],
+    excludeGroups: pipeline.excludeGroups ?? [],
+    includeTree: pipeline.includeTree ?? null,
+    excludeTree: pipeline.excludeTree ?? null,
+  };
+}
+
+function evaluatePipelineForItem(
+  item: Record<string, unknown>,
+  pipeline: TBudgetPipeline,
+): {matched: boolean; matchReasons: string[]; exclusionReasons: string[]} {
+  const rules = rulesForItem(item, pipeline);
+  if (!rules) return {matched: false, matchReasons: [], exclusionReasons: []};
+
+  const inc = evalIncludes(item, rules.includeGroups, rules.includeTree ?? null);
+  if (!inc.matched) return {matched: false, matchReasons: [], exclusionReasons: []};
+
+  const exc = evalExcludes(item, rules.excludeGroups, rules.excludeTree ?? null);
+  if (exc.excluded) {
+    return {matched: false, matchReasons: inc.reasons, exclusionReasons: exc.reasons};
+  }
+
+  return {matched: true, matchReasons: inc.reasons, exclusionReasons: []};
+}
+
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 export async function listBudgetPipelines(
@@ -205,10 +285,12 @@ export async function listBudgetPipelines(
   return {items, count: items.length};
 }
 
-export async function getBudgetPipeline(id: string): Promise<TBudgetPipeline | null> {
+export async function getBudgetPipeline(id: string, orgId: string): Promise<TBudgetPipeline | null> {
   const doc = await db.collection(COLLECTION).doc(id).get();
   if (!doc.exists) return null;
-  return {...(doc.data() as TBudgetPipeline), id: doc.id};
+  const pipeline = doc.data() as TBudgetPipeline;
+  if (pipeline.orgId !== orgId) return null;
+  return {...pipeline, id: doc.id};
 }
 
 export async function upsertBudgetPipeline(
@@ -222,6 +304,9 @@ export async function upsertBudgetPipeline(
   if (body.id) {
     const existing = await coll.doc(body.id).get();
     const prev = existing.exists ? (existing.data() as TBudgetPipeline) : null;
+    if (prev && prev.orgId !== orgId) {
+      throw new Error('not_found');
+    }
     const data: Omit<TBudgetPipeline, 'id'> = {
       orgId,
       name: body.name,
@@ -230,6 +315,9 @@ export async function upsertBudgetPipeline(
       lineItemId: body.lineItemId !== undefined ? (body.lineItemId ?? null) : (prev?.lineItemId ?? null),
       sourceFormId: body.sourceFormId !== undefined ? (body.sourceFormId ?? null) : (prev?.sourceFormId ?? null),
       sourceFormTitle: body.sourceFormTitle !== undefined ? (body.sourceFormTitle ?? null) : (prev?.sourceFormTitle ?? null),
+      formSchemas: body.formSchemas !== undefined
+        ? normalizeFormSchemas(body.formSchemas)
+        : normalizeFormSchemas(prev?.formSchemas),
       includeGroups: body.includeGroups ?? prev?.includeGroups ?? [],
       excludeGroups: body.excludeGroups ?? prev?.excludeGroups ?? [],
       includeTree: body.includeTree !== undefined
@@ -256,6 +344,7 @@ export async function upsertBudgetPipeline(
     lineItemId: body.lineItemId ?? null,
     sourceFormId: body.sourceFormId ?? null,
     sourceFormTitle: body.sourceFormTitle ?? null,
+    formSchemas: normalizeFormSchemas(body.formSchemas),
     includeGroups: body.includeGroups ?? [],
     excludeGroups: body.excludeGroups ?? [],
     includeTree: body.includeTree ?? legacyGroupsToTree(body.includeGroups ?? [], 'AND'),
@@ -269,8 +358,14 @@ export async function upsertBudgetPipeline(
   return {id: ref.id, pipeline: {...data, id: ref.id}};
 }
 
-export async function deleteBudgetPipeline(id: string): Promise<void> {
-  await db.collection(COLLECTION).doc(id).delete();
+export async function deleteBudgetPipeline(id: string, orgId: string): Promise<boolean> {
+  const ref = db.collection(COLLECTION).doc(id);
+  const doc = await ref.get();
+  if (!doc.exists) return false;
+  const pipeline = doc.data() as TBudgetPipeline;
+  if (pipeline.orgId !== orgId) return false;
+  await ref.delete();
+  return true;
 }
 
 // ─── Preview ──────────────────────────────────────────────────────────────────
@@ -345,10 +440,7 @@ export async function previewBudgetPipeline(
     const conflictIds: string[] = [];
 
     for (const item of matched) {
-      const pInc = evalIncludes(item, p.includeGroups, p.includeTree ?? null);
-      if (!pInc.matched) continue;
-      const pExc = evalExcludes(item, p.excludeGroups, p.excludeTree ?? null);
-      if (!pExc.excluded) conflictIds.push(item.id as string);
+      if (evaluatePipelineForItem(item, p).matched) conflictIds.push(item.id as string);
     }
 
     if (conflictIds.length > 0) {
@@ -390,9 +482,5 @@ export function matchesPipeline(
   item: Record<string, unknown>,
   pipeline: TBudgetPipeline,
 ): boolean {
-  if (pipeline.sourceFormId && item.formId !== pipeline.sourceFormId) return false;
-  const inc = evalIncludes(item, pipeline.includeGroups, pipeline.includeTree ?? null);
-  if (!inc.matched) return false;
-  const exc = evalExcludes(item, pipeline.excludeGroups, pipeline.excludeTree ?? null);
-  return !exc.excluded;
+  return evaluatePipelineForItem(item, pipeline).matched;
 }

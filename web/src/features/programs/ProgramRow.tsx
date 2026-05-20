@@ -71,13 +71,13 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
   const isGrant = String(grantRecord.kind || "").toLowerCase() !== "program";
   const totalBudget = budgetTotal(grant);
 
-  const enrollActive = gm?.enrollments.active ?? embeddedCounts.active ?? "-";
-  const enrollInactive = gm?.enrollments.inactive ?? embeddedCounts.inactive ?? "-";
-  const uniqueClients = gm?.customers.uniqueTotal ?? embeddedCustomers.uniqueTotal ?? "-";
-  const cmCount = gm?.caseManagers.total ?? embeddedCaseManagers.total ?? "-";
-  const cmNames = gm?.caseManagers.refs?.map((r) => r.name ?? r.id).join(", ");
+  const enrollActive = gm?.enrollments?.active ?? embeddedCounts.active ?? "-";
+  const enrollInactive = gm?.enrollments?.inactive ?? embeddedCounts.inactive ?? "-";
+  const uniqueClients = gm?.customers?.uniqueTotal ?? embeddedCustomers.uniqueTotal ?? "-";
+  const cmCount = gm?.caseManagers?.total ?? embeddedCaseManagers.total ?? "-";
+  const cmNames = gm?.caseManagers?.refs?.map((r) => r.name ?? r.id).join(", ");
 
-  const pop = gm?.enrollments.byPopulation;
+  const pop = gm?.enrollments?.byPopulation;
   const embeddedPop = asObj(embeddedCounts.population);
   const hasEmbeddedPop = Object.keys(embeddedPop).length > 0;
   const displayPop =
@@ -127,7 +127,7 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
             "col-span-3 text-right text-sm font-bold md:col-span-1",
             metricTextClass("grant-active-enrollments"),
           ].join(" ")}
-          title={gm?.enrollments.total != null ? `Active: ${enrollActive} / Total: ${gm.enrollments.total}` : undefined}
+          title={gm?.enrollments?.total != null ? `Active: ${enrollActive} / Total: ${gm.enrollments?.total}` : undefined}
         >
           {isLoading ? "..." : enrollActive}
         </div>
@@ -141,7 +141,7 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
             "col-span-3 text-right text-sm font-semibold md:col-span-1",
             metricTextClass("grant-unique-clients"),
           ].join(" ")}
-          title={gm ? `Unique: ${gm.customers.uniqueTotal} (${gm.customers.activeUniqueTotal} active)` : undefined}
+          title={gm?.customers ? `Unique: ${gm.customers?.uniqueTotal} (${gm.customers?.activeUniqueTotal} active)` : undefined}
         >
           {isLoading ? "..." : uniqueClients}
         </div>

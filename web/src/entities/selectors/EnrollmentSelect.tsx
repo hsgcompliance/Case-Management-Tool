@@ -30,6 +30,7 @@ type Props = {
   placeholderLabel?: string;
   includeClosed?: boolean;
   limit?: number;
+  labelMode?: "full" | "grant" | "enrollment";
 };
 
 function normStatus(v: unknown) {
@@ -47,6 +48,7 @@ export default function EnrollmentSelect({
   placeholderLabel = "-- Select enrollment --",
   includeClosed = true,
   limit = 500,
+  labelMode = "full",
 }: Props) {
   const clientIds = React.useMemo(
     () => (Array.isArray(filterByClientIds) ? filterByClientIds.filter(Boolean).map(String) : []),
@@ -133,14 +135,21 @@ export default function EnrollmentSelect({
           grantName,
           grantId,
           startDate: r?.startDate,
+          endDate: r?.endDate,
         });
+        const label =
+          labelMode === "grant"
+            ? grantName
+            : labelMode === "enrollment"
+              ? `${enrollmentLabel} | ${status}`
+              : `${customerName} | ${enrollmentLabel} | ${status}`;
         return {
           id,
-          label: `${customerName} | ${enrollmentLabel} | ${status}`,
+          label,
         };
       })
       .filter((x): x is { id: string; label: string } => !!x);
-  }, [enrollments, clientIds, filterByGrantId, includeClosed, customerNameById, grantNameById]);
+  }, [enrollments, clientIds, filterByGrantId, includeClosed, customerNameById, grantNameById, labelMode]);
 
   const loading = byCustomerQ.isLoading || listQ.isLoading || customersQ.isLoading || grantsQ.isLoading;
   const isDisabled = Boolean(disabled || loading);

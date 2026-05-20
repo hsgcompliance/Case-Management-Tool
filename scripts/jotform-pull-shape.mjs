@@ -94,10 +94,14 @@ async function main() {
   const name = arg("name", slug);
   const out = arg("out", path.join("artifacts", "jotform-shapes", `${slug}-${formId}.shape.json`));
 
-  const [questionsContent, submissionsContent] = await Promise.all([
-    jotformFetch(`/form/${formId}/questions`),
-    jotformFetch(`/form/${formId}/submissions`, { limit: 1, offset: 0 }),
-  ]);
+  const questionsContent = await jotformFetch(`/form/${formId}/questions`);
+  let submissionsContent = [];
+  let submissionsError = null;
+  try {
+    submissionsContent = await jotformFetch(`/form/${formId}/submissions`, { limit: 1, offset: 0 });
+  } catch (err) {
+    submissionsError = err?.message || String(err);
+  }
 
   const questions = questionsContent && typeof questionsContent === "object" ? questionsContent : {};
   const submissions = Array.isArray(submissionsContent) ? submissionsContent : [];
@@ -114,6 +118,7 @@ async function main() {
     source: {
       questionsEndpoint: `/form/${formId}/questions`,
       submissionsEndpoint: `/form/${formId}/submissions?limit=1`,
+      ...(submissionsError ? { submissionsError } : {}),
     },
     submission: {
       id: String(sample.id || sample.submission_id || ""),

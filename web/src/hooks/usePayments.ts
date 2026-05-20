@@ -984,6 +984,17 @@ export function usePaymentsProjectionsAdjust() {
         });
       }
 
+      // 3b) Mark schedule as manually edited (so builder can warn on re-open)
+      if (projectionEdits.length > 0 || projectionAdds.length > 0 || projectionDeleteIds.size > 0 || input.spendAdjustment || input.deleteRows?.paymentIds?.length) {
+        const existingMeta = (enrollment as Record<string, unknown>).scheduleMeta;
+        if (existingMeta && typeof existingMeta === "object" && (existingMeta as Record<string, unknown>).version === 1) {
+          await Enrollments.upsert({
+            id: enrollmentId,
+            scheduleMeta: { ...(existingMeta as Record<string, unknown>), editedAt: new Date().toISOString() } as unknown,
+          } as unknown as Parameters<typeof Enrollments.upsert>[0]);
+        }
+      }
+
       // 4) Grant-level recompute options
       if (options.updateGrantBudgets) {
         await Payments.updateGrantBudget({

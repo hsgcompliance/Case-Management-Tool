@@ -25,6 +25,7 @@ const fmtUsd = (cents: number) =>
   (cents / 100).toLocaleString(undefined, {
     style: "currency",
     currency: "USD",
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 

@@ -6,6 +6,9 @@
  */
 import {
   computeBudgetTotals,
+  fromBudgetCents,
+  sumBudgetField,
+  toBudgetCents,
   toMonthKey,
   db,
   FieldValue,
@@ -136,14 +139,8 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
 
       // ---- recompute budget totals (after mutation) ----
       const baseTotals = computeBudgetTotals(lineItems as any[]);
-      const projectedInWindow = lineItems.reduce(
-          (s: number, i: any) => s + Number(i?.projectedInWindow || 0),
-          0,
-      );
-      const spentInWindow = lineItems.reduce(
-          (s: number, i: any) => s + Number(i?.spentInWindow || 0),
-          0,
-      );
+      const projectedInWindow = sumBudgetField(lineItems, 'projectedInWindow');
+      const spentInWindow = sumBudgetField(lineItems, 'spentInWindow');
 
       const totals = {
         ...baseTotals,
@@ -151,9 +148,9 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
         remaining: baseTotals.balance,
         projectedInWindow,
         spentInWindow,
-        windowBalance: Number(baseTotals.total || 0) - spentInWindow,
+        windowBalance: fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow)),
         windowProjectedBalance:
-          Number(baseTotals.total || 0) - (spentInWindow + projectedInWindow),
+          fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow) - toBudgetCents(projectedInWindow)),
         // projectedSpend = spent + projected (total allocated)
         projectedSpend: baseTotals.projectedSpend,
       } as any;

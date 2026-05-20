@@ -25,6 +25,15 @@ const isReservedRouteId = (raw: unknown) => {
   return false;
 };
 
+function applyGrantEndDateDefault(extra: Record<string, any>, grant: Record<string, any>) {
+  const grantEndDate = String(grant?.endDate || "").slice(0, 10);
+  if (!grantEndDate) return extra;
+  const requestedEndDate = String(extra?.endDate || "").slice(0, 10);
+  if (!requestedEndDate) return extra; // blank end date stays blank
+  if (requestedEndDate > grantEndDate) return { ...extra, endDate: grantEndDate };
+  return extra;
+}
+
 export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
   const parsed = EnrollmentsEnrollCustomerBody.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -77,12 +86,13 @@ export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
     return;
   }
 
+  const enrollmentExtra = applyGrantEndDateDefault(extra as Record<string, any>, grant as Record<string, any>);
   const id = uuid();
   const now = FieldValue.serverTimestamp();
   const derived = await deriveEnrollmentNames({
     grantId,
     customerId,
-    startDate: (extra as any)?.startDate,
+    startDate: (enrollmentExtra as any)?.startDate,
     grantDoc: grant,
     customerDoc: cust,
   });
@@ -103,12 +113,12 @@ export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
     updatedAt: now,
     by: { uid: user.uid || null, email: user.email || null },
 
-    ...extra,
+    ...enrollmentExtra,
     ...derived,
   });
 
   let taskGeneration: unknown = null;
-  if ((extra as any)?.generateTaskSchedule !== false) {
+  if ((enrollmentExtra as any)?.generateTaskSchedule !== false) {
     try {
       taskGeneration = await generateTaskScheduleForEnrollments(
         {

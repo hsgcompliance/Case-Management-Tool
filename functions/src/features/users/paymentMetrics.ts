@@ -71,13 +71,15 @@ async function applyUserPaymentDelta(delta: PaymentDelta, sign: 1 | -1) {
   await ref.set(
     {
       updatedAt: FieldValue.serverTimestamp(),
-      "paymentMetrics.updatedAt": FieldValue.serverTimestamp(),
-      "paymentMetrics.unpaidThisMonth": FieldValue.increment(delta.unpaidThisMonth * sign),
-      "paymentMetrics.unpaidNextMonth": FieldValue.increment(delta.unpaidNextMonth * sign),
-      "paymentMetrics.unpaidTotal": FieldValue.increment(delta.unpaidTotal * sign),
-      "paymentMetrics.amountThisMonth": FieldValue.increment(delta.amountThisMonth * sign),
-      "paymentMetrics.amountNextMonth": FieldValue.increment(delta.amountNextMonth * sign),
-      "paymentMetrics.amountTotal": FieldValue.increment(delta.amountTotal * sign),
+      paymentMetrics: {
+        updatedAt: FieldValue.serverTimestamp(),
+        unpaidThisMonth: FieldValue.increment(delta.unpaidThisMonth * sign),
+        unpaidNextMonth: FieldValue.increment(delta.unpaidNextMonth * sign),
+        unpaidTotal: FieldValue.increment(delta.unpaidTotal * sign),
+        amountThisMonth: FieldValue.increment(delta.amountThisMonth * sign),
+        amountNextMonth: FieldValue.increment(delta.amountNextMonth * sign),
+        amountTotal: FieldValue.increment(delta.amountTotal * sign),
+      },
     },
     { merge: true },
   );

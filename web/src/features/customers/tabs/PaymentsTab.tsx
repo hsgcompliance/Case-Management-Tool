@@ -15,6 +15,7 @@ import {
   type PaymentsProjectionsAdjustInput,
 } from "@hooks/usePayments";
 import { useCustomerEnrollments } from "@hooks/useEnrollments";
+import { useGrants } from "@hooks/useGrants";
 import PaymentPaidDialog from "@entities/dialogs/payments/PaymentPaidDialog";
 import PaymentsDeleteDialog from "@entities/dialogs/payments/PaymentsDeleteDialog";
 import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
@@ -56,9 +57,32 @@ function paymentTypeKey(p: TPayment): string {
   return isUtility ? "monthly:utility" : "monthly:rent";
 }
 
+function grantBudgetTotal(grant: unknown): number {
+  const g = grant && typeof grant === "object" ? (grant as Record<string, unknown>) : {};
+  const budget = g.budget && typeof g.budget === "object" ? (g.budget as Record<string, unknown>) : {};
+  const totals = budget.totals && typeof budget.totals === "object" ? (budget.totals as Record<string, unknown>) : {};
+  const directTotal = Number(budget.total ?? totals.total ?? 0);
+  if (Number.isFinite(directTotal) && directTotal > 0) return directTotal;
+  const lineItems = Array.isArray(budget.lineItems) ? budget.lineItems : [];
+  return lineItems.reduce((sum, raw) => {
+    const item = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const amount = Number(item.amount ?? item.total ?? item.budget ?? 0);
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+}
+
+function isOpenEnrollment(enrollment: unknown): boolean {
+  const row = enrollment && typeof enrollment === "object" ? (enrollment as Record<string, unknown>) : {};
+  const status = String(row.status || "").trim().toLowerCase();
+  if (status === "closed" || status === "deleted") return false;
+  if (typeof row.active === "boolean") return row.active;
+  return true;
+}
+
 export function PaymentsTab({ customerId, customerName }: { customerId: string; customerName?: string }) {
   const { data: rows = [], isLoading } = useCustomerPayments(customerId);
   const { data: enrollments = [] } = useCustomerEnrollments(customerId, { enabled: !!customerId });
+  const { data: grants = [] } = useGrants({ limit: 500 }, { enabled: !!customerId });
   const spend = usePaymentsSpend();
   const compliance = usePaymentsUpdateCompliance();
   const deleteRows = usePaymentsDeleteRows();
@@ -77,13 +101,42 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   const [enrollmentFilterId, setEnrollmentFilterId] = React.useState<string>("all");
   const [viewMode, setViewMode] = React.useState<"legacy" | "sheet">("legacy");
 
-  const sorted = React.useMemo(() => {
-    return rows.slice().sort((a: CustomerPaymentRow, b: CustomerPaymentRow) => {
-      const ad = paymentDate(a.payment);
-      const bd = paymentDate(b.payment);
-      return ad.localeCompare(bd);
+  const grantBudgetById = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const grant of grants as Array<Record<string, unknown>>) {
+      const id = String(grant?.id || "").trim();
+      if (id) m.set(id, grantBudgetTotal(grant));
+    }
+    return m;
+  }, [grants]);
+
+  const grantEnrollments = React.useMemo(() => {
+    return enrollments.filter((enrollment) => {
+      const grantId = String(enrollment?.grantId || "").trim();
+      return isOpenEnrollment(enrollment) && !!grantId && (grantBudgetById.get(grantId) || 0) > 0;
     });
-  }, [rows]);
+  }, [enrollments, grantBudgetById]);
+
+  const grantEnrollmentIds = React.useMemo(
+    () => new Set(grantEnrollments.map((enrollment) => String(enrollment.id || ""))),
+    [grantEnrollments],
+  );
+
+  React.useEffect(() => {
+    if (enrollmentFilterId === "all") return;
+    if (!grantEnrollmentIds.has(enrollmentFilterId)) setEnrollmentFilterId("all");
+  }, [enrollmentFilterId, grantEnrollmentIds]);
+
+  const sorted = React.useMemo(() => {
+    return rows
+      .filter((row) => grantEnrollmentIds.has(String(row.enrollmentId || "")))
+      .slice()
+      .sort((a: CustomerPaymentRow, b: CustomerPaymentRow) => {
+        const ad = paymentDate(a.payment);
+        const bd = paymentDate(b.payment);
+        return ad.localeCompare(bd);
+      });
+  }, [rows, grantEnrollmentIds]);
 
   const filteredRows = React.useMemo(() => {
     if (enrollmentFilterId === "all") return sorted;
@@ -174,7 +227,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   }, [filteredRows]);
 
   const builderEnrollments = React.useMemo(() => {
-    return enrollments.map((e) => {
+    return grantEnrollments.map((e) => {
       const status = String(e?.status || "").toLowerCase();
       const statusLabel: "open" | "closed" = status === "closed" || status === "deleted" ? "closed" : "open";
       const lineItemIds = Array.from(
@@ -188,16 +241,17 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         id: String(e.id || ""),
         label: formatEnrollmentLabel(e as Record<string, unknown>),
         grantId: String(e.grantId || ""),
+        endDate: e.endDate ? String(e.endDate).slice(0, 10) : null,
         statusLabel,
         lineItemIds,
         scheduleMeta: (e as Record<string, unknown>).scheduleMeta,
         payments: (Array.isArray(e.payments) ? e.payments : []) as TPayment[],
       };
     });
-  }, [enrollments]);
+  }, [grantEnrollments]);
 
   const adjustEnrollments = React.useMemo(() => {
-    return enrollments.map((e) => {
+    return grantEnrollments.map((e) => {
       const lineItemIds = Array.from(
         new Set(
           (Array.isArray(e?.payments) ? e.payments : [])
@@ -213,7 +267,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         payments: (Array.isArray(e.payments) ? e.payments : []) as TPayment[],
       };
     });
-  }, [enrollments]);
+  }, [grantEnrollments]);
 
   const visibleGrantIds = React.useMemo(() => {
     const relevant = enrollmentFilterId === "all"
@@ -229,7 +283,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
 
   const budgetStripEmptyState = React.useMemo(() => {
     if (visibleGrantIds.length > 0) return null;
-    if (adjustEnrollments.length === 0) return "Create an enrollment before budget totals can be shown.";
+    if (adjustEnrollments.length === 0) return "No grant enrollments with a funded budget are available for this customer.";
     if (enrollmentFilterId === "all") return "No enrolled grants are available for this customer.";
     if (!selectedEnrollmentForBudget) return "The selected enrollment could not be found.";
     return `${selectedEnrollmentForBudget.label} is not linked to a grant, so no budget is available.`;
@@ -451,13 +505,13 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="field">
-            <span className="label">Filter by Enrollment</span>
+            <span className="label">Filter by Grant Enrollment</span>
             <select
               className="input min-w-[18rem]"
               value={enrollmentFilterId}
               onChange={(e) => setEnrollmentFilterId(e.currentTarget.value)}
             >
-              <option value="all">All enrollments</option>
+              <option value="all">All funded grant enrollments</option>
               {builderEnrollments.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.label}
@@ -466,7 +520,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
             </select>
           </label>
           <div className="text-xs text-slate-500">
-            Showing {filteredRows.length} payment row{filteredRows.length === 1 ? "" : "s"}
+            Showing {filteredRows.length} payment row{filteredRows.length === 1 ? "" : "s"} from funded grant enrollments
           </div>
         </div>
 
@@ -536,7 +590,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
                     {section.rows.length ? (
                       section.rows.map((r) => (
                         <tr key={`${section.title}:${r.label}`} className="border-t border-slate-100">
-                          <td className="px-3 py-1.5 text-slate-800">{r.label}</td>
+                          <td className={["px-3 py-1.5 text-slate-800", section.title === "By Enrollment" ? "text-sm font-semibold" : ""].join(" ")}>{r.label}</td>
                           <td className="px-3 py-1.5 text-right text-slate-700">{r.count}</td>
                           <td className="px-3 py-1.5 text-right text-slate-800">{fmtCurrencyUSD(r.total)}</td>
                           <td className="px-3 py-1.5 text-right text-emerald-700">{fmtCurrencyUSD(r.paid)}</td>

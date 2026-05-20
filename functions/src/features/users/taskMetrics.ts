@@ -69,21 +69,30 @@ async function applyUserDelta(
   if (!dm && !dn) return;
 
   const ref = db.collection("userExtras").doc(uid);
-  const write: Record<string, unknown> = {
+  const byType: Partial<Record<TaskKind, Record<string, unknown>>> = {
+    [delta.kind]: {},
+  };
+  const taskMetrics: Record<string, unknown> = {
     updatedAt: FieldValue.serverTimestamp(),
-    "taskMetrics.updatedAt": FieldValue.serverTimestamp(),
+    byType,
   };
 
   if (dm) {
-    write["taskMetrics.openThisMonth"] = FieldValue.increment(dm);
-    write[`taskMetrics.byType.${delta.kind}.thisMonth`] = FieldValue.increment(dm);
+    taskMetrics.openThisMonth = FieldValue.increment(dm);
+    byType[delta.kind]!.thisMonth = FieldValue.increment(dm);
   }
   if (dn) {
-    write["taskMetrics.openNextMonth"] = FieldValue.increment(dn);
-    write[`taskMetrics.byType.${delta.kind}.nextMonth`] = FieldValue.increment(dn);
+    taskMetrics.openNextMonth = FieldValue.increment(dn);
+    byType[delta.kind]!.nextMonth = FieldValue.increment(dn);
   }
 
-  await ref.set(write, { merge: true });
+  await ref.set(
+    {
+      updatedAt: FieldValue.serverTimestamp(),
+      taskMetrics,
+    },
+    { merge: true },
+  );
 }
 
 export const onUserTaskMetrics = onDocumentWritten(

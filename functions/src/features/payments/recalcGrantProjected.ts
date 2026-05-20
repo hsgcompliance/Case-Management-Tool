@@ -23,6 +23,9 @@ import {
   FieldValue,
   secureHandler,
   normId,
+  fromBudgetCents,
+  sumBudgetField,
+  toBudgetCents,
 } from "../../core";
 import type { Request, Response } from "express";
 
@@ -358,23 +361,17 @@ export async function recalcProjectedForGrant(
 
   const baseTotals = computeBudgetTotals(lineItemsOut as any[]);
 
-  const projectedInWindow = (lineItemsOut as any[]).reduce(
-    (s, i: any) => s + Number(i?.projectedInWindow || 0),
-    0
-  );
-  const spentInWindow = (lineItemsOut as any[]).reduce(
-    (s, i: any) => s + Number(i?.spentInWindow || 0),
-    0
-  );
+  const projectedInWindow = sumBudgetField(lineItemsOut as any[], "projectedInWindow");
+  const spentInWindow = sumBudgetField(lineItemsOut as any[], "spentInWindow");
 
   const totals: any = {
     ...baseTotals,
     projectedSpend: baseTotals.projectedSpend,
     projectedInWindow,
     spentInWindow,
-    windowBalance: Number(baseTotals.total || 0) - spentInWindow,
+    windowBalance: fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow)),
     windowProjectedBalance:
-      Number(baseTotals.total || 0) - (spentInWindow + projectedInWindow),
+      fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow) - toBudgetCents(projectedInWindow)),
     // legacy compat: remaining previously == balance
     remaining: baseTotals.balance,
   };

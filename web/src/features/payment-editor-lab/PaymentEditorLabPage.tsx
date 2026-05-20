@@ -244,15 +244,25 @@ export default function PaymentEditorLabPage({
     () => (grantsQ.data || []) as Array<Record<string, unknown>>,
     [grantsQ.data],
   );
+  const openEnrollments = React.useMemo(
+    () =>
+      enrollments.filter((enrollment) => {
+        const status = String(enrollment.status || "").trim().toLowerCase();
+        if (status === "closed" || status === "deleted") return false;
+        if (typeof enrollment.active === "boolean") return enrollment.active;
+        return true;
+      }),
+    [enrollments],
+  );
 
   const grantsById = React.useMemo(() => buildPaymentEditorGrantInfo(grants), [grants]);
   const enrollmentOptions = React.useMemo(
     () =>
-      buildPaymentEditorEnrollmentOptions(enrollments, grantsById).map((option) => ({
+      buildPaymentEditorEnrollmentOptions(openEnrollments, grantsById).map((option) => ({
         ...option,
         label: formatEnrollmentLabel(option.rawEnrollment as Enrollment, { fallback: option.label }),
       })),
-    [enrollments, grantsById],
+    [openEnrollments, grantsById],
   );
 
   React.useEffect(() => {
@@ -260,9 +270,14 @@ export default function PaymentEditorLabPage({
     setSelectedIds(new Set());
   }, [customerId]);
 
+  React.useEffect(() => {
+    if (enrollmentFilter === "all") return;
+    if (!enrollmentOptions.some((option) => option.id === enrollmentFilter)) setEnrollmentFilter("all");
+  }, [enrollmentFilter, enrollmentOptions]);
+
   const sourceRows = React.useMemo(
-    () => buildPaymentEditorRows({ enrollments, grantsById }),
-    [enrollments, grantsById],
+    () => buildPaymentEditorRows({ enrollments: openEnrollments, grantsById }),
+    [openEnrollments, grantsById],
   );
 
   const sheet = usePaymentEditorSheetSave(sourceRows, customerId);
@@ -452,7 +467,7 @@ export default function PaymentEditorLabPage({
                 onChange={(event) => setEnrollmentFilter(event.currentTarget.value)}
                 disabled={!enrollmentOptions.length}
               >
-                <option value="all">All customer enrollments</option>
+                <option value="all">All open customer enrollments</option>
                 {enrollmentOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}

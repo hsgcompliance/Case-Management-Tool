@@ -314,6 +314,7 @@ export const JotformQuestionField = z
     logicType: JotformQuestionLogicType,
     typeLabel: z.string().trim().min(1),
     options: z.array(z.string()).optional(),
+    order: z.coerce.number().int().nonnegative(),
   })
   .passthrough();
 

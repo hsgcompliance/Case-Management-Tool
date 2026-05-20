@@ -20,7 +20,7 @@ import {
 import { toast } from "@lib/toast";
 import { fmtDateOrDash } from "@lib/formatters";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
-import { addYears, parseISO10, toISODate } from "@lib/date";
+import { parseISO10, toISODate } from "@lib/date";
 import { RowStateBadge } from "@entities/ui/rowState";
 import { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
@@ -36,9 +36,14 @@ function isoToday(): string {
   return toISODate(new Date());
 }
 
-function defaultEnrollmentEndDate(startDate?: string | null): string {
-  const base = parseISO10(String(startDate || "").trim()) ?? new Date();
-  return toISODate(addYears(base, 1));
+function defaultEnrollmentEndDateForGrant(_startDate?: string | null, grantEndDate?: string | null): string {
+  return String(grantEndDate || "").slice(0, 10);
+}
+
+function capEnrollmentEndDate(endDate: string, grantEndDate?: string | null): string {
+  const grantEnd = String(grantEndDate || "").slice(0, 10);
+  if (!grantEnd || !endDate) return endDate;
+  return endDate > grantEnd ? grantEnd : endDate;
 }
 
 function toOpenClosed(row: Enrollment): "open" | "closed" {
@@ -75,6 +80,16 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     }
     return map;
   }, [grants]);
+  const grantEndDateById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of grants) {
+      const id = String(g.id || "").trim();
+      if (!id) continue;
+      const end = String(g.endDate || "").slice(0, 10);
+      if (end) map.set(id, end);
+    }
+    return map;
+  }, [grants]);
 
   const enroll = useEnrollCustomer();
   const patch = useEnrollmentsPatch();
@@ -88,8 +103,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
 
   const [grantId, setGrantId] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState<string>(isoToday());
-  const [endDate, setEndDate] = React.useState<string>(defaultEnrollmentEndDate(isoToday()));
-  const [endDateTouched, setEndDateTouched] = React.useState<boolean>(false);
+  const [endDate, setEndDate] = React.useState<string>("");
   const [generateTaskSchedule, setGenerateTaskSchedule] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -119,6 +133,12 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     tasksDelete.isPending;
 
   const today = React.useMemo(() => isoToday(), []);
+  const selectedGrantEndDate = grantId ? grantEndDateById.get(String(grantId)) || "" : "";
+
+  React.useEffect(() => {
+    if (!selectedGrantEndDate) return;
+    setEndDate((current) => capEnrollmentEndDate(current, selectedGrantEndDate));
+  }, [selectedGrantEndDate]);
 
   const closeTargetPayments = React.useMemo(() => {
     const payments = Array.isArray((closeTarget as any)?.payments) ? ((closeTarget as any).payments as any[]) : [];
@@ -205,12 +225,12 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           active: true,
           generateTaskSchedule,
           ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate } : {}),
+          ...(endDate ? { endDate: capEnrollmentEndDate(endDate, selectedGrantEndDate) } : {}),
         },
       });
       setGrantId(null);
       setStartDate(isoToday());
-      setEndDate(defaultEnrollmentEndDate(isoToday()));
+      setEndDate(defaultEnrollmentEndDateForGrant(isoToday()));
       setEndDateTouched(false);
       setGenerateTaskSchedule(true);
       toast("Enrollment created.", { type: "success" });
@@ -348,7 +368,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const openEdit = (row: Enrollment) => {
     setEditing(row);
     setEditStartDate(row.startDate ? toISODate(String(row.startDate)) : "");
-    setEditEndDate(row.endDate ? toISODate(String(row.endDate)) : "");
+    setEditEndDate(capEnrollmentEndDate(row.endDate ? toISODate(String(row.endDate)) : "", grantEndDateById.get(String(row.grantId || "")) || ""));
   };
 
   const saveEdit = async () => {
@@ -357,7 +377,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     try {
       await patchEnrollment(editing.id, {
         startDate: editStartDate || null,
-        endDate: editEndDate || null,
+        endDate: capEnrollmentEndDate(editEndDate, grantEndDateById.get(String(editing.grantId || "")) || "") || null,
       });
       setEditing(null);
       toast("Enrollment dates updated.", { type: "success" });
@@ -544,26 +564,18 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
               className="input"
               type="date"
               value={startDate}
-              onChange={(e) => {
-                const nextStartDate = e.currentTarget.value;
-                setStartDate(nextStartDate);
-                if (!endDateTouched) {
-                  setEndDate(defaultEnrollmentEndDate(nextStartDate));
-                }
-              }}
+              onChange={(e) => setStartDate(e.currentTarget.value)}
               disabled={busy}
             />
           </label>
           <label className="field">
-            <span className="label">End Date</span>
+            <span className="label">End Date (optional)</span>
             <input
               className="input"
               type="date"
               value={endDate}
-              onChange={(e) => {
-                setEndDate(e.currentTarget.value);
-                setEndDateTouched(true);
-              }}
+              max={selectedGrantEndDate || undefined}
+              onChange={(e) => setEndDate(capEnrollmentEndDate(e.currentTarget.value, selectedGrantEndDate))}
               disabled={busy}
             />
           </label>
@@ -588,7 +600,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           )}
         </div>
         <div className="mt-0.5 text-xs text-slate-400">
-          Default start date is today. Default end date is one year from the selected start date.
+          Default start date is today. End date is optional — leave blank for open-ended enrollments. If the grant has an end date, the enrollment cannot extend past it.
         </div>
         {error ? <div className="mt-2 text-sm text-red-700">{error}</div> : null}
       </div>
@@ -732,7 +744,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
               className="input"
               type="date"
               value={editEndDate}
-              onChange={(e) => setEditEndDate(e.currentTarget.value)}
+              max={editing ? grantEndDateById.get(String(editing.grantId || "")) || undefined : undefined}
+              onChange={(e) => setEditEndDate(capEnrollmentEndDate(e.currentTarget.value, editing ? grantEndDateById.get(String(editing.grantId || "")) || "" : ""))}
             />
           </label>
         </div>
@@ -746,6 +759,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           name: g.name ? String(g.name) : undefined,
           code: g.code ? String(g.code) : undefined,
           status: g.status ? String(g.status) : undefined,
+          endDate: g.endDate ? String(g.endDate).slice(0, 10) : null,
           budget: {
             lineItems: Array.isArray(g?.budget?.lineItems)
               ? g.budget.lineItems

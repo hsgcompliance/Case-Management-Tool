@@ -37,6 +37,7 @@ export * as tasks from "./tasks";
 export * as tours from "./tours";
 export * as users from "./users";
 export * as metrics from "./metrics";
+export * as transactionWindows from "./transactionWindows";
 
 // ------------------------------
 // Top-level TYPE exports (leaf modules only)
@@ -185,6 +186,7 @@ export type {
   TGrantPinColor,
   TGrantPinImportant,
   TGrantPinDigest,
+  TGrantPinRentalAssistance,
   TGrantPinInvoice,
   TGrantPins,
 
@@ -437,6 +439,9 @@ export {
   UserMetrics,
   UserTaskMetrics,
   UserPaymentMetrics,
+  UserSettings,
+  UserDigestSubs,
+  UserPinnedItem,
   UserDashboardPrefs,
   TourProgressStatus,
   TourProgressEntry,
@@ -445,6 +450,7 @@ export {
   UserGameMeta,
   UserGameHighScores,
   UserExtras,
+  UserGrantPrefs,
   UpdateMeBody,
 } from "./users";
 
@@ -483,6 +489,9 @@ export type {
   TUserMetrics,
   TUserTaskMetrics,
   TUserPaymentMetrics,
+  TUserSettings,
+  TUserDigestSubs,
+  TUserPinnedItem,
   TUserDashboardPrefs,
   TTourProgressStatus,
   TTourProgressEntry,
@@ -491,6 +500,7 @@ export type {
   TUserGameMeta,
   TUserGameHighScores,
   TUserExtras,
+  TUserGrantPrefs,
   TTaskMode,
   TTaskModeSetBy,
   TUserListStatus,
@@ -532,6 +542,7 @@ export type {
   TPipelineCondition,
   TPipelineConditionGroup,
   TPipelineRuleNode,
+  TPipelineFormSchema,
   TBudgetPipeline,
   TBudgetPipelineUpsertBody,
   TBudgetPipelineListQuery,
@@ -548,9 +559,26 @@ export {
   PipelineCondition,
   PipelineConditionGroup,
   PipelineRuleNode,
+  PipelineFormSchema,
   BudgetPipeline,
   BudgetPipelineUpsertBody,
   BudgetPipelineListQuery,
   BudgetPipelineDeleteBody,
   BudgetPipelinePreviewBody,
 } from "./budgetPipeline";
+
+export type {
+  TransactionWindowFormId,
+  TransactionQuestionField,
+  TransactionFieldDefinition,
+  LogicalTransactionWindow,
+  TransactionWindowModel,
+} from "./transactionWindows";
+
+export {
+  TRANSACTION_WINDOW_FORM_IDS,
+  TransactionWindowSchemaError,
+  cleanVisibleLabel,
+  transactionFieldKey,
+  inferTransactionWindowModel,
+} from "./transactionWindows";

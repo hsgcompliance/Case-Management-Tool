@@ -135,7 +135,7 @@ export { makeIdempoKey, withTxn, ensureIdempotent } from "./tx";
 
 /* -------- Budget helpers -------- */
 
-export { computeBudgetTotals } from "./budgetTotals";
+export { computeBudgetTotals, fromBudgetCents, sumBudgetField, toBudgetCents } from "./budgetTotals";
 
 /* -------- Misc utils --------  */
 

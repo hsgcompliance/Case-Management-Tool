@@ -11,10 +11,12 @@ import {
   onDocumentWritten,
 } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
+import { inferTransactionWindowModel } from "@hdb/contracts";
 import { RUNTIME } from "../../core";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
 import { upsertPaymentQueueItems, voidPaymentQueueItems } from "./service";
 import { recalcGrantProjectedForGrant } from "../payments/recalcGrantProjected";
+import { getJotformFormQuestions } from "../jotform/service";
 
 const FN = "onPaymentQueueSync";
 const FN_BUDGET = "onPaymentQueueBudgetProjection";
@@ -42,7 +44,9 @@ async function syncSubmission(id: string, sub: any): Promise<void> {
   }
 
   // Extract spend line items
-  const extracted = extractSpendItems(sub);
+  const liveQuestions = await getJotformFormQuestions(formId);
+  const transactionModel = inferTransactionWindowModel(formId, liveQuestions.fields);
+  const extracted = extractSpendItems(sub, transactionModel);
 
   if (extracted.length === 0) {
     logger.warn(`${FN}_no_items`, { id, formId });

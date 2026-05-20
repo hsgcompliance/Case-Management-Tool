@@ -239,13 +239,16 @@ export function useGrantAdminClearPayments() {
   });
 }
 
+type ClearEnrollmentsArgs = { grantId: string; statuses?: ("active" | "inactive" | "deleted")[] };
+
 export function useGrantAdminClearEnrollments() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
     queryKeys: [qk.grants.root],
-    mutationFn: (grantId: string) => Grants.adminClearEnrollments(grantId),
-    onSuccess: (_resp, grantId) => {
+    mutationFn: ({ grantId, statuses }: ClearEnrollmentsArgs) =>
+      Grants.adminClearEnrollments(grantId, statuses ? { statuses } : undefined),
+    onSuccess: (_resp, { grantId }) => {
       qc.invalidateQueries({ queryKey: qk.grants.detail(grantId) });
     },
   });

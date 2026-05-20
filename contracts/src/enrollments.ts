@@ -94,6 +94,8 @@ export const ScheduleMetaV1 = z.object({
     })
     .nullable()
     .optional(),
+  /** ISO timestamp of the last manual projection edit after the initial build. Cleared on full rebuild. */
+  editedAt: z.string().optional(),
 });
 
 /** Meta written on destination enrollment during migration. */

@@ -3,8 +3,11 @@ import {
   computeBudgetTotals,
   db,
   FieldValue,
+  fromBudgetCents,
   Timestamp,
   secureHandler,
+  sumBudgetField,
+  toBudgetCents,
   withTxn,
 } from "../../core";
 import { writeLedgerEntry } from "../ledger/service";
@@ -200,16 +203,16 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
         }
 
         const baseTotals = computeBudgetTotals(lineItems as any[]);
-        const projectedInWindow = lineItems.reduce((s: number, i: any) => s + Number(i?.projectedInWindow || 0), 0);
-        const spentInWindow = lineItems.reduce((s: number, i: any) => s + Number(i?.spentInWindow || 0), 0);
+        const projectedInWindow = sumBudgetField(lineItems, "projectedInWindow");
+        const spentInWindow = sumBudgetField(lineItems, "spentInWindow");
         const totals = {
           ...baseTotals,
           remaining: baseTotals.balance,
           projectedSpend: baseTotals.projectedSpend,
           projectedInWindow,
           spentInWindow,
-          windowBalance: Number(baseTotals.total || 0) - spentInWindow,
-          windowProjectedBalance: Number(baseTotals.total || 0) - (spentInWindow + projectedInWindow),
+          windowBalance: fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow)),
+          windowProjectedBalance: fromBudgetCents(toBudgetCents(baseTotals.total) - toBudgetCents(spentInWindow) - toBudgetCents(projectedInWindow)),
         };
         trx.update(gRef!, {
           "budget.lineItems": lineItems,

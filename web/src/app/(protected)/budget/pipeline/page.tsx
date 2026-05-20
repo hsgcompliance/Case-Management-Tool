@@ -1,4 +1,4 @@
-// src/app/(protected)/budget/pipeline/page.tsx
+﻿// src/app/(protected)/budget/pipeline/page.tsx
 "use client";
 import React from "react";
 import Link from "next/link";
@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { usePipelines, usePipelineDelete } from "@hooks/useBudgetPipeline";
 import { toast } from "@lib/toast";
 import type { TBudgetPipeline } from "@types";
+import { HelpButton } from "@entities/help/HelpButton";
 
 function fmtDate(iso: string) {
   try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
@@ -18,6 +19,33 @@ function StatusDot({ status }: { status: TBudgetPipeline["status"] }) {
     inactive: "bg-amber-400",
   };
   return <span className={`inline-block w-2 h-2 rounded-full ${cls[status] ?? "bg-slate-400"}`} />;
+}
+
+
+function enabledSchemaLabels(p: TBudgetPipeline): string {
+  const schemas = Object.values((p as any).formSchemas ?? {}).filter((schema: any) => schema?.enabled !== false);
+  if (schemas.length > 0) {
+    return schemas.map((schema: any) => String(schema.sourceFormTitle || schema.sourceFormId).replace(/^Line Items /, "")).join(" + ");
+  }
+  return p.sourceFormTitle ?? "All forms";
+}
+
+function countRuleConditions(node: any): number {
+  if (!node) return 0;
+  if (node.type === "condition") return 1;
+  return Array.isArray(node.children)
+    ? node.children.reduce((total: number, child: any) => total + countRuleConditions(child), 0)
+    : 0;
+}
+
+function schemaRuleSummary(p: TBudgetPipeline): string {
+  const schemas = Object.values((p as any).formSchemas ?? {}).filter((schema: any) => schema?.enabled !== false);
+  if (schemas.length > 0) {
+    return schemas
+      .map((schema: any) => `${String(schema.sourceFormTitle || "Form").replace(/^Line Items /, "")}: ${countRuleConditions(schema.includeTree)} in / ${countRuleConditions(schema.excludeTree)} out`)
+      .join(" · ");
+  }
+  return `${countRuleConditions((p as any).includeTree)} include · ${countRuleConditions((p as any).excludeTree)} exclude`;
 }
 
 export default function PipelineListPage() {
@@ -39,9 +67,11 @@ export default function PipelineListPage() {
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Budget Pipelines</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-slate-100">
+            Budget Pipelines <HelpButton pageKey="budgetPipeline" />
+          </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Rule-based pipelines that classify payment queue items to grant line items.
+            Rule-based pipelines that classify payment queue items to grant line items. Each pipeline can keep separate Credit Card and Invoice schemas under one budget target.
           </p>
         </div>
         <Link
@@ -99,10 +129,10 @@ export default function PipelineListPage() {
                     {p.grantId ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
                   </td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400 max-w-[120px] truncate">
-                    {p.sourceFormTitle ?? <span className="text-slate-300 dark:text-slate-600">All forms</span>}
+                    {enabledSchemaLabels(p)}
                   </td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                    {p.includeGroups.length} include · {p.excludeGroups.length} exclude
+                    {schemaRuleSummary(p)}
                   </td>
                   <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs">
                     {fmtDate(p.updatedAt)}
@@ -125,3 +155,4 @@ export default function PipelineListPage() {
     </div>
   );
 }
+

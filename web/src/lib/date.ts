@@ -190,3 +190,39 @@ export const addYears = (d: Date, n: number) => {
   copy.setFullYear(copy.getFullYear() + n);
   return copy;
 };
+
+/** Adds `months` months to an ISO10 date, clamping the day within the target month. Handles negative values. */
+export function addMonthsISO(iso: string, months: number): string {
+  if (!isISODate10(iso)) return "";
+  const [y0, m0, d0] = String(iso).split("-").map(Number);
+  const total = y0 * 12 + (m0 - 1) + months;
+  const y = Math.floor(total / 12);
+  const m = (total % 12) + 1;
+  const lastDay = new Date(y, m, 0).getDate();
+  const d = Math.min(d0, lastDay);
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+
+/** Returns `YYYY-MM-01` of the month following the given ISO10 date. */
+export function firstOfNextMonthISO(iso: string): string {
+  if (!isISODate10(iso)) return "";
+  const [y0, m0] = String(iso).split("-").map(Number);
+  const total = y0 * 12 + (m0 - 1) + 1;
+  const y = Math.floor(total / 12);
+  const m = (total % 12) + 1;
+  return `${y}-${pad(m)}-01`;
+}
+
+/** Extracts the `YYYY-MM` portion from an ISO10 date. Returns `""` if input is not a valid ISO10 date. */
+export function isoToYearMonth(iso: unknown): YearMonth | "" {
+  return isISODate10(iso) ? (String(iso).slice(0, 7) as YearMonth) : "";
+}
+
+/** Formats an ISO10 date as `"Jan 1"` — abbreviated month name + day number. */
+export function fmtShortMonthDay(iso: string): string {
+  if (!isISODate10(iso)) return String(iso ?? "");
+  const d = parseISO10(iso);
+  if (!d) return String(iso);
+  const names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${names[d.getMonth()]} ${d.getDate()}`;
+}
