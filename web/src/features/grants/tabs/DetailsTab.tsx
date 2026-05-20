@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { parseISO10, safeISODate10, toISODate, addYears, addDays } from "@lib/date";
+import { fmtMDY, parseISO10, safeISODate10, toISODate, addYears, addDays } from "@lib/date";
 import {
   DynamicFieldsEditor,
   META_KEYS,
@@ -14,7 +14,6 @@ import {
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
-import { fmtCurrencyUSD } from "@lib/formatters";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -804,20 +803,11 @@ function RecommendedGrantInfoEditor({
 function GrantInfoPanel({
   model,
   grant,
-  derived,
-  showBudgetStrip,
-  currency,
 }: {
   model: Record<string, any>;
   grant: Record<string, any> | null;
-  derived?: { total: number; spent: number; projected: number; balance: number; projectedBalance: number } | null;
-  showBudgetStrip?: boolean;
-  currency?: (n: number) => string;
 }) {
   const g = (grant ?? model) as Record<string, any>;
-  const fmt = (n: number) =>
-    fmtCurrencyUSD(n);
-  const fmtFn = currency ?? fmt;
 
   const startDate     = String(g.startDate   || "").slice(0, 10);
   const endDate       = String(g.endDate     || "").slice(0, 10);
@@ -832,16 +822,6 @@ function GrantInfoPanel({
   const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
   const hasEligibility = Object.keys(normalizeEligibility(eligibility)).length > 0;
 
-  // Budget strip values
-  const total    = derived?.total    ?? 0;
-  const spent    = derived?.spent    ?? 0;
-  const projected = derived?.projected ?? 0;
-  const projBal  = derived?.projectedBalance ?? (total - spent - projected);
-  const denom    = total > 0 ? total : 1;
-  const spentPct = Math.min(100, (spent / denom) * 100);
-  const projPct  = Math.min(100 - spentPct, (projected / denom) * 100);
-  const remPct   = Math.max(0, 100 - spentPct - projPct);
-
   return (
     <div className="rounded-[22px] border border-slate-200 bg-white p-5 space-y-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Grant Info</div>
@@ -851,40 +831,16 @@ function GrantInfoPanel({
         <div>
           <div className="text-xs text-slate-400 mb-0.5">Start Date</div>
           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {startDate ? new Date(startDate + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "—"}
+            {startDate ? fmtMDY(startDate) : "—"}
           </div>
         </div>
         <div>
           <div className="text-xs text-slate-400 mb-0.5">End Date</div>
           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {endDate ? new Date(endDate + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "—"}
+            {endDate ? fmtMDY(endDate) : "—"}
           </div>
         </div>
       </div>
-
-      {/* Budget strip (grants only) */}
-      {showBudgetStrip && derived && total > 0 && (
-        <div className="space-y-2">
-          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full bg-amber-400 transition-all" style={{ width: `${spentPct}%` }} />
-            <div className="h-full bg-blue-400 transition-all"  style={{ width: `${projPct}%`  }} />
-            <div className={`h-full transition-all ${projBal < 0 ? "bg-red-400" : "bg-emerald-300"}`} style={{ width: `${remPct}%` }} />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            {[
-              { label: "Total",    value: total,     color: "text-slate-700" },
-              { label: "Spent",    value: spent,     color: "text-amber-700" },
-              { label: "Projected", value: projected, color: "text-blue-700" },
-              { label: "Balance",  value: projBal,   color: projBal >= 0 ? "text-emerald-700" : "text-red-600" },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="rounded-lg border border-slate-100 px-2.5 py-1.5 bg-slate-50">
-                <div className="text-slate-400 mb-0.5">{label}</div>
-                <div className={`font-semibold ${color}`}>{fmtFn(value)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Description */}
       <FieldBlock label="Description" empty={!description}>
@@ -947,9 +903,6 @@ export function DetailsTab({
   canEditKind,
   onRequestKindChange,
   STATUS_OPTS,
-  derived,
-  showBudgetStrip,
-  currency,
 }: {
   editing: boolean;
   model: Record<string, any>;
@@ -1094,9 +1047,6 @@ export function DetailsTab({
           <GrantInfoPanel
             model={model}
             grant={grant as any}
-            derived={derived}
-            showBudgetStrip={showBudgetStrip}
-            currency={currency}
           />
         </div>
       )}

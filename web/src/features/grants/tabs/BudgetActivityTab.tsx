@@ -6,15 +6,24 @@ import { useEnrollments } from "@hooks/useEnrollments";
 import { useGrantActivity } from "@hooks/useGrants";
 import { useUsers } from "@hooks/useUsers";
 import { SpendDetailModal, type SpendRow } from "@features/widgets/spending/SpendDetailModal";
-import { fmtFromTsLike } from "@lib/date";
+import { fmtFromTsLike, safeISODate10, toISODate, toMillisAny } from "@lib/date";
+import {
+  GrantBudgetSandboxModal,
+  type GrantBudgetSandboxLineItem,
+  type GrantBudgetSandboxSeedRow,
+} from "./GrantBudgetSandboxModal";
 
 type ActivityMode = "paid" | "projected" | "all";
 type ActivityKindFilter = "all" | "paid" | "projected" | "reversal" | "data-entry-complete" | "data-entry-incomplete";
 type ComplianceStatus = "complete" | "partial" | "none";
+type SortDirection = "asc" | "desc";
+type ActivitySortKey = "date" | "amount" | "customer" | "budgetType" | "note" | "status";
+type LineItemSortKey = "label" | "type" | "budget" | "spent" | "balance" | "projectedSpend" | "available" | "status";
 type GrantActivityRow = SpendRow & {
   customerLabel: string;
   userLabel: string;
   noteText: string;
+  budgetTypeLabel: string;
   displayType: "Paid" | "Projected" | "Reversal";
   sourceType: "paid" | "projected";
   complianceStatus: ComplianceStatus;
@@ -22,9 +31,10 @@ type GrantActivityRow = SpendRow & {
 };
 
 const DEFAULT_LINE_ITEM_TYPES = [
-  { id: "rental-assistance", label: "Rental Assistance" },
-  { id: "program-spending", label: "Program Spending" },
-  { id: "customer-support-service", label: "Customer Support Service" },
+  { id: "deposit", label: "Deposit" },
+  { id: "rent", label: "Rent" },
+  { id: "utility", label: "Utility" },
+  { id: "support-service", label: "Support Service" },
 ] as const;
 
 function slugifyLineItemType(label: string) {
@@ -43,6 +53,17 @@ function lineItemTypeLabel(value: unknown) {
     return String(raw.label ?? raw.name ?? raw.id ?? "").trim();
   }
   return "";
+}
+
+function normalizeBudgetTypeLabel(value: unknown, fallback?: unknown) {
+  const raw = `${lineItemTypeLabel(value) || String(fallback || "")}`.trim();
+  const key = slugifyLineItemType(raw);
+  if (!key) return "N/A";
+  if (key.includes("deposit")) return "Deposit";
+  if (key.includes("util")) return "Utility";
+  if (key.includes("support") || key.includes("service") || key.includes("case-management")) return "Support Service";
+  if (key.includes("rent") || key.includes("rental") || key.includes("housing")) return "Rent";
+  return raw;
 }
 
 function lineItemTypeKey(value: unknown) {
@@ -83,15 +104,17 @@ function tip(text: string) {
 }
 
 function dateIso10(value: unknown) {
+  if (typeof value === "string") {
+    const iso = safeISODate10(value);
+    if (iso) return iso;
+  }
+  const ms = toMillisAny(value);
+  if (Number.isFinite(ms) && ms > 0) return toISODate(ms);
   const s = String(value || "").trim();
   if (!s) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return toISODate(d);
 }
 
 function monthFromDate(value: unknown) {
@@ -105,6 +128,14 @@ function normalizeText(value: unknown) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function compareText(a: unknown, b: unknown) {
+  return String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function applyDirection(value: number, direction: SortDirection) {
+  return direction === "asc" ? value : -value;
 }
 
 function SpendBar({
@@ -202,11 +233,18 @@ function ActivityDrawer({
 }) {
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<ActivityKindFilter>("all");
+  const [sort, setSort] = useState<{ key: ActivitySortKey; direction: SortDirection }>({ key: "date", direction: "desc" });
   const deferredSearch = useDeferredValue(search);
+  const toggleSort = useCallback((key: ActivitySortKey) => {
+    setSort((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  }, []);
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = normalizeText(deferredSearch);
-    return items.filter((item) => {
+    const filtered = items.filter((item) => {
       const modePass =
         mode === "all" ? true : mode === "paid" ? item.sourceType === "paid" : item.sourceType === "projected";
       if (!modePass) return false;
@@ -224,7 +262,17 @@ function ActivityDrawer({
       if (!normalizedQuery) return true;
       return item.searchText.includes(normalizedQuery);
     });
-  }, [deferredSearch, items, kindFilter, mode]);
+    return filtered.sort((a, b) => {
+      const result =
+        sort.key === "date" ? compareText(a.date, b.date)
+        : sort.key === "amount" ? a.amountCents - b.amountCents
+        : sort.key === "customer" ? compareText(a.customerLabel, b.customerLabel)
+        : sort.key === "budgetType" ? compareText(a.budgetTypeLabel, b.budgetTypeLabel)
+        : sort.key === "note" ? compareText(a.noteText || a.title, b.noteText || b.title)
+        : compareText(a.displayType, b.displayType) || compareText(a.complianceStatus, b.complianceStatus);
+      return applyDirection(result, sort.direction);
+    });
+  }, [deferredSearch, items, kindFilter, mode, sort.direction, sort.key]);
 
   const projectedCount = useMemo(
     () => items.filter((item) => item.sourceType === "projected").length,
@@ -235,6 +283,11 @@ function ActivityDrawer({
     [items],
   );
   const net = filteredItems.reduce((acc, item) => acc + item.amountCents / 100, 0);
+  const headerButton = (key: ActivitySortKey, label: string, className = "pb-1 pr-4 font-medium") => (
+    <button type="button" className={`w-full text-left ${className}`} onClick={() => toggleSort(key)}>
+      {label}
+    </button>
+  );
 
   return (
     <tr>
@@ -282,8 +335,8 @@ function ActivityDrawer({
               className="input text-sm"
               value={search}
               onChange={(e) => setSearch(e.currentTarget.value)}
-              placeholder="Search customer, note, payment, user..."
-              title={tip("Filter activity rows like the invoicing tool by customer, note, payment, or user.")}
+              placeholder="Search customer, type, note, payment..."
+              title={tip("Filter activity rows like the invoicing tool by customer, type, note, or payment.")}
             />
             <select
               className="input text-sm"
@@ -305,12 +358,12 @@ function ActivityDrawer({
               <table className="w-full border-separate text-xs" style={{ borderSpacing: 0 }}>
                 <thead>
                   <tr className="text-left text-slate-500">
-                    <th className="pb-1 pr-4 font-medium">Date</th>
-                    <th className="pb-1 pr-4 text-right font-medium">Amount</th>
-                    <th className="pb-1 pr-4 font-medium">Customer</th>
-                    <th className="pb-1 pr-4 font-medium">User</th>
-                    <th className="pb-1 pr-4 font-medium">Note</th>
-                    <th className="pb-1 font-medium">Type</th>
+                    <th>{headerButton("date", "Date")}</th>
+                    <th>{headerButton("amount", "Amount", "pb-1 pr-4 text-right font-medium")}</th>
+                    <th>{headerButton("customer", "Customer")}</th>
+                    <th>{headerButton("budgetType", "Type")}</th>
+                    <th>{headerButton("note", "Note")}</th>
+                    <th>{headerButton("status", "Status", "pb-1 font-medium")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -326,7 +379,7 @@ function ActivityDrawer({
                         {currency(item.amountCents / 100)}
                       </td>
                       <td className="py-1 pr-4 text-slate-600">{item.customerLabel || "—"}</td>
-                      <td className="py-1 pr-4 text-slate-600">{item.userLabel || "—"}</td>
+                      <td className="py-1 pr-4 text-slate-600">{item.budgetTypeLabel || "N/A"}</td>
                       <td className="py-1 pr-4 text-slate-500">{item.noteText || item.title || "—"}</td>
                       <td className="py-1">
                         {item.displayType === "Reversal" ? (
@@ -569,6 +622,14 @@ export function BudgetActivityTab({
   const [fundsState, setFundsState] = useState<{ index: number; mode: "add" | "move" } | null>(null);
   const [spendCapIdx, setSpendCapIdx] = useState<number | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<SpendRow | null>(null);
+  const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [lineItemSort, setLineItemSort] = useState<{ key: LineItemSortKey; direction: SortDirection }>({ key: "label", direction: "asc" });
+  const toggleLineItemSort = useCallback((key: LineItemSortKey) => {
+    setLineItemSort((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  }, []);
 
   const budget = useMemo(() => {
     const b = JSON.parse(JSON.stringify(model.budget ?? {}));
@@ -644,6 +705,29 @@ export function BudgetActivityTab({
     }
     return { liAmount, liSpent, liProjected };
   }, [budget.lineItems, num]);
+
+  const sortedLineItems = useMemo(() => {
+    return (budget.lineItems as any[])
+      .map((li, index) => ({ li, index }))
+      .sort((a, b) => {
+        const aAmount = num(a.li.amount, 0);
+        const bAmount = num(b.li.amount, 0);
+        const aSpent = num(a.li.spent, 0);
+        const bSpent = num(b.li.spent, 0);
+        const aProjectedSpend = aSpent + num(a.li.projected, 0);
+        const bProjectedSpend = bSpent + num(b.li.projected, 0);
+        const result =
+          lineItemSort.key === "label" ? compareText(a.li.label || a.li.id, b.li.label || b.li.id)
+          : lineItemSort.key === "type" ? compareText(normalizeBudgetTypeLabel(a.li.type, a.li.label), normalizeBudgetTypeLabel(b.li.type, b.li.label))
+          : lineItemSort.key === "budget" ? aAmount - bAmount
+          : lineItemSort.key === "spent" ? aSpent - bSpent
+          : lineItemSort.key === "balance" ? (aAmount - aSpent) - (bAmount - bSpent)
+          : lineItemSort.key === "projectedSpend" ? aProjectedSpend - bProjectedSpend
+          : lineItemSort.key === "available" ? (aAmount - aProjectedSpend) - (bAmount - bProjectedSpend)
+          : Number(!!a.li.locked) - Number(!!b.li.locked) || Number(!!a.li.capEnabled) - Number(!!b.li.capEnabled);
+        return applyDirection(result, lineItemSort.direction) || a.index - b.index;
+      });
+  }, [budget.lineItems, lineItemSort.direction, lineItemSort.key, num]);
 
   const enrollmentInfoById = useMemo(() => {
     const map = new Map<string, { customerId: string; customerLabel: string }>();
@@ -733,6 +817,31 @@ export function BudgetActivityTab({
     return map;
   }, [budget.lineItems, grantId, model?.name]);
 
+  const lineItemTypeByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const li of budget.lineItems as any[]) {
+      const lineItemId = String(li?.id || "").trim();
+      if (!lineItemId) continue;
+      map.set(`${grantId || ""}:${lineItemId}`, normalizeBudgetTypeLabel(li?.type, li?.label));
+    }
+    return map;
+  }, [budget.lineItems, grantId]);
+
+  const sandboxLineItems = useMemo((): GrantBudgetSandboxLineItem[] => {
+    return (budget.lineItems as any[])
+      .map((li) => {
+        const id = String(li?.id || "").trim();
+        if (!id) return null;
+        return {
+          id,
+          label: String(li?.label || id),
+          typeLabel: normalizeBudgetTypeLabel(li?.type, li?.label),
+          budgetCents: Math.round(Number(li?.amount || 0) * 100),
+        };
+      })
+      .filter((item): item is GrantBudgetSandboxLineItem => !!item);
+  }, [budget.lineItems]);
+
   const resolveUserLabel = useCallback((value: unknown) => {
     if (!value) return "";
     if (typeof value === "string") {
@@ -751,6 +860,12 @@ export function BudgetActivityTab({
 
   const activityRows = useMemo(() => {
     const rows: GrantActivityRow[] = [];
+    const budgetTypeFor = (raw: Record<string, any>, item?: Record<string, any>) => {
+      const lineItemId = String(raw?.lineItemId || item?.lineItemId || "").trim();
+      const key = `${String(raw?.grantId || item?.grantId || grantId || "")}:${lineItemId}`;
+      const lookup = lineItemId ? lineItemLookup.get(key) : null;
+      return normalizeBudgetTypeLabel(item?.type ?? raw?.type ?? lineItemTypeByKey.get(key), lookup?.lineItemLabel || raw?.lineItemLabelAtSpend || lineItemId);
+    };
 
     for (const raw of allActivity) {
       if (raw?.kind === "projection" || raw?.sourceType === "paymentQueue") {
@@ -771,6 +886,7 @@ export function BudgetActivityTab({
           queueSource === "invoice" ? "queue-invoice"
           : queueSource === "credit-card" ? "queue-credit-card"
           : "queue-projection";
+        const budgetTypeLabel = budgetTypeFor(raw, item);
         const sourceLabel =
           queueSource === "invoice" ? "Invoice"
           : queueSource === "credit-card" ? "Credit Card"
@@ -799,10 +915,11 @@ export function BudgetActivityTab({
           customerLabel,
           userLabel,
           noteText,
+          budgetTypeLabel,
           displayType: "Projected",
           sourceType: "projected",
           complianceStatus: "none" as ComplianceStatus,
-          searchText: normalizeText([noteText, customerLabel, customerId, userLabel, item?.merchant, item?.paymentId, item?.id].join(" ")),
+          searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, item?.merchant, item?.paymentId, item?.id].join(" ")),
         });
         continue;
       }
@@ -835,6 +952,7 @@ export function BudgetActivityTab({
       const hmis = !!(compliance?.hmisComplete);
       const cw = !!(compliance?.caseworthyComplete);
       const complianceStatus: ComplianceStatus = isReversal ? "complete" : (hmis && cw ? "complete" : (hmis || cw ? "partial" : "none"));
+      const budgetTypeLabel = budgetTypeFor(raw);
 
       rows.push({
         id: String(raw?.id || `ledger:${enrollmentId}:${raw?.paymentId || date}`),
@@ -864,10 +982,11 @@ export function BudgetActivityTab({
         customerLabel,
         userLabel,
         noteText,
+        budgetTypeLabel,
         displayType: isReversal ? "Reversal" : "Paid",
         sourceType: "paid",
         complianceStatus,
-        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, paymentId, raw?.id].join(" ")),
+        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, paymentId, raw?.id].join(" ")),
       });
     }
 
@@ -877,7 +996,7 @@ export function BudgetActivityTab({
     });
 
     return rows;
-  }, [allActivity, customerNameById, enrollmentInfoById, grantId, paymentComplianceByKey, resolveUserLabel]);
+  }, [allActivity, customerNameById, enrollmentInfoById, grantId, lineItemLookup, lineItemTypeByKey, paymentComplianceByKey, resolveUserLabel]);
 
   const activityByLineItem = useMemo(() => {
     const map = new Map<string, GrantActivityRow[]>();
@@ -889,6 +1008,21 @@ export function BudgetActivityTab({
       else map.set(lineItemId, [item]);
     }
     return map;
+  }, [activityRows]);
+
+  const sandboxSeedRows = useMemo((): GrantBudgetSandboxSeedRow[] => {
+    return activityRows.map((row) => ({
+      sourceId: row.id,
+      sourceKind: row.kind,
+      grantId: row.grantId,
+      lineItemId: row.lineItemId,
+      date: row.date,
+      amountCents: row.amountCents,
+      customerLabel: row.customerLabel,
+      budgetTypeLabel: row.budgetTypeLabel,
+      noteText: row.noteText || row.title || "",
+      statusLabel: row.displayType,
+    }));
   }, [activityRows]);
 
   const resolveCustomer = (row: any) =>
@@ -918,10 +1052,28 @@ export function BudgetActivityTab({
     if (nextExpandedId && !isRentalAssistanceLineItem(lineItem)) refreshActivityData();
   };
   const colCount = editing ? 11 : 10;
+  const lineHeaderButton = (key: LineItemSortKey, label: string, className = "") => (
+    <button type="button" className={`w-full text-left ${className}`} onClick={() => toggleLineItemSort(key)}>
+      {label}
+    </button>
+  );
 
   return (
     <div className="mt-4 space-y-4">
-      <SpendBar total={total} spent={spent} projected={projected} currency={currency} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-[280px] flex-1">
+          <SpendBar total={total} spent={spent} projected={projected} currency={currency} />
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => setSandboxOpen(true)}
+          disabled={!sandboxSeedRows.length}
+          title={sandboxSeedRows.length ? tip("Open a local scratch workspace for budget projections.") : tip("No activity rows are available for sandboxing yet.")}
+        >
+          Open Sandbox
+        </button>
+      </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
         {[
@@ -999,15 +1151,15 @@ export function BudgetActivityTab({
         <table className="table text-sm">
           <thead>
             <tr>
-              <th title={tip("Line item label. Expand to review activity tied to this budget bucket.")}>Label</th>
-              <th className="w-44" title={tip("Reporting category for grouping line item totals across grants. Blank or N/A leaves it uncategorized.")}>Type</th>
-              <th className="text-right" title={tip("Planned dollars assigned to this line item.")}>Budget</th>
-              <th className="text-right" title={tip("Posted ledger spend recorded against this line item.")}>Spent</th>
-              <th className="text-right" title={tip("Budget minus posted spend.")}>Balance</th>
-              <th className="text-right" title={tip("Posted spend plus projected obligations.")}>Projected Spend</th>
-              <th className="text-right" title={tip("Most important number. Budget minus projected spend.")}>Available</th>
+              <th title={tip("Line item label. Expand to review activity tied to this budget bucket.")}>{lineHeaderButton("label", "Label")}</th>
+              <th className="w-44" title={tip("Reporting category for grouping line item totals across grants. Blank or N/A leaves it uncategorized.")}>{lineHeaderButton("type", "Type")}</th>
+              <th className="text-right" title={tip("Planned dollars assigned to this line item.")}>{lineHeaderButton("budget", "Budget", "text-right")}</th>
+              <th className="text-right" title={tip("Posted ledger spend recorded against this line item.")}>{lineHeaderButton("spent", "Spent", "text-right")}</th>
+              <th className="text-right" title={tip("Budget minus posted spend.")}>{lineHeaderButton("balance", "Balance", "text-right")}</th>
+              <th className="text-right" title={tip("Posted spend plus projected obligations.")}>{lineHeaderButton("projectedSpend", "Projected Spend", "text-right")}</th>
+              <th className="text-right" title={tip("Most important number. Budget minus projected spend.")}>{lineHeaderButton("available", "Available", "text-right")}</th>
               <th className="w-16" title={tip("Visual spend progress for this line item.")} />
-              <th className="w-28" title={tip("Compact status chips for lock and cap settings.")}>Status</th>
+              <th className="w-28" title={tip("Compact status chips for lock and cap settings.")}>{lineHeaderButton("status", "Status", "text-center")}</th>
               {!editing && <th className="w-14 text-right" title={tip("Line item actions.")}>Actions</th>}
               {editing && <th className="w-24" title={tip("Per-customer cap amount when cap is enabled.")}>Cap $</th>}
               {editing && <th />}
@@ -1019,7 +1171,7 @@ export function BudgetActivityTab({
                 <td className="italic text-slate-400" colSpan={colCount}>No line items yet.</td>
               </tr>
             ) : (
-              budget.lineItems.flatMap((li: any, i: number) => {
+              sortedLineItems.flatMap(({ li, index: i }) => {
                 const liId = String(li.id ?? `idx_${i}`);
                 const liAmount = num(li.amount, 0);
                 const liSpent = num(li.spent, 0);
@@ -1104,7 +1256,7 @@ export function BudgetActivityTab({
                         </>
                       ) : (
                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                          {lineItemTypeLabel(li.type) || "N/A"}
+                          {normalizeBudgetTypeLabel(li.type, li.label)}
                         </span>
                       )}
                     </td>
@@ -1274,6 +1426,16 @@ export function BudgetActivityTab({
         grantNameById={grantNameById}
         lineItemLookup={lineItemLookup}
         customerNameById={customerNameById}
+      />
+
+      <GrantBudgetSandboxModal
+        isOpen={sandboxOpen}
+        onClose={() => setSandboxOpen(false)}
+        grantId={grantId ?? ""}
+        grantName={String(model?.name || grantId || "Grant")}
+        seedRows={sandboxSeedRows}
+        lineItems={sandboxLineItems}
+        currency={currency}
       />
     </div>
   );

@@ -1,0 +1,855 @@
+"use client";
+
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Modal } from "@entities/ui/Modal";
+import { fmtMDY, safeISODate10, toISODate } from "@lib/date";
+
+type SortDirection = "asc" | "desc";
+type SandboxScale = "tight" | "compact" | "regular" | "large";
+type SandboxSortKey = "date" | "amount" | "customer" | "lineItem" | "type" | "note" | "sourceStatus" | "sandboxChange";
+type SandboxRowState = "clean" | "changed" | "new" | "deleted";
+type EditableField = "date" | "amountCents" | "customerLabel" | "lineItemId" | "budgetTypeLabel" | "noteText";
+
+export type GrantBudgetSandboxSeedRow = {
+  sourceId: string;
+  sourceKind: string;
+  grantId: string;
+  lineItemId: string;
+  date: string;
+  amountCents: number;
+  customerLabel: string;
+  budgetTypeLabel: string;
+  noteText: string;
+  statusLabel: string;
+};
+
+export type GrantBudgetSandboxLineItem = {
+  id: string;
+  label: string;
+  typeLabel: string;
+  budgetCents: number;
+};
+
+type SandboxRow = GrantBudgetSandboxSeedRow & {
+  sandboxId: string;
+  rowState: SandboxRowState;
+  original: GrantBudgetSandboxSeedRow;
+};
+
+type BlankDraft = {
+  date: string;
+  amount: string;
+  customerLabel: string;
+  lineItemId: string;
+  budgetTypeLabel: string;
+  noteText: string;
+};
+
+type ContextMenuState = {
+  x: number;
+  y: number;
+  rowId: string;
+};
+
+const EMPTY_DRAFT: BlankDraft = {
+  date: "",
+  amount: "",
+  customerLabel: "",
+  lineItemId: "",
+  budgetTypeLabel: "",
+  noteText: "",
+};
+
+const SCALE_ORDER: SandboxScale[] = ["tight", "compact", "regular", "large"];
+const SCALE_CONFIG: Record<SandboxScale, {
+  label: string;
+  table: string;
+  cell: string;
+  header: string;
+  input: string;
+  badge: string;
+}> = {
+  tight: {
+    label: "Tight",
+    table: "text-[11px]",
+    cell: "px-1.5 py-0.5",
+    header: "px-1.5 py-1",
+    input: "h-6 text-[11px]",
+    badge: "text-[9px]",
+  },
+  compact: {
+    label: "Compact",
+    table: "text-xs",
+    cell: "px-2 py-1",
+    header: "px-2 py-1",
+    input: "h-7 text-xs",
+    badge: "text-[10px]",
+  },
+  regular: {
+    label: "Regular",
+    table: "text-sm",
+    cell: "px-2.5 py-1.5",
+    header: "px-2.5 py-1.5",
+    input: "h-8 text-sm",
+    badge: "text-[11px]",
+  },
+  large: {
+    label: "Large",
+    table: "text-base",
+    cell: "px-3 py-2",
+    header: "px-3 py-2",
+    input: "h-9 text-sm",
+    badge: "text-xs",
+  },
+};
+
+function compareText(a: unknown, b: unknown) {
+  return String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function applyDirection(value: number, direction: SortDirection) {
+  return direction === "asc" ? value : -value;
+}
+
+function centsFromAmountInput(value: string) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+function amountInputFromCents(value: number) {
+  return (Math.round(value) / 100).toFixed(2);
+}
+
+function normalizeDate(value: string) {
+  const iso = safeISODate10(value);
+  if (iso) return iso;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : toISODate(date);
+}
+
+function rowSearchText(row: SandboxRow, lineItemLabel: string) {
+  return [
+    row.customerLabel,
+    row.budgetTypeLabel,
+    row.noteText,
+    lineItemLabel,
+    row.statusLabel,
+    row.sourceKind,
+  ].join(" ");
+}
+
+function hasDraftValue(draft: BlankDraft) {
+  return Boolean(
+    draft.date ||
+    draft.amount ||
+    draft.customerLabel.trim() ||
+    draft.lineItemId ||
+    draft.budgetTypeLabel.trim() ||
+    draft.noteText.trim(),
+  );
+}
+
+function seedRows(rows: GrantBudgetSandboxSeedRow[]): SandboxRow[] {
+  return rows.map((row, index) => ({
+    ...row,
+    sandboxId: `seed:${row.sourceId || index}`,
+    rowState: "clean",
+    original: { ...row },
+  }));
+}
+
+function isChanged(row: SandboxRow) {
+  return (
+    row.date !== row.original.date ||
+    row.amountCents !== row.original.amountCents ||
+    row.customerLabel !== row.original.customerLabel ||
+    row.lineItemId !== row.original.lineItemId ||
+    row.budgetTypeLabel !== row.original.budgetTypeLabel ||
+    row.noteText !== row.original.noteText
+  );
+}
+
+function sumRowAmounts(rows: SandboxRow[] | GrantBudgetSandboxSeedRow[], lineItemId?: string) {
+  return rows.reduce((sum, row) => {
+    if (lineItemId && row.lineItemId !== lineItemId) return sum;
+    if ("rowState" in row && row.rowState === "deleted") return sum;
+    return sum + row.amountCents;
+  }, 0);
+}
+
+function rowStateLabel(state: SandboxRowState) {
+  return state === "clean" ? "Clean" : state === "changed" ? "Edited" : state === "new" ? "Added" : "Removed";
+}
+
+function deltaClass(value: number) {
+  return value >= 0 ? "text-emerald-600" : "text-red-600";
+}
+
+function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: GrantBudgetSandboxLineItem[]) {
+  const loadScenario = useCallback(() => seedRows(seed), [seed]);
+  const [rows, setRows] = useState<SandboxRow[]>(() => loadScenario());
+
+  useEffect(() => {
+    setRows(loadScenario());
+  }, [loadScenario]);
+
+  const lineItemById = useMemo(() => new Map(lineItems.map((item) => [item.id, item])), [lineItems]);
+
+  const updateRow = useCallback((sandboxId: string, patch: Partial<Pick<SandboxRow, EditableField>>) => {
+    setRows((current) => current.map((row) => {
+      if (row.sandboxId !== sandboxId) return row;
+      const next = { ...row, ...patch };
+      return {
+        ...next,
+        rowState: row.rowState === "deleted" ? "deleted" : row.rowState === "new" ? "new" : isChanged(next) ? "changed" : "clean",
+      };
+    }));
+  }, []);
+
+  const addBlankRow = useCallback((draft: Partial<BlankDraft> = {}) => {
+    const lineItemId = String(draft.lineItemId || "").trim();
+    const lineItem = lineItemById.get(lineItemId);
+    const date = normalizeDate(String(draft.date || "")) || toISODate(new Date());
+    const amountCents = centsFromAmountInput(String(draft.amount || "0"));
+    const now = Date.now().toString(36);
+    const row: SandboxRow = {
+      sandboxId: `new:${now}:${Math.random().toString(36).slice(2, 7)}`,
+      sourceId: "",
+      sourceKind: "sandbox",
+      grantId: "",
+      lineItemId,
+      date,
+      amountCents,
+      customerLabel: String(draft.customerLabel || "").trim(),
+      budgetTypeLabel: String(draft.budgetTypeLabel || lineItem?.typeLabel || "").trim() || "N/A",
+      noteText: String(draft.noteText || "").trim(),
+      statusLabel: "New",
+      rowState: "new",
+      original: {
+        sourceId: "",
+        sourceKind: "sandbox",
+        grantId: "",
+        lineItemId,
+        date,
+        amountCents: 0,
+        customerLabel: "",
+        budgetTypeLabel: "N/A",
+        noteText: "",
+        statusLabel: "New",
+      },
+    };
+    setRows((current) => [...current, row]);
+  }, [lineItemById]);
+
+  const duplicateRow = useCallback((sandboxId: string) => {
+    setRows((current) => {
+      const source = current.find((row) => row.sandboxId === sandboxId);
+      if (!source) return current;
+      const duplicate: SandboxRow = {
+        ...source,
+        sandboxId: `dup:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`,
+        sourceId: source.sourceId,
+        sourceKind: source.sourceKind,
+        rowState: "new",
+        statusLabel: "New",
+        original: {
+          ...source.original,
+          sourceId: "",
+          sourceKind: "sandbox",
+          amountCents: 0,
+          date: source.date,
+          statusLabel: "New",
+        },
+      };
+      const sourceIndex = current.findIndex((row) => row.sandboxId === sandboxId);
+      return [
+        ...current.slice(0, sourceIndex + 1),
+        duplicate,
+        ...current.slice(sourceIndex + 1),
+      ];
+    });
+  }, []);
+
+  const removeRow = useCallback((sandboxId: string) => {
+    setRows((current) => current.flatMap((row) => {
+      if (row.sandboxId !== sandboxId) return [row];
+      if (row.rowState === "new") return [];
+      return [{ ...row, rowState: "deleted" }];
+    }));
+  }, []);
+
+  const restoreRow = useCallback((sandboxId: string) => {
+    setRows((current) => current.map((row) => {
+      if (row.sandboxId !== sandboxId) return row;
+      if (!row.sourceId) return { ...row, rowState: "new" };
+      const next = { ...row, rowState: "clean" as SandboxRowState };
+      return { ...next, rowState: isChanged(next) ? "changed" : "clean" };
+    }));
+  }, []);
+
+  const resetScenario = useCallback(() => {
+    setRows(loadScenario());
+  }, [loadScenario]);
+
+  return { rows, updateRow, duplicateRow, addBlankRow, removeRow, restoreRow, resetScenario };
+}
+
+function SandboxContextMenu({
+  menu,
+  row,
+  showDeleted,
+  onDuplicate,
+  onAddBlank,
+  onRemove,
+  onRestore,
+  onClose,
+}: {
+  menu: ContextMenuState;
+  row: SandboxRow | null;
+  showDeleted: boolean;
+  onDuplicate: (rowId: string) => void;
+  onAddBlank: () => void;
+  onRemove: (rowId: string) => void;
+  onRestore: (rowId: string) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onDoc = () => onClose();
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [onClose]);
+
+  if (!row) return null;
+  const buttonClass = "block w-full px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700";
+
+  return (
+    <div
+      className="fixed z-[1600] min-w-[180px] rounded-md border border-slate-200 bg-white py-1 shadow-xl"
+      style={{ top: menu.y, left: menu.x }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      <button type="button" className={buttonClass} onClick={() => { onDuplicate(row.sandboxId); onClose(); }}>
+        Duplicate Row
+      </button>
+      <button type="button" className={buttonClass} onClick={() => { onAddBlank(); onClose(); }}>
+        Add Blank Row
+      </button>
+      {row.rowState === "deleted" && showDeleted ? (
+        <button type="button" className={buttonClass} onClick={() => { onRestore(row.sandboxId); onClose(); }}>
+          Restore Row
+        </button>
+      ) : (
+        <button type="button" className={`${buttonClass} text-red-600 hover:text-red-700`} onClick={() => { onRemove(row.sandboxId); onClose(); }}>
+          Remove Row
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function GrantBudgetSandboxModal({
+  isOpen,
+  onClose,
+  grantId,
+  grantName,
+  seedRows: seed,
+  lineItems,
+  currency,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  grantId: string;
+  grantName: string;
+  seedRows: GrantBudgetSandboxSeedRow[];
+  lineItems: GrantBudgetSandboxLineItem[];
+  currency: (n: number) => string;
+}) {
+  const { rows, updateRow, duplicateRow, addBlankRow, removeRow, restoreRow, resetScenario } = useLocalSandboxScenario(seed, lineItems);
+  const [lineItemFilter, setLineItemFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const deferredSearch = React.useDeferredValue(search);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [sort, setSort] = useState<{ key: SandboxSortKey; direction: SortDirection }>({ key: "date", direction: "desc" });
+  const [scale, setScale] = useState<SandboxScale>("compact");
+  const [editingCell, setEditingCell] = useState<{ rowId: string; field: EditableField; value: string } | null>(null);
+  const [blankDraft, setBlankDraft] = useState<BlankDraft>(EMPTY_DRAFT);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const blankRowRef = React.useRef<HTMLTableRowElement | null>(null);
+  const blankFirstInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setLineItemFilter("all");
+    setSearch("");
+    setShowDeleted(false);
+    setSort({ key: "date", direction: "desc" });
+    setScale("compact");
+    setEditingCell(null);
+    setBlankDraft(EMPTY_DRAFT);
+    setContextMenu(null);
+    resetScenario();
+  }, [isOpen, resetScenario]);
+
+  const lineItemById = useMemo(() => new Map(lineItems.map((item) => [item.id, item])), [lineItems]);
+  const contextRow = useMemo(() => rows.find((row) => row.sandboxId === contextMenu?.rowId) ?? null, [contextMenu?.rowId, rows]);
+
+  const originalTotalCents = useMemo(
+    () => seed.reduce((sum, row) => sum + row.amountCents, 0),
+    [seed],
+  );
+
+  const visibleRows = useMemo(() => {
+    const normalizedSearch = normalizeText(deferredSearch);
+    return rows
+      .filter((row) => {
+        if (!showDeleted && row.rowState === "deleted") return false;
+        if (lineItemFilter !== "all" && row.lineItemId !== lineItemFilter) return false;
+        if (!normalizedSearch) return true;
+        const lineItemLabel = lineItemById.get(row.lineItemId)?.label || "";
+        return normalizeText(rowSearchText(row, lineItemLabel)).includes(normalizedSearch);
+      })
+      .sort((a, b) => {
+        const aLine = lineItemById.get(a.lineItemId)?.label || a.lineItemId;
+        const bLine = lineItemById.get(b.lineItemId)?.label || b.lineItemId;
+        const result =
+          sort.key === "date" ? compareText(a.date, b.date)
+          : sort.key === "amount" ? a.amountCents - b.amountCents
+          : sort.key === "customer" ? compareText(a.customerLabel, b.customerLabel)
+          : sort.key === "lineItem" ? compareText(aLine, bLine)
+          : sort.key === "type" ? compareText(a.budgetTypeLabel, b.budgetTypeLabel)
+          : sort.key === "note" ? compareText(a.noteText, b.noteText)
+          : sort.key === "sourceStatus" ? compareText(a.statusLabel, b.statusLabel)
+          : compareText(a.rowState, b.rowState);
+        return applyDirection(result, sort.direction);
+      });
+  }, [deferredSearch, lineItemById, lineItemFilter, rows, showDeleted, sort.direction, sort.key]);
+
+  const sandboxTotalCents = useMemo(
+    () => sumRowAmounts(rows),
+    [rows],
+  );
+  const deltaCents = sandboxTotalCents - originalTotalCents;
+  const pendingChangeCount = rows.filter((row) => row.rowState !== "clean").length;
+  const scaleConfig = SCALE_CONFIG[scale];
+  const totalBudgetCents = useMemo(
+    () => lineItems.reduce((sum, item) => sum + item.budgetCents, 0),
+    [lineItems],
+  );
+  const budgetSummaryRows = useMemo(() => {
+    return lineItems
+      .filter((item) => lineItemFilter === "all" || item.id === lineItemFilter)
+      .map((item) => {
+        const originalSpendCents = sumRowAmounts(seed, item.id);
+        const sandboxSpendCents = sumRowAmounts(rows, item.id);
+        return {
+          id: item.id,
+          label: item.label,
+          typeLabel: item.typeLabel,
+          budgetCents: item.budgetCents,
+          originalSpendCents,
+          sandboxSpendCents,
+          spendDeltaCents: sandboxSpendCents - originalSpendCents,
+          originalRemainingCents: item.budgetCents - originalSpendCents,
+          sandboxRemainingCents: item.budgetCents - sandboxSpendCents,
+        };
+      });
+  }, [lineItemFilter, lineItems, rows, seed]);
+
+  const toggleSort = useCallback((key: SandboxSortKey) => {
+    setSort((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  }, []);
+
+  const adjustScale = useCallback((direction: -1 | 1) => {
+    setScale((current) => {
+      const index = SCALE_ORDER.indexOf(current);
+      const nextIndex = Math.min(SCALE_ORDER.length - 1, Math.max(0, index + direction));
+      return SCALE_ORDER[nextIndex] || "compact";
+    });
+  }, []);
+
+  const startEdit = useCallback((row: SandboxRow, field: EditableField) => {
+    const value = field === "amountCents" ? amountInputFromCents(row.amountCents) : String(row[field] || "");
+    setEditingCell({ rowId: row.sandboxId, field, value });
+  }, []);
+
+  const commitEdit = useCallback(() => {
+    if (!editingCell) return;
+    const field = editingCell.field;
+    const value = editingCell.value;
+    if (field === "amountCents") updateRow(editingCell.rowId, { amountCents: centsFromAmountInput(value) });
+    else if (field === "date") updateRow(editingCell.rowId, { date: normalizeDate(value) });
+    else updateRow(editingCell.rowId, { [field]: value } as Partial<Pick<SandboxRow, EditableField>>);
+    setEditingCell(null);
+  }, [editingCell, updateRow]);
+
+  const cancelEdit = useCallback(() => setEditingCell(null), []);
+
+  const onEditKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitEdit();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelEdit();
+    }
+  };
+
+  const updateBlankDraft = (patch: Partial<BlankDraft>) => {
+    setBlankDraft((current) => {
+      const next = { ...current, ...patch };
+      if (patch.lineItemId) {
+        const lineItem = lineItemById.get(patch.lineItemId);
+        if (lineItem && !next.budgetTypeLabel) next.budgetTypeLabel = lineItem.typeLabel;
+      }
+      return next;
+    });
+  };
+
+  const commitBlankDraft = () => {
+    if (!hasDraftValue(blankDraft)) return;
+    addBlankRow(blankDraft);
+    setBlankDraft(EMPTY_DRAFT);
+  };
+
+  const handleBlankBlur = () => {
+    window.setTimeout(() => {
+      if (!blankRowRef.current?.contains(document.activeElement)) commitBlankDraft();
+    }, 0);
+  };
+
+  const handleBlankKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitBlankDraft();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setBlankDraft(EMPTY_DRAFT);
+    }
+  };
+
+  const focusBlankRow = useCallback(() => {
+    blankFirstInputRef.current?.focus();
+  }, []);
+
+  const openRowContextMenu = useCallback((e: React.MouseEvent, rowId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, rowId });
+  }, []);
+
+  const headerButton = (key: SandboxSortKey, label: string, className = "") => (
+    <button type="button" className={`w-full text-left ${className}`} onClick={() => toggleSort(key)}>
+      {label}
+    </button>
+  );
+
+  const renderEditableCell = (row: SandboxRow, field: EditableField, display: React.ReactNode, className = "") => {
+    const active = editingCell?.rowId === row.sandboxId && editingCell.field === field;
+    const editable = field === "date" || field === "amountCents" || field === "noteText" || row.rowState === "new";
+    if (active) {
+      if (field === "lineItemId") {
+        return (
+          <select
+            className={`input min-w-36 ${scaleConfig.input}`}
+            value={editingCell.value}
+            onChange={(e) => {
+              const lineItem = lineItemById.get(e.currentTarget.value);
+              setEditingCell((current) => current ? { ...current, value: e.currentTarget.value } : current);
+              if (lineItem) updateRow(row.sandboxId, { budgetTypeLabel: lineItem.typeLabel });
+            }}
+            onBlur={commitEdit}
+            onKeyDown={onEditKeyDown}
+            autoFocus
+          >
+            <option value="">Unassigned</option>
+            {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        );
+      }
+      return (
+        <input
+          className={`input ${scaleConfig.input} ${field === "amountCents" ? "w-24 text-right" : "min-w-28"}`}
+          type={field === "date" ? "date" : field === "amountCents" ? "number" : "text"}
+          value={editingCell.value}
+          onChange={(e) => setEditingCell((current) => current ? { ...current, value: e.currentTarget.value } : current)}
+          onBlur={commitEdit}
+          onKeyDown={onEditKeyDown}
+          autoFocus
+        />
+      );
+    }
+    return (
+      <button
+        type="button"
+        className={`block w-full truncate text-left ${className} ${editable ? "cursor-text" : "cursor-default"}`}
+        onDoubleClick={() => {
+          if (editable) startEdit(row, field);
+        }}
+        title={editable ? "Double-click to edit" : undefined}
+      >
+        {display}
+      </button>
+    );
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      widthClass="max-w-[96vw]"
+      title={<span>Budget Sandbox{grantName ? ` - ${grantName}` : ""}</span>}
+      footer={
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="text-xs text-slate-500">
+            Local scratch only. {pendingChangeCount} pending change{pendingChangeCount === 1 ? "" : "s"}.
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={resetScenario}>Undo All Changes</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-3" data-grant-id={grantId}>
+        <div className="grid gap-2 lg:grid-cols-[180px_minmax(180px,1fr)_auto_auto_auto]">
+          <select className="input h-9 text-sm" value={lineItemFilter} onChange={(e) => setLineItemFilter(e.currentTarget.value)}>
+            <option value="all">All line items</option>
+            {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <input
+            className="input h-9 text-sm"
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            placeholder="Search customer, type, note..."
+          />
+          <label className="flex h-9 items-center gap-2 whitespace-nowrap rounded-md border border-slate-200 px-3 text-xs font-medium text-slate-600">
+            <input type="checkbox" className="h-3.5 w-3.5 accent-sky-600" checked={showDeleted} onChange={(e) => setShowDeleted(e.currentTarget.checked)} />
+            Show Removed Rows
+          </label>
+          <div className="flex h-9 items-center overflow-hidden rounded-md border border-slate-200 text-xs font-medium text-slate-600">
+            <button
+              type="button"
+              className="h-full px-2.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+              onClick={() => adjustScale(-1)}
+              disabled={scale === SCALE_ORDER[0]}
+              title="Smaller rows"
+            >
+              -
+            </button>
+            <div className="min-w-16 border-x border-slate-200 px-2 text-center">{scaleConfig.label}</div>
+            <button
+              type="button"
+              className="h-full px-2.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+              onClick={() => adjustScale(1)}
+              disabled={scale === SCALE_ORDER[SCALE_ORDER.length - 1]}
+              title="Larger rows"
+            >
+              +
+            </button>
+          </div>
+          <div className="grid min-w-[360px] grid-cols-3 overflow-hidden rounded-md border border-slate-200 text-xs">
+            <div className="px-3 py-1.5">
+              <div className="text-slate-400">Original</div>
+              <div className="font-semibold text-slate-800">{currency(originalTotalCents / 100)}</div>
+            </div>
+            <div className="border-l border-slate-200 px-3 py-1.5">
+              <div className="text-slate-400">Sandbox</div>
+              <div className="font-semibold text-slate-800">{currency(sandboxTotalCents / 100)}</div>
+            </div>
+            <div className="border-l border-slate-200 px-3 py-1.5">
+              <div className="text-slate-400">Delta</div>
+              <div className={`font-semibold ${deltaClass(deltaCents)}`}>{currency(deltaCents / 100)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-h-[68vh] overflow-auto rounded-lg border border-slate-200">
+          <table className={`w-full border-separate ${scaleConfig.table}`} style={{ borderSpacing: 0 }}>
+            <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500">
+              <tr>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("date", "Date")}</th>
+                <th className={`${scaleConfig.header} text-right font-medium`}>{headerButton("amount", "Amount", "text-right")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("customer", "Customer")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("lineItem", "Line Item")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("type", "Type")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("note", "Note")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("sourceStatus", "Source Status")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("sandboxChange", "Sandbox Change")}</th>
+              </tr>
+            </thead>
+            <tbody
+              onContextMenu={(e) => {
+                const target = e.target as HTMLElement | null;
+                const rowEl = target?.closest("[data-sandbox-row-id]") as HTMLElement | null;
+                if (!rowEl) return;
+                openRowContextMenu(e, rowEl.dataset.sandboxRowId || "");
+              }}
+            >
+              {visibleRows.map((row) => {
+                const lineItem = lineItemById.get(row.lineItemId);
+                const rowClass =
+                  row.rowState === "deleted" ? "bg-slate-50 text-slate-400 line-through opacity-70"
+                  : row.rowState === "changed" || row.rowState === "new" ? "bg-yellow-50 hover:bg-yellow-100/70"
+                  : "hover:bg-slate-50";
+                return (
+                  <tr
+                    key={row.sandboxId}
+                    data-sandbox-row-id={row.sandboxId}
+                    className={`border-b border-slate-100 transition-colors ${rowClass}`}
+                  >
+                    <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "date", row.date ? fmtMDY(row.date) : "-")}</td>
+                    <td className={`w-28 border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{renderEditableCell(row, "amountCents", currency(row.amountCents / 100), "text-right font-mono")}</td>
+                    <td className={`max-w-[180px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "customerLabel", row.customerLabel || "-")}</td>
+                    <td className={`max-w-[190px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "lineItemId", lineItem?.label || "Unassigned")}</td>
+                    <td className={`max-w-[150px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "budgetTypeLabel", row.budgetTypeLabel || "N/A")}</td>
+                    <td className={`max-w-[260px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "noteText", row.noteText || "-")}</td>
+                    <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>
+                      <span className={`rounded bg-slate-100 px-1.5 py-0.5 font-semibold uppercase text-slate-600 ${scaleConfig.badge}`}>
+                        {row.statusLabel}
+                      </span>
+                    </td>
+                    <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>
+                      <span className={`rounded bg-slate-100 px-1.5 py-0.5 font-semibold uppercase text-slate-600 ${scaleConfig.badge}`}>
+                        {rowStateLabel(row.rowState)}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-white" ref={blankRowRef}>
+                <td className={scaleConfig.cell}><input ref={blankFirstInputRef} className={`input w-28 ${scaleConfig.input}`} type="date" value={blankDraft.date} onChange={(e) => updateBlankDraft({ date: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={scaleConfig.cell}><input className={`input w-24 text-right ${scaleConfig.input}`} type="number" placeholder="0.00" value={blankDraft.amount} onChange={(e) => updateBlankDraft({ amount: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={scaleConfig.cell}><input className={`input min-w-36 ${scaleConfig.input}`} placeholder="Customer" value={blankDraft.customerLabel} onChange={(e) => updateBlankDraft({ customerLabel: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={scaleConfig.cell}>
+                  <select className={`input min-w-36 ${scaleConfig.input}`} value={blankDraft.lineItemId} onChange={(e) => updateBlankDraft({ lineItemId: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown}>
+                    <option value="">Unassigned</option>
+                    {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </td>
+                <td className={scaleConfig.cell}><input className={`input min-w-28 ${scaleConfig.input}`} placeholder="Type" value={blankDraft.budgetTypeLabel} onChange={(e) => updateBlankDraft({ budgetTypeLabel: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={scaleConfig.cell}><input className={`input min-w-44 ${scaleConfig.input}`} placeholder="Note" value={blankDraft.noteText} onChange={(e) => updateBlankDraft({ noteText: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>Draft</td>
+                <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>Blank</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-500">Budget Summary</div>
+              <div className="text-xs text-slate-500">
+                {lineItemFilter === "all" ? "All line items" : lineItemById.get(lineItemFilter)?.label || "Selected line item"}
+              </div>
+            </div>
+            {lineItemFilter === "all" && (
+              <div className="grid min-w-[560px] grid-cols-5 gap-3 text-right text-xs">
+                <div>
+                  <div className="text-slate-400">Total Budget</div>
+                  <div className="font-semibold text-slate-800">{currency(totalBudgetCents / 100)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Original Spend</div>
+                  <div className="font-semibold text-slate-800">{currency(originalTotalCents / 100)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Sandbox Spend</div>
+                  <div className="font-semibold text-slate-800">{currency(sandboxTotalCents / 100)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Spend Delta</div>
+                  <div className={`font-semibold ${deltaClass(deltaCents)}`}>{currency(deltaCents / 100)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Left Delta</div>
+                  <div className={`font-semibold ${deltaClass(-deltaCents)}`}>{currency(-deltaCents / 100)}</div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="max-h-52 overflow-auto">
+            <table className={`w-full border-separate ${scaleConfig.table}`} style={{ borderSpacing: 0 }}>
+              <thead className="sticky top-0 bg-white text-slate-500">
+                <tr>
+                  <th className={`border-b border-slate-100 text-left font-medium ${scaleConfig.header}`}>Line Item</th>
+                  <th className={`border-b border-slate-100 text-left font-medium ${scaleConfig.header}`}>Type</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Budget</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Original Spend</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Sandbox Spend</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Spend Delta</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Original Left</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Sandbox Left</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Left Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {budgetSummaryRows.map((item) => {
+                  const remainingDeltaCents = item.sandboxRemainingCents - item.originalRemainingCents;
+                  return (
+                    <tr key={item.id} className="hover:bg-slate-50">
+                      <td className={`max-w-[220px] border-b border-slate-100 font-medium text-slate-800 ${scaleConfig.cell}`}>
+                        <span className="block truncate" title={item.label}>{item.label}</span>
+                      </td>
+                      <td className={`max-w-[140px] border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>
+                        <span className="block truncate" title={item.typeLabel}>{item.typeLabel}</span>
+                      </td>
+                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.budgetCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.originalSpendCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.sandboxSpendCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono font-semibold ${scaleConfig.cell} ${deltaClass(item.spendDeltaCents)}`}>{currency(item.spendDeltaCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.originalRemainingCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.sandboxRemainingCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono font-semibold ${scaleConfig.cell} ${deltaClass(remainingDeltaCents)}`}>{currency(remainingDeltaCents / 100)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {contextMenu && (
+        <SandboxContextMenu
+          menu={contextMenu}
+          row={contextRow}
+          showDeleted={showDeleted}
+          onDuplicate={duplicateRow}
+          onAddBlank={focusBlankRow}
+          onRemove={removeRow}
+          onRestore={restoreRow}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+    </Modal>
+  );
+}
+
+export default GrantBudgetSandboxModal;
