@@ -46,6 +46,12 @@ export const ORG_CONFIG_DEFAULTS = [
     kind: "email_template",
     defaults: { schemaVersion: 1, subject: "", bodyText: "", bodyHtml: "", placeholders: [] },
   },
+  {
+    id: "RentalAssistanceEmailTemplate",
+    label: "Rental Assistance Email Template",
+    kind: "email_template",
+    defaults: { schemaVersion: 1, subject: "", bodyText: "", bodyHtml: "", placeholders: [] },
+  },
 ] as const;
 
 export type OrgConfigId = typeof ORG_CONFIG_DEFAULTS[number]["id"];

@@ -57,11 +57,13 @@ export const orgGet = secureHandler(
 
     requireOrgAccess(caller, orgId);
 
-    const org = await readOrgWithConfig(orgId);
+    let org = await readOrgWithConfig(orgId);
     if (!org) {
       res.status(404).json({ ok: false, error: "org_not_found" });
       return;
     }
+    await ensureOrgConfigDefaults(db.collection("orgs").doc(orgId), orgId);
+    org = await readOrgWithConfig(orgId);
     res.status(200).json({ ok: true, org });
   },
   { auth: "viewer", methods: ["GET", "OPTIONS"] }
