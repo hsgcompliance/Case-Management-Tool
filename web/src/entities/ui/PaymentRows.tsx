@@ -2,6 +2,7 @@
 
 import React from "react";
 import type { TEnrollment, TGrant, TPayment } from "@types";
+import { paymentTypeLabel, PaymentTypeBadge } from "@entities/payments/PaymentTypeLabel";
 import {
   SmartRowHeader,
   filterRows,
@@ -94,6 +95,7 @@ type PaymentRowsTableColumn =
   | "enrollment"
   | "grant"
   | "lineItem"
+  | "paymentType"
   | "amount"
   | "vendor"
   | "paid"
@@ -194,14 +196,6 @@ function lineItemsFromGrant(grant?: Record<string, unknown> | null): Record<stri
   return Object.fromEntries(out);
 }
 
-function paymentTypeLabel(payment: Record<string, unknown>): string {
-  const type = text(payment.type, "payment").toLowerCase();
-  if (type !== "monthly") return type;
-  const note = notesText(payment.note).toLowerCase();
-  if (note.includes("utility")) return "monthly utility";
-  if (note.includes("rent")) return "monthly rent";
-  return "monthly";
-}
 
 function editableFlags(payment: Record<string, unknown>): PaymentRowsEditableFlags {
   const paid = Boolean(payment.paid);
@@ -300,7 +294,7 @@ export function buildPaymentRows(args: BuildPaymentRowsArgs): PaymentRowsRow[] {
         amount,
         amountCents: cents(amount),
         vendor: text(payment.vendor),
-        notes: notesText(payment.note || payment.comment),
+        notes: notesText(payment.comment),
         paid,
         paidStatus: voided ? "void" : paid ? "paid" : "unpaid",
         complianceStatus: text(compliance.status),
@@ -404,6 +398,7 @@ export function getPaymentRowsColumnValue(
   if (col === "enrollment") return part === "id" ? row.enrollmentId : row.enrollmentLabel;
   if (col === "grant") return part === "id" ? row.grantId : row.grantName;
   if (col === "lineItem") return part === "id" ? row.lineItemId : row.lineItemName;
+  if (col === "paymentType") return row.paymentType;
   if (col === "amount") return row.amount;
   if (col === "vendor") return row.vendor;
   if (col === "paid") return row.paidStatus;
@@ -416,6 +411,7 @@ function columnLabel(column: PaymentRowsTableColumn): string {
   if (column === "dueDate") return "Due Date";
   if (column === "customer") return "Household";
   if (column === "lineItem") return "Line Item";
+  if (column === "paymentType") return "Type";
   return column.charAt(0).toUpperCase() + column.slice(1);
 }
 
@@ -507,6 +503,7 @@ export function PaymentRowsTable({
                 {columns.includes("enrollment") ? <td className={`${cellPad} border-b border-slate-100 dark:border-slate-800`}>{row.enrollmentLabel}</td> : null}
                 {columns.includes("grant") ? <td className={`${cellPad} border-b border-slate-100 dark:border-slate-800`}>{row.grantName}</td> : null}
                 {columns.includes("lineItem") ? <td className={`${cellPad} border-b border-slate-100 dark:border-slate-800`}>{row.lineItemName || "Unassigned"}</td> : null}
+                {columns.includes("paymentType") ? <td className={`${cellPad} border-b border-slate-100 dark:border-slate-800`}><PaymentTypeBadge payment={row.rawPayment as { type?: string; note?: string | string[] }} /></td> : null}
                 {columns.includes("amount") ? <td className={`${cellPad} border-b border-slate-100 text-right tabular-nums dark:border-slate-800`}>{money(row.amount)}</td> : null}
                 {columns.includes("vendor") ? <td className={`${cellPad} border-b border-slate-100 dark:border-slate-800`}>{row.vendor || "-"}</td> : null}
                 {columns.includes("paid") ? (

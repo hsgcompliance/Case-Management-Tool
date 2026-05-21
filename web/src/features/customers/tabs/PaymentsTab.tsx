@@ -57,6 +57,14 @@ function paymentTypeKey(p: TPayment): string {
   return isUtility ? "monthly:utility" : "monthly:rent";
 }
 
+const BY_TYPE_LABELS: Record<string, string> = {
+  "monthly:rent": "Rent",
+  "monthly:utility": "Utility",
+  "deposit": "Deposit",
+  "prorated": "Pro-Rated",
+  "service": "Support Service",
+};
+
 function grantBudgetTotal(grant: unknown): number {
   const g = grant && typeof grant === "object" ? (grant as Record<string, unknown>) : {};
   const budget = g.budget && typeof g.budget === "object" ? (g.budget as Record<string, unknown>) : {};
@@ -570,7 +578,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           {([
             { title: "By Line Item", rows: byLineItem.map((r) => ({ label: r.key, ...r })) },
             { title: "By Enrollment", rows: byEnrollment.map((r) => ({ ...r, label: r.label })) },
-            { title: "By Type", rows: byType.map((r) => ({ label: r.key, ...r })) },
+            { title: "By Type", rows: byType.map((r) => ({ label: BY_TYPE_LABELS[r.key] ?? r.key, ...r })) },
           ] as const).map((section) => (
             <div key={section.title} className="rounded border border-slate-200">
               <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">

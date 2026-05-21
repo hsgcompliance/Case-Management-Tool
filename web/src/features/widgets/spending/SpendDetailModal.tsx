@@ -43,6 +43,7 @@ import {
   buildNormalizedAnswerFields,
   stageLabelFromQueueSource,
 } from "@widgets/jotform/jotformSubmissionView";
+import { paymentTypeLabel, PaymentTypeChip, paymentNoteMeta } from "@entities/payments/PaymentTypeLabel";
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror SpendingTool internals without importing them)
@@ -147,36 +148,6 @@ type PaymentRecord = TPayment & {
 
 const PAYMENT_TYPES: TPayment["type"][] = ["monthly", "deposit", "prorated", "service"];
 
-function paymentTypeLabel(type: unknown): string {
-  const s = String(type || "").trim().toLowerCase();
-  if (s === "monthly") return "Monthly";
-  if (s === "deposit") return "Deposit";
-  if (s === "prorated") return "Prorated";
-  if (s === "service") return "Service";
-  return s || "-";
-}
-
-function normalizePaymentNote(note: unknown): string {
-  if (Array.isArray(note)) return note.map((item) => String(item ?? "").trim()).filter(Boolean).join("\n");
-  return String(note ?? "").trim();
-}
-
-function uniqueLines(...values: unknown[]): string {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const text = normalizePaymentNote(value);
-    if (!text) continue;
-    for (const line of text.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      const key = trimmed.toLowerCase();
-      if (!trimmed || seen.has(key)) continue;
-      seen.add(key);
-      out.push(trimmed);
-    }
-  }
-  return out.join("\n");
-}
 
 function paymentDueDate(payment: PaymentRecord | null | undefined, fallback = ""): string {
   const raw = String(payment?.dueDate || (payment as Record<string, unknown> | null | undefined)?.date || fallback || "");
@@ -193,18 +164,6 @@ function paymentVendor(payment: PaymentRecord | null, row: SpendRow): string {
   ).trim();
 }
 
-function paymentNoteComment(payment: PaymentRecord | null, row: SpendRow): string {
-  return uniqueLines(
-    payment?.note,
-    payment?.comment,
-    row.paymentQueueItem?.note,
-    row.paymentQueueItem?.notes,
-    row.paymentQueueItem?.description,
-    row.ledgerEntry?.note,
-    row.ledgerEntry?.comment,
-    row.ledgerEntry?.description,
-  );
-}
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -627,18 +586,24 @@ function EnrollmentPaymentFacts({
   row: SpendRow;
 }) {
   const vendor = paymentVendor(payment, row);
-  const noteComment = paymentNoteComment(payment, row);
-  const type = paymentTypeLabel(payment?.type || asObject(row.ledgerEntry?.paymentSnapshot).type);
+  const comment = String(payment?.comment ?? "").trim();
+  const noteMeta = paymentNoteMeta(payment?.note);
+  const paymentForType = payment ?? { type: asObject(row.ledgerEntry?.paymentSnapshot).type as string };
 
-  if (!vendor && !noteComment && (!type || type === "-")) return null;
+  if (!vendor && !comment && !noteMeta) return null;
 
   return (
     <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm md:grid-cols-3">
-      {type && type !== "-" ? <SummaryItem label="Type" value={type} /> : null}
+      <SummaryItem label="Type" value={<PaymentTypeChip payment={paymentForType} />} />
       {vendor ? <SummaryItem label="Vendor / Merchant" value={vendor} /> : null}
-      {noteComment ? (
+      {comment ? (
         <div className="md:col-span-3">
-          <SummaryItem label="Note / Comment" value={<span className="whitespace-pre-wrap">{noteComment}</span>} />
+          <SummaryItem label="Note" value={<span className="whitespace-pre-wrap">{comment}</span>} />
+        </div>
+      ) : null}
+      {noteMeta ? (
+        <div className="md:col-span-3">
+          <SummaryItem label="Tags" value={<span className="text-slate-400 text-xs">{noteMeta}</span>} />
         </div>
       ) : null}
     </div>
@@ -668,7 +633,6 @@ function EnrollmentPaymentEditPanel({
     dueDate: string;
     lineItemId: string;
     vendor: string | null;
-    note: string;
     comment: string | null;
   }) => Promise<void>;
 }) {
@@ -679,7 +643,7 @@ function EnrollmentPaymentEditPanel({
   const [dueDate, setDueDate] = React.useState(paymentDueDate(payment, row.date));
   const [draftLineItemId, setDraftLineItemId] = React.useState(lineItemId);
   const [vendor, setVendor] = React.useState(paymentVendor(payment, row));
-  const [noteComment, setNoteComment] = React.useState(paymentNoteComment(payment, row));
+  const [comment, setComment] = React.useState(String(payment?.comment ?? ""));
   const [error, setError] = React.useState("");
 
   React.useEffect(() => {
@@ -689,7 +653,7 @@ function EnrollmentPaymentEditPanel({
     setDueDate(paymentDueDate(payment, row.date));
     setDraftLineItemId(lineItemId);
     setVendor(paymentVendor(payment, row));
-    setNoteComment(paymentNoteComment(payment, row));
+    setComment(String(payment?.comment ?? ""));
     setError("");
   }, [open, payment, row, lineItemId]);
 
@@ -714,8 +678,7 @@ function EnrollmentPaymentEditPanel({
       dueDate,
       lineItemId: draftLineItemId,
       vendor: vendor.trim() ? vendor.trim() : null,
-      note: noteComment.trim(),
-      comment: noteComment.trim() ? noteComment.trim() : null,
+      comment: comment.trim() ? comment.trim() : null,
     });
   };
 
@@ -753,14 +716,14 @@ function EnrollmentPaymentEditPanel({
               <th className="px-2 py-1.5">Vendor / Merchant</th>
               <th className="px-2 py-1.5">Amount</th>
               <th className="px-2 py-1.5">Date</th>
-              <th className="px-2 py-1.5">Note / Comment</th>
+              <th className="px-2 py-1.5">Note</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td className="px-2 py-2 align-top">
                 <select className="input min-w-28 text-sm" value={type} onChange={(e) => setType(e.currentTarget.value as TPayment["type"])} disabled={busy}>
-                  {PAYMENT_TYPES.map((option) => <option key={option} value={option}>{paymentTypeLabel(option)}</option>)}
+                  {PAYMENT_TYPES.map((option) => <option key={option} value={option}>{paymentTypeLabel({ type: option })}</option>)}
                 </select>
               </td>
               <td className="px-2 py-2 align-top">
@@ -773,7 +736,7 @@ function EnrollmentPaymentEditPanel({
                 <input className="input min-w-36 text-sm" type="date" value={dueDate} onChange={(e) => setDueDate(e.currentTarget.value)} disabled={busy} />
               </td>
               <td className="px-2 py-2 align-top">
-                <textarea className="input min-h-10 min-w-64 resize-y text-sm" value={noteComment} onChange={(e) => setNoteComment(e.currentTarget.value)} disabled={busy} />
+                <textarea className="input min-h-10 min-w-64 resize-y text-sm" value={comment} onChange={(e) => setComment(e.currentTarget.value)} disabled={busy} />
               </td>
             </tr>
           </tbody>
@@ -819,13 +782,14 @@ function AdvancedEnrollmentDetails({
         <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
           <SummaryItem label="Enrollment ID" value={enrollmentId || "-"} />
           <SummaryItem label="Payment ID" value={paymentId || "-"} />
-          <SummaryItem label="Payment Type" value={paymentTypeLabel(payment?.type)} />
+          <SummaryItem label="Payment Type" value={paymentTypeLabel(payment ?? {})} />
           <SummaryItem label="Paid" value={payment?.paid ? "Yes" : "No"} />
           <SummaryItem label="Paid At" value={fmtDateOrDash(String(payment?.paidAt || ""))} />
           <SummaryItem label="Paid From Grant" value={payment?.paidFromGrant ? "Yes" : "No"} />
           <SummaryItem label="Void" value={payment?.void ? "Yes" : "No"} />
           <SummaryItem label="Vendor / Merchant" value={paymentVendor(payment, row) || "-"} />
-          <SummaryItem label="Note / Comment" value={paymentNoteComment(payment, row) || "-"} />
+          <SummaryItem label="Comment" value={String(payment?.comment ?? "") || "-"} />
+          <SummaryItem label="Note Tags" value={paymentNoteMeta(payment?.note) || "-"} />
           <SummaryItem label="Notify CM" value={payment?.notifyCM ? "Yes" : "No"} />
           <SummaryItem label="Compliance Status" value={compliance.status || "-"} />
           <SummaryItem label="Compliance Note" value={compliance.note || "-"} />
@@ -1246,7 +1210,6 @@ function EnrollmentSpendCard({
     dueDate: string;
     lineItemId: string;
     vendor: string | null;
-    note: string;
     comment: string | null;
   }) => {
     if (!enrollmentId || !paymentId) {
@@ -1268,7 +1231,6 @@ function EnrollmentSpendCard({
               dueDate: patch.dueDate,
               lineItemId: patch.lineItemId,
               type: patch.type,
-              note: patch.note,
               vendor: patch.vendor || "",
               comment: patch.comment || "",
             }],
@@ -1285,7 +1247,6 @@ function EnrollmentSpendCard({
             dueDate: patch.dueDate,
             lineItemId: patch.lineItemId,
             type: patch.type,
-            note: patch.note,
             vendor: patch.vendor,
             comment: patch.comment,
             reason: "Payment modal edit",

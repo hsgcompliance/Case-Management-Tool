@@ -10,6 +10,7 @@ import { fmtCurrencyUSD } from "@lib/formatters";
 import { useGrant } from "@hooks/useGrants";
 import { SpreadsheetBuilderView, type SSRow, newSSRow } from "./SpreadsheetBuilderView";
 import { TripleToggle, certDueToggleValue } from "@entities/ui/TripleToggle";
+import { paymentTypeLabel } from "@entities/payments/PaymentTypeLabel";
 import dynamic from "next/dynamic";
 const GrantBudgetStrip = dynamic(
   () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
@@ -91,11 +92,12 @@ type PreviewRow = {
   amount: number;
   lineItemId: string;
   note?: string;
+  comment?: string;
 };
 
 type PreviewTableRow =
-  | { key: string; dueDate: string; status: "paid" | "remove"; type: string; note: string; lineItemId: string; amount: number }
-  | { key: string; dueDate: string; status: "new"; type: PreviewRow["type"]; note: string; lineItemId: string; amount: number };
+  | { key: string; dueDate: string; status: "paid" | "remove"; type: string; note: string; comment: string; lineItemId: string; amount: number }
+  | { key: string; dueDate: string; status: "new"; type: PreviewRow["type"]; note: string; comment: string; lineItemId: string; amount: number };
 
 type CompletionState = "empty" | "partial" | "complete";
 
@@ -564,6 +566,7 @@ function DraftPreviewModal({
       status,
       type: String(p.type || "-"),
       note: Array.isArray(p.note) ? p.note.filter(Boolean).join(", ") : String(p.note || "-"),
+      comment: String(p.comment ?? ""),
       lineItemId: String(p.lineItemId || ""),
       amount: Number(p.amount || 0),
     });
@@ -576,6 +579,7 @@ function DraftPreviewModal({
         status: "new",
         type: row.type,
         note: row.note || "-",
+        comment: row.comment || "",
         lineItemId: row.lineItemId,
         amount: row.amount,
       })),
@@ -644,7 +648,7 @@ function DraftPreviewModal({
                   <th className="px-2 py-1.5 text-left">Due</th>
                   <th className="px-2 py-1.5 text-left">Status</th>
                   <th className="px-2 py-1.5 text-left">Type</th>
-                  <th className="px-2 py-1.5 text-left">Note</th>
+                  <th className="px-2 py-1.5 text-left">Comment</th>
                   <th className="px-2 py-1.5 text-left">Line Item</th>
                   <th className="px-2 py-1.5 text-right">Amount</th>
                   {hasCert && <th className="px-2 py-1.5 text-center" title="Rent Cert Due">Cert</th>}
@@ -664,8 +668,8 @@ function DraftPreviewModal({
                     ].join(" ")}>
                       <td className="px-2 py-1"><span className={removed ? "line-through" : ""}>{row.dueDate}</span></td>
                       <td className="px-2 py-1">{statusPill(row.status)}</td>
-                      <td className="px-2 py-1">{row.type}</td>
-                      <td className="px-2 py-1">{row.note}</td>
+                      <td className="px-2 py-1">{paymentTypeLabel({ type: row.type, note: row.note })}</td>
+                      <td className="px-2 py-1">{row.comment || "-"}</td>
                       <td className="px-2 py-1 font-mono text-[11px]">{row.lineItemId}</td>
                       <td className="px-2 py-1 text-right"><span className={removed ? "line-through" : ""}>{money(row.amount)}</span></td>
                       {hasCert && (
@@ -867,7 +871,7 @@ export default function PaymentScheduleBuilderDialog({
       for (let i = 0; i < count; i++) {
         const due = addMonthsISO(plan.firstDue, i);
         if (!due) continue;
-        rows.push({ dueDate: due, type: "monthly", amount: amt, lineItemId: li, note: "rent" });
+        rows.push({ dueDate: due, type: "monthly", amount: amt, lineItemId: li, note: "rent", comment: plan.comment || "" });
       }
     }
 
@@ -879,25 +883,25 @@ export default function PaymentScheduleBuilderDialog({
       for (let i = 0; i < count; i++) {
         const due = addMonthsISO(plan.firstDue, i);
         if (!due) continue;
-        rows.push({ dueDate: due, type: "monthly", amount: amt, lineItemId: li, note: "utility" });
+        rows.push({ dueDate: due, type: "monthly", amount: amt, lineItemId: li, note: "utility", comment: plan.comment || "" });
       }
     }
 
     const depositAmt = asPositiveNumber(deposit.amount);
     if (depositAmt && isISO(deposit.date) && resolvedDepositLI) {
-      rows.push({ dueDate: deposit.date, type: "deposit", amount: depositAmt, lineItemId: resolvedDepositLI, note: "Security Deposit" });
+      rows.push({ dueDate: deposit.date, type: "deposit", amount: depositAmt, lineItemId: resolvedDepositLI, note: "Security Deposit", comment: deposit.comment || "" });
     }
 
     const proratedAmt = asPositiveNumber(prorated.amount);
     if (proratedAmt && isISO(prorated.date) && resolvedProratedLI) {
-      rows.push({ dueDate: prorated.date, type: "prorated", amount: proratedAmt, lineItemId: resolvedProratedLI, note: "Prorated Rent" });
+      rows.push({ dueDate: prorated.date, type: "prorated", amount: proratedAmt, lineItemId: resolvedProratedLI, note: "Prorated Rent", comment: prorated.comment || "" });
     }
 
     for (const svc of services) {
       const amt = asPositiveNumber(svc.amount);
       const li = cleanText(svc.lineItemId) || globalLineItemId;
       if (amt && isISO(svc.date) && li && cleanText(svc.note)) {
-        rows.push({ dueDate: svc.date, type: "service", amount: amt, lineItemId: li, note: cleanText(svc.note) });
+        rows.push({ dueDate: svc.date, type: "service", amount: amt, lineItemId: li, note: cleanText(svc.note), comment: svc.comment || "" });
       }
     }
 
@@ -1019,6 +1023,7 @@ export default function PaymentScheduleBuilderDialog({
     if (!enrollmentId) return "Select an enrollment.";
     if (previewRows.length === 0) return "Add at least one valid payment row to build the schedule.";
     for (const plan of [...rentPlans, ...utilityPlans]) {
+      if (!plan.firstDue && !plan.months && !plan.monthlyAmount) continue;
       if (!isISO(plan.firstDue)) return "Monthly plan first due date must be YYYY-MM-DD.";
       if (plan.months !== "" && asPositiveInt(plan.months, 120) === 0) return "Monthly plan months must be between 1 and 120.";
       if (plan.monthlyAmount !== "" && asPositiveNumber(plan.monthlyAmount) === 0) return "Monthly plan amount must be greater than 0.";

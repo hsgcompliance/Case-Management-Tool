@@ -5,6 +5,7 @@
 
 import type { Payment, ScheduleMeta } from "@types";
 import { isISODate10, safeISODate10, todayISO as localTodayISO, toISODate, addMonthsISO as libAddMonthsISO, fmtShortMonthDay } from "@lib/date";
+import { paymentTypeLabel as _paymentTypeLabel } from "@entities/payments/PaymentTypeLabel";
 
 /* ----------------------- date & money utils ----------------------- */
 
@@ -103,12 +104,7 @@ export function buildNoteTags(p: Payment): string[] {
 }
 
 export function displayTypeLabel(p: Payment): string {
-  if (p.type === "deposit") return "Deposit Assistance";
-  if (p.type === "prorated") return "Prorated Rent Assistance";
-  if (p.type === "service") return "Support Service";
-  const subtype = Array.isArray(p.note) ? p.note[0] : p.note;
-  const isUtility = String(subtype || "").toLowerCase().includes("utility");
-  return isUtility ? "Utility Assistance" : "Rent Assistance";
+  return _paymentTypeLabel(p);
 }
 
 export function makePaymentId(

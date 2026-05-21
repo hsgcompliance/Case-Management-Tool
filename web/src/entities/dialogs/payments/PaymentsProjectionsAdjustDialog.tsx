@@ -8,6 +8,7 @@ import type { PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10, todayISO } from "@lib/date";
 import { isISO } from "@features/customers/components/paymentScheduleUtils";
+import { paymentTypeLabel } from "@entities/payments/PaymentTypeLabel";
 import dynamic from "next/dynamic";
 
 const GrantBudgetStrip = dynamic(
@@ -29,7 +30,7 @@ type AddRow = {
   amount: string;
   lineItemId: string;
   kind: "monthlyRent" | "monthlyUtility" | "deposit" | "prorated" | "service";
-  note: string;
+  comment: string;
 };
 
 type Props = {
@@ -58,22 +59,14 @@ function amountText(value: unknown): string {
   return Number.isFinite(n) && n > 0 ? String(Number(n.toFixed(2))) : "";
 }
 
-function typeLabel(p: TPayment): string {
-  const type = String(p?.type || "");
-  if (type !== "monthly") return type || "-";
-  const notes = Array.isArray(p.note) ? p.note : p.note ? [p.note] : [];
-  const joined = notes.map((n) => String(n).toLowerCase()).join(" ");
-  return joined.includes("utility") ? "monthly (utility)" : "monthly (rent)";
-}
-
 function addRowType(kind: AddRow["kind"]): TPayment["type"] {
   return (kind === "monthlyRent" || kind === "monthlyUtility" ? "monthly" : kind) as TPayment["type"];
 }
 
-function addRowNote(row: AddRow): string | string[] | undefined {
-  if (row.kind === "monthlyRent") return row.note ? ["sub:rent", row.note] : ["sub:rent"];
-  if (row.kind === "monthlyUtility") return row.note ? ["sub:utility", row.note] : ["sub:utility"];
-  return row.note ? row.note : undefined;
+function addRowNote(row: AddRow): string[] | undefined {
+  if (row.kind === "monthlyRent") return ["sub:rent"];
+  if (row.kind === "monthlyUtility") return ["sub:utility"];
+  return undefined;
 }
 
 export default function PaymentsProjectionsAdjustDialog({
@@ -146,8 +139,8 @@ export default function PaymentsProjectionsAdjustDialog({
         .filter((p) => paymentId(p))
         .slice()
         .sort((a, b) =>
-          `${iso10(a.dueDate || (a as Record<string, unknown>)?.date || "")}|${typeLabel(a)}`.localeCompare(
-            `${iso10(b.dueDate || (b as Record<string, unknown>)?.date || "")}|${typeLabel(b)}`,
+          `${iso10(a.dueDate || (a as Record<string, unknown>)?.date || "")}|${paymentTypeLabel(a as Record<string, unknown>)}`.localeCompare(
+            `${iso10(b.dueDate || (b as Record<string, unknown>)?.date || "")}|${paymentTypeLabel(b as Record<string, unknown>)}`,
           ),
         ),
     [selectedEnrollment],
@@ -336,7 +329,7 @@ export default function PaymentsProjectionsAdjustDialog({
         amount: "",
         lineItemId: lineItemOptions[0] || "",
         kind: "monthlyRent",
-        note: "",
+        comment: "",
       },
     ]);
   };
@@ -467,6 +460,7 @@ export default function PaymentsProjectionsAdjustDialog({
         lineItemId: String(r.lineItemId || "").trim(),
         type: addRowType(r.kind),
         note: addRowNote(r),
+        ...(r.comment.trim() ? { comment: r.comment.trim() } : {}),
       }));
 
     for (const row of additions) {
@@ -648,7 +642,7 @@ export default function PaymentsProjectionsAdjustDialog({
                           title={`Current: ${fmtDateOrDash(currentDueDate)}`}
                         />
                       </td>
-                      <td className="px-3 py-2 text-slate-800">{typeLabel(p)}</td>
+                      <td className="px-3 py-2 text-slate-800">{paymentTypeLabel(p as Record<string, unknown>)}</td>
                       <td className="px-3 py-2 text-right text-slate-800">{fmtCurrencyUSD(Number(p.amount || 0))}</td>
                       <td className="px-3 py-2 text-right">
                         <input
@@ -725,7 +719,7 @@ export default function PaymentsProjectionsAdjustDialog({
                   <th className="px-3 py-2 text-left">Type</th>
                   <th className="px-3 py-2 text-right">Amount</th>
                   <th className="px-3 py-2 text-left">Line Item</th>
-                  <th className="px-3 py-2 text-left">Note</th>
+                  <th className="px-3 py-2 text-left">Comment</th>
                   <th className="px-3 py-2 text-left"> </th>
                 </tr>
               </thead>
@@ -761,7 +755,7 @@ export default function PaymentsProjectionsAdjustDialog({
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <input className="w-40 rounded border border-slate-300 px-2 py-1" value={r.note} onChange={(e) => updateProjectionRow(r.id, { note: e.currentTarget.value })} />
+                      <input className="w-40 rounded border border-slate-300 px-2 py-1" value={r.comment} onChange={(e) => updateProjectionRow(r.id, { comment: e.currentTarget.value })} />
                     </td>
                     <td className="px-3 py-2">
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeProjectionRow(r.id)}>Delete</button>
