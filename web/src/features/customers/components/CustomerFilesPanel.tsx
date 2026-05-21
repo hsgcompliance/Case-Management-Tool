@@ -37,6 +37,10 @@ type DriveFile = {
 };
 
 const FOLDER_TEMPLATES = DRIVE_FILE_TEMPLATES;
+const ORIGINAL_CUSTOMER_FILE_TOOL_URL =
+  "https://script.google.com/a/macros/thehrdc.org/s/AKfycby1UgNzSZYurMKSq67cFEj9CUfFHZt7Ox4-yVC_MVa7Bum4B14BqUb0lVBkxAd95N90yQ/exec";
+const CUSTOMER_FILE_PARENT_FOLDER_URL =
+  "https://drive.google.com/drive/folders/1Bfu-bd98xtv3taCKii8ud44gPuAFdGnO";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -671,7 +675,13 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
         await saveLinkedFolders(next);
         setActiveFolder(folder.id);
         setBuildingName(null);
-        toast(`Folder "${folder.name}" is ready.`, { type: "success" });
+        const warningCount = Array.isArray(folder.warnings) ? folder.warnings.length : 0;
+        toast(
+          warningCount
+            ? `Folder "${folder.name}" was created, but ${warningCount} item${warningCount === 1 ? "" : "s"} need manual cleanup.`
+            : `Folder "${folder.name}" is ready.`,
+          { type: warningCount ? "warning" : "success" },
+        );
       },
     },
   );
@@ -965,7 +975,29 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
         {customerDisplayName && (
           <div className="text-base font-semibold text-slate-800">{customerDisplayName} — Drive Files</div>
         )}
-        {error && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        {error && (
+          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div>{error}</div>
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <a
+                href={ORIGINAL_CUSTOMER_FILE_TOOL_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-red-800 underline underline-offset-2 hover:text-red-950"
+              >
+                Open original customer filer tool
+              </a>
+              <a
+                href={CUSTOMER_FILE_PARENT_FOLDER_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-red-800 underline underline-offset-2 hover:text-red-950"
+              >
+                Open customer file folder
+              </a>
+            </div>
+          </div>
+        )}
 
         {/* Background build progress banner */}
         {buildingName && (

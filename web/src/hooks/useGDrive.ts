@@ -65,7 +65,14 @@ export function useGDriveCustomerFolderIndex(
 
 export function useGDriveBuildCustomerFolder(
   indexQuery: { activeParentId?: string; exitedParentId?: string },
-  opts?: { onSuccess?: (folder: { id: string; name: string; url: string }) => void }
+  opts?: {
+    onSuccess?: (folder: {
+      id: string;
+      name: string;
+      url: string;
+      warnings?: Array<{ phase: "template" | "subfolder"; name: string; fileId?: string; error: string }>;
+    }) => void;
+  }
 ) {
   const qc = useQueryClient();
   const normalizedIndexQuery = sanitizeIndexQuery(indexQuery);

@@ -119,6 +119,13 @@ export const GDriveBuildCustomerFolderBody = z.object({
 });
 export type TGDriveBuildCustomerFolderBody = z.infer<typeof GDriveBuildCustomerFolderBody>;
 
+export type TGDriveCustomerFolderBuildWarning = {
+  phase: "template" | "subfolder";
+  name: string;
+  fileId?: string;
+  error: string;
+};
+
 export const GDriveCustomerFolderSyncBody = z.object({
   mode: z.enum(["setFolderState", "reconcile", "folderCwIdFromCustomer", "customerCwIdFromFolder"]),
   customerId: z.string().trim().optional(),
