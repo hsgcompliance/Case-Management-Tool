@@ -103,7 +103,7 @@ function DashboardLayoutInner({ tools, basePath, hintToolIds = [] }: DashboardLa
       />
 
       <SharedPageMetricsBar />
-      {basePath === "/reports" && <PinnedItemsSection />}
+      <PinnedItemsSection />
 
       {noToolSelected ? (
         <NoToolSelectedPanel />

@@ -3,8 +3,6 @@ import type { MetricColorId } from "@lib/colorRegistry";
 export const myDefaultMetrics: MetricColorId[] = [
   "my-customers",
   "my-enrollments",
-  "my-acuity",
-  "my-open-tasks",
 ];
 
 export const systemDefaultMetrics: MetricColorId[] = [
@@ -17,7 +15,6 @@ export const systemDefaultMetrics: MetricColorId[] = [
 export const extendedSystemDefaultMetrics: MetricColorId[] = [
   ...systemDefaultMetrics,
   "system-spend",
-  "system-avg-acuity",
 ];
 
 export const populationDefaultMetrics: MetricColorId[] = [

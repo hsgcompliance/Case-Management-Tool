@@ -3,7 +3,6 @@
 import React from "react";
 import { useCaseManagerMetrics } from "@hooks/useMetrics";
 import {
-  formatIntegerOrDecimal,
   formatNumber,
   MetricCards,
   type BuiltMetricCardsProps,
@@ -38,28 +37,6 @@ export function buildCaseManagerMetricItems(
           ? `Active ${formatNumber(data.enrollments?.active)} | Inactive ${formatNumber(data.enrollments?.inactive)}`
           : undefined,
       metricId: "system-enrollments",
-      loading: isLoading,
-    },
-    {
-      id: "case-manager-acuity",
-      label: "Acuity Avg",
-      value: formatIntegerOrDecimal(data?.acuity?.scoreAvg),
-      subtext:
-        data?.acuity
-          ? `Sum ${formatNumber(data.acuity?.scoreSum)} | Clients ${formatNumber(data.acuity?.scoreCount)}`
-          : undefined,
-      metricId: "my-acuity",
-      loading: isLoading,
-    },
-    {
-      id: "case-manager-open-tasks",
-      label: "Open Tasks",
-      value: formatNumber(data?.tasks?.openThisMonth),
-      subtext:
-        data?.tasks
-          ? `Next month ${formatNumber(data.tasks?.openNextMonth)} | Assessments ${formatNumber(data.tasks?.byType?.assessment?.thisMonth)}`
-          : undefined,
-      metricId: "my-open-tasks",
       loading: isLoading,
     },
   ];

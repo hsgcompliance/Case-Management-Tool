@@ -119,14 +119,11 @@ export const STATUS_COLOR_REGISTRY: Record<StatusColorId, { tone: ColorTone; lab
 export type MetricColorId =
   | "my-customers"
   | "my-enrollments"
-  | "my-acuity"
-  | "my-open-tasks"
   | "system-case-managers"
   | "system-customers"
   | "system-enrollments"
   | "system-grants"
   | "system-spend"
-  | "system-avg-acuity"
   | "case-managers"
   | "assessments-due"
   | "payments-due"
@@ -155,14 +152,11 @@ export type MetricColorId =
 export const METRIC_COLOR_REGISTRY: Record<MetricColorId, { tone: ColorTone; label: string; group: string }> = {
   "my-customers": { tone: "orange", label: "My Customers", group: "caseload" },
   "my-enrollments": { tone: "emerald", label: "My Enrollments", group: "caseload" },
-  "my-acuity": { tone: "amber", label: "My Acuity", group: "acuity" },
-  "my-open-tasks": { tone: "sky", label: "My Open Tasks", group: "tasks" },
   "system-case-managers": { tone: "sky", label: "Total Case Managers", group: "system" },
   "system-customers": { tone: "slate", label: "Total Customers", group: "system" },
   "system-enrollments": { tone: "emerald", label: "Total Enrollments", group: "system" },
   "system-grants": { tone: "amber", label: "Grants & Programs", group: "system" },
   "system-spend": { tone: "orange", label: "Total Spend Amount", group: "finance" },
-  "system-avg-acuity": { tone: "amber", label: "System Avg Acuity", group: "acuity" },
   "case-managers": { tone: "sky", label: "Case Managers", group: "system" },
   "assessments-due": { tone: "violet", label: "Assessments Due", group: "tasks" },
   "payments-due": { tone: "amber", label: "Payments Due", group: "tasks" },

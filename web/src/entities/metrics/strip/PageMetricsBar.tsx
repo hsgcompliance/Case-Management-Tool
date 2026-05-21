@@ -21,11 +21,6 @@ function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString("en-US");
 }
 
-function formatAcuity(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "--";
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
 function fmtUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "--";
   return Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -116,30 +111,6 @@ export function SharedPageMetricsBar() {
         subtext: caseManagerMetrics?.enrollments
           ? `Total ${formatNumber(caseManagerMetrics.enrollments?.total)} | Inactive ${formatNumber(caseManagerMetrics.enrollments?.inactive)}`
           : undefined,
-        loading: !!myUid && caseManagerLoading,
-        disabled: !myUid || !isCaseManager,
-      },
-      {
-        id: "my-acuity",
-        metricId: "my-acuity",
-        label: "My Acuity",
-        value: formatAcuity(caseManagerMetrics?.acuity?.scoreAvg),
-        subtext:
-          caseManagerMetrics?.acuity?.scoreSum != null && caseManagerMetrics?.acuity?.scoreCount != null
-            ? `Sum ${formatNumber(caseManagerMetrics.acuity?.scoreSum)} | Count ${formatNumber(caseManagerMetrics.acuity?.scoreCount)}`
-            : undefined,
-        loading: !!myUid && caseManagerLoading,
-        disabled: !myUid || !isCaseManager,
-      },
-      {
-        id: "my-open-tasks",
-        metricId: "my-open-tasks",
-        label: "My Open Tasks",
-        value: formatNumber(caseManagerMetrics?.tasks?.openThisMonth),
-        subtext:
-          caseManagerMetrics?.tasks?.openNextMonth != null
-            ? `${month} | Next ${formatNumber(caseManagerMetrics.tasks?.openNextMonth)}`
-            : month,
         loading: !!myUid && caseManagerLoading,
         disabled: !myUid || !isCaseManager,
       },
