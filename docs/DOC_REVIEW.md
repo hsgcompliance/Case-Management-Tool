@@ -30,20 +30,25 @@ This directory uses two classes of docs:
 - `web/src/features/customers/README.md`
 - `web/src/features/secret-games/GAMES.md`
 
+## Active Project Folders
+
+`docs/active-projects.local/` is gitignored (matches `*.local`). It contains working notes
+organized by active topic. Do not commit or push its contents.
+
+| Folder | Contents |
+|--------|----------|
+| `active-projects.local/metrics-pins/` | metric platform proposal, metric systems audit, pin + metrics display architecture |
+| `active-projects.local/jotform-spending/` | CC budget tracking, spend extraction + grant mapping, transaction shape reference |
+| `active-projects.local/task-flow/` | task/inbox flow audit |
+| `active-projects.local/secret-games/` | game evaluation, architecture, current state audit, legacy adapter layer, rollout plan, testing strategy |
+
 ## Local-Only Docs
 
-These are intentionally ignored and suffixed as local-only:
+Remaining flat local-only files (not yet moved to an active-project folder):
 
 - `docs/detail-card-data-matrix.local-only.md`
 - `docs/entities-index.local-only.md`
 - `docs/GRAPH_SYSTEM.local-only.md`
-- `docs/jotform-credit-card-budget-tracking.local-only.md`
-- `docs/jotform-spend-grant-mapping-tool.local-only.md`
-- `docs/metric-platform-proposal.local-only.md`
-- `docs/metric-systems-audit.local-only.md`
-- `docs/tasks-flow-audit.local-only.md`
-- `docs/transaction-shape-reference.local-only.md`
-- `docs/secret-games/*.local-only.md`
 
 Use local-only docs as background only. If one contains durable guidance, extract the durable part into a reviewed doc instead of committing the original file.
 
