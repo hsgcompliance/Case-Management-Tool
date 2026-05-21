@@ -633,12 +633,14 @@ import type {
   TGDriveOrgConfig,
   TCustomerFolder,
   TGDriveBuildCustomerFolderBody,
+  TGDriveCustomerFolderBuildWarning,
   TGDriveCustomerFolderSyncBody,
   TGDriveSyncReconcileItem,
 } from "./gdrive";
 export type {
   TCustomerFolder,
   TGDriveBuildCustomerFolderBody,
+  TGDriveCustomerFolderBuildWarning,
   TGDriveOrgConfig,
   TGDriveCustomerFolderIndexConfig,
   TGDriveCustomerFolderSyncBody,
@@ -662,7 +664,14 @@ export type GDriveFile = {
 export type GDriveListResp = Ok<{ files?: GDriveFile[]; nextPageToken?: string } & Record<string, unknown>>;
 export type GDriveCreateFolderResp = Ok<{ folder: GDriveFile }>;
 export type GDriveUploadResp = Ok<{ file: GDriveFile }>;
-export type GDriveBuildCustomerFolderResp = Ok<{ folder: { id: string; name: string; url: string } }>;
+export type GDriveBuildCustomerFolderResp = Ok<{
+  folder: {
+    id: string;
+    name: string;
+    url: string;
+    warnings?: TGDriveCustomerFolderBuildWarning[];
+  };
+}>;
 export type GDriveCustomerFolderIndexResp = Ok<{ folders: TCustomerFolder[] }>;
 export type GDriveConfigGetResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
 export type GDriveConfigPatchResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;

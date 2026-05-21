@@ -540,8 +540,16 @@ export async function buildCustomerFolder(args: {
   const folderId = String(folderResult.data?.id || "").trim();
   if (!folderId) throw new Error("folder_create_no_id");
 
-  // Copy template files in parallel (each makeCopy is independent)
-  await Promise.all(
+  const warnings: Array<{
+    phase: "template" | "subfolder";
+    name: string;
+    fileId?: string;
+    error: string;
+  }> = [];
+
+  // Copy template files in parallel. A template failure should not hide the
+  // successfully-created customer folder from the app.
+  const templateResults = await Promise.allSettled(
     args.templates.map((tmpl) =>
       drive.files.copy({
         fileId: tmpl.fileId,
@@ -551,17 +559,45 @@ export async function buildCustomerFolder(args: {
       }),
     ),
   );
+  templateResults.forEach((result, index) => {
+    if (result.status === "fulfilled") return;
+    const tmpl = args.templates[index];
+    warnings.push({
+      phase: "template",
+      name: String(tmpl?.name || "template"),
+      ...(tmpl?.fileId ? { fileId: tmpl.fileId } : {}),
+      error: shortErrorMessage(result.reason, "template_copy_failed"),
+    });
+  });
 
-  // Create subfolders sequentially (cheap, low risk)
+  // Create subfolders sequentially (cheap, low risk). Keep going so one bad
+  // label does not turn a finished folder into a 500.
   for (const sub of args.subfolders) {
-    await drive.files.create({
-      requestBody: {
-        name: sub,
-        mimeType: "application/vnd.google-apps.folder",
-        parents: [folderId],
-      },
-      fields: "id,name",
-      supportsAllDrives: true,
+    try {
+      await drive.files.create({
+        requestBody: {
+          name: sub,
+          mimeType: "application/vnd.google-apps.folder",
+          parents: [folderId],
+        },
+        fields: "id,name",
+        supportsAllDrives: true,
+      });
+    } catch (err: any) {
+      warnings.push({
+        phase: "subfolder",
+        name: String(sub || "subfolder"),
+        error: shortErrorMessage(err, "subfolder_create_failed"),
+      });
+    }
+  }
+
+  if (warnings.length) {
+    logger.warn("gdrive_customer_folder_build_partial", {
+      folderId,
+      folderName: String(folderResult.data?.name || args.name),
+      warningCount: warnings.length,
+      warnings,
     });
   }
 
@@ -569,6 +605,7 @@ export async function buildCustomerFolder(args: {
     id: folderId,
     name: String(folderResult.data?.name || args.name),
     url: `https://drive.google.com/drive/folders/${folderId}`,
+    ...(warnings.length ? { warnings } : {}),
   };
 }
 
