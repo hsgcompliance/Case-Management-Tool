@@ -44,6 +44,36 @@ const cleanText = (v: unknown): string | null => {
   return s || null;
 };
 
+function resolvePaymentSubtype(note: unknown): "rent" | "utility" {
+  const tags = Array.isArray(note)
+    ? (note as unknown[]).map((t) => String(t ?? "").toLowerCase())
+    : note != null
+    ? [String(note).toLowerCase()]
+    : [];
+  return tags.some(
+    (t) => t === "utility" || t === "sub:utility" || t.startsWith("utility:") || t.startsWith("sub:utility"),
+  )
+    ? "utility"
+    : "rent";
+}
+
+function resolvePaymentType(type: string, note: unknown): string {
+  if (type === "deposit") return "deposit";
+  if (type === "prorated") return "prorated";
+  if (type === "service") return "service";
+  return resolvePaymentSubtype(note);
+}
+
+function paymentTypeTitleLabel(type: string, note: unknown): string {
+  const resolved = resolvePaymentType(type, note);
+  if (resolved === "rent")     return "Rent Assistance";
+  if (resolved === "utility")  return "Utility Assistance";
+  if (resolved === "deposit")  return "Deposit Assistance";
+  if (resolved === "prorated") return "Prorated Rent Assistance";
+  if (resolved === "service")  return "Support Service";
+  return "Payment";
+}
+
 const _normGroup = (g: any) => {
   const k = normTok(g);
   if (!k) return null;
@@ -219,11 +249,10 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
       await batch.commit();
     }
 
-    // -------- Deprecated taskSchedule projection --------
-    // Keep this compatibility path so existing embedded taskSchedule notes still
-    // surface in digest emails and customer/workload flags. The old completion
-    // lifecycle should not be extended; new reminder/notification work should
-    // write lightweight note/reminder rows instead of relying on status changes.
+    // -------- taskSchedule: orphan cleanup only (task system deprecated) --------
+    // New task schedules are no longer built by onEnrollmentBuildTasks.
+    // Only clean up inbox items for tasks that were removed from the schedule,
+    // so stale userTasks docs drain naturally as enrollments are updated.
     const prevTasks: any[] = Array.isArray(before.taskSchedule) ? before.taskSchedule : [];
     const nextTasks: any[] = Array.isArray(after.taskSchedule) ? after.taskSchedule : [];
 
@@ -231,95 +260,6 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     const nextById = new Map(nextTasks.map((t) => [String(t?.id), t]));
 
     for (const [id] of prevById) if (!nextById.has(id)) await deleteInbox(UTID.task(eid, id));
-
-    for (const [id, t] of nextById) {
-      const assignedToUid = t?.assignedToUid || null;
-      const assignedToGroup =
-        _normGroup(t?.assignedToGroup) ||
-        (assignedToUid ? ("casemanager" as const) : null);
-      // Skip only if task is truly unassigned. Also clean up any prior inbox row.
-      if (!assignedToUid && !assignedToGroup) {
-        await deleteInbox(UTID.task(eid, id));
-        continue;
-      }
-
-      const due = iso10(t?.dueDate);
-      const multiMode = t?.multiMode || null;
-      const multiParentId = t?.multiParentId || null;
-      const multiStepIndexNum = Number.isFinite(Number(t?.multiStepIndex)) ? Number(t.multiStepIndex) : null;
-      // Find the nearest (highest-indexed) incomplete step before the current one.
-      // Using filter+sort rather than find() avoids returning a stale step when
-      // earlier steps are already done but a middle step is still open.
-      const prevBlockingStep =
-        multiParentId && multiMode === "sequential" && multiStepIndexNum != null && multiStepIndexNum > 1
-          ? (nextTasks
-              .filter(
-                (s: any) =>
-                  s &&
-                  String(s?.multiParentId || "") === String(multiParentId) &&
-                  Number(s?.multiStepIndex || 0) < multiStepIndexNum &&
-                  !s?.completed,
-              )
-              .sort(
-                (a: any, b: any) =>
-                  Number(b?.multiStepIndex || 0) - Number(a?.multiStepIndex || 0),
-              )[0] || null)
-          : null;
-      const item: InboxItem = {
-        utid: UTID.task(eid, id),
-        source: "task",
-        status: t?.completed ? "done" : "open",
-        enrollmentId: eid,
-        clientId,
-        grantId,
-        sourcePath: `customerEnrollments/${eid}#taskSchedule:${id}`,
-        dueDate: due,
-        dueMonth: ym(due),
-        createdAtISO: t?.createdAt || null,
-        assignedToUid,
-        assignedToGroup,
-        cmUid,
-        orgId,
-        teamIds,
-        notify: typeof t?.notify === "boolean" ? !!t.notify : true,
-        title: `${String(t?.type || "Task")} • ${customerName || clientId || "Customer"}`,
-        subtitle: [caseManagerName || cmUid ? `CM: ${caseManagerName || cmUid}` : null, grantName || grantId ? `Grant: ${grantName || grantId}` : null]
-          .filter(Boolean)
-          .join(" | ") || null,
-        note: t?.notes || null,
-        labels: uniqNorm([
-          ...(Array.isArray(t?.labels) ? t.labels : []),
-          ...(t?.managed ? ["managed"] : []),
-          t?.bucket || null,
-        ]),
-        completedAtISO: t?.completedAt || null,
-        // passthrough task metadata (Inbox schema allows extras); used by detail cards
-        taskId: id,
-        bucket: t?.bucket || null,
-        managed: t?.managed === true,
-        defId: t?.defId || null,
-        notes: t?.notes || null,
-        verified: t?.verified === true,
-        verifiedAt: t?.verifiedAt || null,
-        verifiedBy: t?.verifiedBy || null,
-        rawTaskStatus: t?.status || null,
-        multiParentId,
-        multiStepIndex: multiStepIndexNum,
-        multiStepCount: Number.isFinite(Number(t?.multiStepCount)) ? Number(t.multiStepCount) : null,
-        multiMode,
-        workflowBlocked: !!prevBlockingStep,
-        waitingOnTaskId: prevBlockingStep ? String(prevBlockingStep.id || "") : null,
-        waitingOnGroup: prevBlockingStep ? _normGroup(prevBlockingStep.assignedToGroup) : null,
-        waitingOnUid: prevBlockingStep ? String(prevBlockingStep.assignedToUid || "") || null : null,
-        customerName,
-        grantName,
-        caseManagerName,
-        enrollmentName,
-        taskType: t?.type || "Task",
-        taskDescription: cleanText(t?.description) || cleanText(t?.notes) || null,
-      };
-      await upsertInbox(item);
-    }
 
     // -------- PAYMENTS (actions & compliance) --------
     const prevPays: any[] = Array.isArray(before.payments) ? before.payments : [];
@@ -347,6 +287,7 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     for (const [k, p] of nextP) {
       const pid = String(p?.id || k);
       const type = String(p?.type || "monthly").toLowerCase();
+      const resolvedType = resolvePaymentType(type, p?.note);
       const due = iso10(p?.dueDate);
       const dueMonth = ym(due);
       const paymentAmount = Number.isFinite(Number(p?.amount)) ? Number(p.amount) : null;
@@ -374,18 +315,18 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
         orgId,
         teamIds,
         notify: typeof p?.notify === "boolean" ? !!p.notify : true,
-        title: `${type === "deposit" ? "Deposit Payment" : type === "prorated" ? "Prorated Payment" : type === "service" ? "Service Payment" : "Monthly Payment"} • ${customerName || clientId || "Customer"}`,
+        title: `${paymentTypeTitleLabel(type, p?.note)} • ${customerName || clientId || "Customer"}`,
         subtitle: [grantName || grantId ? `Grant: ${grantName || grantId}` : null, paymentLineItemLabel ? `Line Item: ${paymentLineItemLabel}` : null]
           .filter(Boolean)
           .join(" | ") || null,
-        labels: [type],
+        labels: [resolvedType],
         completedAtISO: p?.paidAt || null,
         customerName,
         grantName,
         caseManagerName,
         enrollmentName,
         paymentId: pid,
-        paymentType: type,
+        paymentType: resolvedType,
         paymentAmount,
         paymentLineItemId,
         paymentLineItemLabel,
@@ -415,14 +356,14 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
           subtitle: [grantName || grantId ? `Grant: ${grantName || grantId}` : null, paymentLineItemLabel ? `Line Item: ${paymentLineItemLabel}` : null]
             .filter(Boolean)
             .join(" | ") || null,
-          labels: ["compliance", type],
+          labels: ["compliance", resolvedType],
           completedAtISO: null,
           customerName,
           grantName,
           caseManagerName,
           enrollmentName,
           paymentId: pid,
-          paymentType: type,
+          paymentType: resolvedType,
           paymentAmount,
           paymentLineItemId,
           paymentLineItemLabel,
@@ -454,14 +395,14 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
           subtitle: [grantName || grantId ? `Grant: ${grantName || grantId}` : null, paymentLineItemLabel ? `Line Item: ${paymentLineItemLabel}` : null]
             .filter(Boolean)
             .join(" | ") || null,
-          labels: ["compliance", type],
+          labels: ["compliance", resolvedType],
           completedAtISO: isoNow(),
           customerName,
           grantName,
           caseManagerName,
           enrollmentName,
           paymentId: pid,
-          paymentType: type,
+          paymentType: resolvedType,
           paymentAmount,
           paymentLineItemId,
           paymentLineItemLabel,

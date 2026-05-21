@@ -3,6 +3,7 @@
 import React from "react";
 import type { CustomerPaymentRow } from "@client/payments";
 import ActionMenu from "@entities/ui/ActionMenu";
+import { PaymentTypeBadge } from "@entities/payments/PaymentTypeLabel";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
@@ -29,18 +30,6 @@ function paymentDate(p: unknown): string {
   return safeISODate10(payment.dueDate || payment.date) || "";
 }
 
-function paymentTypeLabel(p: unknown): string {
-  const payment = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
-  const type = String(payment.type || "-").toLowerCase();
-  if (type !== "monthly") return type || "-";
-  const notes = Array.isArray(payment.note) ? payment.note : payment.note != null ? [payment.note] : [];
-  const tags = notes.map((x: unknown) => String(x || "").toLowerCase());
-  const subtype =
-    tags.find((t) => t === "sub:utility" || t === "utility" || t.startsWith("sub:utility") || t.startsWith("utility:"))
-      ? "utility"
-      : "rent";
-  return `monthly (${subtype})`;
-}
 
 export default function CustomerPaymentsTable({
   rows,
@@ -131,7 +120,7 @@ export default function CustomerPaymentsTable({
               <React.Fragment key={key}>
                 <tr className={["border-t border-slate-200 odd:bg-white even:bg-slate-50/60", isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : ""].join(" ")}>
                   <td className="px-3 py-2 text-slate-800">{fmtDateOrDash(paymentDate(p))}</td>
-                  <td className="px-3 py-2 text-slate-800">{paymentTypeLabel(p)}</td>
+                  <td className="px-3 py-2"><PaymentTypeBadge payment={p} /></td>
                   <td className="px-3 py-2 text-slate-800">{fmtCurrencyUSD(p.amount || 0)}</td>
                   <td className="px-3 py-2 text-slate-800">
                     <label className="inline-flex items-center gap-2 text-xs">
