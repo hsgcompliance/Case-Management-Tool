@@ -6,12 +6,14 @@ import { useEnrollments } from "@hooks/useEnrollments";
 import { useGrantActivity } from "@hooks/useGrants";
 import { useUsers } from "@hooks/useUsers";
 import { SpendDetailModal, type SpendRow } from "@features/widgets/spending/SpendDetailModal";
-import { fmtFromTsLike, safeISODate10, toISODate, toMillisAny } from "@lib/date";
+import { computeRentCertDues } from "@features/customers/components/paymentScheduleUtils";
+import { fmtMDY, safeISODate10, toISODate, toMillisAny } from "@lib/date";
 import {
   GrantBudgetSandboxModal,
   type GrantBudgetSandboxLineItem,
   type GrantBudgetSandboxSeedRow,
 } from "./GrantBudgetSandboxModal";
+import { paymentTypeLabel, paymentNoteMeta } from "@entities/payments/PaymentTypeLabel";
 
 type ActivityMode = "paid" | "projected" | "all";
 type ActivityKindFilter = "all" | "paid" | "projected" | "reversal" | "data-entry-complete" | "data-entry-incomplete";
@@ -24,6 +26,7 @@ type GrantActivityRow = SpendRow & {
   userLabel: string;
   noteText: string;
   budgetTypeLabel: string;
+  rentCertDueOn: string;
   displayType: "Paid" | "Projected" | "Reversal";
   sourceType: "paid" | "projected";
   complianceStatus: ComplianceStatus;
@@ -31,10 +34,10 @@ type GrantActivityRow = SpendRow & {
 };
 
 const DEFAULT_LINE_ITEM_TYPES = [
-  { id: "deposit", label: "Deposit" },
   { id: "rent", label: "Rent" },
-  { id: "utility", label: "Utility" },
-  { id: "support-service", label: "Support Service" },
+  { id: "utility-assistance", label: "Utility assistance" },
+  { id: "deposit", label: "Deposit" },
+  { id: "support-service-prorated", label: "Support service prorated" },
 ] as const;
 
 function slugifyLineItemType(label: string) {
@@ -60,8 +63,8 @@ function normalizeBudgetTypeLabel(value: unknown, fallback?: unknown) {
   const key = slugifyLineItemType(raw);
   if (!key) return "N/A";
   if (key.includes("deposit")) return "Deposit";
-  if (key.includes("util")) return "Utility";
-  if (key.includes("support") || key.includes("service") || key.includes("case-management")) return "Support Service";
+  if (key.includes("util")) return "Utility assistance";
+  if (key.includes("support") || key.includes("service") || key.includes("case-management")) return "Support service prorated";
   if (key.includes("rent") || key.includes("rental") || key.includes("housing")) return "Rent";
   return raw;
 }
@@ -335,8 +338,8 @@ function ActivityDrawer({
               className="input text-sm"
               value={search}
               onChange={(e) => setSearch(e.currentTarget.value)}
-              placeholder="Search customer, type, note, payment..."
-              title={tip("Filter activity rows like the invoicing tool by customer, type, note, or payment.")}
+              placeholder="Search customer, type, note, rent cert, payment..."
+              title={tip("Filter activity rows like the invoicing tool by customer, type, note, rent cert due date, or payment.")}
             />
             <select
               className="input text-sm"
@@ -362,6 +365,7 @@ function ActivityDrawer({
                     <th>{headerButton("amount", "Amount", "pb-1 pr-4 text-right font-medium")}</th>
                     <th>{headerButton("customer", "Customer")}</th>
                     <th>{headerButton("budgetType", "Type")}</th>
+                    <th className="pb-1 pr-4 font-medium">Rent Cert Due</th>
                     <th>{headerButton("note", "Note")}</th>
                     <th>{headerButton("status", "Status", "pb-1 font-medium")}</th>
                   </tr>
@@ -374,12 +378,13 @@ function ActivityDrawer({
                       onClick={() => onSelectItem(item)}
                       title={tip("Open this row in the full spending detail modal.")}
                     >
-                      <td className="py-1 pr-4 text-slate-700">{fmtFromTsLike(item.date)}</td>
+                      <td className="py-1 pr-4 text-slate-700">{item.date ? fmtMDY(item.date) : "-"}</td>
                       <td className={`py-1 pr-4 text-right font-medium ${item.amountCents < 0 ? "text-red-600" : "text-slate-900 dark:text-slate-100"}`}>
                         {currency(item.amountCents / 100)}
                       </td>
                       <td className="py-1 pr-4 text-slate-600">{item.customerLabel || "—"}</td>
                       <td className="py-1 pr-4 text-slate-600">{item.budgetTypeLabel || "N/A"}</td>
+                      <td className="py-1 pr-4 text-slate-600">{item.rentCertDueOn ? fmtMDY(item.rentCertDueOn) : "—"}</td>
                       <td className="py-1 pr-4 text-slate-500">{item.noteText || item.title || "—"}</td>
                       <td className="py-1">
                         {item.displayType === "Reversal" ? (
@@ -755,6 +760,22 @@ export function BudgetActivityTab({
     return map;
   }, [enrollmentInfoById]);
 
+  const rentCertDueByEnrollmentTarget = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const enrollment of enrollments as any[]) {
+      const enrollmentId = String(enrollment?.id || "").trim();
+      if (!enrollmentId) continue;
+      const dues = computeRentCertDues(Array.isArray(enrollment?.payments) ? enrollment.payments : [], {
+        enrollmentId,
+        enrollmentLabel: String(enrollment?.grantName || enrollment?.name || enrollmentId),
+      });
+      for (const due of dues) {
+        map.set(`${enrollmentId}:${due.targetPaymentDate}`, due.dueDate);
+      }
+    }
+    return map;
+  }, [enrollments]);
+
   const paymentComplianceByKey = useMemo(() => {
     const map = new Map<string, Record<string, unknown>>();
     for (const enrollment of enrollments as any[]) {
@@ -860,6 +881,9 @@ export function BudgetActivityTab({
 
   const activityRows = useMemo(() => {
     const rows: GrantActivityRow[] = [];
+    const rentCertDueFor = (enrollmentId: string, paymentDate: string) => (
+      enrollmentId && paymentDate ? rentCertDueByEnrollmentTarget.get(`${enrollmentId}:${paymentDate}`) || "" : ""
+    );
     const budgetTypeFor = (raw: Record<string, any>, item?: Record<string, any>) => {
       const lineItemId = String(raw?.lineItemId || item?.lineItemId || "").trim();
       const key = `${String(raw?.grantId || item?.grantId || grantId || "")}:${lineItemId}`;
@@ -878,15 +902,18 @@ export function BudgetActivityTab({
             customerId ||
             "",
         ).trim();
-        const noteText = String(raw?.note || item?.note || item?.notes || item?.purpose || "").trim();
+        const noteText = String(item?.comment || item?.note || item?.notes || item?.purpose || "").trim();
         const date = dateIso10(raw?.ts || item?.dueDate || item?.createdAt || item?.postedAt);
+        const rentCertDueOn = rentCertDueFor(String(raw?.enrollmentId || item?.enrollmentId || "").trim(), date);
         const userLabel = resolveUserLabel(raw?.by || item?.postedBy || item?.reopenedBy);
         const queueSource = String(item?.source || "").toLowerCase();
         const rowKind =
           queueSource === "invoice" ? "queue-invoice"
           : queueSource === "credit-card" ? "queue-credit-card"
           : "queue-projection";
-        const budgetTypeLabel = budgetTypeFor(raw, item);
+        const budgetTypeLabel = rowKind === "queue-projection"
+          ? paymentTypeLabel({ type: item?.type, note: item?.note })
+          : budgetTypeFor(raw, item);
         const sourceLabel =
           queueSource === "invoice" ? "Invoice"
           : queueSource === "credit-card" ? "Credit Card"
@@ -915,11 +942,12 @@ export function BudgetActivityTab({
           customerLabel,
           userLabel,
           noteText,
+          rentCertDueOn,
           budgetTypeLabel,
           displayType: "Projected",
           sourceType: "projected",
           complianceStatus: "none" as ComplianceStatus,
-          searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, item?.merchant, item?.paymentId, item?.id].join(" ")),
+          searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, rentCertDueOn, item?.merchant, item?.paymentId, item?.id].join(" ")),
         });
         continue;
       }
@@ -935,8 +963,9 @@ export function BudgetActivityTab({
           customerId ||
           "",
       ).trim();
-      const noteText = Array.isArray(raw?.note) ? raw.note.join(", ") : String(raw?.note || "").trim();
+      const noteText = String(raw?.comment || "").trim() || paymentNoteMeta(raw?.note);
       const date = dateIso10(raw?.ts || raw?.date);
+      const rentCertDueOn = rentCertDueFor(enrollmentId, date);
       const isReversal = !!raw?.reversalOf || Number(raw?.amount || 0) < 0;
       const userLabel = resolveUserLabel(raw?.by);
       const paymentId = String(raw?.paymentId || "").trim();
@@ -952,7 +981,7 @@ export function BudgetActivityTab({
       const hmis = !!(compliance?.hmisComplete);
       const cw = !!(compliance?.caseworthyComplete);
       const complianceStatus: ComplianceStatus = isReversal ? "complete" : (hmis && cw ? "complete" : (hmis || cw ? "partial" : "none"));
-      const budgetTypeLabel = budgetTypeFor(raw);
+      const budgetTypeLabel = paymentTypeLabel({ type: raw?.type, note: raw?.note });
 
       rows.push({
         id: String(raw?.id || `ledger:${enrollmentId}:${raw?.paymentId || date}`),
@@ -982,11 +1011,12 @@ export function BudgetActivityTab({
         customerLabel,
         userLabel,
         noteText,
+        rentCertDueOn,
         budgetTypeLabel,
         displayType: isReversal ? "Reversal" : "Paid",
         sourceType: "paid",
         complianceStatus,
-        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, paymentId, raw?.id].join(" ")),
+        searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, rentCertDueOn, paymentId, raw?.id].join(" ")),
       });
     }
 
@@ -996,7 +1026,7 @@ export function BudgetActivityTab({
     });
 
     return rows;
-  }, [allActivity, customerNameById, enrollmentInfoById, grantId, lineItemLookup, lineItemTypeByKey, paymentComplianceByKey, resolveUserLabel]);
+  }, [allActivity, customerNameById, enrollmentInfoById, grantId, lineItemLookup, lineItemTypeByKey, paymentComplianceByKey, rentCertDueByEnrollmentTarget, resolveUserLabel]);
 
   const activityByLineItem = useMemo(() => {
     const map = new Map<string, GrantActivityRow[]>();
@@ -1021,9 +1051,21 @@ export function BudgetActivityTab({
       customerLabel: row.customerLabel,
       budgetTypeLabel: row.budgetTypeLabel,
       noteText: row.noteText || row.title || "",
+      rentCertDueOn: row.rentCertDueOn,
       statusLabel: row.displayType,
     }));
   }, [activityRows]);
+
+  const activityById = useMemo(() => {
+    const map = new Map<string, GrantActivityRow>();
+    for (const row of activityRows) map.set(row.id, row);
+    return map;
+  }, [activityRows]);
+
+  const openSandboxPayment = useCallback((sourceId: string) => {
+    const row = activityById.get(sourceId);
+    if (row) setSelectedActivity(row);
+  }, [activityById]);
 
   const resolveCustomer = (row: any) =>
     String(
@@ -1415,6 +1457,17 @@ export function BudgetActivityTab({
         />
       )}
 
+      <GrantBudgetSandboxModal
+        isOpen={sandboxOpen}
+        onClose={() => setSandboxOpen(false)}
+        grantId={grantId ?? ""}
+        grantName={String(model?.name || grantId || "Grant")}
+        seedRows={sandboxSeedRows}
+        lineItems={sandboxLineItems}
+        currency={currency}
+        onOpenPayment={openSandboxPayment}
+      />
+
       <SpendDetailModal
         row={selectedActivity}
         isOpen={!!selectedActivity}
@@ -1426,16 +1479,6 @@ export function BudgetActivityTab({
         grantNameById={grantNameById}
         lineItemLookup={lineItemLookup}
         customerNameById={customerNameById}
-      />
-
-      <GrantBudgetSandboxModal
-        isOpen={sandboxOpen}
-        onClose={() => setSandboxOpen(false)}
-        grantId={grantId ?? ""}
-        grantName={String(model?.name || grantId || "Grant")}
-        seedRows={sandboxSeedRows}
-        lineItems={sandboxLineItems}
-        currency={currency}
       />
     </div>
   );

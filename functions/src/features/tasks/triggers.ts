@@ -153,6 +153,10 @@ async function evaluateConditionalRules(
 export const onEnrollmentBuildTasks = onDocumentCreated(
   { region: RUNTIME.region, document: "customerEnrollments/{id}" },
   async (event) => {
+    // Task schedule generation is deprecated — rent cert reminders are surfaced
+    // directly from payment objects on the frontend.
+    return;
+
     const eid = String(event.params.id);
     const after = (event.data?.data() as any) || {};
 

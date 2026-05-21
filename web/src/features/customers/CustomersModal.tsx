@@ -23,6 +23,7 @@ import {
   CustomerFilesTab,
 } from "./tabs";
 import NewCustomerFlow from "./NewCustomerFlow";
+import { getCustomerDriveFolderLink } from "./customerDriveFolder";
 
 type TabKey =
   | "details"
@@ -361,6 +362,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
       : "") ||
     customerId ||
     "Customer";
+  const driveFolderLink = getCustomerDriveFolderLink(model && Object.keys(model).length ? model : detail);
 
   const tabs: Array<[TabKey, string]> = [
     ["details", "Details"],
@@ -400,7 +402,22 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
           {creating ? "New Customer" : titleName}
         </div>
         {customerId ? (
-          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{customerId}</div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className="truncate">{customerId}</span>
+            {!creating && driveFolderLink ? (
+              <a
+                href={driveFolderLink.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-6 shrink-0 items-center rounded px-1 font-semibold lowercase text-sky-700 underline underline-offset-2 hover:text-sky-900"
+                title={driveFolderLink.label}
+                aria-label={driveFolderLink.label}
+                onClick={(event) => event.stopPropagation()}
+              >
+                google
+              </a>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <HelpButton pageKey="customersModal" />

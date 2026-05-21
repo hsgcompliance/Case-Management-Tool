@@ -45,6 +45,7 @@ type GrantOption = {
   label: string;
   status?: string | null;
   endDate?: string | null;
+  kind?: string | null;
 };
 type EnrollmentDraft = {
   grantId: string;
@@ -432,6 +433,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         label: grantLabel(grant),
         status: grant.status ? String(grant.status) : null,
         endDate: grant.endDate ? String(grant.endDate).slice(0, 10) : null,
+        kind: grant.kind ? String(grant.kind) : null,
       }))
       .filter((grant) => !!grant.id)
       .sort((a, b) => a.label.localeCompare(b.label));
@@ -1041,6 +1043,97 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
 
   const canRunDupCheck = !!firstName.trim() && !!lastName.trim() && !!dob.trim();
 
+  const renderEnrollmentCard = (grant: GrantOption) => {
+    const draft = selectedEnrollmentDrafts.find((entry) => entry.grantId === grant.id) || null;
+    const selected = !!draft;
+    return (
+      <div
+        key={grant.id}
+        className={[
+          "rounded-[22px] border p-4 transition",
+          selected ? "border-sky-500 bg-sky-50" : "border-slate-200 bg-white hover:border-slate-300",
+          programsLocked ? "cursor-not-allowed opacity-70" : "",
+        ].join(" ")}
+      >
+        <button
+          type="button"
+          disabled={programsLocked}
+          className="w-full text-left"
+          onClick={() =>
+            setSelectedEnrollmentDrafts((current) =>
+              current.some((entry) => entry.grantId === grant.id)
+                ? current.filter((entry) => entry.grantId !== grant.id)
+                : current.concat(createEnrollmentDraft(grant.id, { grantEndDate: grant.endDate || null })),
+            )
+          }
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-slate-950">{grant.label}</div>
+            <span className="text-xs text-slate-500">{selected ? "Selected" : "Add"}</span>
+          </div>
+          <div className="mt-2 text-xs text-slate-500">
+            {selected
+              ? `Start ${draft?.startDate || isoToday()} | End ${draft?.endDate || "No end date"}`
+              : "Adds a dated enrollment draft"}
+          </div>
+        </button>
+        {draft ? (
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="field">
+              <span className="label">Start date</span>
+              <input
+                className="input"
+                type="date"
+                value={draft.startDate}
+                disabled={programsLocked}
+                onChange={(e) => {
+                  const nextStartDate = e.currentTarget.value;
+                  setSelectedEnrollmentDrafts((current) =>
+                    current.map((entry) =>
+                      entry.grantId !== grant.id
+                        ? entry
+                        : {
+                            ...entry,
+                            startDate: nextStartDate,
+                            endDate: entry.endDateManuallyEdited
+                              ? capEnrollmentEndDate(entry.endDate, grant.endDate || null)
+                              : "",
+                          },
+                    ),
+                  );
+                }}
+              />
+            </label>
+            <label className="field">
+              <span className="label">End date (optional)</span>
+              <input
+                className="input"
+                type="date"
+                value={draft.endDate}
+                max={grant.endDate || undefined}
+                disabled={programsLocked}
+                onChange={(e) => {
+                  const nextEndDate = capEnrollmentEndDate(e.currentTarget.value, grant.endDate || null);
+                  setSelectedEnrollmentDrafts((current) =>
+                    current.map((entry) =>
+                      entry.grantId !== grant.id
+                        ? entry
+                        : {
+                            ...entry,
+                            endDate: nextEndDate,
+                            endDateManuallyEdited: true,
+                          },
+                    ),
+                  );
+                }}
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const stepContent = step === 1 ? (
     <StepFrame
       eyebrow="Page 1"
@@ -1207,129 +1300,64 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   ) : step === 3 ? (
     <StepFrame
       eyebrow="Page 3"
-      title="Program enrollments"
-      description="Choose at least one program. Each selection creates an editable enrollment draft. End dates are optional; if the grant has an end date the enrollment cannot extend past it."
+      title="Enrollments"
+      description="Choose at least one grant or program. Each selection creates an editable enrollment draft. End dates are optional; if the grant has an end date the enrollment cannot extend past it."
     >
-      <div className="space-y-4">
-        {programsLocked ? (
-          <div className="rounded-[22px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            Programs are locked once enrollments are created so assessments and task previews stay tied to real records.
-          </div>
-        ) : null}
-
-        <input
-          type="search"
-          className="input input-sm w-full"
-          placeholder="Search programs…"
-          value={enrollmentSearch}
-          onChange={(e) => setEnrollmentSearch(e.currentTarget.value)}
-          disabled={programsLocked}
-        />
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {(Array.isArray(grantOptions) ? grantOptions : [])
-            .filter((grant) => {
-              if (!grant?.id) return false;
-              const isSelected = selectedEnrollmentDrafts.some((d) => d.grantId === grant.id);
-              if (isSelected) return true;
-              const q = (enrollmentSearch ?? "").trim().toLowerCase();
-              if (!q) return true;
-              return String(grant.label ?? "").toLowerCase().includes(q);
-            })
-            .map((grant) => {
-            const draft = selectedEnrollmentDrafts.find((entry) => entry.grantId === grant.id) || null;
-            const selected = !!draft;
-            return (
-              <div
-                key={grant.id}
-                className={[
-                  "rounded-[22px] border p-4 transition",
-                  selected
-                    ? "border-sky-500 bg-sky-50"
-                    : "border-slate-200 bg-white hover:border-slate-300",
-                  programsLocked ? "cursor-not-allowed opacity-70" : "",
-                ].join(" ")}
-              >
-                <button
-                  type="button"
-                  disabled={programsLocked}
-                  className="w-full text-left"
-                  onClick={() =>
-                    setSelectedEnrollmentDrafts((current) =>
-                      current.some((entry) => entry.grantId === grant.id)
-                        ? current.filter((entry) => entry.grantId !== grant.id)
-                        : current.concat(createEnrollmentDraft(grant.id, { grantEndDate: grant.endDate || null })),
-                    )
-                  }
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-slate-950">{grant.label}</div>
-                    <span className="text-xs text-slate-500">{selected ? "Selected" : "Add"}</span>
-                  </div>
-                  <div className="mt-2 text-xs text-slate-500">
-                    {selected
-                      ? `Start ${draft?.startDate || isoToday()} | End ${draft?.endDate || "No end date"}`
-                      : "Adds a dated enrollment draft"}
-                  </div>
-                </button>
-                {draft ? (
-                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <label className="field">
-                      <span className="label">Start date</span>
-                      <input
-                        className="input"
-                        type="date"
-                        value={draft.startDate}
-                        disabled={programsLocked}
-                        onChange={(e) => {
-                          const nextStartDate = e.currentTarget.value;
-                          setSelectedEnrollmentDrafts((current) =>
-                            current.map((entry) =>
-                              entry.grantId !== grant.id
-                                ? entry
-                                : {
-                                    ...entry,
-                                    startDate: nextStartDate,
-                                    endDate: entry.endDateManuallyEdited
-                                      ? capEnrollmentEndDate(entry.endDate, grant.endDate || null)
-                                      : "",
-                                  },
-                            ),
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="label">End date (optional)</span>
-                      <input
-                        className="input"
-                        type="date"
-                        value={draft.endDate}
-                        max={grant.endDate || undefined}
-                        disabled={programsLocked}
-                        onChange={(e) => {
-                          const nextEndDate = capEnrollmentEndDate(e.currentTarget.value, grant.endDate || null);
-                          setSelectedEnrollmentDrafts((current) =>
-                            current.map((entry) =>
-                              entry.grantId !== grant.id
-                                ? entry
-                                : {
-                                    ...entry,
-                                    endDate: nextEndDate,
-                                    endDateManuallyEdited: true,
-                                  },
-                            ),
-                          );
-                        }}
-                      />
-                    </label>
-                  </div>
-                ) : null}
+      {(() => {
+        const filterFn = (grant: GrantOption) => {
+          if (!grant?.id) return false;
+          const isSelected = selectedEnrollmentDrafts.some((d) => d.grantId === grant.id);
+          if (isSelected) return true;
+          const q = (enrollmentSearch ?? "").trim().toLowerCase();
+          if (!q) return true;
+          return String(grant.label ?? "").toLowerCase().includes(q);
+        };
+        const all = Array.isArray(grantOptions) ? grantOptions : [];
+        const grantsSection = all.filter((g) => g.kind === "grant").filter(filterFn);
+        const programsSection = all.filter((g) => g.kind !== "grant").filter(filterFn);
+        return (
+          <div className="space-y-5">
+            {programsLocked ? (
+              <div className="rounded-[22px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                Selections are locked once enrollments are created so assessments and task previews stay tied to real records.
               </div>
-            );
-          })}
-        </div>
-      </div>
+            ) : null}
+
+            <input
+              type="search"
+              className="input input-sm w-full"
+              placeholder="Search grants and programs…"
+              value={enrollmentSearch}
+              onChange={(e) => setEnrollmentSearch(e.currentTarget.value)}
+              disabled={programsLocked}
+            />
+
+            {grantsSection.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-slate-950">Grants</span>
+                  <span className="text-xs text-slate-400">budget tracking</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {grantsSection.map(renderEnrollmentCard)}
+                </div>
+              </div>
+            )}
+
+            {programsSection.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-slate-950">Programs</span>
+                  <span className="text-xs text-slate-400">non-end-dated enrollment tracking</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {programsSection.map(renderEnrollmentCard)}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </StepFrame>
   ) : step === 5 ? (
     <StepFrame

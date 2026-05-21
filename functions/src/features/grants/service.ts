@@ -406,7 +406,7 @@ export async function patchGrants(
     patch: Partial<TGrant>;
     unset?: string[];
   }> = [];
-  // Track grants whose status just became closed/deleted so we can cascade after write.
+  // Track grants whose terminal status should be reflected on enrollments after write.
   const cascadeNeeded: Array<{ id: string; targetStatus: "closed" | "deleted" }> = [];
 
   for (let i = 0; i < rows.length; i++) {
@@ -429,9 +429,10 @@ export async function patchGrants(
     const active = nextStatus === "active";
     const deleted = nextStatus === "deleted";
 
-    // Detect terminal status transitions for cascade.
+    // Detect terminal status writes for cascade. Re-running the cascade is cheap for
+    // already-terminal enrollments and lets a later save repair stale active rows.
     const prevStatus = (prev.status ?? "draft") as TGrant["status"];
-    if (prevStatus !== nextStatus) {
+    if (prevStatus !== nextStatus || hasOwn(safePatch, "status")) {
       if (nextStatus === "closed") cascadeNeeded.push({ id, targetStatus: "closed" });
       else if (nextStatus === "deleted") cascadeNeeded.push({ id, targetStatus: "deleted" });
     }
@@ -479,6 +480,8 @@ export async function patchGrants(
   for (const row of budgetRows) {
     const { id, patch, unset } = row;
 
+    let cascadeTargetStatus: "closed" | "deleted" | null = null;
+
     await withTxn(async (tx) => {
       const ref = db.collection("grants").doc(id);
       const snap = await tx.get(ref);
@@ -498,6 +501,12 @@ export async function patchGrants(
         "draft") as TGrant["status"];
       const active = nextStatus === "active";
       const deleted = nextStatus === "deleted";
+
+      const prevStatus = (prevObj.status ?? "draft") as TGrant["status"];
+      if (prevStatus !== nextStatus || hasOwn(patch, "status")) {
+        if (nextStatus === "closed") cascadeTargetStatus = "closed";
+        else if (nextStatus === "deleted") cascadeTargetStatus = "deleted";
+      }
 
       // kind coherence
       const kind = canonicalKind(prev, patch);
@@ -572,6 +581,12 @@ export async function patchGrants(
         tx.set(ref, delMap, { merge: true });
       }
     }, "grants_patch_with_budget");
+
+    if (cascadeTargetStatus) {
+      await cascadeGrantToEnrollments(id, cascadeTargetStatus).catch((e: any) =>
+        console.error(`[patchGrants] cascade failed for grant ${id} -> ${cascadeTargetStatus}:`, e?.message || e)
+      );
+    }
   }
 
   return { ids };
@@ -589,6 +604,11 @@ export async function cascadeGrantToEnrollments(
   targetStatus: "closed" | "deleted",
 ) {
   if (!grantId) return;
+
+  const grantSnap = await db.collection("grants").doc(grantId).get();
+  const grant = grantSnap.exists ? (grantSnap.data() || {}) : {};
+  const grantEndDate = String((grant as Record<string, unknown>).endDate || "").slice(0, 10);
+  const closeEndDate = grantEndDate || new Date().toISOString().slice(0, 10);
 
   // --- READ FIRST: all enrollments for this grant that are not already terminal ---
   let snap: FirebaseFirestore.QuerySnapshot;
@@ -611,18 +631,24 @@ export async function cascadeGrantToEnrollments(
 
   if (!toProcess.length) return;
 
-  // --- WRITE: batch-close or batch-delete ---
-  const batch = db.batch();
+  // --- WRITE: close or delete matching enrollments ---
+  const writer = newBulkWriter(2);
   const closedEnrollments: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string | null }> = [];
 
   for (const doc of toProcess) {
     const data = doc.data() as any;
     const patch: Record<string, unknown> =
       targetStatus === "closed"
-        ? { status: "closed", active: false, closedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }
+        ? {
+            status: "closed",
+            active: false,
+            endDate: closeEndDate,
+            closedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          }
         : { status: "deleted", active: false, deleted: true, deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
 
-    batch.set(doc.ref, patch, { merge: true });
+    writer.set(doc.ref, patch, { merge: true });
 
     closedEnrollments.push({
       id: doc.id,
@@ -633,7 +659,7 @@ export async function cascadeGrantToEnrollments(
   }
 
   try {
-    await batch.commit();
+    await writer.close();
   } catch (e: any) {
     console.error(`[cascadeGrant] batch write failed for grant ${grantId}:`, e?.message || e);
     return;

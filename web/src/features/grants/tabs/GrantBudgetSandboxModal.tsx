@@ -20,6 +20,7 @@ export type GrantBudgetSandboxSeedRow = {
   customerLabel: string;
   budgetTypeLabel: string;
   noteText: string;
+  rentCertDueOn?: string;
   statusLabel: string;
 };
 
@@ -142,6 +143,7 @@ function rowSearchText(row: SandboxRow, lineItemLabel: string) {
     row.customerLabel,
     row.budgetTypeLabel,
     row.noteText,
+    row.rentCertDueOn,
     lineItemLabel,
     row.statusLabel,
     row.sourceKind,
@@ -195,6 +197,22 @@ function deltaClass(value: number) {
   return value >= 0 ? "text-emerald-600" : "text-red-600";
 }
 
+function sourceStatusClass(label: string) {
+  const normalized = normalizeText(label);
+  if (normalized.includes("reversal")) return "bg-red-100 text-red-700";
+  if (normalized.includes("project")) return "bg-blue-100 text-blue-700";
+  if (normalized.includes("paid")) return "bg-emerald-100 text-emerald-700";
+  if (normalized.includes("new")) return "bg-yellow-100 text-yellow-800";
+  return "bg-slate-100 text-slate-600";
+}
+
+function sandboxChangeClass(state: SandboxRowState) {
+  if (state === "deleted") return "bg-red-100 text-red-700";
+  if (state === "changed") return "bg-yellow-200 text-yellow-900";
+  if (state === "new") return "bg-amber-200 text-amber-900";
+  return "bg-slate-100 text-slate-600";
+}
+
 function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: GrantBudgetSandboxLineItem[]) {
   const loadScenario = useCallback(() => seedRows(seed), [seed]);
   const [rows, setRows] = useState<SandboxRow[]>(() => loadScenario());
@@ -233,6 +251,7 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
       customerLabel: String(draft.customerLabel || "").trim(),
       budgetTypeLabel: String(draft.budgetTypeLabel || lineItem?.typeLabel || "").trim() || "N/A",
       noteText: String(draft.noteText || "").trim(),
+      rentCertDueOn: "",
       statusLabel: "New",
       rowState: "new",
       original: {
@@ -245,6 +264,7 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
         customerLabel: "",
         budgetTypeLabel: "N/A",
         noteText: "",
+        rentCertDueOn: "",
         statusLabel: "New",
       },
     };
@@ -280,6 +300,49 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
     });
   }, []);
 
+  const addRowBelow = useCallback((sandboxId: string) => {
+    setRows((current) => {
+      const sourceIndex = current.findIndex((row) => row.sandboxId === sandboxId);
+      const source = sourceIndex >= 0 ? current[sourceIndex] : null;
+      const lineItem = source ? lineItemById.get(source.lineItemId) : null;
+      const date = source?.date || toISODate(new Date());
+      const row: SandboxRow = {
+        sandboxId: `new:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`,
+        sourceId: "",
+        sourceKind: "sandbox",
+        grantId: source?.grantId || "",
+        lineItemId: source?.lineItemId || "",
+        date,
+        amountCents: 0,
+        customerLabel: "",
+        budgetTypeLabel: lineItem?.typeLabel || "N/A",
+        noteText: "",
+        rentCertDueOn: "",
+        statusLabel: "New",
+        rowState: "new",
+        original: {
+          sourceId: "",
+          sourceKind: "sandbox",
+          grantId: source?.grantId || "",
+          lineItemId: source?.lineItemId || "",
+          date,
+          amountCents: 0,
+          customerLabel: "",
+          budgetTypeLabel: "N/A",
+          noteText: "",
+          rentCertDueOn: "",
+          statusLabel: "New",
+        },
+      };
+      const insertIndex = sourceIndex >= 0 ? sourceIndex + 1 : current.length;
+      return [
+        ...current.slice(0, insertIndex),
+        row,
+        ...current.slice(insertIndex),
+      ];
+    });
+  }, [lineItemById]);
+
   const removeRow = useCallback((sandboxId: string) => {
     setRows((current) => current.flatMap((row) => {
       if (row.sandboxId !== sandboxId) return [row];
@@ -301,7 +364,7 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
     setRows(loadScenario());
   }, [loadScenario]);
 
-  return { rows, updateRow, duplicateRow, addBlankRow, removeRow, restoreRow, resetScenario };
+  return { rows, updateRow, duplicateRow, addBlankRow, addRowBelow, removeRow, restoreRow, resetScenario };
 }
 
 function SandboxContextMenu({
@@ -309,7 +372,8 @@ function SandboxContextMenu({
   row,
   showDeleted,
   onDuplicate,
-  onAddBlank,
+  onOpenPayment,
+  onAddRowBelow,
   onRemove,
   onRestore,
   onClose,
@@ -318,7 +382,8 @@ function SandboxContextMenu({
   row: SandboxRow | null;
   showDeleted: boolean;
   onDuplicate: (rowId: string) => void;
-  onAddBlank: () => void;
+  onOpenPayment?: (row: SandboxRow) => void;
+  onAddRowBelow: (rowId: string) => void;
   onRemove: (rowId: string) => void;
   onRestore: (rowId: string) => void;
   onClose: () => void;
@@ -339,28 +404,41 @@ function SandboxContextMenu({
   if (!row) return null;
   const buttonClass = "block w-full px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700";
 
+  const runAction = (action: () => void) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    action();
+    onClose();
+  };
+
   return (
     <div
       className="fixed z-[1600] min-w-[180px] rounded-md border border-slate-200 bg-white py-1 shadow-xl"
       style={{ top: menu.y, left: menu.x }}
       onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
       }}
     >
-      <button type="button" className={buttonClass} onClick={() => { onDuplicate(row.sandboxId); onClose(); }}>
+      <button type="button" className={buttonClass} onMouseDown={runAction(() => onDuplicate(row.sandboxId))}>
         Duplicate Row
       </button>
-      <button type="button" className={buttonClass} onClick={() => { onAddBlank(); onClose(); }}>
-        Add Blank Row
+      {row.sourceId && onOpenPayment ? (
+        <button type="button" className={buttonClass} onMouseDown={runAction(() => onOpenPayment(row))}>
+          Open Payment
+        </button>
+      ) : null}
+      <button type="button" className={buttonClass} onMouseDown={runAction(() => onAddRowBelow(row.sandboxId))}>
+        Add Row Below
       </button>
       {row.rowState === "deleted" && showDeleted ? (
-        <button type="button" className={buttonClass} onClick={() => { onRestore(row.sandboxId); onClose(); }}>
+        <button type="button" className={buttonClass} onMouseDown={runAction(() => onRestore(row.sandboxId))}>
           Restore Row
         </button>
       ) : (
-        <button type="button" className={`${buttonClass} text-red-600 hover:text-red-700`} onClick={() => { onRemove(row.sandboxId); onClose(); }}>
+        <button type="button" className={`${buttonClass} text-red-600 hover:text-red-700`} onMouseDown={runAction(() => onRemove(row.sandboxId))}>
           Remove Row
         </button>
       )}
@@ -376,6 +454,7 @@ export function GrantBudgetSandboxModal({
   seedRows: seed,
   lineItems,
   currency,
+  onOpenPayment,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -384,8 +463,9 @@ export function GrantBudgetSandboxModal({
   seedRows: GrantBudgetSandboxSeedRow[];
   lineItems: GrantBudgetSandboxLineItem[];
   currency: (n: number) => string;
+  onOpenPayment?: (sourceId: string) => void;
 }) {
-  const { rows, updateRow, duplicateRow, addBlankRow, removeRow, restoreRow, resetScenario } = useLocalSandboxScenario(seed, lineItems);
+  const { rows, updateRow, duplicateRow, addBlankRow, addRowBelow, removeRow, restoreRow, resetScenario } = useLocalSandboxScenario(seed, lineItems);
   const [lineItemFilter, setLineItemFilter] = useState("all");
   const [search, setSearch] = useState("");
   const deferredSearch = React.useDeferredValue(search);
@@ -445,9 +525,11 @@ export function GrantBudgetSandboxModal({
       });
   }, [deferredSearch, lineItemById, lineItemFilter, rows, showDeleted, sort.direction, sort.key]);
 
+  const draftAmountCents = hasDraftValue(blankDraft) ? centsFromAmountInput(blankDraft.amount || "0") : 0;
+  const draftLineItemId = String(blankDraft.lineItemId || "").trim();
   const sandboxTotalCents = useMemo(
-    () => sumRowAmounts(rows),
-    [rows],
+    () => sumRowAmounts(rows) + draftAmountCents,
+    [draftAmountCents, rows],
   );
   const deltaCents = sandboxTotalCents - originalTotalCents;
   const pendingChangeCount = rows.filter((row) => row.rowState !== "clean").length;
@@ -461,7 +543,7 @@ export function GrantBudgetSandboxModal({
       .filter((item) => lineItemFilter === "all" || item.id === lineItemFilter)
       .map((item) => {
         const originalSpendCents = sumRowAmounts(seed, item.id);
-        const sandboxSpendCents = sumRowAmounts(rows, item.id);
+        const sandboxSpendCents = sumRowAmounts(rows, item.id) + (draftLineItemId === item.id ? draftAmountCents : 0);
         return {
           id: item.id,
           label: item.label,
@@ -470,11 +552,10 @@ export function GrantBudgetSandboxModal({
           originalSpendCents,
           sandboxSpendCents,
           spendDeltaCents: sandboxSpendCents - originalSpendCents,
-          originalRemainingCents: item.budgetCents - originalSpendCents,
           sandboxRemainingCents: item.budgetCents - sandboxSpendCents,
         };
       });
-  }, [lineItemFilter, lineItems, rows, seed]);
+  }, [draftAmountCents, draftLineItemId, lineItemFilter, lineItems, rows, seed]);
 
   const toggleSort = useCallback((key: SandboxSortKey) => {
     setSort((prev) => ({
@@ -553,10 +634,6 @@ export function GrantBudgetSandboxModal({
     }
   };
 
-  const focusBlankRow = useCallback(() => {
-    blankFirstInputRef.current?.focus();
-  }, []);
-
   const openRowContextMenu = useCallback((e: React.MouseEvent, rowId: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -579,8 +656,9 @@ export function GrantBudgetSandboxModal({
             className={`input min-w-36 ${scaleConfig.input}`}
             value={editingCell.value}
             onChange={(e) => {
-              const lineItem = lineItemById.get(e.currentTarget.value);
-              setEditingCell((current) => current ? { ...current, value: e.currentTarget.value } : current);
+              const value = e.currentTarget.value;
+              const lineItem = lineItemById.get(value);
+              setEditingCell((current) => current ? { ...current, value } : current);
               if (lineItem) updateRow(row.sandboxId, { budgetTypeLabel: lineItem.typeLabel });
             }}
             onBlur={commitEdit}
@@ -597,7 +675,10 @@ export function GrantBudgetSandboxModal({
           className={`input ${scaleConfig.input} ${field === "amountCents" ? "w-24 text-right" : "min-w-28"}`}
           type={field === "date" ? "date" : field === "amountCents" ? "number" : "text"}
           value={editingCell.value}
-          onChange={(e) => setEditingCell((current) => current ? { ...current, value: e.currentTarget.value } : current)}
+          onChange={(e) => {
+            const value = e.currentTarget.value;
+            setEditingCell((current) => current ? { ...current, value } : current);
+          }}
           onBlur={commitEdit}
           onKeyDown={onEditKeyDown}
           autoFocus
@@ -697,7 +778,7 @@ export function GrantBudgetSandboxModal({
                 <th className={`${scaleConfig.header} text-right font-medium`}>{headerButton("amount", "Amount", "text-right")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("customer", "Customer")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("lineItem", "Line Item")}</th>
-                <th className={`${scaleConfig.header} font-medium`}>{headerButton("type", "Type")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>Rent Cert Due</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("note", "Note")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("sourceStatus", "Source Status")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("sandboxChange", "Sandbox Change")}</th>
@@ -714,7 +795,7 @@ export function GrantBudgetSandboxModal({
               {visibleRows.map((row) => {
                 const lineItem = lineItemById.get(row.lineItemId);
                 const rowClass =
-                  row.rowState === "deleted" ? "bg-slate-50 text-slate-400 line-through opacity-70"
+                  row.rowState === "deleted" ? "bg-red-50 text-red-500 line-through opacity-80"
                   : row.rowState === "changed" || row.rowState === "new" ? "bg-yellow-50 hover:bg-yellow-100/70"
                   : "hover:bg-slate-50";
                 return (
@@ -727,15 +808,15 @@ export function GrantBudgetSandboxModal({
                     <td className={`w-28 border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{renderEditableCell(row, "amountCents", currency(row.amountCents / 100), "text-right font-mono")}</td>
                     <td className={`max-w-[180px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "customerLabel", row.customerLabel || "-")}</td>
                     <td className={`max-w-[190px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "lineItemId", lineItem?.label || "Unassigned")}</td>
-                    <td className={`max-w-[150px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "budgetTypeLabel", row.budgetTypeLabel || "N/A")}</td>
+                    <td className={`w-28 border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>{row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "—"}</td>
                     <td className={`max-w-[260px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "noteText", row.noteText || "-")}</td>
                     <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>
-                      <span className={`rounded bg-slate-100 px-1.5 py-0.5 font-semibold uppercase text-slate-600 ${scaleConfig.badge}`}>
+                      <span className={`rounded px-1.5 py-0.5 font-semibold uppercase ${scaleConfig.badge} ${sourceStatusClass(row.statusLabel)}`}>
                         {row.statusLabel}
                       </span>
                     </td>
                     <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>
-                      <span className={`rounded bg-slate-100 px-1.5 py-0.5 font-semibold uppercase text-slate-600 ${scaleConfig.badge}`}>
+                      <span className={`rounded px-1.5 py-0.5 font-semibold uppercase ${scaleConfig.badge} ${sandboxChangeClass(row.rowState)}`}>
                         {rowStateLabel(row.rowState)}
                       </span>
                     </td>
@@ -752,7 +833,7 @@ export function GrantBudgetSandboxModal({
                     {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                   </select>
                 </td>
-                <td className={scaleConfig.cell}><input className={`input min-w-28 ${scaleConfig.input}`} placeholder="Type" value={blankDraft.budgetTypeLabel} onChange={(e) => updateBlankDraft({ budgetTypeLabel: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={`${scaleConfig.cell} text-slate-400`}>—</td>
                 <td className={scaleConfig.cell}><input className={`input min-w-44 ${scaleConfig.input}`} placeholder="Note" value={blankDraft.noteText} onChange={(e) => updateBlankDraft({ noteText: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
                 <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>Draft</td>
                 <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>Blank</td>
@@ -799,34 +880,25 @@ export function GrantBudgetSandboxModal({
               <thead className="sticky top-0 bg-white text-slate-500">
                 <tr>
                   <th className={`border-b border-slate-100 text-left font-medium ${scaleConfig.header}`}>Line Item</th>
-                  <th className={`border-b border-slate-100 text-left font-medium ${scaleConfig.header}`}>Type</th>
                   <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Budget</th>
-                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Original Spend</th>
-                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Sandbox Spend</th>
-                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Spend Delta</th>
-                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Original Left</th>
-                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Sandbox Left</th>
-                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Left Delta</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Original</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Preview</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Change</th>
+                  <th className={`border-b border-slate-100 text-right font-medium ${scaleConfig.header}`}>Left</th>
                 </tr>
               </thead>
               <tbody>
                 {budgetSummaryRows.map((item) => {
-                  const remainingDeltaCents = item.sandboxRemainingCents - item.originalRemainingCents;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
                       <td className={`max-w-[220px] border-b border-slate-100 font-medium text-slate-800 ${scaleConfig.cell}`}>
                         <span className="block truncate" title={item.label}>{item.label}</span>
                       </td>
-                      <td className={`max-w-[140px] border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>
-                        <span className="block truncate" title={item.typeLabel}>{item.typeLabel}</span>
-                      </td>
                       <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.budgetCents / 100)}</td>
                       <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.originalSpendCents / 100)}</td>
                       <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.sandboxSpendCents / 100)}</td>
                       <td className={`border-b border-slate-100 text-right font-mono font-semibold ${scaleConfig.cell} ${deltaClass(item.spendDeltaCents)}`}>{currency(item.spendDeltaCents / 100)}</td>
-                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.originalRemainingCents / 100)}</td>
-                      <td className={`border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{currency(item.sandboxRemainingCents / 100)}</td>
-                      <td className={`border-b border-slate-100 text-right font-mono font-semibold ${scaleConfig.cell} ${deltaClass(remainingDeltaCents)}`}>{currency(remainingDeltaCents / 100)}</td>
+                      <td className={`border-b border-slate-100 text-right font-mono font-semibold ${scaleConfig.cell} ${deltaClass(item.sandboxRemainingCents)}`}>{currency(item.sandboxRemainingCents / 100)}</td>
                     </tr>
                   );
                 })}
@@ -842,7 +914,8 @@ export function GrantBudgetSandboxModal({
           row={contextRow}
           showDeleted={showDeleted}
           onDuplicate={duplicateRow}
-          onAddBlank={focusBlankRow}
+          onOpenPayment={onOpenPayment ? (row) => onOpenPayment(row.sourceId) : undefined}
+          onAddRowBelow={addRowBelow}
           onRemove={removeRow}
           onRestore={restoreRow}
           onClose={() => setContextMenu(null)}

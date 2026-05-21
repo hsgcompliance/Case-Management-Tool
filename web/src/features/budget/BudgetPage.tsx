@@ -319,11 +319,11 @@ export function BudgetPage() {
   };
 
   useEffect(() => {
-    if (!canSyncSpendingForms || autoSyncFired.current) return;
+    if (!isAdminLike(profile) || autoSyncFired.current) return;
     autoSyncFired.current = true;
     void onLoadSpendingForms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSyncSpendingForms]);
+  }, [profile]);
 
   const onOpen = (id: string) => setSelectedGrantId(id);
 

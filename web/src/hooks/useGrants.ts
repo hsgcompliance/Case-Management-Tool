@@ -127,6 +127,26 @@ export function usePatchGrants() {
             },
           }));
       },
+      afterSuccess: async (_data, rows, qc) => {
+        const arr = Array.isArray(rows) ? rows : [rows];
+        const terminalGrantIds = arr
+          .filter((row) => {
+            const status = String((row?.patch as { status?: unknown } | undefined)?.status || "").toLowerCase();
+            return !!row?.id && (status === "closed" || status === "deleted");
+          })
+          .map((row) => String(row.id));
+
+        if (!terminalGrantIds.length) return;
+
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: qk.enrollments.root }),
+          qc.invalidateQueries({ queryKey: qk.inbox.root }),
+          qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+          qc.invalidateQueries({ queryKey: ["metrics"] }),
+          ...terminalGrantIds.map((id) => qc.invalidateQueries({ queryKey: qk.grants.detail(id) })),
+          ...terminalGrantIds.map((id) => qc.invalidateQueries({ queryKey: qk.metrics.grant(id) })),
+        ]);
+      },
       revalidateAfterMs: 0,
     },
     { meta: { queryClient: qc } },
