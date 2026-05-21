@@ -106,6 +106,24 @@ function budgetTotal(g: Grant) {
   return asNum(totals.total ?? budget.total);
 }
 
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadCsv(filename: string, rows: unknown[][]) {
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function enrollmentCounts(g: Grant) {
   const allMetrics = asObj(asObj(g).metrics);
   const metrics = asObj(allMetrics.enrollmentCounts);
@@ -147,7 +165,7 @@ function getProgramColumnValue(g: Grant, col: string) {
 export function ProgramsPage() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<FilterMode>("active");
-  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("program");
   const [focusFilter, setFocusFilter] = useState<FocusFilter>("all");
   const [populationFilter, setPopulationFilter] = useState<PopulationFilter>("all");
   const [search, setSearch] = useState("");
@@ -254,6 +272,44 @@ export function ProgramsPage() {
     await qc.invalidateQueries({ queryKey: qk.grants.root });
   };
 
+  const onExport = () => {
+    const rows = sorted.map((g) => {
+      const counts = enrollmentCounts(g);
+      return [
+        String(g.name || ""),
+        String(g.id || ""),
+        isGrantKind(g) ? "Grant" : "Program",
+        String(g.status || ""),
+        counts.active,
+        counts.inactive,
+        counts.unique,
+        counts.youth,
+        counts.family,
+        counts.individual,
+        counts.caseManagers,
+        budgetTotal(g),
+      ];
+    });
+
+    downloadCsv(`programs-${filter}-${new Date().toISOString().slice(0, 10)}.csv`, [
+      [
+        "Name",
+        "ID",
+        "Type",
+        "Status",
+        "Active Enrollments",
+        "Inactive Enrollments",
+        "Unique Clients",
+        "Youth",
+        "Family",
+        "Individual",
+        "Case Managers",
+        "Budget",
+      ],
+      ...rows,
+    ]);
+  };
+
   const onOpen = (id: string) => setSelectedGrantId(id);
   const hasColumnFilters = Object.keys(columnFilters).length > 0;
 
@@ -276,6 +332,14 @@ export function ProgramsPage() {
                 {totalCount} {totalCount === 1 ? "grant / program" : "grants / programs"}
               </div>
               <RefreshButton queryKeys={[qk.grants.root]} label="Refresh" onRefresh={onRefresh} />
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={onExport}
+                disabled={!sorted.length}
+              >
+                Export
+              </button>
               <button
                 className="btn btn-xs"
                 onClick={() => setCreatingProgram(true)}

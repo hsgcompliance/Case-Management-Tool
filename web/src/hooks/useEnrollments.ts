@@ -23,23 +23,35 @@ export const CUSTOMER_ENROLLMENTS_LIMIT = 800;
 export const CUSTOMER_ENROLLMENTS_STALE_MS =
   typeof RQ_DEFAULTS.staleTime === "number" ? RQ_DEFAULTS.staleTime : 60_000;
 
-export function customerEnrollmentsQueryKey(customerId?: string | null) {
+type CustomerEnrollmentsOptions = {
+  enabled?: boolean;
+  limit?: number;
+};
+
+function normalizeCustomerEnrollmentsLimit(limit?: number) {
+  const next = Math.floor(Number(limit || CUSTOMER_ENROLLMENTS_LIMIT));
+  if (!Number.isFinite(next) || next <= 0) return CUSTOMER_ENROLLMENTS_LIMIT;
+  return Math.min(next, CUSTOMER_ENROLLMENTS_LIMIT);
+}
+
+export function customerEnrollmentsQueryKey(customerId?: string | null, limit?: number) {
   return qk.enrollments.byCustomer(String(customerId || "").trim(), {
-    limit: CUSTOMER_ENROLLMENTS_LIMIT,
+    limit: normalizeCustomerEnrollmentsLimit(limit),
   });
 }
 
-function customerEnrollmentsQueryOptions(customerId?: string | null) {
+function customerEnrollmentsQueryOptions(customerId?: string | null, limit?: number) {
   const normalizedCustomerId = String(customerId || "").trim();
+  const normalizedLimit = normalizeCustomerEnrollmentsLimit(limit);
   return {
     staleTime: CUSTOMER_ENROLLMENTS_STALE_MS,
     gcTime: RQ_DEFAULTS.gcTime,
     retry: RQ_DEFAULTS.retry,
-    queryKey: customerEnrollmentsQueryKey(normalizedCustomerId),
+    queryKey: customerEnrollmentsQueryKey(normalizedCustomerId, normalizedLimit),
     queryFn: () =>
       EnrollmentsAPI.list({
         customerId: normalizedCustomerId || undefined,
-        limit: CUSTOMER_ENROLLMENTS_LIMIT,
+        limit: normalizedLimit,
       }),
   };
 }
@@ -180,12 +192,12 @@ export function useEnrollmentsList(query?: EnrollmentsListQuery, opts?: { enable
 }
 
 /** Convenience: enrollments for a customer */
-export function useCustomerEnrollments(customerId?: string | null, opts?: { enabled?: boolean }) {
+export function useCustomerEnrollments(customerId?: string | null, opts?: CustomerEnrollmentsOptions) {
   const enabled = (opts?.enabled ?? true) && !!customerId;
 
   return useQuery<Enrollment[]>({
     ...RQ_DEFAULTS,
-    ...customerEnrollmentsQueryOptions(customerId),
+    ...customerEnrollmentsQueryOptions(customerId, opts?.limit),
     enabled,
   });
 }
@@ -394,12 +406,15 @@ async function invalidateEnrollmentQueries(
     if (grantId) grantIds.add(grantId);
   }
 
-  const work: Array<Promise<unknown>> = [
-    qc.invalidateQueries({ queryKey: qk.enrollments.root }),
-    qc.invalidateQueries({ queryKey: qk.customers.root }),
-    qc.invalidateQueries({ queryKey: qk.grants.root }),
-    qc.invalidateQueries({ queryKey: qk.inbox.root }),
-  ];
+  const hasScopedTarget = enrollmentIds.size > 0 || customerIds.size > 0 || grantIds.size > 0;
+  const work: Array<Promise<unknown>> = hasScopedTarget
+    ? [qc.invalidateQueries({ queryKey: qk.inbox.root })]
+    : [
+        qc.invalidateQueries({ queryKey: qk.enrollments.root }),
+        qc.invalidateQueries({ queryKey: qk.customers.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+        qc.invalidateQueries({ queryKey: qk.inbox.root }),
+      ];
 
   for (const id of Array.from(enrollmentIds)) {
     work.push(qc.invalidateQueries({ queryKey: qk.enrollments.detail(id) }));

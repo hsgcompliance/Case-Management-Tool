@@ -1,6 +1,7 @@
 // src/entities/Modal.tsx
 "use client";
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useModalRuntime } from "./modalRuntime";
 
 type ModalProps = {
@@ -32,6 +33,11 @@ export function Modal({
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
+  const [mounted, setMounted] = React.useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const attemptClose = async () => {
     const ok = (await onBeforeClose?.()) ?? true;
@@ -53,9 +59,9 @@ export function Modal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, disableEscClose, onBeforeClose, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
+  const modal = (
     <div
       className="modal-overlay"
       data-tour={tourId ? `${tourId}-overlay` : undefined}
@@ -90,6 +96,8 @@ export function Modal({
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 export default Modal;

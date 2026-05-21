@@ -13,6 +13,20 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
 }
 
+function hasSelectedTextWithin(element: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
+
+  for (let i = 0; i < selection.rangeCount; i += 1) {
+    const range = selection.getRangeAt(i);
+    const container = range.commonAncestorContainer;
+    const node = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    if (node && element.contains(node)) return true;
+  }
+
+  return false;
+}
+
 const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 const toCents = (n: number) => Math.round(Number(n || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
@@ -268,7 +282,10 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       {/* Card header — clickable to open detail */}
       <button
         type="button"
-        onClick={onClick}
+        onClick={(event) => {
+          if (hasSelectedTextWithin(event.currentTarget)) return;
+          onClick();
+        }}
         className={[
           "flex items-start justify-between gap-2 rounded-t-xl p-4 text-left transition hover:opacity-80",
           accentHeaderBg ? accentHeaderBg : "",

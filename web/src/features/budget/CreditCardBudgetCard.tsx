@@ -8,6 +8,20 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
 }
 
+function hasSelectedTextWithin(element: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
+
+  for (let i = 0; i < selection.rangeCount; i += 1) {
+    const range = selection.getRangeAt(i);
+    const container = range.commonAncestorContainer;
+    const node = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    if (node && element.contains(node)) return true;
+  }
+
+  return false;
+}
+
 const fmtUsd = (cents: number) =>
   fmtCurrencyUSD(cents / 100);
 
@@ -113,7 +127,14 @@ export function CreditCardBudgetCard({ card, onClick }: CreditCardBudgetCardProp
 
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className="w-full text-left">
+      <button
+        type="button"
+        onClick={(event) => {
+          if (hasSelectedTextWithin(event.currentTarget)) return;
+          onClick();
+        }}
+        className="w-full text-left"
+      >
         {cardEl}
       </button>
     );
