@@ -1,5 +1,5 @@
 // functions/src/features/paymentQueue/http.ts
-import {secureHandler, orgIdFromClaims, requireUid} from '../../core';
+import {secureHandler, orgIdFromClaims, requireUid, isDev} from '../../core';
 import {adminSyncPaymentQueueHandler} from './adminSyncPaymentQueue';
 import {
   PaymentQueueListBody,
@@ -31,16 +31,22 @@ export const paymentQueueList = secureHandler(async (req, res): Promise<void> =>
   const body = PaymentQueueListBody.parse(src || {});
   const caller = (req as any).user || {};
   const callerOrg = orgIdFromClaims(caller);
-  const orgId = (body.orgId as string | undefined) || callerOrg;
+  const explicitOrgId = String((body.orgId as string | undefined) || '').trim();
+  const orgId = explicitOrgId || callerOrg;
+
+  if (explicitOrgId && explicitOrgId !== callerOrg && !isDev(caller)) {
+    res.status(403).json({ok: false, error: 'forbidden_org'});
+    return;
+  }
 
   if (!orgId) {
-    res.status(400).json({ok: false, error: 'org_required'});
+    res.status(403).json({ok: false, error: 'missing_org'});
     return;
   }
 
   const result = await listPaymentQueueItems(orgId, body);
   res.json({ok: true, ...result});
-}, {auth: 'viewer', memory: '512MiB', concurrency: 10});
+}, {auth: 'viewer', methods: ['GET', 'POST', 'OPTIONS'], memory: '512MiB', concurrency: 10});
 
 /* ============================================================================
    GET /paymentQueueGet?id=…
