@@ -30,11 +30,6 @@ function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString("en-US");
 }
 
-function formatAcuity(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "--";
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
 function formatCurrency(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "--";
   return new Intl.NumberFormat("en-US", {
@@ -71,28 +66,6 @@ export function CustomersMetricsBar({ myUid }: CustomersMetricsBarProps) {
         subtext: myMetrics?.enrollments
           ? `Active ${formatNumber(myMetrics.enrollments?.active)} | Total ${formatNumber(myMetrics.enrollments?.total)}`
           : undefined,
-        loading: !!myUid && myMetricsLoading,
-        disabled: !myUid,
-      },
-      {
-        id: "my-acuity",
-        label: "My Acuity",
-        value: formatAcuity(myMetrics?.acuity?.scoreAvg),
-        subtext:
-          myMetrics?.acuity?.scoreSum != null && myMetrics?.acuity?.scoreCount != null
-            ? `Sum ${formatNumber(myMetrics.acuity?.scoreSum)} | Count ${formatNumber(myMetrics.acuity?.scoreCount)}`
-            : undefined,
-        loading: !!myUid && myMetricsLoading,
-        disabled: !myUid,
-      },
-      {
-        id: "my-open-tasks",
-        label: "My Open Tasks",
-        value: formatNumber(myMetrics?.tasks?.openThisMonth),
-        subtext:
-          myMetrics?.tasks?.openNextMonth != null
-            ? `This month | Next ${formatNumber(myMetrics.tasks?.openNextMonth)}`
-            : "This month",
         loading: !!myUid && myMetricsLoading,
         disabled: !myUid,
       },

@@ -555,7 +555,6 @@ export const reconcileMetricsWeekly = onSchedule(
       userWriter.set(
         db.doc(`userExtras/${uid}`),
         {
-          taskMetrics: FieldValue.delete(),
           paymentMetrics: {
             ...p,
             updatedAt: FieldValue.serverTimestamp(),
@@ -757,7 +756,6 @@ export const reconcileMetricsWeekly = onSchedule(
             scoreCount: hasAcuity ? ac.count : 0,
             scoreAvg: hasAcuity ? acuityAvg : null,
           },
-          tasks: FieldValue.delete(),
           payments: p,
         },
         { merge: false },

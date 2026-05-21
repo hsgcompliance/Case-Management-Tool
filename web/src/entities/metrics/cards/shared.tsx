@@ -35,10 +35,6 @@ export function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString("en-US");
 }
 
-export function formatIntegerOrDecimal(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "--";
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
 
 export function formatCurrency(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "--";

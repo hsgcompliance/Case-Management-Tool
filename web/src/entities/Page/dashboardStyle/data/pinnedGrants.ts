@@ -48,11 +48,14 @@ export async function togglePinnedGrant(
     const next = isPinned
       ? current.filter((id) => id !== grantId)
       : [grantId, ...current.filter((id) => id !== grantId)].slice(0, MAX_PINNED_GRANTS);
-    tx.set(
-      ref,
-      { grantPrefs: { pinnedGrantIds: next, updatedAt: serverTimestamp() } },
-      { merge: true },
-    );
+    if (snap.exists()) {
+      tx.update(ref, {
+        "grantPrefs.pinnedGrantIds": next,
+        "grantPrefs.updatedAt": serverTimestamp(),
+      });
+    } else {
+      tx.set(ref, { grantPrefs: { pinnedGrantIds: next, updatedAt: serverTimestamp() } });
+    }
     return { pinned: !isPinned, ids: next };
   });
 }
