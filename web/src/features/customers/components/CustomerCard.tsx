@@ -301,6 +301,12 @@ function paymentDueDate(payment: Record<string, unknown>): string {
   return String(payment.dueDate || payment.date || "").slice(0, 10);
 }
 
+function defaultCloseDateForGrant(grant: Record<string, unknown> | null | undefined): string {
+  const today = todayISO();
+  const grantEndDate = String(grant?.endDate || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(grantEndDate) && grantEndDate < today ? grantEndDate : today;
+}
+
 function toDraftPaymentRows(enrollment: Enrollment | null): DraftPaymentRow[] {
   const payments = Array.isArray(enrollment?.payments) ? enrollment.payments : [];
   return payments.map((raw, index) => {
@@ -481,6 +487,7 @@ function EnrollmentQuickModal({
   const [startDate, setStartDate] = React.useState("");
   const [endDate, setEndDate] = React.useState("");
   const [closeDate, setCloseDate] = React.useState(todayISO());
+  const [manageOpen, setManageOpen] = React.useState(false);
   const [dateEditorOpen, setDateEditorOpen] = React.useState(false);
   const [closeEditorOpen, setCloseEditorOpen] = React.useState(false);
   const [rawOpen, setRawOpen] = React.useState(false);
@@ -495,13 +502,21 @@ function EnrollmentQuickModal({
     if (!open) return;
     setStartDate(String(enrollment?.startDate || "").slice(0, 10));
     setEndDate(String(enrollment?.endDate || "").slice(0, 10));
-    setCloseDate(String(enrollment?.endDate || "").slice(0, 10) || todayISO());
+    setCloseDate(todayISO());
+    setManageOpen(false);
     setDateEditorOpen(false);
     setCloseEditorOpen(false);
     setRawOpen(false);
     setMigrateOpen(false);
     setCleanupOpen(false);
   }, [enrollment, open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const today = todayISO();
+    const defaultCloseDate = defaultCloseDateForGrant(grant as Record<string, unknown> | null);
+    setCloseDate((current) => (current === today ? defaultCloseDate : current));
+  }, [grant, open]);
 
   const enrollmentId = String(enrollment?.id || "");
   const status = String(enrollment?.status || (enrollment?.active === false ? "closed" : "active")).toLowerCase();
@@ -588,9 +603,22 @@ function EnrollmentQuickModal({
                 <div className="text-xl font-bold text-slate-900">{enrollmentLabel}</div>
                 {grantName ? <div className="mt-1 text-sm font-medium text-slate-600">{grantName}</div> : null}
               </div>
-              <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${statusTone}`}>
-                {status || "unknown"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${statusTone}`}>
+                  {status || "unknown"}
+                </span>
+                {editable ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setManageOpen((value) => !value)}
+                    disabled={busy}
+                    aria-expanded={manageOpen}
+                  >
+                    Manage
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -612,39 +640,80 @@ function EnrollmentQuickModal({
             </div>
           </section>
 
-          {editable ? (
+          <div className="grid gap-2 text-sm md:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">CaseWorthy Entry</div>
+              <div className="mt-1 font-semibold text-slate-800">{compliance.caseworthyEntryComplete ? "Complete" : "Pending"}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">HMIS Entry</div>
+              <div className="mt-1 font-semibold text-slate-800">{compliance.hmisEntryComplete ? "Complete" : "Pending"}</div>
+            </div>
+          </div>
+
+          {editable && manageOpen ? (
             <section className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Enrollment management</div>
+                  <div className="text-xs text-slate-500">Use these for quick patches or to open the full tools.</div>
+                </div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setManageOpen(false)}>
+                  Hide
+                </button>
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-2">
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-sky-300 hover:bg-sky-50 disabled:opacity-50"
                   onClick={() => {
                     setDateEditorOpen((value) => !value);
                     setCloseEditorOpen(false);
                   }}
                   disabled={busy}
                 >
-                  Edit Dates
+                  <span className="block font-semibold text-slate-900">Edit dates</span>
+                  <span className="block text-xs text-slate-500">Change start or end date.</span>
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-amber-300 hover:bg-amber-50 disabled:opacity-50"
                   onClick={() => {
                     setCloseEditorOpen((value) => !value);
                     setDateEditorOpen(false);
                   }}
                   disabled={busy}
                 >
-                  Close Enrollment
+                  <span className="block font-semibold text-slate-900">Close enrollment</span>
+                  <span className="block text-xs text-slate-500">Set the end date and mark inactive.</span>
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setMigrateOpen(true)} disabled={busy}>
-                  Migrate Enrollment
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-sky-300 hover:bg-sky-50 disabled:opacity-50"
+                  onClick={() => setMigrateOpen(true)}
+                  disabled={busy}
+                >
+                  <span className="block font-semibold text-slate-900">Migrate enrollment</span>
+                  <span className="block text-xs text-slate-500">Open the migration tool.</span>
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={markEntryComplete} disabled={busy}>
-                  Mark CW + HMIS Entry Complete
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50"
+                  onClick={markEntryComplete}
+                  disabled={busy || (compliance.caseworthyEntryComplete === true && compliance.hmisEntryComplete === true)}
+                >
+                  <span className="block font-semibold text-slate-900">Mark CW + HMIS complete</span>
+                  <span className="block text-xs text-slate-500">Update both entry checks.</span>
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCleanupOpen(true)} disabled={busy}>
-                  Clean Up Enrollment
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-rose-300 hover:bg-rose-50 disabled:opacity-50 md:col-span-2"
+                  onClick={() => setCleanupOpen(true)}
+                  disabled={busy}
+                >
+                  <span className="block font-semibold text-slate-900">Clean up enrollment</span>
+                  <span className="block text-xs text-slate-500">Open the cleanup/delete dialog for associated spend handling.</span>
                 </button>
               </div>
 
@@ -687,17 +756,6 @@ function EnrollmentQuickModal({
               ) : null}
             </section>
           ) : null}
-
-          <div className="grid gap-2 text-sm md:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">CaseWorthy Entry</div>
-              <div className="mt-1 font-semibold text-slate-800">{compliance.caseworthyEntryComplete ? "Complete" : "Pending"}</div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">HMIS Entry</div>
-              <div className="mt-1 font-semibold text-slate-800">{compliance.hmisEntryComplete ? "Complete" : "Pending"}</div>
-            </div>
-          </div>
 
           {admin ? (
             <details open={rawOpen} onToggle={(event) => setRawOpen(event.currentTarget.open)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -760,6 +818,10 @@ function fmtShortDate(iso: string | null): string {
 const COL_SPAN_CLASSES = ["", "lg:col-span-1", "lg:col-span-2"] as const;
 const DRAG_PX_PER_STEP = 140;
 
+type CustomerCardContextMenu =
+  | { kind: "enrollment"; x: number; y: number; enrollmentId: string }
+  | { kind: "payment"; x: number; y: number; enrollmentId: string };
+
 function hasSelectedTextWithin(element: HTMLElement): boolean {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
@@ -784,11 +846,15 @@ function CustomerCardInner({
   onOpen,
   loading = false,
 }: CustomerCardProps) {
+  const { profile } = useAuth();
+  const canManageEnrollments = !isViewerLike(profile as any);
+  const patchEnrollment = useEnrollmentsPatch();
   const [colSpan, setColSpan] = React.useState(1);
   const dragRef = React.useRef<{ startX: number; startSpan: number } | null>(null);
   const showEnrollmentSections = colSpan > 1;
   const [paymentPopupEnrollmentId, setPaymentPopupEnrollmentId] = React.useState<string | null>(null);
   const [enrollmentPopupId, setEnrollmentPopupId] = React.useState<string | null>(null);
+  const [contextMenu, setContextMenu] = React.useState<CustomerCardContextMenu | null>(null);
 
   const handleResizeMouseDown = React.useCallback(
     (event: React.MouseEvent) => {
@@ -838,6 +904,14 @@ function CustomerCardInner({
     () => enrollments.find((enrollment) => String(enrollment.id || "") === String(enrollmentPopupId || "")) || null,
     [enrollments, enrollmentPopupId],
   );
+  const enrollmentById = React.useMemo(() => {
+    const map = new Map<string, Enrollment>();
+    for (const enrollment of enrollments) {
+      const id = String(enrollment.id || "");
+      if (id) map.set(id, enrollment);
+    }
+    return map;
+  }, [enrollments]);
 
   const activeEnrollments = sortActiveEnrollments(enrollments.filter(isActiveEnrollment));
   const inactiveEnrollments = enrollments.filter((enrollment) => !isActiveEnrollment(enrollment));
@@ -850,6 +924,63 @@ function CustomerCardInner({
     .map((f) => f.lastDate as string)
     .sort()
     .at(-1) ?? null;
+
+  React.useEffect(() => {
+    if (!contextMenu) return undefined;
+    const close = () => setContextMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [contextMenu]);
+
+  const closeEnrollmentToday = React.useCallback(
+    async (enrollmentId: string) => {
+      if (!canManageEnrollments || patchEnrollment.isPending) return;
+      const enrollment = enrollmentById.get(String(enrollmentId || ""));
+      if (!enrollment || !isActiveEnrollment(enrollment)) {
+        setContextMenu(null);
+        return;
+      }
+      try {
+        await patchEnrollment.mutateAsync({
+          id: String(enrollment.id),
+          patch: {
+            status: "closed",
+            active: false,
+            endDate: todayISO(),
+          },
+        });
+        toast("Enrollment closed today.", { type: "success" });
+        setContextMenu(null);
+        void enrollmentsQuery.refetch();
+      } catch (error: unknown) {
+        toast(toApiError(error).error || "Failed to close enrollment.", { type: "error" });
+      }
+    },
+    [canManageEnrollments, enrollmentById, enrollmentsQuery, patchEnrollment],
+  );
+
+  const openGrantForEnrollment = React.useCallback(
+    (enrollmentId: string) => {
+      const enrollment = enrollmentById.get(String(enrollmentId || ""));
+      const grantId = String(enrollment?.grantId || "").trim();
+      setContextMenu(null);
+      if (!grantId) {
+        toast("No grant is linked to this enrollment.", { type: "warning" });
+        return;
+      }
+      window.open(`/grants/${encodeURIComponent(grantId)}`, "_blank", "noopener,noreferrer");
+    },
+    [enrollmentById],
+  );
 
   // Selected CM's relationship (only when a different CM is selected)
   const selectedCmRole = (selectedCmId && selectedCmId !== viewerId)
@@ -1173,6 +1304,12 @@ function CustomerCardInner({
                     event.stopPropagation();
                     setPaymentPopupEnrollmentId(f.id);
                   }}
+                  onContextMenu={(event) => {
+                    if (hasSelectedTextWithin(event.currentTarget)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setContextMenu({ kind: "payment", x: event.clientX, y: event.clientY, enrollmentId: f.id });
+                  }}
                   onKeyDown={(event) => {
                     if (event.key !== "Enter" && event.key !== " ") return;
                     event.preventDefault();
@@ -1333,6 +1470,17 @@ function CustomerCardInner({
                       event.stopPropagation();
                       setEnrollmentPopupId(String(enr.id || ""));
                     }}
+                    onContextMenu={(event) => {
+                      if (hasSelectedTextWithin(event.currentTarget)) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setContextMenu({
+                        kind: "enrollment",
+                        x: event.clientX,
+                        y: event.clientY,
+                        enrollmentId: String(enr.id || ""),
+                      });
+                    }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
@@ -1412,6 +1560,54 @@ function CustomerCardInner({
           </div>
         ) : null}
       </div>
+
+      {contextMenu ? (
+        <div
+          className="fixed z-[12000] min-w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-xl"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          role="menu"
+        >
+          {contextMenu.kind === "payment" ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+              onClick={() => openGrantForEnrollment(contextMenu.enrollmentId)}
+              role="menuitem"
+            >
+              Open Grant
+            </button>
+          ) : null}
+          {contextMenu.kind === "enrollment" && canManageEnrollments ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-amber-50 hover:text-amber-900 disabled:opacity-50"
+              onClick={() => void closeEnrollmentToday(contextMenu.enrollmentId)}
+              disabled={patchEnrollment.isPending}
+              role="menuitem"
+            >
+              Close enrollment today
+            </button>
+          ) : null}
+          {contextMenu.kind === "enrollment" ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                setEnrollmentPopupId(contextMenu.enrollmentId);
+                setContextMenu(null);
+              }}
+              role="menuitem"
+            >
+              Open enrollment details
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {paymentPopupEnrollment ? (
         <PaymentScheduleQuickModal

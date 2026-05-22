@@ -37,10 +37,14 @@ organized by active topic. Do not commit or push its contents.
 
 | Folder | Contents |
 |--------|----------|
-| `active-projects.local/metrics-pins/` | metric platform proposal, metric systems audit, pin + metrics display architecture |
+| `active-projects.local/metrics-pins/` | metric platform proposal (Phases 1–4 built), metric systems audit, pin + metrics display architecture |
 | `active-projects.local/jotform-spending/` | CC budget tracking, spend extraction + grant mapping, transaction shape reference |
-| `active-projects.local/task-flow/` | task/inbox flow audit |
+| `active-projects.local/task-flow/` | task/inbox flow audit (system largely deprecated — see task-revamp) |
 | `active-projects.local/secret-games/` | game evaluation, architecture, current state audit, legacy adapter layer, rollout plan, testing strategy |
+| `active-projects.local/tour-system/` | tour/onboarding system revamp — current state, open questions |
+| `active-projects.local/task-revamp/` | new task/to-do system design — what's kept (approve-user, rent-cert), what's retired |
+| `active-projects.local/org-config/` | org config page upgrade — scope and open questions |
+| `active-projects.local/arcade-manager/` | arcade manager admin surface — related to secret-games, operator controls layer |
 
 ## Local-Only Docs
 

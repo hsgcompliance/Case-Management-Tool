@@ -178,9 +178,12 @@ export const usersSetRole = secureHandler(
       }
     }
 
-    const out = await setUserRoleService(
-      isSuperDev(caller) ? body : { ...body, orgId: undefined, teamIds: undefined }
-    );
+    const scoped = scopeForManagedUser(caller, body);
+    const out = await setUserRoleService({
+      ...body,
+      orgId: scoped.orgId,
+      teamIds: scoped.teamIds,
+    });
     res.status(200).json({ ok: true, user: out });
   },
   { auth: "admin", requireOrg: true, methods: ["POST", "OPTIONS"] }

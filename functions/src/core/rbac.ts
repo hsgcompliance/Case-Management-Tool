@@ -224,6 +224,7 @@ export function requireRole(c: Claims, role: string) {
 const AUTO_CAPS: Record<string, string[]> = {
   [TOP_ROLES.UNVERIFIED]: [],
   [TOP_ROLES.PUBLIC_USER]: ["profile:read", "profile:write"],
+  [TOP_ROLES.VIEWER]: ["viewer:read"],
   [TOP_ROLES.USER]: [],
 
   // FE tags (user-level shaping only)

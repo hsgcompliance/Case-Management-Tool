@@ -124,7 +124,7 @@ export default function AdminUsersPage() {
   const [inviteName, setInviteName] = React.useState("");
   const [inviteTopRole, setInviteTopRole] = React.useState<ManagedTopRole>("user");
   const [inviteSendEmail, setInviteSendEmail] = React.useState(true);
-  const [inviteTags, setInviteTags] = React.useState<Tag[]>(["casemanager"]);
+  const [inviteTags, setInviteTags] = React.useState<Tag[]>([]);
   const [continueUrl, setContinueUrl] = React.useState("");
   const [inviteOrgId, setInviteOrgId] = React.useState("");
   const [inviteTeamIds, setInviteTeamIds] = React.useState("");
@@ -205,10 +205,6 @@ export default function AdminUsersPage() {
   };
 
   const persistTags = async (u: CompositeUser, tags: Tag[]) => {
-    if (tags.length === 0) {
-      toast("At least one role is required.", { type: "error" });
-      return;
-    }
     try {
       await setRoleMut.mutateAsync({
         uid: u.uid,
@@ -233,10 +229,6 @@ export default function AdminUsersPage() {
       toast("Invite email is required.", { type: "error" });
       return;
     }
-    if (inviteTopRole !== "viewer" && inviteTags.length === 0) {
-      toast("Select at least one role.", { type: "error" });
-      return;
-    }
     if (topRoleRank(inviteTopRole) > viewerRank) {
       toast("You cannot assign a role above your own rank.", { type: "error" });
       return;
@@ -245,7 +237,7 @@ export default function AdminUsersPage() {
       const result = await inviteMut.mutateAsync({
         email,
         name: inviteName.trim(),
-        roles: inviteTopRole === "viewer" ? [] : inviteTags,
+        roles: inviteTags,
         topRole: inviteTopRole,
         sendEmail: inviteSendEmail,
         ...(canCrossOrgManage && inviteOrgId.trim() ? { orgId: inviteOrgId.trim() } : {}),
@@ -270,7 +262,7 @@ export default function AdminUsersPage() {
       setContinueUrl("");
       setInviteTopRole("user");
       setInviteSendEmail(true);
-      setInviteTags(["casemanager"]);
+      setInviteTags([]);
       setInviteOrgId("");
       setInviteTeamIds("");
       void refetch();
@@ -322,10 +314,6 @@ export default function AdminUsersPage() {
 
   const approveUser = async (u: CompositeUser) => {
     const tags = rowTags[u.uid] || normalizeTags(u.roles);
-    if (tags.length === 0) {
-      toast("Select at least one role before approval.", { type: "error" });
-      return;
-    }
     if (isSelf(u)) {
       toast("Use another admin account to approve your own account.", { type: "error" });
       return;
@@ -348,10 +336,6 @@ export default function AdminUsersPage() {
 
   const setTopRole = async (u: CompositeUser, topRole: ManagedTopRole) => {
     const tags = rowTags[u.uid] || normalizeTags(u.roles);
-    if (topRole !== "viewer" && tags.length === 0) {
-      toast("Select at least one role.", { type: "error" });
-      return;
-    }
     if (isSelf(u)) {
       toast("Use another admin account to change your own access level.", { type: "error" });
       return;
@@ -363,7 +347,7 @@ export default function AdminUsersPage() {
     try {
       await setRoleMut.mutateAsync({
         uid: u.uid,
-        roles: topRole === "viewer" ? [] : tags,
+        roles: tags,
         topRole,
       } as any);
       toast(`Access set to ${topRole}.`, { type: "success" });
@@ -498,7 +482,7 @@ export default function AdminUsersPage() {
           )}
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-          {inviteTopRole !== "viewer" && TAGS.map((tag) => (
+          {inviteTopRole === "user" && TAGS.map((tag) => (
             <label key={tag} className="inline-flex items-center gap-2">
               <input type="checkbox" checked={inviteTags.includes(tag)} onChange={() => toggleInviteTag(tag)} />
               <span>{tag}</span>
@@ -590,7 +574,7 @@ export default function AdminUsersPage() {
             </div>
 
             <div className="rounded border border-slate-200 p-3 dark:border-slate-700">
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Role</div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Staff tags</div>
               <div className="flex flex-wrap gap-2">
                 {TAGS.map((tag) => (
                   <label key={tag} className="inline-flex items-center gap-1 text-xs">
@@ -704,7 +688,7 @@ export default function AdminUsersPage() {
             <tr>
               <th className="p-2">User</th>
               <th className="p-2">Access</th>
-              <th className="p-2">Role</th>
+              <th className="p-2">Staff tags</th>
               <th className="p-2">Status</th>
               <th className="p-2">Last Login</th>
               <th className="p-2 text-right">Actions</th>

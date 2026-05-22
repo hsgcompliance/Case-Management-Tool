@@ -4,33 +4,42 @@
 import React, { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@app/auth/AuthProvider";
-import { useDevGrantAdmin } from "@hooks/useUsers";
+import { useDevGrantAdmin, useUpdateMe } from "@hooks/useUsers";
 import { auth } from "@lib/firebase";
 import { api } from "@client/api";
+import Orgs, { type RequestableOrg } from "@client/orgs";
 import { shouldUseEmulators } from "@lib/runtimeEnv";
+import { toast } from "@lib/toast";
 
 function isLocalEmulator() {
   return shouldUseEmulators();
 }
 
 export default function AccessPendingPage() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, reloadProfile } = useAuth();
   const router = useRouter();
   const [mounted, setMounted] = React.useState(false);
+  const updateMe = useUpdateMe();
+  const orgsQuery = useQuery({
+    queryKey: ["orgs", "requestable"],
+    queryFn: Orgs.listRequestable,
+    enabled: !!user && !loading,
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const roles: string[] = Array.isArray(profile?.roles)
-    ? (profile!.roles as string[])
-    : profile?.role
-    ? [profile.role]
-    : [];
-
   const topRole = String(profile?.topRole || profile?.role || "unverified").toLowerCase();
   const isActive = profile?.active !== false;
+  const extras = ((profile as any)?.extras || {}) as Record<string, any>;
+  const meta = (extras.meta || {}) as Record<string, any>;
+  const accessRequest = (meta.accessRequest || {}) as Record<string, any>;
+  const requestedOrgId = String(accessRequest.orgId || "");
+  const requestableOrgs = orgsQuery.data?.items || [];
 
   const blockedByRole =
     !topRole || topRole === "unverified" || topRole === "public_user";
@@ -52,6 +61,25 @@ export default function AccessPendingPage() {
     }
   }, [loading, user, topRole, isActive, router]);
 
+  const requestOrgAccess = async (org: RequestableOrg) => {
+    const nextMeta = {
+      ...meta,
+      accessRequest: {
+        orgId: org.orgId || org.id,
+        orgName: org.name,
+        status: "pending",
+        requestedAt: new Date().toISOString(),
+      },
+    };
+    try {
+      await updateMe.mutateAsync({ meta: nextMeta } as any);
+      await reloadProfile();
+      toast(`Access requested for ${org.name}.`, { type: "success" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not request org access.";
+      toast(message, { type: "error" });
+    }
+  };
 
   return (
     <div className="mx-auto max-w-lg p-6 space-y-4">
@@ -72,26 +100,65 @@ export default function AccessPendingPage() {
         <div>
           <b>Email:</b> {user?.email}
         </div>
-        <div className="flex items-center gap-2">
-          <b>Roles:</b>
-          <div className="flex flex-wrap gap-1">
-            {roles.map((r) => (
-              <span
-                key={r}
-                className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-              >
-                {r}
-              </span>
-            ))}
-            {!roles.length && <span className="text-xs text-slate-500 dark:text-slate-400">none</span>}
-          </div>
-        </div>
         <div>
-          <b>Top role:</b> {topRole || "unverified"}
+          <b>Role:</b> {blockedByRole ? "unverified" : topRole || "unverified"}
         </div>
         <div>
           <b>Active:</b>{" "}
           {isActive ? "Yes" : isActive === false ? "No" : "-"}
+        </div>
+        {requestedOrgId && (
+          <div>
+            <b>Requested org:</b> {accessRequest.orgName || requestedOrgId}
+          </div>
+        )}
+      </div>
+
+      <div className="card space-y-3 p-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Request organization access</h2>
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+            Pick the organization an administrator should approve for this account.
+          </p>
+        </div>
+
+        <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+          {orgsQuery.isLoading && (
+            <div className="rounded border border-slate-200 p-3 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              Loading organizations...
+            </div>
+          )}
+          {!orgsQuery.isLoading && requestableOrgs.length === 0 && (
+            <div className="rounded border border-slate-200 p-3 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              No requestable organizations were found.
+            </div>
+          )}
+          {requestableOrgs.map((org) => {
+            const orgId = org.orgId || org.id;
+            const requested = requestedOrgId === orgId;
+            return (
+              <button
+                key={org.id}
+                type="button"
+                onClick={() => void requestOrgAccess(org)}
+                disabled={updateMe.isPending || requested}
+                className="w-full rounded border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-default disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:disabled:bg-slate-900"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{org.name}</div>
+                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">{orgId}</div>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-slate-300 px-2 py-0.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200">
+                    {requested ? "Requested" : updateMe.isPending ? "Saving..." : "Request"}
+                  </span>
+                </div>
+                {org.description && (
+                  <p className="mt-2 line-clamp-2 text-xs text-slate-600 dark:text-slate-400">{org.description}</p>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 

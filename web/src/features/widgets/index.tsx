@@ -16,7 +16,8 @@ import {
 import { usePaymentsSpend, usePaymentsUpdateCompliance } from "@hooks/usePayments";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { metricTone } from "@lib/colorRegistry";
-import { hasRole, isAdminLike, normalizeRole } from "@lib/roles";
+import { hasRole, isAdminLike, isViewerLike, normalizeRole } from "@lib/roles";
+import { useAuth } from "@app/auth/AuthProvider";
 import { reassignDebugLog } from "@lib/reassignDebug";
 import { toast } from "@lib/toast";
 import PaymentPaidDialog from "@entities/dialogs/payments/PaymentPaidDialog";
@@ -536,6 +537,8 @@ function useInboxRows(filterState: InboxFilterState, mode: InboxViewMode = "main
   const { customerNameById, grantNameById, customers, enrollments } = useDashboardSharedData();
   const usersQ = useUsers({ status: "all", limit: 1000 });
   const { data: me } = useMe();
+  const { profile } = useAuth();
+  const isViewer = isViewerLike(profile as { roles?: unknown } | null);
   const myUid = String((me as any)?.uid || "");
   const month = /^\d{4}-\d{2}$/.test(String(filterState.month || "")) ? String(filterState.month) : monthKeyOffsetDays(5);
   const toggles = normalizeInboxToggles(filterState.toggles);
@@ -550,7 +553,7 @@ function useInboxRows(filterState: InboxFilterState, mode: InboxViewMode = "main
   const inboxQuery = useMyInbox(
     { month, includeOverdue, includeGroup },
     {
-      enabled: true,
+      enabled: !isViewer,
       staleTime: staleTimeByMode[mode],
       fallbackToCachedMonth: true,
     }
@@ -683,8 +686,11 @@ const InboxTopbar: DashboardToolDefinition<InboxFilterState, InboxSelection>["To
   const myUid = String((me as any)?.uid || "");
   const today = toDateOnlyKey(new Date());
 
+  const { profile: topbarProfile } = useAuth();
+  const isTopbarViewer = isViewerLike(topbarProfile as { roles?: unknown } | null);
+
   // Endpoint-derived metrics (primary source — reconciled, not list-bounded).
-  const { data: inboxMetricsData, isLoading: inboxMetricsLoading } = useMyInboxMetrics(month);
+  const { data: inboxMetricsData, isLoading: inboxMetricsLoading } = useMyInboxMetrics(month, { enabled: !isTopbarViewer });
   const endpointTotal = (inboxMetricsData as any)?.data?.total;
 
   // Toggle-card counts are derived from locally-loaded rows (for filter chip counts).

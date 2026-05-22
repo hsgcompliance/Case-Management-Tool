@@ -47,6 +47,31 @@ async function readOrgWithConfig(orgId: string) {
   return { id: orgId, ...orgSnap.data(), config };
 }
 
+export const orgsListRequestable = secureHandler(
+  async (_req, res) => {
+    const snap = await db.collection("orgs").get();
+    const items = snap.docs
+      .map((doc) => {
+        const data = doc.data() || {};
+        return {
+          id: doc.id,
+          orgId: String(data.orgId || doc.id),
+          name: String(data.name || data.orgName || doc.id),
+          active: data.active !== false,
+          description:
+            typeof data.description === "string" && data.description.trim()
+              ? data.description.trim()
+              : undefined,
+        };
+      })
+      .filter((org) => org.active)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.status(200).json({ ok: true, items });
+  },
+  { auth: "authed", methods: ["GET", "OPTIONS"] }
+);
+
 // ── GET /orgGet ───────────────────────────────────────────────────────────────
 
 export const orgGet = secureHandler(

@@ -18,6 +18,9 @@ export type CompositeUser = {
   roles?: string[];
   role?: string | null;
   topRole?: string | null;
+  orgId?: string | null;
+  teamIds?: string[];
+  caps?: string[];
   admin?: boolean;
   createdAt?: string | null;
   lastLogin?: string | null;
@@ -164,20 +167,29 @@ export function useSetUserRole() {
     (body: Parameters<typeof Users.setRole>[0]) => Users.setRole(body),
     {
       makePatches: (body) => {
-        const { uid, roles } = body as any;
+        const { uid } = body as any;
         if (!uid) return [];
+        const patch: Partial<CompositeUser> = {};
+        if ("roles" in (body as any)) patch.roles = Array.isArray((body as any).roles) ? (body as any).roles : [];
+        if ("topRole" in (body as any)) patch.topRole = (body as any).topRole || null;
+        if ("orgId" in (body as any)) patch.orgId = (body as any).orgId || null;
+        if ("teamIds" in (body as any)) patch.teamIds = Array.isArray((body as any).teamIds) ? (body as any).teamIds : [];
+        const nextTopRole = patch.topRole;
+        const nextRoles = patch.roles;
+        if (nextTopRole !== undefined || nextRoles !== undefined) {
+          patch.admin = nextTopRole === "admin" || nextTopRole === "dev" || nextTopRole === "org_dev" || nextTopRole === "super_dev" || !!nextRoles?.includes("admin");
+        }
         const apply = (before: any) => {
           // detail cache
           if (!before) return before;
-          return { ...(before as any), roles: roles as string[], admin: (roles as string[]).includes('admin') };
+          return { ...(before as any), ...patch };
         };
         const updateList = (prev: any) => {
           const list = Array.isArray(prev) ? prev as CompositeUser[] : Array.isArray(prev?.users) ? (prev.users as CompositeUser[]) : null;
           if (!list) return prev;
           const replaced = upsertInArray(list, {
             ...(list.find(u => u.uid === uid) || ({ uid } as any)),
-            roles: roles as string[],
-            admin: (roles as string[]).includes('admin'),
+            ...patch,
           });
           if (Array.isArray(prev)) return replaced;
           return { ...(prev || {}), users: replaced };

@@ -9,6 +9,8 @@ import React from "react";
 import { useMyInbox } from "@hooks/useInbox";
 import { toApiError } from "@client/api";
 import { useInboxTaskRegistry } from "@entities/tasks/inboxTaskRegistry";
+import { useAuth } from "@app/auth/AuthProvider";
+import { isViewerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
 import type {
   BoardState,
@@ -21,11 +23,13 @@ import { mapInboxTasksToBoardState } from "./adapters";
 
 export function useBoardData(filters: CaseLoadBoardFilterState) {
   const registry = useInboxTaskRegistry();
+  const { profile } = useAuth();
+  const isViewer = isViewerLike(profile as { roles?: unknown } | null);
 
   // Re-uses the same query key as InboxMain — shares the cache, no duplicate fetch
   const inboxQ = useMyInbox(
     { month: filters.month, includeOverdue: true, includeGroup: true },
-    { staleTime: 30_000 }
+    { staleTime: 30_000, enabled: !isViewer }
   );
 
   // Local optimistic overrides: taskId → new bucketId

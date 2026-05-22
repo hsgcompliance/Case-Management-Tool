@@ -7,6 +7,8 @@
 import React from "react";
 import { useMyInboxMetrics } from "@hooks/useInbox";
 import { InboxMetricsBar } from "@entities/metrics/InboxMetricsBar";
+import { useAuth } from "@app/auth/AuthProvider";
+import { isViewerLike } from "@lib/roles";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 import { monthKeyOffsetDays } from "@widgets/utils";
 import type { CaseLoadBoardFilterState } from "./types";
@@ -38,7 +40,9 @@ export const CaseLoadBoardTopbar: DashboardToolDefinition<CaseLoadBoardFilterSta
       ? value.month
       : monthKeyOffsetDays(0);
 
-    const { data: inboxMetricsData, isLoading: metricsLoading } = useMyInboxMetrics(month);
+    const { profile } = useAuth();
+    const isViewer = isViewerLike(profile as { roles?: unknown } | null);
+    const { data: inboxMetricsData, isLoading: metricsLoading } = useMyInboxMetrics(month, { enabled: !isViewer });
     const endpointTotal = (inboxMetricsData as any)?.data?.total;
 
     const metrics = endpointTotal
