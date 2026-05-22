@@ -34,7 +34,18 @@ export type OrgDoc = {
   updatedAt?: unknown;
 };
 
+export type RequestableOrg = {
+  id: string;
+  orgId?: string;
+  name: string;
+  active?: boolean;
+  description?: string;
+};
+
 export const Orgs = {
+  listRequestable: () =>
+    api.get('orgsListRequestable') as Promise<{ ok: boolean; items: RequestableOrg[] }>,
+
   get: (orgId?: string) =>
     api.get('orgGet', orgId ? { orgId } : {}) as Promise<{ ok: boolean; org: OrgDoc }>,
 

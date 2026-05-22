@@ -99,7 +99,7 @@ export const jotformSubmissionsPatch = secureHandler(
     const out = await patchJotformSubmissions(body, caller, targetOrg);
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", methods: ["PATCH", "OPTIONS"] }
+  { auth: "viewer", methods: ["PATCH", "OPTIONS"] }
 );
 
 /** POST /jotformSubmissionsDelete — admin; id or ids[] (soft) */

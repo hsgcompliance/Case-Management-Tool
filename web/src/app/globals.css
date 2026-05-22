@@ -98,7 +98,7 @@
 
   /* ---------- Topbar ---------- */
   .topbar {
-    @apply sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur;
+    @apply sticky top-0 z-[300] border-b border-slate-200 bg-white/85 backdrop-blur;
     @apply dark:border-slate-800 dark:bg-slate-900/85;
   }
 

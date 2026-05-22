@@ -101,7 +101,7 @@ export function Topbar() {
   };
 
   return (
-    <header className="topbar z-40" data-tour="topbar">
+    <header className="topbar" data-tour="topbar">
       <div className="topbar-inner gap-4" data-tour="topbar-inner">
         <div className="flex items-center gap-3 min-w-0" data-tour="topbar-brand">
           <Link

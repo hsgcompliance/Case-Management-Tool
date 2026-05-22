@@ -90,7 +90,7 @@ export default function MyProfileDropdown() {
         <div
           id="profile-menu"
           role="menu"
-          className="absolute right-0 z-50 mt-2 w-64 rounded border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-900"
+          className="absolute right-0 z-[310] mt-2 w-64 rounded border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-900"
         >
           <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
             <div className="truncate font-medium text-slate-900 dark:text-slate-100">

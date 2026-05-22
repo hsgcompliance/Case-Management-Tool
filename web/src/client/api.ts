@@ -296,6 +296,7 @@ export const endpointsLoose = {
   customerGet:                   { method: 'GET',  path: 'customerGet' },
 
   // ORGS
+  orgsListRequestable:         { method: 'GET',  path: 'orgsListRequestable' },
   orgGet:                       { method: 'GET',  path: 'orgGet' },
   orgConfigGet:                 { method: 'GET',  path: 'orgConfigGet' },
   orgConfigPatch:               { method: 'POST', path: 'orgConfigPatch' },

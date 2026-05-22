@@ -95,7 +95,7 @@ function EnrollmentMigrateDialogUI({
     defaults?.closeSourcePaymentMode ?? "deleteUnpaid",
   );
 
-  const [migratePaidChoice, setMigratePaidChoice] = React.useState<"" | "yes" | "no">("");
+  const [migratePaidChoice, setMigratePaidChoice] = React.useState<"" | "yes" | "no">("no");
 
   const destGrant = React.useMemo(
     () => grants.find((g) => String(g.id) === String(toGrantId)) || null,
@@ -162,7 +162,7 @@ function EnrollmentMigrateDialogUI({
     setCloseSourceTaskMode(defaults?.closeSourceTaskMode ?? "complete");
     setCloseSourcePaymentMode(defaults?.closeSourcePaymentMode ?? "deleteUnpaid");
 
-    setMigratePaidChoice("");
+    setMigratePaidChoice("no");
     setJsonError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -286,11 +286,15 @@ function EnrollmentMigrateDialogUI({
             </div>
           </div>
         ) : null}
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-900">
+          Pick the destination grant and cutover date. Standard cleanup rules are already selected; advanced policy and line-item mapping are below if needed.
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-2">
           <label className="block">
-            <div className="mb-0.5 text-slate-600">To grant</div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">To grant</div>
             <select
-              className="w-full rounded border px-2 py-1"
+              className="input w-full"
               value={toGrantId}
               onChange={(e) => setToGrantId(e.currentTarget.value)}
               disabled={locked}
@@ -305,10 +309,10 @@ function EnrollmentMigrateDialogUI({
           </label>
 
           <label className="block">
-            <div className="mb-0.5 text-slate-600">Cutover date (inclusive)</div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Cutover date</div>
             <input
               type="date"
-              className="w-full rounded border px-2 py-1"
+              className="input w-full"
               value={cutoverDate ?? ""}
               onChange={(e) => setCutoverDate((e.currentTarget.value || today10) as ISODate)}
               disabled={locked}
@@ -322,15 +326,14 @@ function EnrollmentMigrateDialogUI({
           </div>
         ) : null}
 
-        {/* REQUIRED: migrate paid items? */}
-        <div className="rounded border p-3">
-          <div className="mb-2 font-medium">Paid items</div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-2 font-semibold text-slate-900">Paid items after cutover</div>
           <div className="mb-2 text-slate-600">
             Do you also want to migrate already-paid items <b>on/after</b> the cutover date?
           </div>
 
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-6">
-            <label className="inline-flex items-center gap-2">
+          <div className="grid gap-2 md:grid-cols-2">
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-3 transition hover:bg-slate-50">
               <input
                 type="radio"
                 name="migratePaid"
@@ -340,7 +343,7 @@ function EnrollmentMigrateDialogUI({
               />
               <span>Yes — reverse on source and recreate on destination</span>
             </label>
-            <label className="inline-flex items-center gap-2">
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-3 transition hover:bg-slate-50">
               <input
                 type="radio"
                 name="migratePaid"
@@ -359,9 +362,12 @@ function EnrollmentMigrateDialogUI({
           )}
         </div>
 
-        {/* Options */}
-        <div className="rounded border p-3">
-          <div className="mb-2 font-medium">Options</div>
+        <details className="rounded-lg border border-slate-200 bg-white p-3">
+          <summary className="cursor-pointer select-none font-semibold text-slate-900">
+            Advanced migration policy
+          </summary>
+          <div className="mt-3 rounded border border-slate-200 p-3">
+            <div className="mb-2 font-medium">Move related records</div>
 
           <label className="mb-1 flex items-center gap-2">
             <input
@@ -402,9 +408,9 @@ function EnrollmentMigrateDialogUI({
             />
             <span>Rebuild schedule meta for destination</span>
           </label>
-        </div>
+          </div>
 
-        <div className="rounded border p-3">
+          <div className="mt-3 rounded border border-slate-200 p-3">
           <div className="mb-2 font-medium">Source close policy (at cutover)</div>
           <div className="mb-2 text-xs text-slate-600">
             Applies when source enrollment is closed at the cutover date. If source still has payments after cutover, migration close will be blocked.
@@ -446,12 +452,15 @@ function EnrollmentMigrateDialogUI({
               Migration usually moves future unpaid projections to the destination. Source &quot;run spend&quot; is only relevant if unpaid projections remain on source.
             </div>
           ) : null}
-        </div>
+          </div>
+        </details>
 
-        {/* Line item mapping */}
-        <div className="rounded border p-3">
-          <div className="mb-2 font-medium">Line item mapping</div>
-          <div className="mb-2 text-xs text-slate-600">
+        <details className="rounded-lg border border-slate-200 bg-white p-3" open={!!toGrantId && sourceLineItems.length > 0 && !hasAllMappings}>
+          <summary className="cursor-pointer select-none font-semibold text-slate-900">
+            Line item mapping
+            {sourceLineItems.length > 0 && hasAllMappings ? <span className="ml-2 text-xs font-medium text-emerald-700">ready</span> : null}
+          </summary>
+          <div className="mb-2 mt-2 text-xs text-slate-600">
             Map source line items to destination line items. Defaults to same IDs when available.
           </div>
 
@@ -529,7 +538,7 @@ function EnrollmentMigrateDialogUI({
               Please map all source line items to destination line items.
             </div>
           )}
-        </div>
+        </details>
       </div>
     </Modal>
   );

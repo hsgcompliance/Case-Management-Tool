@@ -42,7 +42,7 @@ export const RoleInput = z.string().transform((v) => {
   return mapped;
 });
 
-export const RolesArray = z.array(RoleInput).default(["casemanager"]);
+export const RolesArray = z.array(RoleInput).default([]);
 
 export const CreateUserBody = z.object({
   email: z.email(),

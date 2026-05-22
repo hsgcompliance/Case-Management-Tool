@@ -97,7 +97,7 @@ export const assessmentPushAnswer = secureHandler(
     const out = await pushAnswerService((req as any).user, req.body);
     res.json({ ...out, ok: true });
   },
-  { auth: "user", methods: ["POST", "OPTIONS"], requireOrg: true, requireTeams: true }
+  { auth: "viewer", methods: ["POST", "OPTIONS"], requireOrg: true, requireTeams: true }
 );
 
 /**
