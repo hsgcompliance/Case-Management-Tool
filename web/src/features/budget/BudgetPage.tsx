@@ -345,12 +345,14 @@ export function BudgetPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-                  Budget
+                  Budgets
                 </h1>
                 <HelpButton pageKey="budget" />
               </div>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                Budget overview by funding source. Click any card to view details and activity.
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+                Track funding-source grants, line-item budgets, credit cards, committed spend, and
+                remaining balances. Programs have their own participation view so budget workflows
+                stay focused on funding sources.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

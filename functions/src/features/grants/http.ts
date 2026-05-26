@@ -769,6 +769,22 @@ function _docBelongsToGrant(
   return true;
 }
 
+function _grantKind(data: Record<string, unknown>): "grant" | "program" {
+  return normStr(data.kind) === "program" ? "program" : "grant";
+}
+
+function _rejectProgramBudgetAction(
+  res: { status: (code: number) => { json: (body: Record<string, unknown>) => void } },
+  action: string,
+): boolean {
+  res.status(400).json({
+    ok: false,
+    error: "program_has_no_budget",
+    message: `Programs do not use grant budget workflows. ${action} is only available for funding-source grants.`,
+  });
+  return true;
+}
+
 /**
  * Recomputes budget totals from live ledger + pending paymentQueue data and
  * writes them back to the grant document.  Both callers (clearPayments and
@@ -785,6 +801,10 @@ async function recomputeAndWriteBudget(
   newTotals: Record<string, number>;
   counts: { ledger: number; paymentQueue: number };
 }> {
+  if (_grantKind(grantData) === "program") {
+    throw new Error("program_has_no_budget");
+  }
+
   const [ledgerSnap, queueSnap] = await Promise.all([
     db.collection("ledger").where("grantId", "==", grantId).get(),
     db.collection("paymentQueue")
@@ -900,6 +920,10 @@ export const grantsAdminClearPayments = secureHandler(
     if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
     const gData = gSnap.data() || {};
     assertGrantOrgAccess(caller, targetOrg, gData);
+    if (_grantKind(gData) === "program") {
+      _rejectProgramBudgetAction(res, "Clearing enrollment payments");
+      return;
+    }
     const grantOrg = normId(gData.orgId) || normId(targetOrg);
 
     const [ledgerSnap, queueSnap] = await Promise.all([
@@ -1097,6 +1121,10 @@ export const grantsAdminReconcileBudget = secureHandler(
     if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
     const gData = gSnap.data() || {};
     assertGrantOrgAccess(caller, targetOrg, gData);
+    if (_grantKind(gData) === "program") {
+      _rejectProgramBudgetAction(res, "Reconciling budget totals");
+      return;
+    }
     const grantOrg = normId(gData.orgId) || normId(targetOrg);
 
     const { newTotals, counts } = await recomputeAndWriteBudget(grantId, grantOrg, gData);

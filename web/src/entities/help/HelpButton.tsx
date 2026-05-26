@@ -8,12 +8,13 @@ import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import { toast } from "@lib/toast";
 import { RichTextEditor } from "./RichTextEditor";
 
-export type HelpPageKey = "customers" | "customersModal" | "budget" | "budgetPipeline" | "invoiceTool";
+export type HelpPageKey = "customers" | "customersModal" | "budget" | "programs" | "budgetPipeline" | "invoiceTool";
 
 const PAGE_TITLES: Record<HelpPageKey, string> = {
   customers: "Customers - Help & Reference",
   customersModal: "Customer Details - Help & Reference",
   budget: "Budget - Help & Reference",
+  programs: "Programs - Help & Reference",
   budgetPipeline: "Budget Pipelines - Help & Reference",
   invoiceTool: "Invoicing - Help & Reference",
 };
@@ -65,7 +66,7 @@ const DEFAULT_CONTENT: Record<HelpPageKey, string> = {
 
   budget: [
     "<h2>Budget Overview</h2>",
-    "<p>The Budget page shows all grants and their spending by line item. Cards are arranged in custom groups configured by your admin.</p>",
+    "<p>The Budget page shows funding-source grants, credit-card budget activity, and spending by line item. Programs are intentionally excluded from budget-heavy views because they track ongoing participation rather than award balances.</p>",
     "<h3>Key Concepts</h3>",
     "<ul>",
     "<li><strong>Grant</strong> — A funding source with a total budget, divided into <em>line items</em> (e.g. Rental Assistance, Utilities, Case Management)</li>",
@@ -73,6 +74,14 @@ const DEFAULT_CONTENT: Record<HelpPageKey, string> = {
     "<li><strong>Enrollment</strong> — A customer's participation in a program; payments draw from the grant's line items</li>",
     "<li><strong>Projected Spend</strong> — Spent + unpaid future obligations from the payment projection queue</li>",
     "<li><strong>Balance</strong> — Total budget minus actual spend</li>",
+    "</ul>",
+    "<h3>Grants vs Programs</h3>",
+    "<p>Programs and grants can both be enrollment targets. That lets a customer be tracked in an ongoing service area while also being tied to the funding source that paid for a specific service period.</p>",
+    "<p>For example, <strong>Rental Assistance Client</strong> is a Program. <strong>YHDP RRH 25-26</strong> is a Grant that may fund rental assistance during a specific cycle. The customer may be enrolled in both, but only the Grant belongs on this Budget page.</p>",
+    "<ul>",
+    "<li>Use Programs for long-term participation, service history, and year-over-year counts.</li>",
+    "<li>Use Grants for award tracking, line-item budgets, spending, reimbursement, and funder reporting.</li>",
+    "<li>A Program may span multiple Grants over time, and a Grant may fund services associated with more than one Program.</li>",
     "</ul>",
     "<h3>Adding a Grant</h3>",
     "<ol>",
@@ -84,6 +93,39 @@ const DEFAULT_CONTENT: Record<HelpPageKey, string> = {
     "<h3>Custom Layout</h3>",
     "<p>Admins can use <em>Configure</em> to create groups and control which grants appear as cards, ",
     "in what order, and with which color theme. Use the <em>Custom</em> vs <em>All Grants</em> toggle to switch views.</p>",
+  ].join(""),
+
+  programs: [
+    "<h2>Programs Overview</h2>",
+    "<p>Programs are ongoing service areas that customers can enroll in over time. They are useful for tracking participation, service history, case management context, and customer counts across changing funding sources.</p>",
+    "<h3>What Belongs Here</h3>",
+    "<ul>",
+    "<li><strong>Rental Assistance Client</strong> - a Program for customers receiving rental-assistance services over time.</li>",
+    "<li><strong>Blueprint Client</strong> - a youth Program for customers participating in Blueprint services.</li>",
+    "<li><strong>Other service areas</strong> - any ongoing participation category that should roll forward year to year.</li>",
+    "</ul>",
+    "<h3>Programs vs Grants</h3>",
+    "<p>Programs and grants intentionally share the enrollment system, but they represent different things.</p>",
+    "<ul>",
+    "<li><strong>Programs</strong> track ongoing service participation and should not require grant budgets, award amounts, reimbursement workflows, or cycle closeout fields.</li>",
+    "<li><strong>Grants</strong> track funding sources or funding cycles. They may have budgets, start/end dates, eligibility rules, reporting requirements, and spend tracking.</li>",
+    "<li>A customer may be enrolled in a Program, a Grant, or both. That is expected when the organization wants both long-term service tracking and funding-cycle tracking.</li>",
+    "</ul>",
+    "<h3>How to Use Program Counts</h3>",
+    "<ul>",
+    "<li>Use active enrollments to understand who is currently participating in a service area.</li>",
+    "<li>Use inactive or historical enrollments to understand prior participation without resetting the Program each year.</li>",
+    "<li>Use unique customer counts when reporting Program participation, especially when the same customer also has one or more Grant enrollments.</li>",
+    "</ul>",
+    "<h3>Relationship to Grants</h3>",
+    "<p>A Program can be funded by multiple Grants over time. A Grant can also support services associated with more than one Program. Those relationships may be useful for navigation and reporting, but the authoritative enrollment link remains the enrollment's grant/program target and name.</p>",
+    "<p>Example: <strong>YHDP RRH 25-26</strong> may pay for services delivered under the broader <strong>Rental Assistance Client</strong> Program. The Grant belongs in budget views; the Program belongs in participation and service views.</p>",
+    "<h3>When to Create a Program</h3>",
+    "<ul>",
+    "<li>Create a Program when the category should roll forward year to year.</li>",
+    "<li>Create a Program when staff need participation counts independent of a specific funder or award cycle.</li>",
+    "<li>Create a Grant instead when the record primarily represents funding, budget, spend, reimbursement, or funder reporting.</li>",
+    "</ul>",
   ].join(""),
 
   budgetPipeline: [

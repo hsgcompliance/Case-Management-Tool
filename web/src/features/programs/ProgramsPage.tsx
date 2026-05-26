@@ -9,6 +9,7 @@ import PageShell from "@entities/Page/PageShell";
 import PageFilterBar from "@entities/Page/PageFilterBar";
 import { FilterToggleGroup } from "@entities/ui";
 import RefreshButton from "@entities/ui/RefreshButton";
+import { HelpButton } from "@entities/help/HelpButton";
 import { useGrants } from "@hooks/useGrants";
 import { useOrgConfig } from "@hooks/useOrgConfig";
 import {
@@ -320,11 +321,16 @@ export function ProgramsPage() {
           {/* Page header */}
           <div className="flex flex-wrap items-end justify-between gap-4 pb-2">
             <div>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-                Programs
-              </h1>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                Population enrollment counts, active/inactive totals, and grant/program tracking in one place.
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                  Programs
+                </h1>
+                <HelpButton pageKey="programs" />
+              </div>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+                Track ongoing service participation across years and funding cycles. Programs
+                answer who is participating in a service area; grants answer which funding source
+                paid for a specific cycle or activity.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

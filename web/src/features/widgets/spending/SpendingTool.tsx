@@ -2460,6 +2460,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 value={filterState.grantId || null}
                 onChange={(next) => setFilter({ grantId: String(next || "") })}
                 includeUnassigned
+                mode="grant"
                 placeholderLabel="All grants"
                 className="w-[200px]"
               />
@@ -2696,6 +2697,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 value={bulkPostGrantId || null}
                 onChange={(v) => { setBulkPostGrantId(String(v || "")); setBulkPostLineItemId(""); }}
                 includeUnassigned
+                mode="grant"
                 placeholderLabel="No Grant Classification"
               />
               {bulkPostGrantId && (
