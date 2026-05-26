@@ -337,6 +337,7 @@ export default function CardInvoiceEntryDialog({
               setLineItemId("");
             }}
             includeUnassigned
+            mode="grant"
           />
           {grantId && (
             <GrantBudgetStrip grantId={grantId} projectionDelta={projectionDelta} />

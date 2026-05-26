@@ -77,6 +77,7 @@ export type OrgDisplayConfig = {
     customers?: string;
     customersModal?: string;
     budget?: string;
+    programs?: string;
     budgetPipeline?: string;
     invoiceTool?: string;
   };

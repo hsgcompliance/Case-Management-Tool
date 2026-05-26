@@ -368,6 +368,15 @@ export const GrantInputSchema = z
     /** Optional internal guidance mapping assistance levels to eligibility criteria. */
     levelOfAssistance: z.record(z.string(), z.string()).nullish(),
 
+    /**
+     * Optional relationship hints for reporting/navigation.
+     * These are not required for enrollment; enrollments still use grantId/grantName.
+     */
+    programIds: z.array(IdLike).nullish(),
+    fundingGrantIds: z.array(IdLike).nullish(),
+    relatedProgramIds: z.array(IdLike).nullish(),
+    relatedGrantIds: z.array(IdLike).nullish(),
+
     meta: z.record(z.string(), z.unknown()).nullish(),
 
     createdAt: TsLike.nullish(),

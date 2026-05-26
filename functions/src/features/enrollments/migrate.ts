@@ -15,6 +15,17 @@ import {
 import { writeLedgerEntry } from "../ledger/service";
 import { EnrollmentsMigrateBody } from "./schemas";
 
+function migrationError(message: string, code = 400, meta?: Record<string, unknown>) {
+  const e = new Error(message) as Error & { code?: number; meta?: Record<string, unknown> };
+  e.code = code;
+  if (meta) e.meta = meta;
+  return e;
+}
+
+function targetKind(row: Record<string, unknown> | null | undefined): "grant" | "program" {
+  return String(row?.kind || "").trim().toLowerCase() === "program" ? "program" : "grant";
+}
+
 function latestPaymentDueDate(payments: any[]): string | null {
   let maxDue = "";
   for (const p of Array.isArray(payments) ? payments : []) {
@@ -210,6 +221,36 @@ export const migrateEnrollment = secureHandler(
 
         const futurePays = pays.filter(isFutureUnpaid);
         const stayPays = pays.filter((p: any) => !isFutureUnpaid(p));
+        const futurePaidPays = pays.filter(
+          (p: any) =>
+            p?.paid &&
+            String(p?.dueDate || p?.date || "").slice(0, 10) >= String(cutover || ""),
+        );
+
+        const fromKind = targetKind(fromGrant);
+        const toKind = targetKind(toGrant);
+        const touchesBudget =
+          futurePays.length > 0 ||
+          (movePaidPayments && futurePaidPays.length > 0) ||
+          moveSpends ||
+          closeSourcePaymentMode === "spendUnpaid";
+
+        if (!isDev(user) && touchesBudget && (fromKind === "program" || toKind === "program")) {
+          throw migrationError(
+            "This migration would move or recalculate grant budget information, but Programs do not use budgets. For Grant to Program migrations, disable payment/spend movement or migrate the enrollment manually after reviewing budget impact.",
+            400,
+            {
+              errorCode: "program_migration_budget_impact_not_allowed",
+              fromKind,
+              toKind,
+              futureUnpaidPayments: futurePays.length,
+              futurePaidPayments: futurePaidPays.length,
+              moveSpends,
+              movePaidPayments,
+              closeSourcePaymentMode,
+            },
+          );
+        }
 
         const destPays = futurePays.map((p: any) => {
           const mapped = mapLI(p.lineItemId);

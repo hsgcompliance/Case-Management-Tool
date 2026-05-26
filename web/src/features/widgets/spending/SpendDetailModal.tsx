@@ -1776,6 +1776,7 @@ function CardSpendCard({
                 value={assignGrantId || null}
                 onChange={(v) => { setAssignGrantId(String(v || "")); setAssignLineItemId(""); }}
                 includeUnassigned
+                mode="grant"
                 placeholderLabel="No Grant Classification"
               />
             </div>
@@ -1977,6 +1978,7 @@ function CardSpendCard({
             value={assignGrantId || null}
             onChange={(v) => { setAssignGrantId(String(v || "")); setAssignLineItemId(""); }}
             includeUnassigned
+            mode="grant"
           />
           {assignGrantId && <GrantBudgetStrip grantId={assignGrantId} />}
           <LineItemSelect
@@ -2360,6 +2362,7 @@ function InvoiceSpendCard({
               value={assignGrantId || null}
               onChange={(v) => { setAssignGrantId(String(v || "")); setAssignLineItemId(""); }}
               includeUnassigned
+              mode="grant"
               placeholderLabel="No Grant Classification"
             />
           </div>

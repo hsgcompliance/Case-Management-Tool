@@ -268,6 +268,7 @@ function SettingsPanel({ draft, linkDraft, onDraftChange, onLinkChange }: Settin
               value={linkDraft.grantId || null}
               onChange={(id) => onLinkChange({ ...linkDraft, grantId: id || "" })}
               includeUnassigned
+              mode="grant"
               placeholderLabel="— No grant —"
             />
           </div>

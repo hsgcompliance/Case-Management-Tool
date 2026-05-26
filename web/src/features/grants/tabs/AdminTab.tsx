@@ -27,6 +27,14 @@ const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 const fmtCount = (n: number, singular: string, plural?: string) =>
   `${n.toLocaleString()} ${n === 1 ? singular : (plural ?? singular + "s")}`;
 
+function isProgramTarget(row: TGrant | null | undefined): boolean {
+  return String((row as any)?.kind || "").trim().toLowerCase() === "program";
+}
+
+function targetLabel(row: TGrant | null | undefined): "Grant" | "Program" {
+  return isProgramTarget(row) ? "Program" : "Grant";
+}
+
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function Skeleton({ className = "" }: { className?: string }) {
@@ -167,6 +175,8 @@ function ConfirmDialog({
 
   if (!kind) return null;
 
+  const isProgram = isProgramTarget(grant);
+  const label = targetLabel(grant);
   const needsConfirm = kind !== "reconcile";
   const enrollStatusesOk = kind !== "enrollments" || enrollStatuses.length > 0;
   const canSubmit = (!needsConfirm || confirmText === "DELETE") && enrollStatusesOk;
@@ -191,7 +201,7 @@ function ConfirmDialog({
           : kind === "enrollments"
           ? "Clear Enrollments"
           : kind === "hardDelete"
-          ? "Hard Delete Grant"
+          ? `Hard Delete ${label}`
           : "Reconcile Budget"
       }
       footer={
@@ -214,7 +224,7 @@ function ConfirmDialog({
               : kind === "enrollments"
               ? "Clear Enrollments"
               : kind === "hardDelete"
-              ? "Delete Grant Permanently"
+              ? `Delete ${label} Permanently`
               : "Reconcile Now"}
           </button>
         </div>
@@ -337,7 +347,7 @@ function ConfirmDialog({
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600">Not Affected</div>
                 <ImpactRow label="Ledger history" variant="preserve" />
                 <ImpactRow label="CC/invoice queue items" variant="preserve" />
-                <ImpactRow label="Grant budget record" variant="preserve" />
+                <ImpactRow label={isProgram ? "Program record" : "Grant budget record"} variant="preserve" />
               </div>
             </div>
           </>
@@ -377,7 +387,7 @@ function ConfirmDialog({
         {kind === "hardDelete" && (
           <>
             <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2.5 dark:border-rose-800/60 dark:bg-rose-950/40">
-              <div className="font-semibold text-rose-800 dark:text-rose-300">This permanently removes the grant from Firestore.</div>
+              <div className="font-semibold text-rose-800 dark:text-rose-300">This permanently removes the {label.toLowerCase()} from Firestore.</div>
               <div className="mt-0.5 text-xs text-rose-700 dark:text-rose-400">
                 The document and all nested data are unrecoverable after deletion.
               </div>
@@ -411,8 +421,8 @@ function ConfirmDialog({
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-rose-500">Deleted from Firestore</div>
-                <ImpactRow label="Grant document" variant="delete" />
-                <ImpactRow label="Budget record &amp; pins" variant="delete" />
+                <ImpactRow label={`${label} document`} variant="delete" />
+                <ImpactRow label={isProgram ? "Program settings & pins" : "Budget record & pins"} variant="delete" />
                 <ImpactRow label="Nested subcollections" variant="delete" />
               </div>
             </div>
@@ -641,7 +651,19 @@ function BulkMigrationDialog({
     return { futurePayments, futurePaid, futureUnpaid, futureAmount, futurePaidAmount, futureUnpaidAmount, tasks };
   }, [targetEnrollments, cutoverDate]);
 
-  const mapped = sourceLineItems.every((li) => !!lineItemMap[li.id]);
+  const sourceIsProgram = isProgramTarget(sourceGrant);
+  const destIsProgram = isProgramTarget(destGrant);
+  const programInvolved = sourceIsProgram || destIsProgram;
+  const budgetImpact =
+    impact.futureUnpaid > 0 ||
+    (movePaidPayments && impact.futurePaid > 0) ||
+    moveSpends ||
+    closeSourcePaymentMode === "spendUnpaid";
+  const mappingRequired =
+    impact.futureUnpaid > 0 ||
+    (movePaidPayments && impact.futurePaid > 0) ||
+    moveSpends;
+  const mapped = !mappingRequired || sourceLineItems.every((li) => !!lineItemMap[li.id]);
   const canRun = !!toGrantId && !!cutoverDate && statuses.length > 0 && targetEnrollments.length > 0 && mapped && confirmText === "MIGRATE" && !running;
 
   if (!open) return null;
@@ -669,12 +691,12 @@ function BulkMigrationDialog({
       <div className="space-y-4 text-sm">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <label>
-            <div className="mb-1 text-xs font-medium text-slate-600">Destination grant</div>
+            <div className="mb-1 text-xs font-medium text-slate-600">Destination</div>
             <select className="input w-full" value={toGrantId} onChange={(e) => setToGrantId(e.currentTarget.value)} disabled={running}>
               <option value="">Select destination...</option>
               {grants.filter((g) => String((g as any)?.id || "") !== String((sourceGrant as any)?.id || "")).map((g) => (
                 <option key={String((g as any).id)} value={String((g as any).id)}>
-                  {String((g as any).name || (g as any).code || (g as any).id)}
+                  {String((g as any).name || (g as any).code || (g as any).id)} ({targetLabel(g)})
                 </option>
               ))}
             </select>
@@ -684,6 +706,24 @@ function BulkMigrationDialog({
             <input className="input w-full" type="date" value={cutoverDate} onChange={(e) => setCutoverDate(e.currentTarget.value || todayISO())} disabled={running} />
           </label>
         </div>
+
+        {programInvolved && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            <div className="text-sm font-semibold">Budget information may be lost or skipped.</div>
+            <div className="mt-1 text-xs">
+              Programs do not carry grant budgets. Non-dev users cannot run migrations that move payments, spends, or recalculate budget projections to or from a Program.
+            </div>
+            {budgetImpact && (
+              <div className="mt-2 space-y-1 text-xs">
+                <div className="font-semibold">Preview breaking changes:</div>
+                {impact.futureUnpaid > 0 && <div>- {fmtCount(impact.futureUnpaid, "future unpaid payment")} may need manual handling.</div>}
+                {movePaidPayments && impact.futurePaid > 0 && <div>- {fmtCount(impact.futurePaid, "future paid payment")} would move from the source target.</div>}
+                {moveSpends && <div>- Ledger spends after cutover would move to the destination target.</div>}
+                {closeSourcePaymentMode === "spendUnpaid" && <div>- Source unpaid projections would be converted into spend before closeout.</div>}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="rounded-xl border border-slate-200 p-3">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Target Enrollments</div>
@@ -761,7 +801,7 @@ function BulkMigrationDialog({
               </div>
             ))}
           </div>
-          {!mapped && <div className="mt-2 text-xs text-rose-600">Map every source line item before running migration.</div>}
+          {mappingRequired && !mapped && <div className="mt-2 text-xs text-rose-600">Map every source line item before running migration.</div>}
         </div>
 
         <div>
@@ -870,11 +910,17 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
           migrationSummary: { total: targets.length, failed: failures.length },
         },
       });
-      toast(`Migrated ${targets.length - failures.length} of ${targets.length} enrollment${targets.length === 1 ? "" : "s"}.`, {
-        type: failures.length ? "warning" : "success",
-      });
       if (failures.length) {
+        const firstError = failures[0]?.error || "Migration failed.";
+        toast(
+          failures.length === targets.length
+            ? firstError
+            : `Migrated ${targets.length - failures.length} of ${targets.length} enrollment${targets.length === 1 ? "" : "s"}. First failure: ${firstError}`,
+          { type: failures.length === targets.length ? "error" : "warning" },
+        );
         console.warn("Bulk enrollment migration failures", failures);
+      } else {
+        toast(`Migrated ${targets.length} enrollment${targets.length === 1 ? "" : "s"}.`, { type: "success" });
       }
       invalidate();
       qc.invalidateQueries({ queryKey: qk.enrollments.root });
@@ -887,6 +933,8 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
   const loading = previewLoading;
   const blocked = previewLoading || previewError;
   const migrationTargets = (grantEnrollments as Enrollment[]).filter((e) => enrollmentStatus(e as any) === "active").length;
+  const isProgram = isProgramTarget(grant);
+  const label = targetLabel(grant);
 
   return (
     <div className="mt-4 space-y-4">
@@ -897,6 +945,7 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
           <div className="text-sm font-semibold text-orange-900 dark:text-orange-200">Admin Operations</div>
           <div className="text-xs text-orange-700 dark:text-orange-400">
             These tools operate directly on Firestore data. Destructive actions show live impact counts before you confirm.
+            {isProgram ? " Programs reuse enrollment tools but do not use grant budget workflows." : ""}
           </div>
         </div>
       </div>
@@ -920,7 +969,14 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
       {/* Result panel */}
       {lastResult && <ResultPanel result={lastResult} onDismiss={() => setLastResult(null)} />}
 
+      {isProgram && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200">
+          Programs do not expose budget reconciliation or payment-clear tools. Use enrollment cleanup and migration tools for participation changes.
+        </div>
+      )}
+
       {/* ── Clear Enrollment Payments ──────────────────────────────────── */}
+      {!isProgram && (
       <ActionCard
         title="Clear Enrollment Payments"
         description="Permanently deletes enrollment-sourced ledger entries, deprecated enrollment spend mirrors, and projection queue items. CC and invoice entries are always preserved."
@@ -975,11 +1031,12 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
           </div>
         </div>
       </ActionCard>
+      )}
 
       {/* ── Clear Enrollments ──────────────────────────────────────────── */}
       <ActionCard
         title="Clear Enrollments"
-        description="Soft-deletes all enrollments under this grant and removes their pending projection queue items. Ledger history is not touched."
+        description={`Soft-deletes all enrollments under this ${label.toLowerCase()} and removes their pending projection queue items. Ledger history is not touched.`}
         actionLabel="Clear Enrollments →"
         actionVariant="danger"
         disabled={blocked}
@@ -1011,13 +1068,14 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
             <div className="space-y-1.5">
               <ImpactRow label="Ledger history" variant="preserve" />
               <ImpactRow label="CC/invoice queue items" variant="preserve" />
-              <ImpactRow label="Grant budget record" variant="preserve" />
+              <ImpactRow label={isProgram ? "Program record" : "Grant budget record"} variant="preserve" />
             </div>
           </div>
         </div>
       </ActionCard>
 
       {/* ── Reconcile Budget ───────────────────────────────────────────── */}
+      {!isProgram && (
       <ActionCard
         title="Reconcile Budget"
         description="Recounts all ledger entries and pending queue items, then writes the correct totals back. Safe to run at any time — nothing is deleted."
@@ -1060,11 +1118,12 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
           </div>
         </div>
       </ActionCard>
+      )}
 
       {/* ── Smart Bulk Migration ──────────────────────────────────────── */}
       <ActionCard
         title="Smart Bulk Migration"
-        description="Mass-migrates enrollments from this grant to another grant using the existing migration engine, with cutover, paid-spend, task, and line-item impact preview."
+        description={`Mass-migrates enrollments from this ${label.toLowerCase()} to another grant or program using the existing migration engine, with cutover, paid-spend, task, and line-item impact preview.`}
         actionLabel="Open Migration Preview →"
         actionVariant="primary"
         disabled={enrollmentsLoading || busy}
@@ -1098,9 +1157,9 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
 
       {/* ── Hard Delete Grant ──────────────────────────────────────────── */}
       <ActionCard
-        title="Hard Delete Grant"
-        description="Permanently removes the grant document from Firestore. Enrollments and payment records are not automatically deleted — clear them first to avoid orphaned data."
-        actionLabel="Hard Delete Grant →"
+        title={`Hard Delete ${label}`}
+        description={`Permanently removes the ${label.toLowerCase()} document from Firestore. Enrollments and payment records are not automatically deleted — clear them first to avoid orphaned data.`}
+        actionLabel={`Hard Delete ${label} →`}
         actionVariant="danger"
         disabled={blocked}
         onAction={() => setActiveDialog("hardDelete")}
@@ -1118,7 +1177,7 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
             loading={loading}
           />
           <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-            Run Clear Enrollment Payments and Clear Enrollments first.
+            {isProgram ? "Run Clear Enrollments first." : "Run Clear Enrollment Payments and Clear Enrollments first."}
           </div>
         </div>
       </ActionCard>
