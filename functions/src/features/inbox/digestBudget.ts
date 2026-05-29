@@ -3,6 +3,7 @@
 import { db } from "../../core";
 import { sendHtmlEmail } from "./emailer";
 import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
+import {getGrantFinancialCapabilities} from '../grants/schemas';
 
 const DASHBOARD_LINK = "https://households-db.web.app/dashboard";
 const BRAND   = "#2563EB";
@@ -94,7 +95,8 @@ export async function buildBudgetDigestData(opts: {
 
   for (const doc of grantsSnap.docs) {
     const g = doc.data() as Record<string, unknown>;
-    if (g.kind === "program") continue; // skip umbrella programs, only concrete grants
+    const capabilities = getGrantFinancialCapabilities(g);
+    if (!capabilities.drawsDownBudget) continue; // budget digest is spend-down only
     if (!(g.pins as any)?.digest?.enabled) continue; // must have budget digest pin enabled
 
     const name  = String(g.name || g.code || doc.id);

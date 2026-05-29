@@ -13,6 +13,10 @@ import {
   Timestamp,
 } from "../../core";
 import { writeLedgerEntry } from "../ledger/service";
+import {
+  computeGrantLineItemOverCap,
+  getGrantFinancialCapabilities,
+} from "../grants/schemas";
 import { EnrollmentsMigrateBody } from "./schemas";
 
 function migrationError(message: string, code = 400, meta?: Record<string, unknown>) {
@@ -20,10 +24,6 @@ function migrationError(message: string, code = 400, meta?: Record<string, unkno
   e.code = code;
   if (meta) e.meta = meta;
   return e;
-}
-
-function targetKind(row: Record<string, unknown> | null | undefined): "grant" | "program" {
-  return String(row?.kind || "").trim().toLowerCase() === "program" ? "program" : "grant";
 }
 
 function latestPaymentDueDate(payments: any[]): string | null {
@@ -227,22 +227,24 @@ export const migrateEnrollment = secureHandler(
             String(p?.dueDate || p?.date || "").slice(0, 10) >= String(cutover || ""),
         );
 
-        const fromKind = targetKind(fromGrant);
-        const toKind = targetKind(toGrant);
+        const fromFinancial = getGrantFinancialCapabilities(fromGrant);
+        const toFinancial = getGrantFinancialCapabilities(toGrant);
         const touchesBudget =
           futurePays.length > 0 ||
           (movePaidPayments && futurePaidPays.length > 0) ||
           moveSpends ||
           closeSourcePaymentMode === "spendUnpaid";
 
-        if (!isDev(user) && touchesBudget && (fromKind === "program" || toKind === "program")) {
+        if (!isDev(user) && touchesBudget && (!fromFinancial.hasFinancialActivity || !toFinancial.hasFinancialActivity)) {
           throw migrationError(
-            "This migration would move or recalculate grant budget information, but Programs do not use budgets. For Grant to Program migrations, disable payment/spend movement or migrate the enrollment manually after reviewing budget impact.",
+            "This migration would move or recalculate financial activity, but one of the grants does not have financial activity enabled. Disable payment/spend movement or migrate the enrollment manually after reviewing financial impact.",
             400,
             {
-              errorCode: "program_migration_budget_impact_not_allowed",
-              fromKind,
-              toKind,
+              errorCode: "financial_migration_impact_not_enabled",
+              fromModel: fromFinancial.config.model,
+              toModel: toFinancial.config.model,
+              fromLedgerMode: fromFinancial.ledgerMode,
+              toLedgerMode: toFinancial.ledgerMode,
               futureUnpaidPayments: futurePays.length,
               futurePaidPayments: futurePaidPays.length,
               moveSpends,
@@ -394,20 +396,16 @@ export const migrateEnrollment = secureHandler(
           return base;
         });
 
-        const markOverCap = (items: any[]) => {
+        const markOverCap = (grant: Record<string, unknown>, items: any[]) => {
           for (const li of items) {
-            const cap = Number(li.amount || 0);
-            const over = Math.max(
-              0,
-              (Number(li.spent || 0) + Number(li.projected || 0)) - cap
-            );
-            if (over > 0) li.overCap = over;
+            const over = computeGrantLineItemOverCap(grant, li);
+            if (over != null && over > 0) li.overCap = over;
             else delete li.overCap;
           }
         };
 
-        markOverCap(fromItems);
-        markOverCap(toItemsW);
+        markOverCap(fromGrant, fromItems);
+        markOverCap(toGrant, toItemsW);
 
         const fromTotals = computeBudgetTotals(fromItems as any[]);
         const toTotals = computeBudgetTotals(toItemsW as any[]);

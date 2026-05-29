@@ -16,16 +16,7 @@ import { EnrollmentsBulkEnrollBody } from "./schemas";
 import type { TEnrollmentsBulkEnrollBody } from "./schemas";
 import { deriveEnrollmentNames } from "./derive";
 import { generateTaskScheduleForEnrollments } from "../tasks/generateScheduleWrite";
-
-function applyGrantEndDateDefault(extra: Record<string, any>, grant: Record<string, any>) {
-  const grantEndDate = String(grant?.endDate || "").slice(0, 10);
-  if (!grantEndDate) return extra;
-  const requestedEndDate = String(extra?.endDate || "").slice(0, 10);
-  return {
-    ...extra,
-    endDate: !requestedEndDate || requestedEndDate > grantEndDate ? grantEndDate : requestedEndDate,
-  };
-}
+import { applyGrantEnrollmentDefaults } from "./defaults";
 
 export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
   const parsed = EnrollmentsBulkEnrollBody.safeParse(req.body ?? {});
@@ -105,7 +96,7 @@ export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
         ...extra,
         ...stripReservedFields(sanitizeNestedObject(perCustomerExtra?.[customerId] || {})),
       };
-      const enrollmentExtra = applyGrantEndDateDefault(merged as Record<string, any>, grant as Record<string, any>);
+      const enrollmentExtra = applyGrantEnrollmentDefaults(merged as Record<string, any>, grant as Record<string, any>);
       const derived = await deriveEnrollmentNames({
         grantId: String(grantId),
         customerId: String(customerId),

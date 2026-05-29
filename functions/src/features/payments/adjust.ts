@@ -36,6 +36,7 @@ import {
   withTxn,
 } from "../../core";
 import type { Request, Response } from "express";
+import { computeGrantLineItemOverCap } from "@hdb/contracts";
 
 import { writeLedgerEntry } from "../ledger/service";
 
@@ -87,6 +88,66 @@ function asPaymentType(v: unknown): "monthly" | "deposit" | "prorated" | "servic
   return s === "monthly" || s === "deposit" || s === "prorated" || s === "service" ? s : null;
 }
 
+function toMillis(v: any): number {
+  if (!v) return 0;
+  if (typeof v?.toMillis === "function") return Number(v.toMillis()) || 0;
+  if (typeof v?.toDate === "function") return Number(v.toDate()?.getTime?.()) || 0;
+  const parsed = Date.parse(String(v));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isPositiveOriginalSpendLike(data: any): boolean {
+  const amount = Number(data?.amount ?? Number(data?.amountCents || 0) / 100);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  if (data?.reversalOf) return false;
+  const labels = Array.isArray(data?.labels) ? data.labels.map((x: any) => String(x || "")) : [];
+  if (labels.some((label: string) => label === "payment_delete_reversal" || label.startsWith("reversalOf:"))) {
+    return false;
+  }
+  return true;
+}
+
+function ledgerEntryToSpend(entry: any, fallbackPayment: any, enrollment: any): any {
+  const amountCents = Number.isFinite(Number(entry?.amountCents))
+    ? Number(entry.amountCents)
+    : toCents(entry?.amount);
+  const amount = Number.isFinite(Number(entry?.amount))
+    ? Number(entry.amount)
+    : amountCents / 100;
+  const dueDate = iso10(entry?.dueDate) || iso10(fallbackPayment?.dueDate || fallbackPayment?.date);
+  const lineItemId = String(entry?.lineItemId || fallbackPayment?.lineItemId || "").trim();
+  const paymentId = String(entry?.paymentId || entry?.origin?.baseId || fallbackPayment?.id || "").trim();
+
+  return removeUndefinedDeep({
+    ...entry,
+    source: entry?.source || "enrollment",
+    amount,
+    amountCents,
+    dueDate,
+    dueMonth: entry?.month || dueDate.slice(0, 7) || null,
+    lineItemId,
+    paymentId,
+    customerNameAtSpend:
+      entry?.customerNameAtSpend ??
+      enrollment?.customerName ??
+      enrollment?.clientName ??
+      null,
+    paymentLabelAtSpend:
+      entry?.paymentLabelAtSpend ??
+      (dueDate ? `${dueDate} - ${String(fallbackPayment?.type || "payment")}` : null),
+    paymentSnapshot: {
+      ...(entry?.paymentSnapshot || {}),
+      amount,
+      type: fallbackPayment?.type ?? entry?.paymentType ?? null,
+      lineItemId,
+      dueDate,
+      vendor: entry?.vendor ?? fallbackPayment?.vendor ?? null,
+      comment: entry?.comment ?? fallbackPayment?.comment ?? null,
+      note: entry?.note ?? fallbackPayment?.note ?? null,
+    },
+  });
+}
+
 // ------------------------------------
 // 1) Adjust a past spend (paid payment)
 // ------------------------------------
@@ -124,9 +185,12 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
 
       // ---- resolve spend from subcollection ----
       // spendId may be absent or stale (enrollment.spends[] no longer written after 50-cap fix).
-      // Fall back to querying the subcollection by paymentId to find the latest positive, non-reversal spend.
+      // Fall back to querying the subcollection by paymentId, then the authoritative ledger for legacy rows.
       let spendRef: any = null;
       let spendSnap: any = null;
+      let resolvedSpendId = String(spendId || "").trim();
+      let fallbackSpendData: any = null;
+      const embeddedPayments: any[] = Array.isArray(e.payments) ? e.payments : [];
 
       if (spendId) {
         const candidateRef = eRef.collection("spends").doc(spendId);
@@ -134,24 +198,51 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         if (candidateSnap.exists) {
           spendRef = candidateRef;
           spendSnap = candidateSnap;
+          resolvedSpendId = candidateSnap.id;
         }
       }
 
       if (!spendSnap) {
         const lookupId = paymentIdHint || "";
-        if (!lookupId) throw new Error("Spend not found — provide spendId or paymentId");
+        if (!lookupId) throw new Error("Spend not found - provide spendId or paymentId");
         const qs = await trx.get(eRef.collection("spends").where("paymentId", "==", lookupId));
         const eligible = qs.docs
           .filter((d: any) => Number(d.data()?.amount || 0) > 0 && !d.data()?.reversalOf)
           .sort((a: any, b: any) =>
             Number(b.data()?.ts?.toMillis?.() ?? 0) - Number(a.data()?.ts?.toMillis?.() ?? 0)
           )[0];
-        if (!eligible) throw new Error("Spend not found");
-        spendRef = eligible.ref;
-        spendSnap = eligible;
+        if (eligible) {
+          spendRef = eligible.ref;
+          spendSnap = eligible;
+          resolvedSpendId = eligible.id;
+        }
       }
 
-      const oldSpend: any = spendSnap.data() || {};
+      if (!spendSnap) {
+        const lookupId = paymentIdHint || "";
+        if (!lookupId) throw new Error("Spend not found - provide spendId or paymentId");
+        const ledgerSnap = await trx.get(db.collection("ledger").where("enrollmentId", "==", enrollmentId));
+        const eligibleLedger = ledgerSnap.docs
+          .map((d: any) => ({ id: d.id, ...(d.data() || {}) }))
+          .filter((row: any) => String(row?.paymentId || row?.origin?.baseId || "") === lookupId)
+          .filter(isPositiveOriginalSpendLike)
+          .sort((a: any, b: any) =>
+            Math.max(toMillis(b?.ts), toMillis(b?.updatedAt), toMillis(b?.createdAt)) -
+            Math.max(toMillis(a?.ts), toMillis(a?.updatedAt), toMillis(a?.createdAt))
+          )[0];
+        if (eligibleLedger) {
+          const fallbackPayment = embeddedPayments.find((p: any) => String(p?.id || "") === lookupId) || null;
+          resolvedSpendId = `legacy_${eligibleLedger.id}`;
+          spendRef = eRef.collection("spends").doc(resolvedSpendId);
+          fallbackSpendData = ledgerEntryToSpend(eligibleLedger, fallbackPayment, e);
+        }
+      }
+
+      if (!spendSnap && !fallbackSpendData) throw new Error("Spend not found");
+
+      const oldSpend: any = fallbackSpendData || spendSnap.data() || {};
+      resolvedSpendId = String(fallbackSpendData ? resolvedSpendId : oldSpend?.id || resolvedSpendId || "").trim();
+      if (!resolvedSpendId) throw new Error("Spend missing id");
 
       // Guardrails: only adjust a positive spend (not a reversal record)
       const oldAmt = Number(oldSpend?.amount || 0);
@@ -264,7 +355,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
       const computedKey = makeIdempoKey([
         "paymentsAdjustSpend",
         enrollmentId,
-        spendId,
+        resolvedSpendId,
         nextAmountCents,
         nextLineItemId,
         nextDueDateISO,
@@ -280,7 +371,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
 
       const idem = await ensureIdempotent(trx, idemKey, {
         enrollmentId,
-        spendId,
+        spendId: resolvedSpendId,
         paymentId,
         oldAmountCents: oldAmtCents,
         newAmountCents: nextAmountCents,
@@ -297,7 +388,6 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
 
       // Ensure the paid payment row exists; otherwise the UI will see no visible change
       // even though ledger/spend adjustments were written.
-      const embeddedPayments: any[] = Array.isArray(e.payments) ? e.payments : [];
       const paymentIdx = embeddedPayments.findIndex((p: any) => String(p?.id || "") === paymentId);
       if (paymentIdx < 0) {
         throw new Error(`Payment row not found on enrollment for spend.paymentId: ${paymentId}`);
@@ -339,7 +429,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         note: mergedNote.length ? mergedNote : null,
         vendor: asMaybeString(oldSpend?.paymentSnapshot?.vendor),
         comment: asMaybeString(oldSpend?.paymentSnapshot?.comment),
-        labels: ["adjustment", `reversalOf:${spendId}`],
+        labels: ["adjustment", `reversalOf:${resolvedSpendId}`],
 
         ts: tsNow,
         dueDate: oldDueDateISO,
@@ -348,7 +438,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         origin: {
           app: "hdb",
           baseId: paymentId,
-          sourcePath: `customerEnrollments/${enrollmentId}/spends/${spendId}`,
+          sourcePath: `customerEnrollments/${enrollmentId}/spends/${resolvedSpendId}`,
           idempotencyKey: idemKey,
         },
 
@@ -379,7 +469,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         note: mergedNote.length ? mergedNote : null,
         vendor: asMaybeString(nextVendor),
         comment: asMaybeString(nextComment),
-        labels: ["adjustment", `adjusted:${spendId}`],
+        labels: ["adjustment", `adjusted:${resolvedSpendId}`],
 
         ts: tsNow,
         dueDate: nextDueDateISO,
@@ -388,7 +478,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         origin: {
           app: "hdb",
           baseId: paymentId,
-          sourcePath: `customerEnrollments/${enrollmentId}/spends/${spendId}`,
+          sourcePath: `customerEnrollments/${enrollmentId}/spends/${resolvedSpendId}`,
           idempotencyKey: idemKey,
         },
 
@@ -411,7 +501,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
       const updatedSpend = removeUndefinedDeep({
         ...oldSpend,
 
-        id: spendId,
+        id: resolvedSpendId,
         amount: nextAmountCents / 100,
         amountCents: nextAmountCents,
         lineItemId: nextLineItemId,
@@ -476,7 +566,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         context: "paymentsAdjustSpend",
         enrollmentId,
         grantId,
-        spendId,
+        spendId: resolvedSpendId,
         paymentId,
         old: {
           amountCents: oldAmtCents,
@@ -622,10 +712,8 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
           Number(newUnpaidWin[id] || 0) - Number(oldUnpaidWin[id] || 0);
         li.projectedInWindow = Math.max(0, prevProjectedWin + deltaWin);
 
-        const cap = Number(li.amount || 0);
-        const spent = Number(li.spent || 0);
-        const overBy = Math.max(0, spent + Number(li.projected || 0) - cap);
-        if (overBy > 0) li.overCap = overBy;
+        const overBy = computeGrantLineItemOverCap(grant, li);
+        if (overBy != null) li.overCap = overBy;
         else delete li.overCap;
       }
 

@@ -11,6 +11,307 @@ export type TGrantStatus = z.infer<typeof GrantStatus>;
 export const GrantKind = z.enum(["grant", "program"]);
 export type TGrantKind = z.infer<typeof GrantKind>;
 
+export const GrantFinancialModel = z.enum(["budgeted", "billable", "serviceOnly"]);
+export type TGrantFinancialModel = z.infer<typeof GrantFinancialModel>;
+
+export const GrantLedgerMode = z.enum(["spendDown", "billing", "none"]);
+export type TGrantLedgerMode = z.infer<typeof GrantLedgerMode>;
+
+export const GrantCompliancePreset = z.enum(["hmisCaseworthy", "custom", "none"]);
+export type TGrantCompliancePreset = z.infer<typeof GrantCompliancePreset>;
+
+export const GrantComplianceControl = z
+  .object({
+    key: z.string().trim().min(1),
+    label: z.string().trim().min(1),
+    field: z.string().trim().min(1).optional(),
+    type: z.enum(["boolean"]).default("boolean"),
+  })
+  .passthrough();
+export type TGrantComplianceControl = z.infer<typeof GrantComplianceControl>;
+
+export const GrantComplianceConfig = z
+  .object({
+    preset: GrantCompliancePreset.nullable().optional(),
+    active: z.array(GrantComplianceControl).optional(),
+    inactive: z.array(GrantComplianceControl).optional(),
+  })
+  .passthrough();
+export type TGrantComplianceConfig = z.infer<typeof GrantComplianceConfig>;
+
+export const GrantFinancialConfig = z
+  .object({
+    model: GrantFinancialModel,
+    budgetEnabled: z.boolean(),
+    billingEnabled: z.boolean(),
+    allocationEnabled: z.boolean(),
+    ledgerEnabled: z.boolean(),
+    ledgerMode: GrantLedgerMode,
+  })
+  .passthrough();
+
+export type TGrantFinancialConfig = z.infer<typeof GrantFinancialConfig>;
+
+export const GrantFinancialConfigPatch = GrantFinancialConfig.partial().passthrough();
+export type TGrantFinancialConfigPatch = z.infer<typeof GrantFinancialConfigPatch>;
+
+export type TGrantFinancialCapabilities = {
+  config: TGrantFinancialConfig;
+  budgetEnabled: boolean;
+  billingEnabled: boolean;
+  allocationEnabled: boolean;
+  ledgerEnabled: boolean;
+  ledgerMode: TGrantLedgerMode;
+  drawsDownBudget: boolean;
+  usesBillingLedger: boolean;
+  hasFinancialActivity: boolean;
+};
+
+export type TGrantLineItemAmountSemantics = {
+  drawsDownBudget: boolean;
+  amountIsBudgetAllocation: boolean;
+  amountIsBillingReference: boolean;
+  amountCreatesOverCap: boolean;
+};
+
+const FINANCIAL_CONFIG_DEFAULTS: Record<TGrantFinancialModel, TGrantFinancialConfig> = {
+  budgeted: {
+    model: "budgeted",
+    budgetEnabled: true,
+    billingEnabled: false,
+    allocationEnabled: false,
+    ledgerEnabled: true,
+    ledgerMode: "spendDown",
+  },
+  billable: {
+    model: "billable",
+    budgetEnabled: false,
+    billingEnabled: true,
+    allocationEnabled: false,
+    ledgerEnabled: true,
+    ledgerMode: "billing",
+  },
+  serviceOnly: {
+    model: "serviceOnly",
+    budgetEnabled: false,
+    billingEnabled: false,
+    allocationEnabled: false,
+    ledgerEnabled: false,
+    ledgerMode: "none",
+  },
+};
+
+const HMIS_CASEWORTHY_COMPLIANCE_CONFIG: Required<Pick<TGrantComplianceConfig, "active" | "inactive">> & {
+  preset: "hmisCaseworthy";
+} = {
+  preset: "hmisCaseworthy",
+  active: [
+    {
+      key: "caseworthyEntryComplete",
+      label: "CW Entry",
+      field: "compliance.caseworthyEntryComplete",
+      type: "boolean",
+    },
+    {
+      key: "hmisEntryComplete",
+      label: "HMIS Entry",
+      field: "compliance.hmisEntryComplete",
+      type: "boolean",
+    },
+  ],
+  inactive: [
+    {
+      key: "caseworthyExitComplete",
+      label: "CW Exit",
+      field: "compliance.caseworthyExitComplete",
+      type: "boolean",
+    },
+    {
+      key: "hmisExitComplete",
+      label: "HMIS Exit",
+      field: "compliance.hmisExitComplete",
+      type: "boolean",
+    },
+  ],
+};
+
+function normalizeComplianceControl(value: unknown): TGrantComplianceControl | null {
+  if (!isPlainObject(value)) return null;
+  const key = String(value.key || "").trim();
+  const label = String(value.label || key).trim();
+  if (!key || !label) return null;
+  const field = String(value.field || `compliance.${key}`).trim();
+  return {
+    ...value,
+    key,
+    label,
+    field,
+    type: "boolean",
+  };
+}
+
+function normalizeComplianceControls(value: unknown): TGrantComplianceControl[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => normalizeComplianceControl(entry))
+    .filter((entry): entry is TGrantComplianceControl => !!entry);
+}
+
+function grantKindOf(value: Record<string, unknown> | null | undefined): TGrantKind {
+  return String(value?.kind || "").trim().toLowerCase() === "program" ? "program" : "grant";
+}
+
+function parseFinancialModel(value: unknown): TGrantFinancialModel | null {
+  const parsed = GrantFinancialModel.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function parseLedgerMode(value: unknown): TGrantLedgerMode | null {
+  const parsed = GrantLedgerMode.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function parseCompliancePreset(value: unknown): TGrantCompliancePreset | null {
+  const parsed = GrantCompliancePreset.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Read-time financial config normalization. This intentionally does not rely on
+ * schema defaults so parsing legacy Firestore records does not imply a write-back
+ * migration. Persist normalized values later only through an explicit migration.
+ */
+export function normalizeGrantFinancialConfig(
+  grant: Record<string, unknown> | null | undefined,
+): TGrantFinancialConfig {
+  const raw = isPlainObject(grant?.financialConfig)
+    ? (grant.financialConfig as Record<string, unknown>)
+    : {};
+  const legacyAllocationEnabled =
+    isPlainObject(grant?.budget) &&
+    (grant.budget as Record<string, unknown>).allocationEnabled === true;
+
+  const fallbackModel: TGrantFinancialModel =
+    grantKindOf(grant) === "grant" ? "budgeted" : "serviceOnly";
+  const model = parseFinancialModel(raw.model) ?? fallbackModel;
+  const defaults = FINANCIAL_CONFIG_DEFAULTS[model];
+  const rawLedgerMode = parseLedgerMode(raw.ledgerMode);
+
+  const next: TGrantFinancialConfig = {
+    ...defaults,
+    model,
+    budgetEnabled:
+      typeof raw.budgetEnabled === "boolean" ? raw.budgetEnabled : defaults.budgetEnabled,
+    billingEnabled:
+      typeof raw.billingEnabled === "boolean" ? raw.billingEnabled : defaults.billingEnabled,
+    allocationEnabled:
+      typeof raw.allocationEnabled === "boolean"
+        ? raw.allocationEnabled
+        : legacyAllocationEnabled || defaults.allocationEnabled,
+    ledgerEnabled:
+      typeof raw.ledgerEnabled === "boolean" ? raw.ledgerEnabled : defaults.ledgerEnabled,
+    ledgerMode: rawLedgerMode ?? defaults.ledgerMode,
+  };
+
+  if (next.ledgerMode === "none") next.ledgerEnabled = false;
+  if (!next.ledgerEnabled) next.ledgerMode = "none";
+
+  return next;
+}
+
+export function normalizeGrantComplianceConfig(
+  grant: Record<string, unknown> | null | undefined,
+): TGrantComplianceConfig {
+  const raw = isPlainObject(grant?.complianceConfig)
+    ? (grant.complianceConfig as Record<string, unknown>)
+    : {};
+  const preset = parseCompliancePreset(raw.preset) ?? "hmisCaseworthy";
+
+  if (preset === "none") {
+    return {
+      ...raw,
+      preset: "none",
+      active: normalizeComplianceControls(raw.active),
+      inactive: normalizeComplianceControls(raw.inactive),
+    };
+  }
+
+  if (preset === "hmisCaseworthy" && !Array.isArray(raw.active) && !Array.isArray(raw.inactive)) {
+    return HMIS_CASEWORTHY_COMPLIANCE_CONFIG;
+  }
+
+  return {
+    ...raw,
+    preset,
+    active: normalizeComplianceControls(raw.active),
+    inactive: normalizeComplianceControls(raw.inactive),
+  };
+}
+
+export function getGrantFinancialCapabilities(
+  grant: Record<string, unknown> | null | undefined,
+): TGrantFinancialCapabilities {
+  const config = normalizeGrantFinancialConfig(grant);
+  const ledgerEnabled = config.ledgerEnabled && config.ledgerMode !== "none";
+  const budgetEnabled = config.budgetEnabled;
+  const billingEnabled = config.billingEnabled;
+  const allocationEnabled = config.allocationEnabled;
+  const drawsDownBudget = ledgerEnabled && config.ledgerMode === "spendDown" && budgetEnabled;
+  const usesBillingLedger = ledgerEnabled && config.ledgerMode === "billing";
+
+  return {
+    config,
+    budgetEnabled,
+    billingEnabled,
+    allocationEnabled,
+    ledgerEnabled,
+    ledgerMode: config.ledgerMode,
+    drawsDownBudget,
+    usesBillingLedger,
+    hasFinancialActivity: budgetEnabled || billingEnabled || allocationEnabled || ledgerEnabled,
+  };
+}
+
+export function shouldRetainGrantBudget(
+  grant: Record<string, unknown> | null | undefined,
+): boolean {
+  return getGrantFinancialCapabilities(grant).hasFinancialActivity;
+}
+
+export function getGrantLineItemAmountSemantics(
+  grant: Record<string, unknown> | null | undefined,
+): TGrantLineItemAmountSemantics {
+  const capabilities = getGrantFinancialCapabilities(grant);
+  const amountIsBudgetAllocation = capabilities.drawsDownBudget;
+  return {
+    drawsDownBudget: capabilities.drawsDownBudget,
+    amountIsBudgetAllocation,
+    amountIsBillingReference: capabilities.usesBillingLedger && !amountIsBudgetAllocation,
+    amountCreatesOverCap: amountIsBudgetAllocation,
+  };
+}
+
+export function computeGrantLineItemOverCap(
+  grant: Record<string, unknown> | null | undefined,
+  lineItem: Record<string, unknown> | null | undefined,
+): number | null {
+  if (!getGrantLineItemAmountSemantics(grant).amountCreatesOverCap) return null;
+
+  const amount = Number(lineItem?.amount || 0);
+  const spent = Number(lineItem?.spent || 0);
+  const projected = Number(lineItem?.projected || 0);
+  if (!Number.isFinite(amount) || !Number.isFinite(spent) || !Number.isFinite(projected)) {
+    return null;
+  }
+
+  const over = Math.max(0, spent + projected - amount);
+  return over > 0 ? over : null;
+}
+
 /** ---------- helpers ---------- */
 // Zod v4: .finite() is deprecated
 const Num = z.coerce.number().refine(Number.isFinite, "not_finite").default(0);
@@ -185,6 +486,17 @@ export const ConditionalTaskRule = z
 
 export type TConditionalTaskRule = z.infer<typeof ConditionalTaskRule>;
 
+/**
+ * Grant-level managed task definitions. Current UI and task generation store
+ * these as an array on grants/{id}.tasks. Legacy records may still have a
+ * record-shaped tasks object, so accept both shapes at contract boundaries.
+ */
+export const GrantTaskDefinitions = z.union([
+  z.array(z.record(z.string(), z.unknown())),
+  z.record(z.string(), z.unknown()),
+]);
+export type TGrantTaskDefinitions = z.infer<typeof GrantTaskDefinitions>;
+
 // ─── Pins ─────────────────────────────────────────────────────────────────────
 // Org-visible pins stored on the grant doc itself.
 // User-level pins (metrics, dashboard detail cards) live on userExtras.grantPrefs.
@@ -323,6 +635,15 @@ export const GrantInvoicing = z.object({
 }).passthrough();
 export type TGrantInvoicing = z.infer<typeof GrantInvoicing>;
 
+export const GrantEnrollmentDefaults = z
+  .object({
+    authorizationMonths: z.number().int().min(1).max(120).nullable().optional(),
+    serviceStatus: z.enum(["active", "paused"]).nullable().optional(),
+    medicaidStatus: z.enum(["active", "closed"]).nullable().optional(),
+  })
+  .passthrough();
+export type TGrantEnrollmentDefaults = z.infer<typeof GrantEnrollmentDefaults>;
+
 /** ---------- Grant (INPUT) ---------- */
 export const GrantInputSchema = z
   .object({
@@ -337,6 +658,7 @@ export const GrantInputSchema = z
     orgId: Id.nullish(),
 
     kind: GrantKind.optional(),
+    financialConfig: GrantFinancialConfigPatch.nullish(),
 
     duration: z.string().trim().nullish().default("1 Year"),
 
@@ -348,7 +670,8 @@ export const GrantInputSchema = z
     budget: GrantBudget.nullish(),
 
     taskTypes: z.array(z.string().trim()).nullish(),
-    tasks: z.record(z.string(), z.unknown()).nullish(),
+    tasks: GrantTaskDefinitions.nullish(),
+    complianceConfig: GrantComplianceConfig.nullish(),
 
     /** Conditional task rules evaluated on each new enrollment. */
     conditionalTaskRules: z.array(ConditionalTaskRule).nullish(),
@@ -361,6 +684,9 @@ export const GrantInputSchema = z
 
     /** Optional invoicing metadata: codes, funder contacts, billing details. */
     invoicing: GrantInvoicing.nullish(),
+
+    /** Optional enrollment defaults such as TSS authorization windows. */
+    enrollmentDefaults: GrantEnrollmentDefaults.nullish(),
 
     /** Optional documents expected for payment/invoice processing. */
     invoiceDocuments: z.array(z.string().trim()).nullish(),

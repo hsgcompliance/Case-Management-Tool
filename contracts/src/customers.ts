@@ -128,6 +128,9 @@ export const CustomerInputSchema = z
     createdAt: TsLike.nullish().optional(),
     updatedAt: TsLike.nullish().optional(),
 
+    // alternative display name for search
+    alias: z.string().trim().nullish(),
+
     // tolerated legacy / common fields
     hmisId: z.string().trim().nullish(),
     cwId: z.string().trim().nullish(),

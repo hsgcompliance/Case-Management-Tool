@@ -8,6 +8,10 @@ import {
   requireOrg,
 } from "../../core";
 import { writeLedgerEntry } from "../ledger/service";
+import {
+  computeGrantLineItemOverCap,
+  getGrantFinancialCapabilities,
+} from "../grants/schemas";
 
 const KEEP_RECENT_SPENDS = 50;
 const monthKey = (iso: string) => String(iso || "").slice(0, 7); // 'YYYY-MM'
@@ -125,6 +129,10 @@ export const adminReverseLedgerEntry = secureHandler(
             if (!gSnap.exists) throw new Error("Grant not found for ledger entry");
 
             grant = gSnap.data() || {};
+            const capabilities = getGrantFinancialCapabilities(grant);
+            if (!capabilities.hasFinancialActivity) {
+              throw new Error("grant_financial_activity_not_enabled");
+            }
             lineItems = Array.isArray(grant?.budget?.lineItems)
               ? grant.budget.lineItems
               : [];
@@ -178,15 +186,20 @@ export const adminReverseLedgerEntry = secureHandler(
 
             const li = lineItemsMut[idx];
             const cap = Number(li.amount || 0);
+            const capabilities = getGrantFinancialCapabilities(grant);
 
             if (sign > 0) {
               // Original was a positive spend → reversing it
               li.spent = Math.max(0, Number(li.spent || 0) - amt);
-              const maxProj = Math.max(0, cap - li.spent);
-              li.projected = Math.min(
-                maxProj,
-                Number(li.projected || 0) + amt
-              );
+              if (capabilities.drawsDownBudget) {
+                const maxProj = Math.max(0, cap - li.spent);
+                li.projected = Math.min(
+                  maxProj,
+                  Number(li.projected || 0) + amt
+                );
+              } else {
+                li.projected = Number(li.projected || 0) + amt;
+              }
             } else {
               // Original was a negative (reversal) → undo the reversal
               li.projected = Math.max(
@@ -196,13 +209,9 @@ export const adminReverseLedgerEntry = secureHandler(
               li.spent = Number(li.spent || 0) + amt;
             }
 
-            // Recompute overCap
-            const capNow = Number(li.amount || 0);
-            const overNow = Math.max(
-              0,
-              (Number(li.spent || 0) + Number(li.projected || 0)) - capNow
-            );
-            if (overNow > 0) li.overCap = overNow;
+            // Recompute overCap only when line-item amount is a spend-down cap.
+            const overNow = computeGrantLineItemOverCap(grant, li);
+            if (overNow != null && overNow > 0) li.overCap = overNow;
             else delete li.overCap;
 
             // Recompute totals (align with v2 budget.totals)

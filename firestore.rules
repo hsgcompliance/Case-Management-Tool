@@ -125,6 +125,21 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // CM activity log — all verified staff (except viewer role) can read org activities.
+    // Viewer role has no access. Writes are always own-record only.
+    match /cmActivities/{id} {
+      allow read: if verifiedStaff()
+        && topRole() != "viewer"
+        && sameOrg(resource.data);
+      allow create: if verifiedStaff()
+        && request.auth.uid == request.resource.data.caseManagerId
+        && sameOrg(request.resource.data);
+      allow update: if verifiedStaff()
+        && request.auth.uid == resource.data.caseManagerId;
+      allow delete: if verifiedStaff()
+        && request.auth.uid == resource.data.caseManagerId;
+    }
+
     // Jotform submissions
     match /jotformSubmissions/{id} {
       allow read: if verifiedStaff() && sameOrg(resource.data);

@@ -233,7 +233,8 @@ export const PaymentsRecalcGrantProjectedBody = z.object({
   grantId: z.string().min(1),
   effectiveFrom: ISO10ish.optional(), // metadata only
   activeOnly: z.boolean().optional().default(true),
-  source: z.union([z.literal(1), z.literal(2)]).optional().default(1),
+  // Ledger is the authoritative spend source. Accept only source=1.
+  source: z.literal(1).optional().default(1),
   dryRun: z.boolean().optional(),
 });
 
@@ -342,6 +343,7 @@ export const PaymentsSpendBody = z.object({
   paymentId: z.string().min(1),
   note: z.union([z.string(), z.array(z.string())]).optional(),
   reverse: z.boolean().optional().default(false),
+  forceSync: z.boolean().optional().default(false),
   vendor: z.string().optional(),
   comment: z.string().optional(),
 });
@@ -448,7 +450,7 @@ export const PaymentsRecalcGrantProjectedResp = z.object({
   dryRun: z.boolean(),
   effectiveFromISO: ISO10ish,
   activeOnly: z.boolean(),
-  source: z.union([z.literal(1), z.literal(2)]),
+  source: z.literal(1),
 });
 export type TPaymentsRecalcGrantProjectedResp = z.infer<typeof PaymentsRecalcGrantProjectedResp>;
 

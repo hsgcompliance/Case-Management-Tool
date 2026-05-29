@@ -38,6 +38,7 @@ export * as tours from "./tours";
 export * as users from "./users";
 export * as metrics from "./metrics";
 export * as transactionWindows from "./transactionWindows";
+export * as cmActivities from "./cmActivities";
 
 // ------------------------------
 // Top-level TYPE exports (leaf modules only)
@@ -137,6 +138,14 @@ export type {
 // Enrollments
 export type {
   TEnrollment,
+  TEnrollmentServiceStatus,
+  TEnrollmentMedicaidStatus,
+  TEnrollmentMedicaid,
+  TEnrollmentActions,
+  TEnrollmentActionHistoryEventType,
+  TEnrollmentActionHistoryRecord,
+  TEnrollmentActionsApplyBody,
+  TEnrollmentActionsApplyResp,
   TEnrollmentsUpsertBody,
   TEnrollmentsPatchRow,
   TEnrollmentsPatchBody,
@@ -176,6 +185,16 @@ export type {
   TGrant,
   TGrantStatus,
   TGrantKind,
+  TGrantFinancialModel,
+  TGrantLedgerMode,
+  TGrantFinancialConfig,
+  TGrantFinancialConfigPatch,
+  TGrantCompliancePreset,
+  TGrantComplianceControl,
+  TGrantComplianceConfig,
+  TGrantTaskDefinitions,
+  TGrantFinancialCapabilities,
+  TGrantLineItemAmountSemantics,
   TGrantLineItemType,
   TGrantBudgetLineItem,
   TGrantBudgetTotals,
@@ -193,6 +212,7 @@ export type {
   // invoicing
   TGrantInvoicing,
   TGrantInvoicingFrequency,
+  TGrantEnrollmentDefaults,
 
   // request bodies + responses
   TGrantsUpsertBody,
@@ -229,7 +249,22 @@ export type {
   TGrantsAdminReconcileBudgetBody,
   TGrantsAdminReconcileBudgetResp,
 } from "./grants";
-export { GRANT_PIN_COLORS } from "./grants";
+export {
+  GRANT_PIN_COLORS,
+  GrantFinancialModel,
+  GrantLedgerMode,
+  GrantFinancialConfig,
+  GrantFinancialConfigPatch,
+  GrantCompliancePreset,
+  GrantComplianceControl,
+  GrantComplianceConfig,
+  normalizeGrantFinancialConfig,
+  normalizeGrantComplianceConfig,
+  getGrantFinancialCapabilities,
+  shouldRetainGrantBudget,
+  getGrantLineItemAmountSemantics,
+  computeGrantLineItemOverCap,
+} from "./grants";
 
 // Jotform
 export type {
@@ -582,3 +617,22 @@ export {
   transactionFieldKey,
   inferTransactionWindowModel,
 } from "./transactionWindows";
+
+// CM Activities
+export {
+  CmActivityType,
+  CmActivity,
+  CmActivityCreateBody,
+  CmActivityUpdateBody,
+  CmActivitiesListQuery,
+  CmActivitiesListResp,
+} from "./cmActivities";
+
+export type {
+  TCmActivityType,
+  TCmActivity,
+  TCmActivityCreateBody,
+  TCmActivityUpdateBody,
+  TCmActivitiesListQuery,
+  TCmActivitiesListResp,
+} from "./cmActivities";

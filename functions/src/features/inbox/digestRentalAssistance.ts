@@ -5,6 +5,7 @@ import {sendHtmlEmail} from './emailer';
 import {loadDigestEnrollments} from './digestEnrollmentSource';
 import {computeNextRentCertDue} from './rentCert';
 import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
+import {getGrantFinancialCapabilities} from '../grants/schemas';
 
 const DASHBOARD_LINK = 'https://households-db.web.app/dashboard';
 const BRAND = '#2563EB';
@@ -24,6 +25,8 @@ type GrantBudgetSummary = {
   projectedSpend: number;
   available: number;
   pctAllocated: number;
+  drawsDownBudget: boolean;
+  isBillingMode: boolean;
 };
 
 type AssistanceRow = {
@@ -161,16 +164,26 @@ function customerName(data: Record<string, unknown>, fallback: string): string {
 }
 
 function grantBudget(data: Record<string, unknown>): GrantBudgetSummary {
+  const capabilities = getGrantFinancialCapabilities(data);
   const totals = ((data.budget as any)?.totals || data.budgetTotals || {}) as Record<string, unknown>;
   const total = Number(totals.total || 0);
   const spent = Number(totals.spent || 0);
   const projectedSpend = Number(totals.projectedSpend || Number(totals.projected || 0) + spent);
   const available = Number(totals.projectedBalance ?? total - projectedSpend);
   const pctAllocated = total > 0 ? Math.round((projectedSpend / total) * 100) : 0;
-  return {total, spent, projectedSpend, available, pctAllocated};
+  return {
+    total,
+    spent,
+    projectedSpend,
+    available,
+    pctAllocated,
+    drawsDownBudget: capabilities.drawsDownBudget,
+    isBillingMode: !capabilities.drawsDownBudget && (capabilities.billingEnabled || capabilities.usesBillingLedger),
+  };
 }
 
 function budgetColor(budget: GrantBudgetSummary): string {
+  if (!budget.drawsDownBudget) return TEXT;
   if (budget.available < 0 || budget.pctAllocated >= 95) return DANGER_TEXT;
   if (budget.pctAllocated >= 75) return AMBER_TEXT;
   return GREEN_TEXT;
@@ -280,17 +293,21 @@ export async function buildRentalAssistanceDigestData(opts: {
 
 function budgetStrip(group: GrantAssistanceGroup): string {
   const color = budgetColor(group.budget);
-  const bar = Math.max(0, Math.min(100, group.budget.pctAllocated));
+  const bar = group.budget.drawsDownBudget ? Math.max(0, Math.min(100, group.budget.pctAllocated)) : 100;
+  const amountLabel = group.budget.drawsDownBudget ? 'Budget' : 'Reference';
+  const spentLabel = group.budget.isBillingMode ? 'Recorded Spend' : 'Spent';
+  const finalLabel = group.budget.drawsDownBudget ? 'Available' : 'Activity Total';
+  const finalValue = group.budget.drawsDownBudget ? group.budget.available : group.budget.projectedSpend;
   return `
     <div style="background:#e2e8f0;border-radius:9999px;height:7px;margin:10px 0 12px;overflow:hidden">
       <div style="height:7px;width:${bar}%;background:${color};border-radius:9999px"></div>
     </div>
     <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
       <tr>
-        ${budgetCell('Budget', fmtMoney(group.budget.total), TEXT)}
-        ${budgetCell('Spent', fmtMoney(group.budget.spent), TEXT)}
+        ${budgetCell(amountLabel, fmtMoney(group.budget.total), TEXT)}
+        ${budgetCell(spentLabel, fmtMoney(group.budget.spent), TEXT)}
         ${budgetCell('Projected', fmtMoney(group.budget.projectedSpend), AMBER_TEXT)}
-        ${budgetCell('Available', fmtMoney(group.budget.available), color)}
+        ${budgetCell(finalLabel, fmtMoney(finalValue), color)}
       </tr>
     </table>`;
 }
@@ -329,7 +346,7 @@ function grantSection(group: GrantAssistanceGroup): string {
           <div style="font-size:16px;font-weight:800;color:${TEXT}">${esc(group.grantName)}</div>
           ${group.grantCode ? `<div style="font-size:11px;color:${MUTED};margin-top:2px">${esc(group.grantCode)}</div>` : ''}
         </div>
-        <div style="font-size:11px;font-weight:800;color:${budgetColor(group.budget)};background:#f8fafc;border:1px solid ${BORDER};border-radius:9999px;padding:4px 9px;white-space:nowrap">${group.budget.pctAllocated}% allocated</div>
+        <div style="font-size:11px;font-weight:800;color:${budgetColor(group.budget)};background:#f8fafc;border:1px solid ${BORDER};border-radius:9999px;padding:4px 9px;white-space:nowrap">${group.budget.drawsDownBudget ? `${group.budget.pctAllocated}% allocated` : 'billing activity'}</div>
       </div>
       ${budgetStrip(group)}
     </div>

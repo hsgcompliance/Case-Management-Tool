@@ -1,5 +1,6 @@
 // functions/src/features/payments/triggers.ts
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { computeGrantLineItemOverCap } from "@hdb/contracts";
 import { db, FieldValue, computeBudgetTotals, normId } from "../../core";
 import { RUNTIME } from "../../core/env";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
@@ -195,12 +196,8 @@ export const onLedgerWrite = onDocumentWritten(
           const delta = deltaRow.deltaCents / 100;
           li.spent = Math.max(0, Number(li.spent || 0) + delta);
 
-          const cap = Number(li.amount || 0);
-          const over = Math.max(
-            0,
-            (Number(li.spent || 0) + Number(li.projected || 0)) - cap
-          );
-          if (over > 0) li.overCap = over;
+          const over = computeGrantLineItemOverCap(g, li);
+          if (over != null) li.overCap = over;
           else delete li.overCap;
 
           touched = true;

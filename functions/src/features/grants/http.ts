@@ -29,6 +29,7 @@ import {
   GrantPatchBody,
   GrantsDeleteBody,
   GrantsAdminDeleteBody,
+  getGrantFinancialCapabilities,
 } from "./schemas";
 
 import {
@@ -395,7 +396,7 @@ export const grantsStructure = secureHandler(
       },
 
       taskTypes: [],
-      tasks: {}, // MUST be record, not array
+      tasks: [],
       meta: {},
     };
     res.status(200).json({ ok: true, structure });
@@ -769,20 +770,25 @@ function _docBelongsToGrant(
   return true;
 }
 
-function _grantKind(data: Record<string, unknown>): "grant" | "program" {
-  return normStr(data.kind) === "program" ? "program" : "grant";
-}
-
-function _rejectProgramBudgetAction(
+function _rejectGrantBudgetAction(
   res: { status: (code: number) => { json: (body: Record<string, unknown>) => void } },
   action: string,
+  grantData: Record<string, unknown>,
 ): boolean {
+  const capabilities = getGrantFinancialCapabilities(grantData);
+  const billingMode = capabilities.usesBillingLedger || capabilities.billingEnabled;
   res.status(400).json({
     ok: false,
-    error: "program_has_no_budget",
-    message: `Programs do not use grant budget workflows. ${action} is only available for funding-source grants.`,
+    error: billingMode ? "billing_mode_has_no_spend_down_budget" : "grant_budget_action_not_enabled",
+    message: billingMode
+      ? `${action} is a spend-down budget workflow. Billing-mode programs track billing activity but do not draw down a grant budget.`
+      : `${action} is only available when financial config enables spend-down budget behavior.`,
   });
   return true;
+}
+
+function _canRunSpendDownBudgetAction(data: Record<string, unknown>): boolean {
+  return getGrantFinancialCapabilities(data).drawsDownBudget;
 }
 
 /**
@@ -801,8 +807,11 @@ async function recomputeAndWriteBudget(
   newTotals: Record<string, number>;
   counts: { ledger: number; paymentQueue: number };
 }> {
-  if (_grantKind(grantData) === "program") {
-    throw new Error("program_has_no_budget");
+  if (!_canRunSpendDownBudgetAction(grantData)) {
+    const capabilities = getGrantFinancialCapabilities(grantData);
+    throw new Error(capabilities.usesBillingLedger || capabilities.billingEnabled
+      ? "billing_mode_has_no_spend_down_budget"
+      : "grant_budget_action_not_enabled");
   }
 
   const [ledgerSnap, queueSnap] = await Promise.all([
@@ -920,8 +929,8 @@ export const grantsAdminClearPayments = secureHandler(
     if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
     const gData = gSnap.data() || {};
     assertGrantOrgAccess(caller, targetOrg, gData);
-    if (_grantKind(gData) === "program") {
-      _rejectProgramBudgetAction(res, "Clearing enrollment payments");
+    if (!_canRunSpendDownBudgetAction(gData)) {
+      _rejectGrantBudgetAction(res, "Clearing enrollment payments", gData);
       return;
     }
     const grantOrg = normId(gData.orgId) || normId(targetOrg);
@@ -1121,8 +1130,8 @@ export const grantsAdminReconcileBudget = secureHandler(
     if (!gSnap.exists) { res.status(404).json({ ok: false, error: "grant_not_found" }); return; }
     const gData = gSnap.data() || {};
     assertGrantOrgAccess(caller, targetOrg, gData);
-    if (_grantKind(gData) === "program") {
-      _rejectProgramBudgetAction(res, "Reconciling budget totals");
+    if (!_canRunSpendDownBudgetAction(gData)) {
+      _rejectGrantBudgetAction(res, "Reconciling budget totals", gData);
       return;
     }
     const grantOrg = normId(gData.orgId) || normId(targetOrg);

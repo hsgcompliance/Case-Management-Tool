@@ -13,6 +13,7 @@ import {
   topLevelMetadataOnly,
 } from "../../core/triggerDebug";
 import { syncCustomerAssistanceLength } from "../customers/assistanceLength";
+import { applyGrantEnrollmentDefaults } from "./defaults";
 
 const FN_ENROLLMENT_CREATE_DEFAULTS = "onEnrollmentCreateDefaults";
 const FN_ENROLLMENT_NORMALIZE = "onEnrollmentNormalize";
@@ -84,11 +85,26 @@ export const onEnrollmentCreateDefaults = onDocumentCreated(
     });
 
     const patch: any = {};
+    const grantId = String(e?.grantId || "").trim();
+    let grantDoc: Record<string, any> = {};
+    if (grantId && (!e?.endDate || !e?.serviceStatus || !e?.medicaid || !e?.actions)) {
+      const grantSnap = await grantsCol.doc(grantId).get().catch(() => null);
+      grantDoc = grantSnap?.data() || {};
+    }
+    const defaulted = applyGrantEnrollmentDefaults(e || {}, grantDoc);
     if (!e?.createdAt) patch.createdAt = FieldValue.serverTimestamp();
     const status = e?.status;
     if (status == null) patch.status = "active";
     if (e?.active == null) patch.active = (status ?? "active") === "active";
     if (e?.deleted == null && (status ?? "active") !== "deleted") patch.deleted = false;
+    if (!e?.endDate && defaulted.endDate) patch.endDate = defaulted.endDate;
+    if (!e?.serviceStatus && defaulted.serviceStatus) patch.serviceStatus = defaulted.serviceStatus;
+    if (!e?.medicaid || typeof e.medicaid !== "object" || Array.isArray(e.medicaid)) {
+      patch.medicaid = defaulted.medicaid;
+    }
+    if (!e?.actions || typeof e.actions !== "object" || Array.isArray(e.actions)) {
+      patch.actions = defaulted.actions;
+    }
 
     if (Object.keys(patch).length) {
       patch.system = { lastWriter: FN_ENROLLMENT_CREATE_DEFAULTS, lastWriteAt: FieldValue.serverTimestamp() };
@@ -113,7 +129,6 @@ export const onEnrollmentCreateDefaults = onDocumentCreated(
       { merge: true }
     );
 
-    const grantId = String(e?.grantId || "").trim();
     if (grantId) {
       const c = activeInactiveForGrant({ ...e, ...patch });
       await applyGrantEnrollmentDeltas({

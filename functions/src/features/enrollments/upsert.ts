@@ -10,6 +10,7 @@ import {
 import { randomUUID as uuid } from "node:crypto";
 import { EnrollmentsUpsertBody, toArray } from "./schemas";
 import { deriveEnrollmentNames } from "./derive";
+import { applyGrantEnrollmentDefaults } from "./defaults";
 
 const norm = (v: unknown) => String(v || "").trim();
 const isReservedRouteId = (raw: unknown) => {
@@ -19,13 +20,6 @@ const isReservedRouteId = (raw: unknown) => {
   if (s.startsWith("(") && s.endsWith(")new")) return true;
   return false;
 };
-
-function capEndDateToGrant(endDate: unknown, grantEndDate: unknown) {
-  const end = String(endDate || "").slice(0, 10);
-  const grantEnd = String(grantEndDate || "").slice(0, 10);
-  if (!grantEnd || !end) return end; // no cap or blank end date passes through
-  return end > grantEnd ? grantEnd : end;
-}
 
 export const enrollmentsUpsert = secureHandler(async (req, res) => {
   const rows = toArray(EnrollmentsUpsertBody.parse(req.body));
@@ -62,13 +56,13 @@ export const enrollmentsUpsert = secureHandler(async (req, res) => {
     }
 
     const teamIds = Array.from(new Set([rowOrgId, ...(raw0.teamIds||[]), ...teams])).slice(0,10);
-    let grantEndDate = "";
+    let grantDoc: Record<string, any> = {};
     if ((raw0 as any).grantId) {
       const grantSnap = await db.collection("grants").doc(String((raw0 as any).grantId)).get();
-      grantEndDate = String(grantSnap.data()?.endDate || "").slice(0, 10);
+      grantDoc = grantSnap.data() || {};
     }
 
-    const data: any = {
+    const rawData: any = {
       ...raw0,
       id,
       orgId: rowOrgId,
@@ -80,9 +74,9 @@ export const enrollmentsUpsert = secureHandler(async (req, res) => {
 
       updatedAt: FieldValue.serverTimestamp(),
     };
-    if (grantEndDate) {
-      data.endDate = capEndDateToGrant(data.endDate, grantEndDate);
-    }
+    const data = applyGrantEnrollmentDefaults(rawData, grantDoc, {
+      applyAuthorizationWindow: !raw0.id,
+    }) as any;
     Object.assign(data, await deriveEnrollmentNames({
       grantId: data.grantId,
       customerId: data.customerId,

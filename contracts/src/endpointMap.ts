@@ -242,6 +242,10 @@ import type {
   TGrantEntity,
   TGrantStatus,
   TGrantKind,
+  TGrantFinancialModel,
+  TGrantLedgerMode,
+  TGrantFinancialConfig,
+  TGrantFinancialCapabilities,
   TGrantBudgetLineItem,
   TGrantBudgetTotals,
   TGrantBudget,
@@ -285,6 +289,10 @@ export type TGrantInput = TGrant;
 export type GrantEntity = TGrantEntity;
 export type GrantStatus = TGrantStatus;
 export type GrantKind = TGrantKind;
+export type GrantFinancialModel = TGrantFinancialModel;
+export type GrantLedgerMode = TGrantLedgerMode;
+export type GrantFinancialConfig = TGrantFinancialConfig;
+export type GrantFinancialCapabilities = TGrantFinancialCapabilities;
 export type GrantBudgetLineItem = TGrantBudgetLineItem;
 export type GrantBudgetTotals = TGrantBudgetTotals;
 export type GrantBudget = TGrantBudget;
@@ -444,6 +452,8 @@ export type BudgetPipelinePreviewResp = Ok<TBudgetPipelinePreviewResult>;
 import type {
   TEnrollment,
   TEnrollmentEntity,
+  TEnrollmentActionsApplyBody,
+  TEnrollmentActionsApplyResp,
   TEnrollmentGetByIdQuery,
   TEnrollmentGetByIdResp,
   TEnrollmentsAdminDeleteBody,
@@ -480,6 +490,9 @@ export type EnrollmentsAdminDeleteResp = TEnrollmentsAdminDeleteResp;
 
 export type EnrollmentsAdminReverseLedgerEntryReq = TEnrollmentsAdminReverseLedgerEntryBody;
 export type EnrollmentsAdminReverseLedgerEntryResp = TEnrollmentsAdminReverseLedgerEntryResp;
+
+export type EnrollmentActionsApplyReq = TEnrollmentActionsApplyBody;
+export type EnrollmentActionsApplyResp = TEnrollmentActionsApplyResp;
 
 export type EnrollmentsBulkEnrollReq = TEnrollmentsBulkEnrollBody;
 export type EnrollmentsBulkEnrollResp = TEnrollmentsBulkEnrollResp;
@@ -970,6 +983,7 @@ export interface EndpointMap {
   enrollmentsUndoMigration: { req: EnrollmentsUndoMigrationReq; resp: EnrollmentsUndoMigrationResp };
   enrollmentsAdminReverseLedgerEntry: { req: EnrollmentsAdminReverseLedgerEntryReq; resp: EnrollmentsAdminReverseLedgerEntryResp };
   enrollmentsVoidProjections: { req: EnrollmentsVoidProjectionsReq; resp: EnrollmentsVoidProjectionsResp };
+  enrollmentActionsApply: { req: EnrollmentActionsApplyReq; resp: EnrollmentActionsApplyResp };
 
   // GRANTS
   grantsUpsert: { req: GrantsUpsertReq; resp: GrantsUpsertResp };
