@@ -96,6 +96,11 @@
       "types": "./dist/metrics.d.ts",
       "import": "./dist/metrics.js",
       "require": "./dist/metrics.cjs"
+    },
+    "./cmActivities": {
+      "types": "./dist/cmActivities.d.ts",
+      "import": "./dist/cmActivities.js",
+      "require": "./dist/cmActivities.cjs"
     }
   },
   "files": [

@@ -23,6 +23,9 @@ import {
   GrantUpsertBody,
   TGrant,
   TGrantBudget,
+  normalizeGrantFinancialConfig,
+  normalizeGrantComplianceConfig,
+  shouldRetainGrantBudget,
   toArray,
 } from "./schemas";
 
@@ -146,6 +149,11 @@ const cleanExtras = (v: Record<string, unknown> | null | undefined) =>
     ? sanitizeNestedObject(stripReservedFields(v as Record<string, unknown>))
     : null;
 
+const cleanGrantTasks = (v: TGrant["tasks"] | null | undefined): TGrant["tasks"] | null => {
+  if (Array.isArray(v)) return sanitizeNestedObject(v) as TGrant["tasks"];
+  return cleanExtras(v as Record<string, unknown> | null | undefined) as TGrant["tasks"] | null;
+};
+
 /* ---------------- Reserved keys (server-owned / protected) ---------------- */
 
 const RESERVED = new Set<string>([
@@ -168,6 +176,38 @@ function hasOwn(obj: unknown, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeFinancialConfigForDecision(
+  prev: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  unset: string[] | undefined,
+) {
+  if (patch.financialConfig === null) return null;
+  const clearsFinancialConfig = Array.isArray(unset) && unset.includes("financialConfig");
+  const prevConfig = !clearsFinancialConfig && isPlainObject(prev.financialConfig) ? prev.financialConfig : {};
+  const patchConfig = isPlainObject(patch.financialConfig) ? patch.financialConfig : {};
+  if (!Object.keys(prevConfig).length && !Object.keys(patchConfig).length) return undefined;
+  return { ...prevConfig, ...patchConfig };
+}
+
+function grantDecisionInput(
+  prev: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  kind: TGrant["kind"],
+  unset?: string[],
+) {
+  const financialConfig = mergeFinancialConfigForDecision(prev, patch, unset);
+  return {
+    ...prev,
+    ...patch,
+    kind,
+    ...(financialConfig === undefined ? {} : { financialConfig }),
+  };
+}
+
 function isReservedRouteId(raw: unknown): boolean {
   const s = String(raw ?? "").trim().toLowerCase();
   if (!s) return false;
@@ -184,12 +224,14 @@ const KNOWN_GRANT_FIELDS = new Set<string>([
   "active",
   "deleted",
   "kind",
+  "financialConfig",
   "duration",
   "startDate",
   "endDate",
   "budget",
   "taskTypes",
   "tasks",
+  "complianceConfig",
   "conditionalTaskRules",
   "pins",
   "invoicing",
@@ -280,7 +322,7 @@ function sanitizeGrantPatch(patch: Partial<TGrant>): Partial<TGrant> {
   if ("createdAt" in out) delete out.createdAt;
   if ("updatedAt" in out) delete out.updatedAt;
 
-  if (out.tasks !== undefined) out.tasks = cleanExtras(out.tasks);
+  if (out.tasks !== undefined) out.tasks = cleanGrantTasks(out.tasks);
   if (out.meta !== undefined) out.meta = cleanExtras(out.meta);
   if (
     out.budget !== undefined &&
@@ -315,11 +357,14 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
   const deleted = status === "deleted";
 
   const kind = canonicalKind({}, parsed);
+  const financialConfig = normalizeGrantFinancialConfig({ ...parsed, kind });
+  const complianceConfig = normalizeGrantComplianceConfig(parsed as Record<string, unknown>);
 
-  const budget =
-    kind === "program" ? null : normalizeBudget(parsed.budget ?? null);
+  const budget = shouldRetainGrantBudget({ ...parsed, kind, financialConfig })
+    ? normalizeBudget(parsed.budget ?? { total: 0, lineItems: [] })
+    : null;
 
-  const tasks = cleanExtras(parsed.tasks);
+  const tasks = cleanGrantTasks(parsed.tasks);
   const meta = cleanExtras(parsed.meta);
   const extras = cleanTopLevelExtras(parsed as Record<string, unknown>);
 
@@ -334,6 +379,7 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
     deleted,
 
     kind,
+    financialConfig,
 
     duration: parsed.duration ?? null,
     startDate: parsed.startDate ?? null,
@@ -341,6 +387,7 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
 
     budget,
     taskTypes: parsed.taskTypes ?? null,
+    complianceConfig,
     conditionalTaskRules: parsed.conditionalTaskRules ?? null,
     pins: parsed.pins ?? null,
     invoicing: parsed.invoicing ?? null,
@@ -451,7 +498,18 @@ export async function patchGrants(
 
     // program/grant coherence
     const kind = canonicalKind(prev, safePatch);
-    const mustClearBudget = kind === "program";
+    const nextFinancialConfig = normalizeGrantFinancialConfig({ ...prev, ...safePatch, kind });
+    const nextComplianceConfig = normalizeGrantComplianceConfig({ ...prev, ...safePatch });
+    const mustClearBudget = !shouldRetainGrantBudget(
+      {
+        ...grantDecisionInput(prev as Record<string, unknown>, safePatch as Record<string, unknown>, kind, unset),
+        financialConfig: nextFinancialConfig,
+      },
+    );
+    const shouldSeedBudget =
+      !mustClearBudget &&
+      !hasOwn(safePatch, "budget") &&
+      !(prev.budget && typeof prev.budget === "object" && !Array.isArray(prev.budget));
 
     const data: Record<string, unknown> = {
       ...safePatch,
@@ -459,7 +517,10 @@ export async function patchGrants(
       active,
       deleted,
       kind,
+      financialConfig: nextFinancialConfig,
+      complianceConfig: nextComplianceConfig,
       ...(mustClearBudget ? { budget: null } : {}),
+      ...(shouldSeedBudget ? { budget: normalizeBudget({ total: 0, lineItems: [] }) } : {}),
       ...(normId(prev.orgId) ? {} : { orgId: normId(targetOrg) }), // migrate legacy
       updatedAt: FieldValue.serverTimestamp(),
     };
@@ -522,7 +583,14 @@ export async function patchGrants(
 
       // kind coherence
       const kind = canonicalKind(prev, patch);
-      const mustClearBudget = kind === "program";
+      const nextFinancialConfig = normalizeGrantFinancialConfig({ ...prev, ...patch, kind });
+      const nextComplianceConfig = normalizeGrantComplianceConfig({ ...prev, ...patch });
+      const mustClearBudget = !shouldRetainGrantBudget(
+        {
+          ...grantDecisionInput(prev as Record<string, unknown>, patch as Record<string, unknown>, kind, unset),
+          financialConfig: nextFinancialConfig,
+        },
+      );
 
       // budget merge
       let nextBudget: TGrantBudget | null = null;
@@ -530,7 +598,7 @@ export async function patchGrants(
       if (mustClearBudget) {
         nextBudget = null;
       } else if (hasOwn(patch, "budget") && patch.budget === null) {
-        nextBudget = null;
+        nextBudget = normalizeBudget({ total: 0, lineItems: [] });
       } else {
         const prevBudget = (prevObj.budget || {}) as Partial<TGrantBudget>;
         const patchBudget = (patch.budget || {}) as Partial<TGrantBudget>;
@@ -570,7 +638,7 @@ export async function patchGrants(
         nextBudget = normalizeBudget(
           Object.keys(mergedInput).length
             ? (mergedInput as TGrantBudget)
-            : null,
+            : { total: 0, lineItems: [] },
         );
       }
 
@@ -580,6 +648,8 @@ export async function patchGrants(
         active,
         deleted,
         kind,
+        financialConfig: nextFinancialConfig,
+        complianceConfig: nextComplianceConfig,
         budget: nextBudget,
         ...(normId(prevObj.orgId) ? {} : { orgId: normId(targetOrg) }), // migrate legacy
         updatedAt: FieldValue.serverTimestamp(),

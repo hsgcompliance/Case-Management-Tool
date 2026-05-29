@@ -30,6 +30,74 @@ export const EnrollmentCompliance = z.object({
   hmisExitComplete: z.boolean().nullish(),
 });
 
+export const EnrollmentServiceStatus = z.enum(["active", "paused", "expired"]);
+export type TEnrollmentServiceStatus = z.infer<typeof EnrollmentServiceStatus>;
+
+export const EnrollmentMedicaidStatus = z.enum(["active", "closed"]);
+export type TEnrollmentMedicaidStatus = z.infer<typeof EnrollmentMedicaidStatus>;
+
+export const EnrollmentMedicaid = z
+  .object({
+    status: EnrollmentMedicaidStatus.default("active"),
+    closedDate: z.string().trim().nullable().optional(),
+    reopenedDate: z.string().trim().nullable().optional(),
+    note: z.string().trim().nullable().optional(),
+  })
+  .passthrough();
+export type TEnrollmentMedicaid = z.infer<typeof EnrollmentMedicaid>;
+
+export const EnrollmentActions = z.record(z.string(), z.unknown());
+export type TEnrollmentActions = z.infer<typeof EnrollmentActions>;
+
+export const EnrollmentActionHistoryEventType = z.enum([
+  "actionChanged",
+  "serviceStatusChanged",
+  "medicaidStatusChanged",
+  "renewalReminderCreated",
+  "enrollmentExpired",
+  "automationFailed",
+]);
+export type TEnrollmentActionHistoryEventType = z.infer<typeof EnrollmentActionHistoryEventType>;
+
+export const EnrollmentActionHistoryRecord = z
+  .object({
+    id: Id.optional(),
+    eventType: EnrollmentActionHistoryEventType,
+    actionId: z.string().trim().nullable().optional(),
+    actorType: z.enum(["user", "system", "automation"]).default("user"),
+    actorId: z.string().trim().nullable().optional(),
+    before: z.unknown().optional(),
+    after: z.unknown().optional(),
+    note: z.string().trim().nullable().optional(),
+    createdAt: TsLike.nullish().optional(),
+  })
+  .passthrough();
+export type TEnrollmentActionHistoryRecord = z.infer<typeof EnrollmentActionHistoryRecord>;
+
+export const EnrollmentActionsApplyBody = z
+  .object({
+    enrollmentId: Id,
+    actionId: z.string().trim().min(1).optional(),
+    value: z.unknown().optional(),
+    serviceStatus: EnrollmentServiceStatus.optional(),
+    medicaid: EnrollmentMedicaid.partial().optional(),
+    note: z.string().trim().nullable().optional(),
+  })
+  .passthrough()
+  .refine(
+    (v) =>
+      !!v.serviceStatus ||
+      !!v.medicaid ||
+      (typeof v.actionId === "string" && Object.prototype.hasOwnProperty.call(v, "value")),
+    { message: "missing_action_update" },
+  );
+export type TEnrollmentActionsApplyBody = z.infer<typeof EnrollmentActionsApplyBody>;
+
+export type TEnrollmentActionsApplyResp = Ok<{
+  enrollmentId: string;
+  historyId: string;
+}>;
+
 // ---- Schedule meta ----------------------------------------------------------
 
 /** Legacy builder meta (v1) captured alongside schedules. */
@@ -152,6 +220,12 @@ export const Enrollment = z.object({
   active: z.boolean().nullable().optional(),
   status: z.enum(["active", "deleted", "closed"]).nullable().optional(),
   deleted: z.boolean().nullable().optional(),
+
+  // Service status is separate from enrollment lifecycle. Medicaid loss can pause service
+  // while the enrollment lifecycle remains active for authorization/renewal tracking.
+  serviceStatus: EnrollmentServiceStatus.nullable().optional(),
+  medicaid: EnrollmentMedicaid.nullish(),
+  actions: EnrollmentActions.nullish(),
 
   // Operational stage (waitlist → tenant, etc.) kept separate from lifecycle status.
   stage: z.enum(["waitlisted", "offered", "tenant", "exited"]).nullable().optional(),

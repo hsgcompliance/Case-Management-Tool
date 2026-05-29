@@ -6,9 +6,7 @@
  *
  * - projected = sum of unpaid enrollment payments w/ lineItemId (ALL TYPES)
  * - projectedInWindow = same, but dueDate within grant window
- * - spent:
- *    source=1 (default): recompute from /ledger (authoritative)
- *    source=2: recompute from enrollments' paid payments (legacy fallback)
+ * - spent: recompute from /ledger (authoritative)
  *
  * Notes:
  * - We intentionally DO NOT filter by effectiveFromISO here. Defaulting effectiveFrom
@@ -28,6 +26,7 @@ import {
   toBudgetCents,
 } from "../../core";
 import type { Request, Response } from "express";
+import { computeGrantLineItemOverCap } from "@hdb/contracts";
 
 import { assertOrgAccessMaybe, getGrantWindowISO, isInGrantWindow } from "./utils";
 import type { GrantWindowISO } from "./utils";
@@ -39,7 +38,7 @@ import type { TPaymentsRecalcGrantProjectedBody } from "./schemas";
 type RecalcOpts = {
   effectiveFromISO: string; // metadata only
   activeOnly: boolean;
-  source: 1 | 2; // 1=ledger authoritative, 2=enrollment legacy
+  source: 1; // ledger authoritative
 };
 
 const todayISO = (v?: any) => toDateOnly(v || new Date());
@@ -104,7 +103,7 @@ export async function recalcGrantProjectedForGrant(args: {
 }) {
   const effectiveFromISO = args.effectiveFromISO || toDateOnly(new Date());
   const activeOnly = args.activeOnly ?? true;
-  const source = args.source ?? 1;
+  const source = 1;
   const dryRun = args.dryRun ?? false;
 
   return recalcProjectedForGrant(
@@ -215,19 +214,8 @@ export async function recalcProjectedForGrant(
         if (paymentId) countedEnrollmentProjectionKeys.add(`${doc.id}:${paymentId}`);
       }
 
-      // legacy spent path: paid payments in enrollment (NOT authoritative)
-      // HARDEN: only count if paidFromGrant is not explicitly false
-      if (opts.source === 2 && p?.paid) {
-        const fromGrant = p?.paidFromGrant;
-        const countAsSpend = fromGrant === undefined || fromGrant === null || fromGrant === true;
-
-        if (countAsSpend) {
-          acc.spentCents += amtCents;
-          if (dueISO && isInGrantWindow(dueISO, win)) {
-            acc.spentWinCents += amtCents;
-          }
-        }
-      }
+      // Paid enrollment rows are not authoritative for spend. Ledger handles
+      // paid spend and reversals; enrollment payments are used only for unpaid projections.
     }
   }
 
@@ -280,38 +268,36 @@ export async function recalcProjectedForGrant(
     }
   }
 
-  // --------- Pass 2: spent from ledger if source=1 (authoritative) ----------
-  if (opts.source === 1) {
-    const ledSnap = await db
-      .collection("ledger")
-      .where("grantId", "==", grantId)
-      .get();
+  // --------- Pass 2: spent from ledger (authoritative) ----------
+  const ledSnap = await db
+    .collection("ledger")
+    .where("grantId", "==", grantId)
+    .get();
 
-    for (const doc of ledSnap.docs) {
-      const row: any = doc.data() || {};
-      const liId = String(row?.lineItemId || "");
-      if (!liId) continue;
+  for (const doc of ledSnap.docs) {
+    const row: any = doc.data() || {};
+    const liId = String(row?.lineItemId || "");
+    if (!liId) continue;
 
-      const acc = accById[liId];
-      if (!acc) {
-        warnings.push(`Ledger row references unknown lineItemId: ${liId}`);
-        continue;
-      }
+    const acc = accById[liId];
+    if (!acc) {
+      warnings.push(`Ledger row references unknown lineItemId: ${liId}`);
+      continue;
+    }
 
-      // Integrity guard (match onLedgerWrite trigger behavior)
-      const rowOrgNorm = row?.orgId ? normId(row.orgId) : null;
-      if (rowOrgNorm && grantOrgNorm && rowOrgNorm !== grantOrgNorm) {
-        warnings.push(`Skipped cross-org ledger row ${doc.id} (row org != grant org)`);
-        continue;
-      }
+    // Integrity guard (match onLedgerWrite trigger behavior)
+    const rowOrgNorm = row?.orgId ? normId(row.orgId) : null;
+    if (rowOrgNorm && grantOrgNorm && rowOrgNorm !== grantOrgNorm) {
+      warnings.push(`Skipped cross-org ledger row ${doc.id} (row org != grant org)`);
+      continue;
+    }
 
-      const amtCents = ledgerAmountCents(row); // reversals are negative already
-      if (!amtCents) continue;
+    const amtCents = ledgerAmountCents(row); // reversals are negative already
+    if (!amtCents) continue;
 
-      acc.spentCents += amtCents;
-      if (isLedgerInWindow(row, win)) {
-        acc.spentWinCents += amtCents;
-      }
+    acc.spentCents += amtCents;
+    if (isLedgerInWindow(row, win)) {
+      acc.spentWinCents += amtCents;
     }
   }
 
@@ -350,12 +336,8 @@ export async function recalcProjectedForGrant(
 
   // Over-cap bookkeeping per LI (based on total, not windowed)
   for (const li of lineItemsOut as any[]) {
-    const capNow = Number(li?.amount || 0);
-    const overNow = Math.max(
-      0,
-      (Number(li?.spent || 0) + Number(li?.projected || 0)) - capNow
-    );
-    if (overNow > 0) li.overCap = overNow;
+    const overNow = computeGrantLineItemOverCap(grant, li);
+    if (overNow != null) li.overCap = overNow;
     else delete li.overCap;
   }
 
@@ -399,8 +381,9 @@ export async function paymentsRecalcGrantProjectedHandler(req: Request, res: Res
   const parsed = PaymentsRecalcGrantProjectedBody.safeParse(req.body ?? {});
   if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.message });
 
-  const { grantId, effectiveFrom, activeOnly, source, dryRun } =
+  const { grantId, effectiveFrom, activeOnly, dryRun } =
     parsed.data as TPaymentsRecalcGrantProjectedBody;
+  const source = 1;
 
   const effectiveFromISO = todayISO(effectiveFrom);
 

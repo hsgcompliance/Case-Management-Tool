@@ -3,6 +3,7 @@
  * Recompute a grant's projected/spent in one shot.
  * POST /paymentsUpdateGrantBudget
  * Body: { grantId, effectiveFrom?, activeOnly?, source?, dryRun? }
+ * Spend is always reconciled from the ledger; legacy source values are ignored.
  *
  * Thin alias to recalcGrantProjected to avoid drift.
  */
@@ -23,8 +24,9 @@ export async function paymentsUpdateGrantBudgetHandler(
   if (!parsed.success)
     return res.status(400).json({ ok: false, error: parsed.error.message });
 
-  const { grantId, effectiveFrom, activeOnly, source, dryRun } =
+  const { grantId, effectiveFrom, activeOnly, dryRun } =
     parsed.data as TPaymentsUpdateGrantBudgetBody;
+  const source = 1;
   const effectiveFromISO = toDateOnly(effectiveFrom || new Date());
 
   try {

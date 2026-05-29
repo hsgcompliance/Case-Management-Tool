@@ -507,6 +507,28 @@
         { "fieldPath": "updatedAt",  "order": "DESCENDING" },
         { "fieldPath": "__name__",   "order": "DESCENDING" }
       ]
+    },
+
+    // ── cmActivities — by CM, date+createdAt desc (useCmActivities feed) ────────────
+    {
+      "collectionGroup": "cmActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "caseManagerId", "order": "ASCENDING" },
+        { "fieldPath": "date",          "order": "DESCENDING" },
+        { "fieldPath": "createdAt",     "order": "DESCENDING" }
+      ]
+    },
+
+    // ── cmActivities — by CM + customer, date desc (useCustomerSessions) ────────────
+    {
+      "collectionGroup": "cmActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "caseManagerId", "order": "ASCENDING" },
+        { "fieldPath": "customerId",    "order": "ASCENDING" },
+        { "fieldPath": "date",          "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

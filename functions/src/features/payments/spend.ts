@@ -2,7 +2,7 @@
 /**
  * Book a spend (or reversal) against a payment, rebalancing grant budget and writing ledger.
  * POST /paymentsSpend
- * Body: { enrollmentId, paymentId, note?, reverse?, vendor?, comment? }
+ * Body: { enrollmentId, paymentId, note?, reverse?, forceSync?, vendor?, comment? }
  */
 import {
   computeBudgetTotals,
@@ -20,6 +20,7 @@ import {
   secureHandler,
 } from '../../core';
 import type {Request, Response} from 'express';
+import {computeGrantLineItemOverCap} from '@hdb/contracts';
 import {writeLedgerEntry} from '../ledger/service';
 import {PaymentsSpendBody, type TPaymentsSpendBody} from './schemas';
 import {
@@ -40,7 +41,7 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
   }
 
   const body: TPaymentsSpendBody = parsed.data;
-  const {enrollmentId, paymentId, note, reverse, vendor, comment} = body;
+  const {enrollmentId, paymentId, note, reverse, forceSync, vendor, comment} = body;
 
   const user: any = (req as any)?.user || {};
   let uid = '';
@@ -69,8 +70,22 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
 
       const p: any = paymentsArr[idx] || {};
 
-      // If it's already in the desired state, noop (idempotent-at-state)
-      if (!reverse && p.paid) return;
+      // If it's already in the desired state, noop. forceSync is a repair path for
+      // historical paid schedule rows that never got a ledger entry.
+      if (!reverse && p.paid) {
+        if (!forceSync) return;
+        const existingLedgerSnap = await trx.get(
+            db.collection('ledger')
+                .where('enrollmentId', '==', enrollmentId)
+                .limit(500),
+        );
+        const hasPositiveLedger = existingLedgerSnap.docs.some((doc) => {
+          const led: any = doc.data() || {};
+          const ledgerPaymentId = String(led.paymentId || led.origin?.baseId || '').trim();
+          return ledgerPaymentId === paymentId && Number(led.amountCents || 0) > 0 && !led.reversalOf;
+        });
+        if (hasPositiveLedger) return;
+      }
       if (reverse && !p.paid) return;
 
       const amt = Number(p.amount || 0);
@@ -128,12 +143,8 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
 
       // Over-cap bookkeeping per LI (based on TOTALS, not windowed)
       {
-        const capNow = Number(li.amount || 0);
-        const overNow = Math.max(
-            0,
-            (Number(li.spent || 0) + Number(li.projected || 0)) - capNow,
-        );
-        if (overNow > 0) li.overCap = overNow;
+        const overNow = computeGrantLineItemOverCap(grant, li);
+        if (overNow != null) li.overCap = overNow;
         else delete li.overCap;
       }
 
@@ -218,6 +229,7 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
         enrollmentId,
         paymentId,
         reverse ? 'R' : 'P',
+        forceSync ? 'FS' : '',
         amountCents,
         lastEdgeId,
       ]);
@@ -232,6 +244,7 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
         enrollmentId,
         paymentId,
         reverse: !!reverse,
+        forceSync: !!forceSync,
         amountCents,
         lastEdgeId,
         externalIdempotencyKey: externalIdempoRaw ? externalIdempoRaw.slice(0, 200) : null,
@@ -270,12 +283,7 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
       const paymentLabelAtSpend =
         (dueDateISO ? `${dueDateISO} · ` : '') + paymentTypeLabel;
 
-      const overByNow = !reverse ?
-        Math.max(
-            0,
-            (Number(li.spent || 0) + Number(li.projected || 0)) - Number(li.amount || 0),
-        ) :
-        0;
+      const overByNow = !reverse ? computeGrantLineItemOverCap(grant, li) ?? 0 : 0;
 
       const compiledNote =
         [incomingNotes.join(', '), comment, vendor, overByNow ? `overCap:$${overByNow.toFixed(2)}` : null]

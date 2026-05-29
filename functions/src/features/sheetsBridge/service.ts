@@ -8,6 +8,7 @@ import {
   toUtcIso,
 } from "../../core";
 import {normalizeBudget} from "../grants/service";
+import {shouldRetainGrantBudget} from "../grants/schemas";
 import type {TGrantBudgetLineItem} from "../grants/schemas";
 import {
   getPaymentQueueItem,
@@ -34,6 +35,7 @@ type GrantDoc = Record<string, unknown> & {
   active?: boolean;
   deleted?: boolean;
   kind?: string;
+  financialConfig?: Record<string, unknown> | null;
   duration?: string | null;
   startDate?: unknown;
   endDate?: unknown;
@@ -104,6 +106,25 @@ function iso(value: unknown): string | null {
 function iso10(value: unknown): string | null {
   const parsed = iso(value);
   return parsed ? parsed.slice(0, 10) : null;
+}
+
+function grantKind(value: unknown): "grant" | "program" {
+  return str(value).toLowerCase() === "program" ? "program" : "grant";
+}
+
+function shouldRetainSheetsGrantBudget(grant: GrantDoc, nextKind: "grant" | "program"): boolean {
+  return shouldRetainGrantBudget({
+    ...grant,
+    kind: nextKind,
+    ...(grant.financialConfig !== undefined ? {financialConfig: grant.financialConfig} : {}),
+  });
+}
+
+function assertSheetsGrantBudgetEditable(grant: GrantDoc): void {
+  if (shouldRetainGrantBudget(grant)) return;
+  const err = new Error("grant_financial_activity_not_enabled") as Error & {code?: number};
+  err.code = 400;
+  throw err;
 }
 
 function safeSecretEquals(left: string, right: string): boolean {
@@ -376,17 +397,17 @@ async function getGrantDocForWrite(orgId: string, grantId: string, tx?: Firebase
 
 function buildGrantPatchPayload(grant: GrantDoc, patch: TSheetsGrantPatch) {
   const nextStatus = patch.status ?? (str(grant.status || "draft") || "draft");
-  const nextKind = patch.kind ?? (str(grant.kind || "grant") || "grant");
+  const nextKind = grantKind(patch.kind ?? grant.kind);
   const prevBudget = grant.budget ?? null;
-  const nextBudget = nextKind === "program" ?
-    null :
+  const nextBudget = shouldRetainSheetsGrantBudget(grant, nextKind) ?
     normalizeBudget({
       ...(prevBudget || {total: 0, lineItems: []}),
       total: num(prevBudget?.total),
       totals: undefined,
       ...(patch.budgetTotal !== undefined ? {total: patch.budgetTotal ?? 0} : {}),
       lineItems: normalizeLineItemsForBudget(Array.isArray(prevBudget?.lineItems) ? prevBudget.lineItems : []),
-    });
+    }) :
+    null;
 
   return removeUndefinedDeep({
     ...(patch.name !== undefined ? {name: patch.name} : {}),
@@ -457,6 +478,7 @@ async function applyGrantLineItemUpsert(
 ) {
   return db.runTransaction(async (tx) => {
     const {ref, grant} = await getGrantDocForWrite(orgId, grantId, tx);
+    assertSheetsGrantBudgetEditable(grant);
     const currentItems = Array.isArray(grant.budget?.lineItems) ? grant.budget?.lineItems : [];
     const {nextId, nextItems} = buildNextLineItems(currentItems, lineItemId, patch);
     const budget = normalizeBudget({
@@ -478,6 +500,7 @@ async function applyGrantLineItemUpsert(
 async function applyGrantLineItemDelete(orgId: string, grantId: string, lineItemId: string, dryRun: boolean) {
   return db.runTransaction(async (tx) => {
     const {ref, grant} = await getGrantDocForWrite(orgId, grantId, tx);
+    assertSheetsGrantBudgetEditable(grant);
     const currentItems = Array.isArray(grant.budget?.lineItems) ? grant.budget?.lineItems : [];
     const nextItems = normalizeLineItemsForBudget(
       currentItems.filter((lineItem) => str(lineItem.id) !== str(lineItemId)),

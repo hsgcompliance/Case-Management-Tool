@@ -15,6 +15,7 @@ export { migrateEnrollment } from "./migrate";
 export { undoEnrollmentMigration } from "./migrate";
 export { adminReverseLedgerEntry } from "./adminReverseLedgerEntry";
 export { enrollmentsVoidProjections } from "./voidProjections";
+export { enrollmentActionsApply } from "./actionsApply";
 export {onEnrollmentCreateDefaults,
   onEnrollmentNormalize,
   onEnrollmentDelete} from "./triggers";

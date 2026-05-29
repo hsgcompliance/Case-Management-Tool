@@ -14,6 +14,7 @@ import {
   toBudgetCents,
 } from '../../core';
 import type {Request, Response} from 'express';
+import {computeGrantLineItemOverCap} from '@hdb/contracts';
 import {
   ensurePaymentIds,
   assertOrgAccess,
@@ -126,16 +127,14 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
         const deltaWin = Number(newUnpaidWin[id] || 0) - Number(oldUnpaidWin[id] || 0);
         const nextProjectedWin = Math.max(0, prevProjectedWin + deltaWin);
 
-        const cap = Number(li.amount || 0);
-        const spent = Number(li.spent || 0);
-
-        const overBy = Math.max(0, (spent + nextProjected) - cap);
-        if (overBy > 0) overCaps[id] = overBy;
-
         li.projected = nextProjected;
         li.projectedInWindow = nextProjectedWin;
 
-        if (overBy > 0) li.overCap = overBy;
+        const overBy = computeGrantLineItemOverCap(grant, li);
+        if (overBy != null) {
+          overCaps[id] = overBy;
+          li.overCap = overBy;
+        }
         else delete li.overCap;
       }
 

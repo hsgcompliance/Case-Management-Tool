@@ -16,6 +16,7 @@
   import type { TEnrollmentsEnrollCustomerBody } from "./schemas";
   import { deriveEnrollmentNames } from "./derive";
   import { generateTaskScheduleForEnrollments } from "../tasks/generateScheduleWrite";
+  import { applyGrantEnrollmentDefaults } from "./defaults";
 
 const isReservedRouteId = (raw: unknown) => {
   const s = String(raw ?? "").trim().toLowerCase();
@@ -24,15 +25,6 @@ const isReservedRouteId = (raw: unknown) => {
   if (s.startsWith("(") && s.endsWith(")new")) return true;
   return false;
 };
-
-function applyGrantEndDateDefault(extra: Record<string, any>, grant: Record<string, any>) {
-  const grantEndDate = String(grant?.endDate || "").slice(0, 10);
-  if (!grantEndDate) return extra;
-  const requestedEndDate = String(extra?.endDate || "").slice(0, 10);
-  if (!requestedEndDate) return extra; // blank end date stays blank
-  if (requestedEndDate > grantEndDate) return { ...extra, endDate: grantEndDate };
-  return extra;
-}
 
 export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
   const parsed = EnrollmentsEnrollCustomerBody.safeParse(req.body ?? {});
@@ -86,7 +78,7 @@ export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
     return;
   }
 
-  const enrollmentExtra = applyGrantEndDateDefault(extra as Record<string, any>, grant as Record<string, any>);
+  const enrollmentExtra = applyGrantEnrollmentDefaults(extra as Record<string, any>, grant as Record<string, any>);
   const id = uuid();
   const now = FieldValue.serverTimestamp();
   const derived = await deriveEnrollmentNames({

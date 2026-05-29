@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { computeGrantLineItemOverCap } from "@hdb/contracts";
 import {
   computeBudgetTotals,
   db,
@@ -155,9 +156,8 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
               li.spentInWindow = Math.max(0, Number(li.spentInWindow || 0) - amt);
               li.projectedInWindow = Math.max(0, Number(li.projectedInWindow || 0) + amt);
             }
-            const capNow = Number(li.amount || 0);
-            const overNow = Math.max(0, (Number(li.spent || 0) + Number(li.projected || 0)) - capNow);
-            if (overNow > 0) li.overCap = overNow;
+            const overNow = computeGrantLineItemOverCap(grant, li);
+            if (overNow != null) li.overCap = overNow;
             else delete li.overCap;
 
             if (reverseLedger) {
