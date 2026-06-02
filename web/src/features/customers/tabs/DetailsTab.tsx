@@ -4,6 +4,7 @@
 import React from "react";
 import { parseISO10Strict } from "@lib/date";
 import { fmtDateOrDash } from "@lib/formatters";
+import { CustomerWorkbookPanel } from "./CustomerWorkbookPanel";
 
 type AnyRecord = Record<string, any>;
 type Status = "active" | "inactive";
@@ -55,18 +56,18 @@ export function DetailsTab({
   model,
   setModel,
   onToggleActive,
-  onSaveNotes,
   statusBusy = false,
-  notesSaving = false,
+  customerId,
+  isViewer = false,
 }: {
   creating?: boolean;
   editing: boolean;
   model: AnyRecord;
   setModel: (updater: any) => void;
   onToggleActive?: () => void;
-  onSaveNotes?: (notes: string) => Promise<void>;
   statusBusy?: boolean;
-  notesSaving?: boolean;
+  customerId?: string;
+  isViewer?: boolean;
 }) {
   const computedName = React.useMemo(
     () => fullName(model?.firstName, model?.lastName),
@@ -92,8 +93,6 @@ export function DetailsTab({
   const age = React.useMemo(() => computeAgeYears(asStr(model?.dob)), [model?.dob]);
 
   const setField = (k: string, v: any) => setModel((m: AnyRecord) => ({ ...(m || {}), [k]: v }));
-  const setMeta = (patch: AnyRecord) =>
-    setModel((m: AnyRecord) => ({ ...(m || {}), meta: { ...(m?.meta || {}), ...(patch || {}) } }));
 
   const onStatusChange = (nextStatus: Status) => {
     setModel((m: AnyRecord) => {
@@ -109,43 +108,6 @@ export function DetailsTab({
       }
       return next;
     });
-  };
-
-  const notesVal = asStr(model?.meta?.notes);
-  const [notesDraft, setNotesDraft] = React.useState(notesVal);
-  const [notesSaveError, setNotesSaveError] = React.useState<string | null>(null);
-  const [notesSaved, setNotesSaved] = React.useState(false);
-  const [notesFocused, setNotesFocused] = React.useState(false);
-  const lastSavedNotesRef = React.useRef(notesVal.trim() ? notesVal : "");
-
-  React.useEffect(() => {
-    if (notesFocused) return;
-    const next = notesVal.trim() ? notesVal : "";
-    lastSavedNotesRef.current = next;
-    setNotesDraft(notesVal);
-    setNotesSaveError(null);
-    setNotesSaved(false);
-  }, [notesFocused, notesVal]);
-
-  const updateNotesModel = (value: string) => {
-    setNotesDraft(value);
-    setNotesSaved(false);
-    setNotesSaveError(null);
-    setMeta({ notes: value.trim() ? value : null });
-  };
-
-  const saveNotesIfNeeded = async () => {
-    if (!onSaveNotes) return;
-    const next = notesDraft.trim() ? notesDraft : "";
-    const current = lastSavedNotesRef.current;
-    if (next === current) return;
-    try {
-      await onSaveNotes(next);
-      lastSavedNotesRef.current = next;
-      setNotesSaved(true);
-    } catch (e: unknown) {
-      setNotesSaveError(e instanceof Error ? e.message : "Notes save failed.");
-    }
   };
 
   const statusIsActive = status === "active";
@@ -204,7 +166,7 @@ export function DetailsTab({
         </label>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <label className="field">
           <span className="label">CW ID</span>
           <input
@@ -222,6 +184,16 @@ export function DetailsTab({
             value={asStr(model?.hmisId)}
             onChange={(e) => setField("hmisId", e.currentTarget.value || null)}
             placeholder="(optional)"
+          />
+        </label>
+
+        <label className="field">
+          <span className="label">Alias</span>
+          <input
+            className="input"
+            value={asStr(model?.alias)}
+            onChange={(e) => setField("alias", e.currentTarget.value || null)}
+            placeholder="Alternative name for search"
           />
         </label>
 
@@ -248,9 +220,10 @@ export function DetailsTab({
         <ViewField label="Population" value={model?.population} />
         <ViewField label="DOB" value={fmtDateOrDash(model?.dob)} />
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <ViewField label="CW ID" value={model?.cwId} />
         <ViewField label="HMIS ID" value={model?.hmisId} />
+        <ViewField label="Alias" value={model?.alias} />
         <ViewField label="Status" value={statusChipLabel} />
       </div>
     </>
@@ -307,32 +280,15 @@ export function DetailsTab({
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div>
-            <h4 className="text-sm font-semibold text-slate-900">Notes</h4>
-          </div>
-          <div className="text-xs text-slate-500">
-            {notesSaving ? "Saving..." : notesSaveError ? "Save failed" : notesSaved ? "Saved" : ""}
-          </div>
+      {!creating && customerId ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <CustomerWorkbookPanel
+            customerId={customerId}
+            model={model}
+            isViewer={isViewer}
+          />
         </div>
-        <textarea
-          className="input min-h-32 w-full resize-y"
-          rows={6}
-          disabled={!editing && !onSaveNotes}
-          value={notesDraft}
-          onChange={(e) => updateNotesModel(e.currentTarget.value)}
-          onFocus={() => setNotesFocused(true)}
-          onBlur={() => {
-            setNotesFocused(false);
-            void saveNotesIfNeeded();
-          }}
-          placeholder="Internal notes..."
-        />
-        {notesSaveError ? (
-          <div className="mt-2 text-xs text-red-600">{notesSaveError}</div>
-        ) : null}
-      </div>
+      ) : null}
     </div>
   );
 }

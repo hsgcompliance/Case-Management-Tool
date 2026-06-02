@@ -1,9 +1,9 @@
 // functions/src/features/gdrive/customerFolderIndex.ts
 import {
   secureHandler,
-  OAUTH_CLIENT_ID,
-  OAUTH_CLIENT_SECRET,
-  OAUTH_REFRESH_TOKEN,
+  GOOGLE_OAUTH_CLIENT_ID,
+  GOOGLE_OAUTH_CLIENT_SECRET,
+  GOOGLE_OAUTH_REFRESH_TOKEN,
   requireOrg,
 } from "../../core";
 import { getDriveClient, getDriveClientWithDiagnostics } from "./service";
@@ -55,9 +55,9 @@ function isLikelyPermissionOrVisibilityError(err: any) {
 async function listFoldersInParent(
   folderId: string,
   status: "active" | "exited",
-  opts?: { googleAccessToken?: string }
+  opts?: { googleAccessToken?: string; userUid?: string }
 ) {
-  const drive = await getDriveClient({ googleAccessToken: opts?.googleAccessToken });
+  const drive = await getDriveClient({ googleAccessToken: opts?.googleAccessToken, userUid: opts?.userUid });
   let files: Array<{ id?: string | null; name?: string | null; webViewLink?: string | null; createdTime?: string | null }> = [];
   let scopedLookupError: any = null;
   try {
@@ -117,6 +117,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
   async (req, res) => {
     const debug = queryFlag((req.query as Record<string, unknown>)?.debug);
     const googleAccessToken = readGoogleAccessToken(req);
+    const userUid = String((req as any).user?.uid || "");
     try {
       const query = QuerySchema.parse(req.query ?? {});
       const caller = (req as any).user;
@@ -138,7 +139,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
       let authDebug: Record<string, unknown> | undefined;
       if (debug) {
         try {
-          const ctx = await getDriveClientWithDiagnostics({ googleAccessToken });
+          const ctx = await getDriveClientWithDiagnostics({ googleAccessToken, userUid });
           authDebug = { authMode: ctx.authMode, auth: ctx.authDiagnostics, selection: ctx.selection };
         } catch (e: any) {
           authDebug = { error: String(e?.message || e) };
@@ -152,6 +153,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
         try {
           const folders = await listFoldersInParent(resolvedQuery.activeParentId, "active", {
             googleAccessToken,
+            userUid,
           });
           results.push(...folders);
         } catch (err: any) {
@@ -167,6 +169,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
         try {
           const folders = await listFoldersInParent(resolvedQuery.exitedParentId, "exited", {
             googleAccessToken,
+            userUid,
           });
           results.push(...folders);
         } catch (err: any) {
@@ -201,7 +204,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
       let authDebug: Record<string, unknown> | undefined;
       if (debug) {
         try {
-          const ctx = await getDriveClientWithDiagnostics({ googleAccessToken });
+          const ctx = await getDriveClientWithDiagnostics({ googleAccessToken, userUid });
           authDebug = { authMode: ctx.authMode, auth: ctx.authDiagnostics, selection: ctx.selection };
         } catch (de: any) {
           authDebug = { error: String(de?.message || de) };
@@ -217,7 +220,7 @@ export const gdriveCustomerFolderIndex = secureHandler(
   {
     auth: "viewer",
     methods: ["GET", "OPTIONS"],
-    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+    secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
     memory: "512MiB",
     concurrency: 4,
     timeoutSeconds: 120,

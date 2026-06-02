@@ -2,11 +2,12 @@
 import {
   GOOGLE_API_SCOPES,
   GOOGLE_DRIVE_AUTH_MODE,
-  OAUTH_CLIENT_ID,
-  OAUTH_CLIENT_SECRET,
-  OAUTH_REFRESH_TOKEN,
+  GOOGLE_OAUTH_CLIENT_ID,
+  GOOGLE_OAUTH_CLIENT_SECRET,
+  GOOGLE_OAUTH_REFRESH_TOKEN,
 } from "../../core";
 import * as logger from "firebase-functions/logger";
+import { buildOAuthClient } from "../google/oauthClient";
 
 let googleapisPromise: Promise<typeof import("googleapis")> | null = null;
 async function getGoogle() {
@@ -23,6 +24,7 @@ type DriveErrorInfo = {
 };
 
 export type DriveAuthMode =
+  | "server_user_oauth"
   | "user_access_token"
   | "service_account"
   | "shared_refresh_token";
@@ -111,6 +113,14 @@ function normalizeDriveAuthMode(raw: string): "auto" | DriveAuthMode {
     .trim()
     .toLowerCase();
   if (
+    value === "server" ||
+    value === "server_user_oauth" ||
+    value === "per_user_oauth" ||
+    value === "per-user-oauth"
+  ) {
+    return "server_user_oauth";
+  }
+  if (
     value === "user" ||
     value === "user_access_token" ||
     value === "signed_in_user" ||
@@ -137,16 +147,30 @@ function normalizeDriveAuthMode(raw: string): "auto" | DriveAuthMode {
   return "auto";
 }
 
-function resolveDriveAuthOrder(configuredMode: string): DriveAuthMode[] {
+function resolveDriveAuthOrder(configuredMode: string, hasServerUser: boolean): DriveAuthMode[] {
   const mode = normalizeDriveAuthMode(configuredMode);
+  if (mode === "server_user_oauth") {
+    return hasServerUser
+      ? ["server_user_oauth", "user_access_token", "shared_refresh_token", "service_account"]
+      : ["user_access_token", "shared_refresh_token", "service_account"];
+  }
+  if (hasServerUser && mode === "auto") {
+    return ["server_user_oauth", "user_access_token", "shared_refresh_token", "service_account"];
+  }
   if (mode === "user_access_token") {
-    return ["user_access_token", "shared_refresh_token", "service_account"];
+    return hasServerUser
+      ? ["user_access_token", "server_user_oauth", "shared_refresh_token", "service_account"]
+      : ["user_access_token", "shared_refresh_token", "service_account"];
   }
   if (mode === "service_account") {
-    return ["service_account", "user_access_token", "shared_refresh_token"];
+    return hasServerUser
+      ? ["service_account", "server_user_oauth", "user_access_token", "shared_refresh_token"]
+      : ["service_account", "user_access_token", "shared_refresh_token"];
   }
   if (mode === "shared_refresh_token") {
-    return ["shared_refresh_token", "user_access_token", "service_account"];
+    return hasServerUser
+      ? ["shared_refresh_token", "server_user_oauth", "user_access_token", "service_account"]
+      : ["shared_refresh_token", "user_access_token", "service_account"];
   }
   return ["user_access_token", "shared_refresh_token", "service_account"];
 }
@@ -156,7 +180,7 @@ function buildAuthSelection(configuredMode: string, googleAccessToken?: string) 
     configuredMode: String(configuredMode || "auto").trim() || "auto",
     headerTokenPresent: Boolean(String(googleAccessToken || "").trim()),
     attemptedModes: [] as DriveAuthMode[],
-    resolvedMode: "shared_refresh_token" as DriveAuthMode,
+    resolvedMode: "server_user_oauth" as DriveAuthMode,
     failures: [] as Array<{ mode: DriveAuthMode; reason: string }>,
   };
 }
@@ -244,11 +268,11 @@ async function buildServiceAccountContext() {
 
 async function buildSharedRefreshTokenContext(expectedScopes: string[]) {
   const { google } = await getGoogle();
-  const clientId = OAUTH_CLIENT_ID.value();
-  const clientSecret = OAUTH_CLIENT_SECRET.value();
-  const refreshToken = OAUTH_REFRESH_TOKEN.value();
+  const clientId = GOOGLE_OAUTH_CLIENT_ID.value();
+  const clientSecret = GOOGLE_OAUTH_CLIENT_SECRET.value();
+  const refreshToken = String(GOOGLE_OAUTH_REFRESH_TOKEN.value() || "").trim();
 
-  if (!clientId || !clientSecret || !refreshToken) {
+  if (!clientId || !clientSecret || !refreshToken || refreshToken === "__unset__") {
     throw new Error("missing_oauth_secrets");
   }
 
@@ -318,9 +342,36 @@ async function buildUserAccessTokenContext(googleAccessToken: string) {
   };
 }
 
-async function buildDriveContext(opts?: { googleAccessToken?: string; includeDiagnostics?: boolean }): Promise<DriveContext> {
+async function buildServerUserOAuthContext(uid: string) {
+  const cleanUid = String(uid || "").trim();
+  if (!cleanUid) throw new Error("missing_server_user_uid");
+  const authResult = await buildOAuthClient(cleanUid, "googleDrive");
+  if (!authResult.ok) throw new Error(`server_google_drive_${authResult.code}`);
+  const { google } = await getGoogle();
+  const drive = google.drive({ version: "v3", auth: authResult.auth });
+  return {
+    authClient: authResult.auth,
+    drive,
+    oauth2: authResult.auth,
+    authMode: "server_user_oauth" as const,
+    authDiagnostics: {
+      hasRefreshToken: true,
+      oauthClientIdSuffix: "",
+      expectedScopes: [DRIVE_SCOPE],
+      hasDriveScope: true,
+    },
+  };
+}
+
+async function buildDriveContext(opts?: {
+  googleAccessToken?: string;
+  includeDiagnostics?: boolean;
+  userUid?: string;
+  requireWritable?: boolean;
+}): Promise<DriveContext> {
   const configuredMode = GOOGLE_DRIVE_AUTH_MODE.value();
-  const order = resolveDriveAuthOrder(String(configuredMode || ""));
+  const userUid = String(opts?.userUid || "").trim();
+  const order = resolveDriveAuthOrder(String(configuredMode || ""), Boolean(userUid));
   const expectedScopes = parseConfiguredScopes(String(GOOGLE_API_SCOPES.value() || ""));
   const googleAccessToken = String(opts?.googleAccessToken || "").trim();
   const selection = buildAuthSelection(String(configuredMode || ""), googleAccessToken);
@@ -329,7 +380,9 @@ async function buildDriveContext(opts?: { googleAccessToken?: string; includeDia
     selection.attemptedModes.push(mode);
     try {
       const context =
-        mode === "user_access_token"
+        mode === "server_user_oauth"
+          ? await buildServerUserOAuthContext(userUid)
+          : mode === "user_access_token"
           ? await buildUserAccessTokenContext(googleAccessToken)
           : mode === "service_account"
           ? await buildServiceAccountContext()
@@ -339,6 +392,9 @@ async function buildDriveContext(opts?: { googleAccessToken?: string; includeDia
         context.authDiagnostics?.hasDriveScope === false
       ) {
         throw new Error("shared_refresh_token_missing_drive_scope");
+      }
+      if (opts?.requireWritable && context.authMode === "shared_refresh_token") {
+        throw new Error("shared_oauth_read_only");
       }
       selection.resolvedMode = context.authMode;
       return {
@@ -371,7 +427,9 @@ function buildInaccessibleFolderError(
   err?: DriveErrorInfo
 ) {
   const prefix =
-    authMode === "user_access_token"
+    authMode === "server_user_oauth"
+      ? "The connected Google Drive account cannot access this Drive folder."
+      : authMode === "user_access_token"
       ? "The signed-in Google user cannot access this Drive folder."
       : authMode === "service_account"
       ? "The project service account cannot access this Drive folder."
@@ -384,26 +442,36 @@ function buildInaccessibleFolderError(
 }
 
 /** Internal: build a Drive client using the preferred Drive auth context */
-export async function getDriveClient(opts?: { googleAccessToken?: string; includeDiagnostics?: boolean }) {
+export async function getDriveClient(opts?: {
+  googleAccessToken?: string;
+  includeDiagnostics?: boolean;
+  userUid?: string;
+  requireWritable?: boolean;
+}) {
   const { drive } = await buildDriveContext(opts);
   return drive;
 }
 
-export async function getSheetsClient(opts?: { googleAccessToken?: string; includeDiagnostics?: boolean }) {
+export async function getSheetsClient(opts?: {
+  googleAccessToken?: string;
+  includeDiagnostics?: boolean;
+  userUid?: string;
+  requireWritable?: boolean;
+}) {
   const { authClient } = await buildDriveContext(opts);
   const { google } = await getGoogle();
   return google.sheets({ version: "v4", auth: authClient as any });
 }
 
 /** Like getDriveClient but also returns auth diagnostics — used by debug endpoints */
-export async function getDriveClientWithDiagnostics(opts?: { googleAccessToken?: string }) {
+export async function getDriveClientWithDiagnostics(opts?: { googleAccessToken?: string; userUid?: string }) {
   const context = await buildDriveContext({ ...opts, includeDiagnostics: true });
   return { drive: context.drive, authMode: context.authMode, authDiagnostics: context.authDiagnostics, selection: context.selection };
 }
 
 export async function listInFolder(
   folderId: string,
-  opts?: { includeDiagnostics?: boolean; googleAccessToken?: string }
+  opts?: { includeDiagnostics?: boolean; googleAccessToken?: string; userUid?: string }
 ) {
   const context = await buildDriveContext(opts);
   const { drive } = context;
@@ -506,9 +574,9 @@ export async function listInFolder(
 export async function createFolder(
   parentId: string,
   name: string,
-  opts?: { googleAccessToken?: string; includeDiagnostics?: boolean }
+  opts?: { googleAccessToken?: string; includeDiagnostics?: boolean; userUid?: string }
 ) {
-  const drive = await getDriveClient(opts);
+  const drive = await getDriveClient({ ...opts, requireWritable: true });
   const r = await drive.files.create({
     requestBody: { name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] },
     fields: "id,name,webViewLink,driveId,parents",
@@ -523,8 +591,13 @@ export async function buildCustomerFolder(args: {
   templates: Array<{ fileId: string; name: string }>;
   subfolders: string[];
   googleAccessToken?: string;
+  userUid?: string;
 }) {
-  const drive = await getDriveClient({ googleAccessToken: args.googleAccessToken });
+  const drive = await getDriveClient({
+    googleAccessToken: args.googleAccessToken,
+    userUid: args.userUid,
+    requireWritable: true,
+  });
 
   // Create main folder
   const folderResult = await drive.files.create({
@@ -615,9 +688,10 @@ export async function uploadSmallFile(args: {
   contentBase64: string;
   mimeType?: string;
   googleAccessToken?: string;
+  userUid?: string;
 }) {
-  const { parentId, name, contentBase64, mimeType = "application/pdf", googleAccessToken } = args;
-  const drive = await getDriveClient({ googleAccessToken });
+  const { parentId, name, contentBase64, mimeType = "application/pdf", googleAccessToken, userUid } = args;
+  const drive = await getDriveClient({ googleAccessToken, userUid, requireWritable: true });
   const media = { mimeType, body: Buffer.from(contentBase64, "base64") };
 
   // ~10MB guardrail

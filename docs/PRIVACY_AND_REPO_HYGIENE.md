@@ -6,6 +6,7 @@ Do not commit:
 
 - `.env`, `.env.local`, or any real environment file
 - service account JSON, OAuth credentials, refresh tokens, private keys, certificates, or pem/key files
+- downloaded Google OAuth client files such as `client_secret_*.json`
 - emulator imports/exports in `.emulator-data/`
 - Firebase local cache in `.firebase/`
 - production or migration harvests containing customer, grant, ledger, payment, Jotform, auth, or Drive data
@@ -43,6 +44,7 @@ Only commit archive material after reviewing it for:
 - Jotform submission payloads
 - Google Drive file or folder IDs that should not be public
 - service account, OAuth, or API credentials
+- Google OAuth client JSON downloads, including files named `client_secret_*.json`
 - local machine paths that are not useful to future maintainers
 
 ## Graphify Outputs
@@ -56,7 +58,9 @@ Run:
 ```powershell
 git status --short
 git ls-files --others --ignored --exclude-standard
-rg -n "(BEGIN .*KEY|PRIVATE KEY|client_secret|refresh_token|service_account|JOTFORM_API_KEY|OAUTH_CLIENT_SECRET|SHEETS_BRIDGE_SHARED_SECRET)" -g "!node_modules" -g "!.git"
+rg -n "(BEGIN .*KEY|PRIVATE KEY|client_secret|refresh_token|service_account|JOTFORM_API_KEY|GMAIL_CLIENT_SECRET|GOOGLE_OAUTH_CLIENT_SECRET|OAUTH_CLIENT_SECRET|SHEETS_BRIDGE_SHARED_SECRET)" -g "!node_modules" -g "!.git"
 ```
 
 Public Firebase web config values beginning with `NEXT_PUBLIC_` are not secret by themselves. Real server-side secrets belong in Firebase secrets/params or environment-specific secret stores, never in source control.
+
+Google OAuth credential boundary: `GMAIL_*` secrets are for the automated Gmail sender only. Drive and Calendar integrations use `GOOGLE_OAUTH_*` secrets. Do not reuse, copy, or document the secret values in repo docs; store them only in Secret Manager or a local credential manager.

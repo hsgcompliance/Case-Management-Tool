@@ -346,7 +346,7 @@ function toProjectionInput(payment: TPayment): TPaymentProjectionInput | null {
   const dueDate = String(payment?.dueDate || (payment as Record<string, unknown>)?.date || "").trim();
   const amount = Number(payment?.amount || 0);
 
-  if (!lineItemId || !dueDate || amount <= 0) return null;
+  if (!lineItemId || !dueDate || !Number.isFinite(amount) || amount === 0) return null;
 
   return {
     ...payment,

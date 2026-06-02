@@ -37,6 +37,7 @@ type Props = {
   open: boolean;
   enrollments: EnrollmentOption[];
   initialEnrollmentId?: string | null;
+  paymentIssues?: Record<string, { label: string } | undefined>;
   busy?: boolean;
   onCancel: () => void;
   onApply: (payload: PaymentsProjectionsAdjustInput) => void;
@@ -69,10 +70,17 @@ function addRowNote(row: AddRow): string[] | undefined {
   return undefined;
 }
 
+function signedAmountText(amount: number): string {
+  const value = fmtCurrencyUSD(Math.abs(amount));
+  if (amount < 0) return `-${value}`;
+  return value;
+}
+
 export default function PaymentsProjectionsAdjustDialog({
   open,
   enrollments,
   initialEnrollmentId,
+  paymentIssues,
   busy = false,
   onCancel,
   onApply,
@@ -131,6 +139,11 @@ export default function PaymentsProjectionsAdjustDialog({
   const lineItemOptions = React.useMemo(
     () => Array.from(new Set((selectedEnrollment?.lineItemIds || []).filter(Boolean))),
     [selectedEnrollment],
+  );
+
+  const issueForPayment = React.useCallback(
+    (id: string) => paymentIssues?.[`${selectedEnrollment?.id || ""}:${id}`] || null,
+    [paymentIssues, selectedEnrollment?.id],
   );
 
   const payments = React.useMemo(
@@ -201,11 +214,14 @@ export default function PaymentsProjectionsAdjustDialog({
       }
     }
 
-    const addedTotal = addRows.reduce((sum, r) => sum + (Number(r.amount || 0) > 0 ? Number(r.amount) : 0), 0);
+    const addedTotal = addRows.reduce((sum, r) => {
+      const amount = Number(r.amount || 0);
+      return sum + (Number.isFinite(amount) && amount !== 0 ? amount : 0);
+    }, 0);
     nextTotal += addedTotal;
     for (const row of addRows) {
       const amount = Number(row.amount || 0);
-      if (amount > 0) addDelta(row.lineItemId, amount);
+      if (Number.isFinite(amount) && amount !== 0) addDelta(row.lineItemId, amount);
     }
 
     return {
@@ -217,7 +233,10 @@ export default function PaymentsProjectionsAdjustDialog({
       unpaidEditCount,
       paidDeleteCount,
       unpaidDeleteCount,
-      addedCount: addRows.filter((r) => Number(r.amount || 0) > 0).length,
+      addedCount: addRows.filter((r) => {
+        const amount = Number(r.amount || 0);
+        return Number.isFinite(amount) && amount !== 0;
+      }).length,
     };
   }, [payments, editedAmounts, editedDueDates, editedLineItems, deletedIds, addRows, replaceUnpaid]);
 
@@ -245,6 +264,11 @@ export default function PaymentsProjectionsAdjustDialog({
         })
         .filter(Boolean),
     [payments, editedAmounts, editedDueDates, editedLineItems, deletedIds],
+  );
+
+  const driftedPaidCount = React.useMemo(
+    () => payments.filter((p) => Boolean(p.paid) && !!issueForPayment(paymentId(p))).length,
+    [payments, issueForPayment],
   );
 
   const setEditAmount = (id: string, value: string) => {
@@ -342,6 +366,105 @@ export default function PaymentsProjectionsAdjustDialog({
     setAddRows((prev) => prev.filter((r) => r.id !== id));
   };
 
+  const paidBulkAdjustment = React.useMemo(() => {
+    if (paidChangedIds.length <= 1) return null;
+
+    const changedIds = new Set(paidChangedIds);
+    const centsByLineItem: Record<string, number> = {};
+    let totalCents = 0;
+    let amountChangeCount = 0;
+    let hasUnsupportedChange = false;
+    let missingLineItem = false;
+
+    for (const p of payments) {
+      const id = paymentId(p);
+      if (!changedIds.has(id)) continue;
+
+      const currentAmountCents = Math.round(Number(p.amount || 0) * 100);
+      const nextAmountRaw = editedAmounts[id];
+      const amountChanged =
+        nextAmountRaw != null &&
+        nextAmountRaw !== "" &&
+        Number.isFinite(Number(nextAmountRaw)) &&
+        Math.round(Number(nextAmountRaw) * 100) !== currentAmountCents;
+      const dueChanged =
+        editedDueDates[id] != null &&
+        editedDueDates[id] !== "" &&
+        editedDueDates[id] !== iso10(p.dueDate || (p as Record<string, unknown>)?.date || "");
+      const lineChanged =
+        editedLineItems[id] != null &&
+        editedLineItems[id] !== "" &&
+        editedLineItems[id] !== String(p.lineItemId || "");
+
+      if (dueChanged || lineChanged) {
+        hasUnsupportedChange = true;
+        continue;
+      }
+      if (!amountChanged) continue;
+
+      const lineItemId = String(p.lineItemId || "").trim();
+      if (!lineItemId) {
+        missingLineItem = true;
+        continue;
+      }
+
+      const deltaCents = Math.round(Number(nextAmountRaw) * 100) - currentAmountCents;
+      if (deltaCents === 0) continue;
+      amountChangeCount += 1;
+      totalCents += deltaCents;
+      centsByLineItem[lineItemId] = (centsByLineItem[lineItemId] || 0) + deltaCents;
+    }
+
+    const rows = Object.entries(centsByLineItem)
+      .filter(([, cents]) => cents !== 0)
+      .map(([lineItemId, cents]) => ({ lineItemId, amount: cents / 100 }));
+
+    return {
+      canAdd: !hasUnsupportedChange && !missingLineItem && rows.length > 0,
+      changedCount: amountChangeCount,
+      total: totalCents / 100,
+      rows,
+      reason: hasUnsupportedChange
+        ? "Bulk recommendations only cover amount changes; date or line item changes still need one paid row at a time."
+        : missingLineItem
+          ? "One of the paid rows is missing a line item, so an adjustment row cannot be placed automatically."
+          : "",
+    };
+  }, [paidChangedIds, payments, editedAmounts, editedDueDates, editedLineItems]);
+
+  const addBulkPaidAdjustmentRows = () => {
+    if (!paidBulkAdjustment?.canAdd) return;
+    const kind = paidBulkAdjustment.total < 0 ? "credit" : "charge";
+    const dueDate = todayISO();
+    setAddRows((prev) => [
+      ...prev,
+      ...paidBulkAdjustment.rows.map((row) => ({
+        id: rowKey(),
+        dueDate,
+        amount: row.amount.toFixed(2),
+        lineItemId: row.lineItemId,
+        kind: "service" as const,
+        comment: `Bulk paid ${kind} for ${paidBulkAdjustment.changedCount} edited paid rows`,
+      })),
+    ]);
+    setEditedAmounts((prev) => {
+      const next = { ...prev };
+      for (const id of paidChangedIds) delete next[id];
+      return next;
+    });
+    setEditedDueDates((prev) => {
+      const next = { ...prev };
+      for (const id of paidChangedIds) delete next[id];
+      return next;
+    });
+    setEditedLineItems((prev) => {
+      const next = { ...prev };
+      for (const id of paidChangedIds) delete next[id];
+      return next;
+    });
+    setError(null);
+  };
+
   const submit = () => {
     setError(null);
 
@@ -351,7 +474,18 @@ export default function PaymentsProjectionsAdjustDialog({
     }
 
     if (paidChangedIds.length > 1) {
-      setError("Only one paid row can be adjusted at a time because paid edits write ledger reversals.");
+      if (paidBulkAdjustment?.canAdd) {
+        const kind = paidBulkAdjustment.total < 0 ? "credit" : "charge";
+        setError(`Only one payment can be adjusted at a time. Would you like to add a ${kind} of ${signedAmountText(paidBulkAdjustment.total)} instead?`);
+      } else {
+        setError(paidBulkAdjustment?.reason || "Only one payment can be adjusted at a time.");
+      }
+      return;
+    }
+
+    const driftedPaidChangedIds = paidChangedIds.filter((id) => !!issueForPayment(id));
+    if (driftedPaidChangedIds.length > 0) {
+      setError("Sync ledger/spend for the flagged paid row before adjusting it.");
       return;
     }
 
@@ -464,8 +598,8 @@ export default function PaymentsProjectionsAdjustDialog({
       }));
 
     for (const row of additions) {
-      if (!Number.isFinite(row.amount) || row.amount <= 0) {
-        setError("Each added row must have amount > 0.");
+      if (!Number.isFinite(row.amount) || row.amount === 0) {
+        setError("Each added row must have a non-zero amount.");
         return;
       }
       if (!isISO(row.dueDate)) {
@@ -605,6 +739,11 @@ export default function PaymentsProjectionsAdjustDialog({
               </button>
             </div>
           </div>
+          {driftedPaidCount > 0 ? (
+            <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {driftedPaidCount} paid row{driftedPaidCount === 1 ? "" : "s"} need ledger/spend sync before paid-row adjustments.
+            </div>
+          ) : null}
 
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
@@ -629,20 +768,34 @@ export default function PaymentsProjectionsAdjustDialog({
                   const id = paymentId(p);
                   const paid = Boolean(p.paid);
                   const deleted = Boolean(deletedIds[id]);
+                  const issue = paid ? issueForPayment(id) : null;
+                  const editDisabled = deleted || !!issue;
                   const currentDueDate = iso10(p.dueDate || (p as Record<string, unknown>)?.date || "");
                   return (
-                    <tr key={id} className={["border-t border-slate-100", idx % 2 ? "bg-slate-50/60" : "bg-white", deleted ? "opacity-55" : ""].join(" ")}>
+                    <tr key={id} className={["border-t border-slate-100", issue ? "bg-amber-50" : idx % 2 ? "bg-slate-50/60" : "bg-white", deleted ? "opacity-55" : ""].join(" ")}>
                       <td className="px-3 py-2 text-slate-800">
                         <input
                           type="date"
                           className="w-36 rounded border border-slate-300 px-2 py-1"
                           value={editedDueDates[id] ?? currentDueDate}
                           onChange={(e) => setEditDueDate(id, e.currentTarget.value)}
-                          disabled={deleted}
-                          title={`Current: ${fmtDateOrDash(currentDueDate)}`}
+                          disabled={editDisabled}
+                          title={issue?.label || `Current: ${fmtDateOrDash(currentDueDate)}`}
                         />
                       </td>
-                      <td className="px-3 py-2 text-slate-800">{paymentTypeLabel(p as Record<string, unknown>)}</td>
+                      <td className="px-3 py-2 text-slate-800">
+                        <span className="inline-flex items-center gap-2">
+                          <span>{paymentTypeLabel(p as Record<string, unknown>)}</span>
+                          {issue ? (
+                            <span
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 text-[11px] font-bold leading-none text-amber-800"
+                              title={issue.label}
+                            >
+                              !
+                            </span>
+                          ) : null}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 text-right text-slate-800">{fmtCurrencyUSD(Number(p.amount || 0))}</td>
                       <td className="px-3 py-2 text-right">
                         <input
@@ -652,8 +805,9 @@ export default function PaymentsProjectionsAdjustDialog({
                           className="w-28 rounded border border-slate-300 px-2 py-1 text-right"
                           value={editedAmounts[id] ?? ""}
                           onChange={(e) => setEditAmount(id, e.currentTarget.value)}
-                          disabled={deleted}
+                          disabled={editDisabled}
                           placeholder={amountText(p.amount)}
+                          title={issue?.label || undefined}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -662,7 +816,7 @@ export default function PaymentsProjectionsAdjustDialog({
                           className="w-36 rounded border border-slate-300 px-2 py-1 text-xs"
                           value={editedVendors[id] ?? String((p as Record<string, unknown>).vendor || "")}
                           onChange={(e) => setEditVendor(id, e.currentTarget.value)}
-                          disabled={deleted || paid}
+                          disabled={editDisabled || paid}
                           placeholder={paid ? "—" : "Vendor"}
                         />
                       </td>
@@ -676,6 +830,7 @@ export default function PaymentsProjectionsAdjustDialog({
                           onChange={(next) => setEditLineItem(id, String(next || ""))}
                           fallbackLineItemIds={lineItemOptions}
                           inputClassName="w-56 rounded border border-slate-300 px-2 py-1 text-xs"
+                          disabled={editDisabled}
                         />
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -704,6 +859,29 @@ export default function PaymentsProjectionsAdjustDialog({
               placeholder="Example: corrected amount, duplicate row, wrong payment"
             />
           </label>
+        ) : null}
+
+        {paidChangedIds.length > 1 && paidBulkAdjustment ? (
+          <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                Only one payment can be adjusted at a time.
+                {paidBulkAdjustment.canAdd ? (
+                  <>
+                    {" "}Add a {paidBulkAdjustment.total < 0 ? "credit" : "charge"} of{" "}
+                    <b>{signedAmountText(paidBulkAdjustment.total)}</b> instead.
+                  </>
+                ) : (
+                  <> {paidBulkAdjustment.reason}</>
+                )}
+              </div>
+              {paidBulkAdjustment.canAdd ? (
+                <button type="button" className="btn btn-sm" onClick={addBulkPaidAdjustmentRows}>
+                  Add {paidBulkAdjustment.total < 0 ? "credit" : "charge"}
+                </button>
+              ) : null}
+            </div>
+          </div>
         ) : null}
 
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -743,7 +921,7 @@ export default function PaymentsProjectionsAdjustDialog({
                       </select>
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <input type="number" min={0} step="0.01" className="w-28 rounded border border-slate-300 px-2 py-1 text-right" value={r.amount} onChange={(e) => updateProjectionRow(r.id, { amount: e.currentTarget.value })} />
+                      <input type="number" step="0.01" className="w-28 rounded border border-slate-300 px-2 py-1 text-right" value={r.amount} onChange={(e) => updateProjectionRow(r.id, { amount: e.currentTarget.value })} />
                     </td>
                     <td className="px-3 py-2">
                       <LineItemSelect

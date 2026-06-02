@@ -519,17 +519,6 @@ export function CustomerCardView({
         resultLabel={isLoading ? "Loading..." : `${displayRows.length} / ${totalRows} Customers`}
         actions={
           <div className="flex items-center gap-2">
-            {viewFlags.showEnrollmentRefreshAction ? (
-              <button
-                type="button"
-                className="btn btn-sm rounded-lg border border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100"
-                onClick={handleEnrollmentRefresh}
-                disabled={isRefreshingEnrollments || isLoading || displayRows.length === 0}
-                title="This system pre loads enrollments only for the clients of the user, click to load all enrollments."
-              >
-                {isRefreshingEnrollments ? "Refreshing Enrollments..." : "Refresh Enrollments"}
-              </button>
-            ) : null}
             <button type="button" className="btn btn-ghost btn-sm rounded-lg" onClick={onResetFilters}>
               Clear
             </button>
@@ -588,6 +577,19 @@ export function CustomerCardView({
             onChange={onSortModeChange}
           />
         </div>
+        {viewFlags.showEnrollmentRefreshAction ? (
+          <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-700">
+            <button
+              type="button"
+              className="btn btn-sm rounded-lg border border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100"
+              onClick={handleEnrollmentRefresh}
+              disabled={isRefreshingEnrollments || isLoading || displayRows.length === 0}
+              title="Pre-loads enrollment data for all visible customers, not just your caseload."
+            >
+              {isRefreshingEnrollments ? "Refreshing Enrollments..." : "Refresh Enrollments"}
+            </button>
+          </div>
+        ) : null}
       </PageFilterBar>
 
       {viewFlags.showBulkActions && selectedRows.length > 0 ? (

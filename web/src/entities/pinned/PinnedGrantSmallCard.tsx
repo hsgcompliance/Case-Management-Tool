@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { useGrant } from "@hooks/useGrants";
 import type { TGrant as Grant } from "@types";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,10 @@ function getKind(g: Grant): GrantKind {
   if (k === "program") return "program";
   if (k === "grant") return "grant";
   return Number((g as any)?.budget?.total ?? 0) <= 0 ? "program" : "grant";
+}
+
+function getFinancialCapabilities(g: Grant) {
+  return getGrantFinancialCapabilities(g as Record<string, unknown>);
 }
 
 function getBudget(g: Grant) {
@@ -72,23 +77,34 @@ const MODE_LABELS: Record<GrantMode, string> = {
   population: "Population",
 };
 
+function modeLabel(mode: GrantMode, g: Grant): string {
+  const capabilities = getFinancialCapabilities(g);
+  if (capabilities.drawsDownBudget) return MODE_LABELS[mode];
+  if (mode === "budgetSpent") return "Spend Activity";
+  if (mode === "budgetProjected") return "Projected Activity";
+  return MODE_LABELS[mode];
+}
+
 // ─── Content panels ───────────────────────────────────────────────────────────
 
 function BudgetSpentPanel({ g }: { g: Grant }) {
+  const capabilities = getFinancialCapabilities(g);
   const { total, spent, remaining } = getBudget(g);
-  const pct = total > 0 ? Math.min(100, (spent / total) * 100) : 0;
+  const pct = capabilities.drawsDownBudget && total > 0 ? Math.min(100, (spent / total) * 100) : 100;
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-xs">
-        <span className="text-slate-500">Spent</span>
+        <span className="text-slate-500">{capabilities.drawsDownBudget ? "Spent" : "Recorded Spend"}</span>
         <span className="font-semibold text-amber-600 dark:text-amber-400">{fmtUsd(spent)}</span>
       </div>
-      <div className="flex justify-between text-xs">
-        <span className="text-slate-500">Remaining</span>
-        <span className={`font-semibold ${remaining < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-          {fmtUsd(remaining)}
-        </span>
-      </div>
+      {capabilities.drawsDownBudget ? (
+        <div className="flex justify-between text-xs">
+          <span className="text-slate-500">Remaining</span>
+          <span className={`font-semibold ${remaining < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+            {fmtUsd(remaining)}
+          </span>
+        </div>
+      ) : null}
       <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
         <div
           className={`h-full rounded-full ${pct >= 100 ? "bg-rose-500" : "bg-amber-400"}`}
@@ -96,32 +112,35 @@ function BudgetSpentPanel({ g }: { g: Grant }) {
         />
       </div>
       <div className="text-right text-[10px] text-slate-400">
-        {fmtUsd(total)} total
+        {capabilities.drawsDownBudget ? `${fmtUsd(total)} total` : `${fmtUsd(total)} reference`}
       </div>
     </div>
   );
 }
 
 function BudgetProjectedPanel({ g }: { g: Grant }) {
+  const capabilities = getFinancialCapabilities(g);
   const { total, projected, projectedRemaining } = getBudget(g);
-  const pct = total > 0 ? Math.min(100, (projected / total) * 100) : 0;
+  const pct = capabilities.drawsDownBudget && total > 0 ? Math.min(100, (projected / total) * 100) : 100;
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between text-xs">
         <span className="text-slate-500">Projected</span>
         <span className="font-semibold text-blue-600 dark:text-blue-400">{fmtUsd(projected)}</span>
       </div>
-      <div className="flex justify-between text-xs">
-        <span className="text-slate-500">Proj. Remaining</span>
-        <span className={`font-semibold ${projectedRemaining < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-          {fmtUsd(projectedRemaining)}
-        </span>
-      </div>
+      {capabilities.drawsDownBudget ? (
+        <div className="flex justify-between text-xs">
+          <span className="text-slate-500">Proj. Remaining</span>
+          <span className={`font-semibold ${projectedRemaining < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+            {fmtUsd(projectedRemaining)}
+          </span>
+        </div>
+      ) : null}
       <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
         <div className="h-full rounded-full bg-blue-400" style={{ width: `${pct}%` }} />
       </div>
       <div className="text-right text-[10px] text-slate-400">
-        {fmtUsd(total)} total
+        {capabilities.drawsDownBudget ? `${fmtUsd(total)} total` : `${fmtUsd(total)} reference`}
       </div>
     </div>
   );
@@ -190,7 +209,8 @@ export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardP
 
   const g = grant as Grant;
   const kind = getKind(g);
-  const modes = kind === "program" ? PROGRAM_MODES : GRANT_MODES;
+  const financialCapabilities = getFinancialCapabilities(g);
+  const modes = financialCapabilities.hasFinancialActivity ? GRANT_MODES : PROGRAM_MODES;
   const mode = modes[modeIdx % modes.length];
   const status = String((g as any)?.status || "draft");
 
@@ -201,7 +221,7 @@ export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardP
       <div
       className="relative flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900 cursor-pointer select-none"
       onClick={cycleNext}
-      title={`Click to cycle view (${MODE_LABELS[mode]})`}
+      title={`Click to cycle view (${modeLabel(mode, g)})`}
       >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2">
@@ -232,7 +252,7 @@ export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardP
       {/* Mode label */}
       <div className="px-3 pb-1">
         <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
-          {MODE_LABELS[mode]}
+          {modeLabel(mode, g)}
         </div>
       </div>
 
@@ -254,7 +274,7 @@ export function PinnedGrantSmallCard({ grantId, onUnpin }: PinnedGrantSmallCardP
             <button
               key={m}
               onClick={(e) => { e.stopPropagation(); setModeIdx(i); }}
-              title={MODE_LABELS[m]}
+              title={modeLabel(m, g)}
               className={`h-1 rounded-full transition ${
                 i === modeIdx % modes.length
                   ? "w-4 bg-sky-500"

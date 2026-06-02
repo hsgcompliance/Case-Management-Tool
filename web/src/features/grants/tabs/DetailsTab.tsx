@@ -56,6 +56,50 @@ function eligibilityDraftObject(value: unknown): Record<string, string> {
 
 const RENTAL_ASSISTANCE_TAG = "rental-assistance";
 
+const FINANCIAL_MODEL_PRESETS = {
+  budgeted: {
+    model: "budgeted",
+    budgetEnabled: true,
+    billingEnabled: false,
+    allocationEnabled: false,
+    ledgerEnabled: true,
+    ledgerMode: "spendDown",
+  },
+  billable: {
+    model: "billable",
+    budgetEnabled: false,
+    billingEnabled: true,
+    allocationEnabled: true,
+    ledgerEnabled: true,
+    ledgerMode: "billing",
+  },
+  serviceOnly: {
+    model: "serviceOnly",
+    budgetEnabled: false,
+    billingEnabled: false,
+    allocationEnabled: false,
+    ledgerEnabled: false,
+    ledgerMode: "none",
+  },
+} as const;
+
+type FinancialModel = keyof typeof FINANCIAL_MODEL_PRESETS;
+
+function financialModelOf(model: Record<string, any>, grant: Grant | null): FinancialModel {
+  const raw = String((model.financialConfig ?? grant?.financialConfig ?? {})?.model || "").trim();
+  if (raw === "budgeted" || raw === "billable" || raw === "serviceOnly") return raw;
+  return String(model.kind ?? grant?.kind ?? "grant") === "program" ? "serviceOnly" : "budgeted";
+}
+
+function emptyBudget() {
+  return { total: 0, lineItems: [] };
+}
+
+function authorizationMonthsFrom(value: unknown): string {
+  const n = Number((value as any)?.authorizationMonths);
+  return Number.isFinite(n) && n > 0 ? String(Math.floor(n)) : "";
+}
+
 // ── Pin system ────────────────────────────────────────────────────────────────
 
 const PIN_COLORS = GRANT_ACCENT_COLORS;
@@ -961,6 +1005,22 @@ export function DetailsTab({
   const statusVal = String((grant?.status ?? model?.status ?? "draft") || "draft");
   const kindVal = String(model?.kind || grant?.kind || "grant");
   const isGrantKind = kindVal !== "program";
+  const financialModel = financialModelOf(model, grant);
+  const onFinancialModel = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const nextModel = e.currentTarget.value as FinancialModel;
+      const financialConfig = FINANCIAL_MODEL_PRESETS[nextModel];
+      setModel((m) => ({
+        ...m,
+        financialConfig,
+        ...(nextModel === "serviceOnly" ? {} : { budget: m?.budget ?? grant?.budget ?? emptyBudget() }),
+        ...(nextModel === "billable" && !authorizationMonthsFrom((m as any)?.enrollmentDefaults ?? (grant as any)?.enrollmentDefaults)
+          ? { enrollmentDefaults: { ...((m as any)?.enrollmentDefaults ?? (grant as any)?.enrollmentDefaults ?? {}), authorizationMonths: 12 } }
+          : {}),
+      }));
+    },
+    [grant, setModel],
+  );
   const rentalAssistanceTagged = hasRentalAssistanceTag(model.tags ?? grant?.tags);
   const additionalFieldCount = Object.keys(dynamicValue || {}).length;
   const [advancedOpen, setAdvancedOpen] = useState(additionalFieldCount > 0);
@@ -1139,7 +1199,59 @@ export function DetailsTab({
                 <span className="ml-2 text-xs text-slate-500">(admin only)</span>
               </div>
             )}
-            <div className="mt-1 text-xs text-slate-500">Programs are zero-budget. Change kind to escalate a program to a grant.</div>
+            <div className="mt-1 text-xs text-slate-500">
+              Kind controls lifecycle expectations. Financial settings control budget, billing, ledger, and allocation behavior.
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="text-slate-500 dark:text-slate-400">Financial Model</div>
+            {editing ? (
+              <select className="select pointer-events-auto" value={financialModel} onChange={onFinancialModel}>
+                <option value="budgeted">Budgeted spend-down</option>
+                <option value="billable">Billable with ledger/allocation</option>
+                <option value="serviceOnly">Service only</option>
+              </select>
+            ) : (
+              <div className="text-sm text-slate-700">
+                {financialModel === "budgeted"
+                  ? "Budgeted spend-down"
+                  : financialModel === "billable"
+                    ? "Billable with ledger/allocation"
+                    : "Service only"}
+              </div>
+            )}
+            <div className="mt-1 text-xs text-slate-500">
+              TSS should use Program plus Billable with ledger/allocation.
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="text-slate-500 dark:text-slate-400">Enrollment Defaults</div>
+            <label className="mt-1 block">
+              <span className="text-xs text-slate-500">Authorization months</span>
+              <input
+                className="input pointer-events-auto mt-1"
+                type="number"
+                min={1}
+                max={120}
+                value={authorizationMonthsFrom((model as any).enrollmentDefaults ?? (grant as any)?.enrollmentDefaults)}
+                onChange={(e) => {
+                  const raw = e.currentTarget.value;
+                  const months = raw ? Math.max(1, Math.min(120, Math.floor(Number(raw)))) : null;
+                  setModel((m) => ({
+                    ...m,
+                    enrollmentDefaults: {
+                      ...((m as any)?.enrollmentDefaults ?? {}),
+                      authorizationMonths: months,
+                    },
+                  }));
+                }}
+              />
+            </label>
+            <div className="mt-1 text-xs text-slate-500">
+              Leave blank for open-ended enrollments. TSS should use 12 months.
+            </div>
           </div>
 
           {isGrantKind ? (

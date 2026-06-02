@@ -1,13 +1,13 @@
 // web/src/features/budget/BudgetCard.tsx
 "use client";
-import React, { useState } from "react";
+import React from "react";
 import { useGrantMetrics } from "@hooks/useMetrics";
-import { usePatchGrants } from "@hooks/useGrants";
 import { statusChipClass, grantAccentLeftBorder, grantAccentHeaderBg } from "@lib/colorRegistry";
 import type { TGrant as Grant } from "@types";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 import { fmtCurrencyUSD } from "@lib/formatters";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
@@ -57,16 +57,19 @@ function BudgetProgressBar({
   spent,
   projected,
   total,
+  drawsDownBudget = true,
 }: {
   spent: number;
   projected: number;
   total: number;
+  drawsDownBudget?: boolean;
 }) {
-  const denom = total > 0 ? total : 1;
+  const activity = spent + projected;
+  const denom = drawsDownBudget ? (total > 0 ? total : 1) : Math.max(total, activity, 1);
   const spentPct = clamp((spent / denom) * 100, 0, 100);
   const projPct = clamp((projected / denom) * 100, 0, 100 - spentPct);
-  const remainPct = clamp(100 - spentPct - projPct, 0, 100);
-  const overspent = spent + projected > total;
+  const remainPct = drawsDownBudget ? clamp(100 - spentPct - projPct, 0, 100) : 0;
+  const overspent = drawsDownBudget && spent + projected > total;
 
   return (
     <div className="space-y-1.5">
@@ -81,10 +84,12 @@ function BudgetProgressBar({
           style={{ width: `${projPct}%` }}
           title={`Projected: ${fmtUsd(projected)}`}
         />
-        <div
-          className={["h-full transition-all", overspent ? "bg-red-300" : "bg-emerald-300"].join(" ")}
-          style={{ width: `${remainPct}%` }}
-        />
+        {drawsDownBudget && (
+          <div
+            className={["h-full transition-all", overspent ? "bg-red-300" : "bg-emerald-300"].join(" ")}
+            style={{ width: `${remainPct}%` }}
+          />
+        )}
       </div>
       <div className="flex items-center gap-3 text-[10px] text-slate-400 dark:text-slate-500">
         <span className="flex items-center gap-1">
@@ -93,10 +98,17 @@ function BudgetProgressBar({
         <span className="flex items-center gap-1">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400" />Projected
         </span>
-        <span className="flex items-center gap-1">
-          <span className={["inline-block h-1.5 w-1.5 rounded-full", overspent ? "bg-red-300" : "bg-emerald-300"].join(" ")} />
-          Remaining
-        </span>
+        {drawsDownBudget ? (
+          <span className="flex items-center gap-1">
+            <span className={["inline-block h-1.5 w-1.5 rounded-full", overspent ? "bg-red-300" : "bg-emerald-300"].join(" ")} />
+            Remaining
+          </span>
+        ) : (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300" />
+            Reference
+          </span>
+        )}
       </div>
     </div>
   );
@@ -124,78 +136,6 @@ function MetricRow({
     </div>
   );
 }
-
-// ─── Add Funds inline form ─────────────────────────────────────────────────────
-
-function AddFundsForm({
-  grantId,
-  currentTotal,
-  currentBudget,
-  onDone,
-}: {
-  grantId: string;
-  currentTotal: number;
-  currentBudget: Record<string, unknown>;
-  onDone: () => void;
-}) {
-  const patch = usePatchGrants();
-  const [amount, setAmount] = useState("");
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const add = Number(amount.replace(/[^0-9.-]/g, ""));
-    if (!Number.isFinite(add) || add <= 0) return;
-    const newTotal = fromCents(toCents(currentTotal) + toCents(add));
-
-    // If exactly 1 line item, keep it in sync with the overall total
-    const lineItems = Array.isArray(currentBudget.lineItems) ? currentBudget.lineItems as Record<string, unknown>[] : [];
-    const syncedLineItems = lineItems.length === 1
-      ? [{ ...lineItems[0], amount: newTotal }]
-      : lineItems;
-
-    patch.mutate(
-      { id: grantId, patch: { budget: { ...currentBudget, total: newTotal, lineItems: syncedLineItems } } } as any,
-      { onSettled: onDone },
-    );
-  };
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      onClick={(e) => e.stopPropagation()}
-      className="flex items-center gap-1.5"
-    >
-      <span className="text-xs text-slate-400">+$</span>
-      <input
-        autoFocus
-        type="number"
-        min="0"
-        step="any"
-        placeholder="Amount"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        className="w-24 rounded border border-slate-300 px-2 py-0.5 text-xs dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-      />
-      <button
-        type="submit"
-        disabled={patch.isPending}
-        className="rounded bg-sky-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-      >
-        Add
-      </button>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onDone(); }}
-        className="rounded px-1 py-0.5 text-[10px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-      >
-        ✕
-      </button>
-    </form>
-  );
-}
-
-// ─── BudgetCard ────────────────────────────────────────────────────────────────
 
 function getLineItemBudget(grant: Grant, lineItemId: string) {
   const lineItems = (grant as any)?.budget?.lineItems as Array<Record<string, unknown>> | undefined;
@@ -232,7 +172,6 @@ interface BudgetCardProps {
 
 export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOverride, accentColor, onClick }: BudgetCardProps) {
   const { data: gm } = useGrantMetrics(grant.id);
-  const [addingFunds, setAddingFunds] = useState(false);
   const { data: pinnedIds = [] } = usePinnedGrantIds();
   const togglePin = useTogglePinnedGrant();
   const { data: dashPinnedItems = [] } = usePinnedItems();
@@ -244,6 +183,9 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
 
   const liData = lineItemId ? getLineItemBudget(grant, lineItemId) : null;
   const budget = liData ?? getBudget(grant);
+  const financialCapabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
+  const drawsDownBudget = financialCapabilities.drawsDownBudget;
+  const isBillingMode = !drawsDownBudget && (financialCapabilities.billingEnabled || financialCapabilities.usesBillingLedger);
   const status = String(grant.status || "active");
 
   // Auto-detect client-allocation: explicit prop OR grant has allocationEnabled OR displayed line item has capEnabled
@@ -255,7 +197,9 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       : false);
 
   const availClass =
-    budget.available < 0
+    !drawsDownBudget
+      ? "text-slate-700 dark:text-slate-200"
+      : budget.available < 0
       ? "text-red-600 dark:text-red-400"
       : budget.available < budget.total * 0.1
       ? "text-amber-600 dark:text-amber-400"
@@ -322,60 +266,43 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
           spent={budget.spent}
           projected={budget.projected}
           total={budget.total}
+          drawsDownBudget={drawsDownBudget}
         />
       </div>
 
       {/* Metric rows */}
       <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
-        {/* Total row with + button */}
+        {/* Total row */}
         <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-slate-500 dark:text-slate-400">Total</span>
-            {!lineItemId && !addingFunds && (
-              <button
-                type="button"
-                title="Add funds to total"
-                onClick={(e) => { e.stopPropagation(); setAddingFunds(true); }}
-                className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold text-slate-400 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-600 dark:border-slate-600 dark:hover:border-sky-500 dark:hover:bg-sky-950 dark:hover:text-sky-400"
-              >
-                +
-              </button>
-            )}
-            {addingFunds && (
-              <AddFundsForm
-                grantId={String(grant.id)}
-                currentTotal={budget.total}
-                currentBudget={budget.rawBudget}
-                onDone={() => setAddingFunds(false)}
-              />
-            )}
-          </div>
-          {!addingFunds && (
-            <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-              {fmtUsd(budget.total)}
-            </span>
-          )}
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {drawsDownBudget ? "Total" : "Reference"}
+          </span>
+          <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+            {fmtUsd(budget.total)}
+          </span>
         </div>
 
         <MetricRow
-          label="Spent"
+          label={isBillingMode ? "Recorded Spend" : "Spent"}
           value={fmtUsd(budget.spent)}
           valueClass="text-amber-700 dark:text-amber-400"
         />
+        {drawsDownBudget ? (
+          <MetricRow
+            label="Remaining"
+            value={fmtUsd(budget.remaining)}
+            valueClass="text-slate-700 dark:text-slate-200"
+          />
+        ) : null}
         <MetricRow
-          label="Remaining"
-          value={fmtUsd(budget.remaining)}
-          valueClass="text-slate-700 dark:text-slate-200"
-        />
-        <MetricRow
-          label="Projected to Spend"
+          label={isBillingMode ? "Projected Activity" : "Projected to Spend"}
           value={fmtUsd(budget.projectedToSpend)}
-          valueClass={budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
+          valueClass={drawsDownBudget && budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
           dimmed={budget.projectedToSpend === 0}
         />
         <MetricRow
-          label="Available"
-          value={fmtUsd(budget.available)}
+          label={drawsDownBudget ? "Available" : "Activity Total"}
+          value={fmtUsd(drawsDownBudget ? budget.available : budget.projectedToSpend)}
           valueClass={availClass}
         />
       </div>

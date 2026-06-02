@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useModalRuntime } from "./modalRuntime";
+import { useOverlayLayer } from "./overlayLayers";
 
 type FullPageModalProps = {
   isOpen: boolean;
@@ -32,6 +34,12 @@ export function FullPageModal({
 }: FullPageModalProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = React.useState(false);
+  const { zIndex, bringToFront } = useOverlayLayer(isOpen, "modal");
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const attemptClose = async () => {
     const ok = (await onBeforeClose?.()) ?? true;
@@ -50,14 +58,19 @@ export function FullPageModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, disableEscClose, onBeforeClose, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
+  const modal = (
     <div
       className="workspace-modal-overlay"
+      style={{ zIndex }}
       data-tour={tourId ? `${tourId}-overlay` : undefined}
       ref={overlayRef}
       onMouseDown={(e) => {
+        const target = e.target as Node;
+        if (!overlayRef.current?.contains(target)) return;
+        e.stopPropagation();
+        bringToFront();
         if (disableOverlayClose) return;
         if (e.target === overlayRef.current) attemptClose();
       }}
@@ -87,6 +100,8 @@ export function FullPageModal({
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 export default FullPageModal;

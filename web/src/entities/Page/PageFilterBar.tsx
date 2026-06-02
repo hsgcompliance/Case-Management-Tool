@@ -12,6 +12,8 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
+import { createPortal } from "react-dom";
+import { useOverlayLayer } from "@entities/ui/overlayLayers";
 
 const DRAG_THRESHOLD = 8;
 
@@ -44,6 +46,12 @@ export function PageFilterBar({
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [isFloating, setIsFloating] = useState(false);
   const [floatPos, setFloatPos] = useState({ x: 80, y: 100 });
+  const [mounted, setMounted] = React.useState(false);
+  const { zIndex, bringToFront } = useOverlayLayer(isFloating, "floating");
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // ── Grip → float ──────────────────────────────────────────────────────────
   const handleGripMouseDown = useCallback(
@@ -120,6 +128,17 @@ export function PageFilterBar({
         onChange={(e) => onSearchChange(e.currentTarget.value)}
         onKeyDown={onSearchEnter ? (e) => { if (e.key === "Enter") { e.preventDefault(); onSearchEnter(); } } : undefined}
       />
+      {onSearchEnter ? (
+        <button
+          type="button"
+          className="ml-1 shrink-0 rounded px-2 py-0.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 dark:hover:bg-slate-800"
+          onClick={onSearchEnter}
+          tabIndex={-1}
+          title="Search all customers"
+        >
+          Enter
+        </button>
+      ) : null}
     </div>
   );
 
@@ -177,13 +196,9 @@ export function PageFilterBar({
   }
 
   // ── FLOATING mode ─────────────────────────────────────────────────────────
-  return (
-    <>
-      {/* Ghost placeholder so the layout doesn't collapse */}
-      <div className="pointer-events-none h-[40px]" aria-hidden />
-
+  const floatingPanel = (
       <div
-        className="fixed z-[200] min-w-[320px] overflow-auto rounded-md border border-slate-300 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="fixed min-w-[320px] overflow-auto rounded-md border border-slate-300 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
         style={{
           top: floatPos.y,
           left: floatPos.x,
@@ -191,7 +206,9 @@ export function PageFilterBar({
           maxWidth: "90vw",
           maxHeight: "80vh",
           resize: "both",
+          zIndex,
         }}
+        onMouseDown={bringToFront}
       >
         {/* Float header — drag to reposition */}
         <div
@@ -230,6 +247,14 @@ export function PageFilterBar({
           ) : null}
         </div>
       </div>
+  );
+
+  if (!mounted) return <div className="pointer-events-none h-[40px]" aria-hidden />;
+
+  return (
+    <>
+      <div className="pointer-events-none h-[40px]" aria-hidden />
+      {createPortal(floatingPanel, document.body)}
     </>
   );
 }

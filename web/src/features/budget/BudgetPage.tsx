@@ -26,6 +26,7 @@ import { BudgetConfigModal } from "./BudgetConfigModal";
 import { NewCreditCardModal } from "./NewCreditCardModal";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import PinnedGrantCards from "@features/grants/PinnedGrantCards";
+import { shouldShowInBudgetWorkspace } from "@features/grants/financialVisibility";
 import { HelpButton } from "@entities/help/HelpButton";
 
 type FilterMode = "active" | "inactive";
@@ -33,9 +34,6 @@ type ViewMode = "custom" | "all";
 
 const isVisible = (g?: Partial<Grant> | null) =>
   !!g && g.status !== "deleted" && g.deleted !== true;
-
-const isGrant = (g: Partial<Grant>) =>
-  String(g?.kind || "").toLowerCase() !== "program";
 
 const RENTAL_ASSISTANCE_TAG = "rental-assistance";
 
@@ -68,7 +66,7 @@ function buildSections(
       .map((g) => String(g.id)),
   );
   const rentalAssistanceItems = grantsList
-    .filter((g) => visibleIds.has(String(g.id)) && isGrant(g) && hasRentalAssistanceTag(g))
+    .filter((g) => visibleIds.has(String(g.id)) && shouldShowInBudgetWorkspace(g) && hasRentalAssistanceTag(g))
     .map((g) => ({ id: `${String(g.id)}::rental-assistance`, grantId: String(g.id) }));
 
   // "All Grants" flat view — ignore config groups
@@ -263,11 +261,11 @@ export function BudgetPage() {
 
   const sourceGrants = useMemo(() => {
     const source = filter === "active" ? activeData : inactiveData;
-    return (source as Grant[]).filter((g) => isVisible(g) && isGrant(g));
+    return (source as Grant[]).filter((g) => isVisible(g) && shouldShowInBudgetWorkspace(g));
   }, [activeData, inactiveData, filter]);
 
   const activeGrants = useMemo(
-    () => (activeData as Grant[]).filter((g) => isVisible(g) && isGrant(g)),
+    () => (activeData as Grant[]).filter((g) => isVisible(g) && shouldShowInBudgetWorkspace(g)),
     [activeData],
   );
 
@@ -351,8 +349,8 @@ export function BudgetPage() {
               </div>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
                 Track funding-source grants, line-item budgets, credit cards, committed spend, and
-                remaining balances. Programs have their own participation view so budget workflows
-                stay focused on funding sources.
+                remaining balances. Service-only programs stay in participation views; programs with
+                configured financial activity can appear here.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

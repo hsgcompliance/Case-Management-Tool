@@ -16,6 +16,7 @@ import {
 } from "@hooks/usePayments";
 import { useCustomerEnrollments } from "@hooks/useEnrollments";
 import { useGrants } from "@hooks/useGrants";
+import { useLedgerEntries } from "@hooks/useLedger";
 import PaymentPaidDialog from "@entities/dialogs/payments/PaymentPaidDialog";
 import PaymentsDeleteDialog from "@entities/dialogs/payments/PaymentsDeleteDialog";
 import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
@@ -87,10 +88,30 @@ function isOpenEnrollment(enrollment: unknown): boolean {
   return true;
 }
 
+function positiveLedgerPaymentKey(entry: unknown): string | null {
+  const row = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+  const amountCents = Number(row.amountCents ?? Number(row.amount || 0) * 100);
+  if (!Number.isFinite(amountCents) || amountCents <= 0) return null;
+  if (row.reversalOf) return null;
+  const enrollmentId = String(row.enrollmentId || "").trim();
+  const origin = row.origin && typeof row.origin === "object" ? (row.origin as Record<string, unknown>) : {};
+  const paymentId = String(row.paymentId || origin.baseId || "").trim();
+  if (!enrollmentId || !paymentId) return null;
+  return `${enrollmentId}:${paymentId}`;
+}
+
 export function PaymentsTab({ customerId, customerName }: { customerId: string; customerName?: string }) {
   const { data: rows = [], isLoading } = useCustomerPayments(customerId);
   const { data: enrollments = [] } = useCustomerEnrollments(customerId, { enabled: !!customerId });
   const { data: grants = [] } = useGrants({ limit: 500 }, { enabled: !!customerId });
+  const {
+    data: customerLedgerEntries = [],
+    isLoading: isLedgerLoading,
+    isError: isLedgerError,
+  } = useLedgerEntries(
+    { customerId, limit: 500, sortBy: "dueDate", sortOrder: "desc" },
+    { enabled: !!customerId },
+  );
   const spend = usePaymentsSpend();
   const compliance = usePaymentsUpdateCompliance();
   const deleteRows = usePaymentsDeleteRows();
@@ -150,6 +171,32 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     if (enrollmentFilterId === "all") return sorted;
     return sorted.filter((r) => String(r.enrollmentId || "") === enrollmentFilterId);
   }, [sorted, enrollmentFilterId]);
+
+  const ledgerPaymentKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const entry of customerLedgerEntries) {
+      const key = positiveLedgerPaymentKey(entry);
+      if (key) keys.add(key);
+    }
+    return keys;
+  }, [customerLedgerEntries]);
+
+  const rowIssues = React.useMemo(() => {
+    if (!customerId || isLedgerLoading || isLedgerError) return {};
+    const issues: Record<string, { label: string }> = {};
+    for (const row of filteredRows) {
+      const payment = row.payment as Record<string, unknown>;
+      if (!payment?.paid) continue;
+      const pid = String(payment.id || "").trim();
+      const enrollmentId = String(row.enrollmentId || "").trim();
+      if (!pid || !enrollmentId) continue;
+      const key = `${enrollmentId}:${pid}`;
+      if (!ledgerPaymentKeys.has(key)) {
+        issues[key] = { label: "Paid schedule row is missing a matching ledger entry." };
+      }
+    }
+    return issues;
+  }, [customerId, filteredRows, isLedgerError, isLedgerLoading, ledgerPaymentKeys]);
 
   const totals = React.useMemo(() => {
     let total = 0;
@@ -302,6 +349,9 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     [selected, adjustEnrollments],
   );
 
+  const selectedIssue = selected ? rowIssues[selected.paymentKey] || null : null;
+  const rowIssueCount = React.useMemo(() => Object.keys(rowIssues).length, [rowIssues]);
+
   React.useEffect(() => {
     setError(null);
     setHmisComplete(Boolean(selected?.payment?.compliance?.hmisComplete));
@@ -354,6 +404,56 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       setPaidDialogOpen(false);
     } catch (e: unknown) {
       toast(toApiError(e).error || "Failed to update paid state.", { type: "error" });
+    }
+  };
+
+  const syncLedgerSpend = async () => {
+    if (!selected?.enrollmentId || !paymentId) return;
+    setError(null);
+    try {
+      await spend.mutateAsync({
+        body: {
+          enrollmentId: selected.enrollmentId,
+          paymentId,
+          reverse: false,
+          forceSync: true,
+        },
+      });
+      toast("Ledger/spend synced.", { type: "success" });
+      setSelected(null);
+      setPaidDialogOpen(false);
+    } catch (e: unknown) {
+      toast(toApiError(e).error || "Failed to sync ledger/spend.", { type: "error" });
+    }
+  };
+
+  const syncVisibleLedgerSpend = async () => {
+    const targets = filteredRows
+      .map((row) => {
+        const pid = String((row.payment as Record<string, unknown>)?.id || "").trim();
+        const enrollmentId = String(row.enrollmentId || "").trim();
+        const key = `${enrollmentId}:${pid}`;
+        return rowIssues[key] && enrollmentId && pid ? { enrollmentId, paymentId: pid } : null;
+      })
+      .filter((x): x is { enrollmentId: string; paymentId: string } => !!x);
+    if (!targets.length) return;
+    setError(null);
+    try {
+      for (const target of targets) {
+        await spend.mutateAsync({
+          body: {
+            enrollmentId: target.enrollmentId,
+            paymentId: target.paymentId,
+            reverse: false,
+            forceSync: true,
+          },
+        });
+      }
+      toast(`Synced ${targets.length} ledger/spend issue${targets.length === 1 ? "" : "s"}.`, { type: "success" });
+      setSelected(null);
+      setPaidDialogOpen(false);
+    } catch (e: unknown) {
+      toast(toApiError(e).error || "Failed to sync ledger/spend issues.", { type: "error" });
     }
   };
 
@@ -622,9 +722,35 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       ) : filteredRows.length === 0 ? (
         <div className="text-sm text-slate-600">No payments found for this customer.</div>
       ) : (
-        <CustomerPaymentsTable
-          rows={filteredRows}
-          selectedKey={selected?.paymentKey || null}
+        <>
+          {isLedgerError ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div className="font-semibold">Ledger sync check unavailable</div>
+              <div className="text-xs text-amber-800">
+                Paid-row drift detection is paused because ledger entries could not be loaded.
+              </div>
+            </div>
+          ) : null}
+          {rowIssueCount > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div>
+                <div className="font-semibold">{rowIssueCount} paid row{rowIssueCount === 1 ? "" : "s"} missing ledger actuals</div>
+                <div className="text-xs text-amber-800">These rows can show in the schedule but stay out of grant budget actuals until synced.</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => void syncVisibleLedgerSpend()}
+                disabled={spend.isPending}
+              >
+                {spend.isPending ? "Syncing..." : "Sync visible issues"}
+              </button>
+            </div>
+          ) : null}
+          <CustomerPaymentsTable
+            rows={filteredRows}
+            rowIssues={rowIssues}
+            selectedKey={selected?.paymentKey || null}
           renderSelectedRowDetail={() =>
             selected ? (
               <div>
@@ -634,6 +760,23 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
                 </div>
 
                 {error ? <div className="mb-2 text-sm text-red-700">{error}</div> : null}
+
+                {selectedIssue ? (
+                  <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <div className="font-semibold">Paid row is not in ledger.</div>
+                    <div className="mt-1 text-xs text-amber-800">
+                      This schedule row is marked paid, but grant budget actuals only read ledger entries.
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm mt-2"
+                      onClick={() => void syncLedgerSpend()}
+                      disabled={spend.isPending}
+                    >
+                      {spend.isPending ? "Syncing..." : "Sync ledger/spend"}
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className="mb-3 flex flex-wrap items-center gap-4">
                   <label className="inline-flex items-center gap-2 text-sm">
@@ -708,7 +851,8 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
             selectRow(row, key);
             setDeleteOpen(true);
           }}
-        />
+          />
+        </>
       )}
 
       <PaymentPaidDialog
@@ -753,6 +897,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         busy={adjustMutation.isPending}
         enrollments={adjustEnrollments}
         initialEnrollmentId={adjustInitialEnrollmentId}
+        paymentIssues={rowIssues}
         onCancel={() => setAdjustOpen(false)}
         onApply={(payload) => void applyAdjustments(payload)}
       />

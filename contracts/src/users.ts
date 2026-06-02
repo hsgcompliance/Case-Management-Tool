@@ -1,5 +1,6 @@
 // contracts/src/users.ts
 import { z, Id, TsLike } from "./core";
+import { GoogleIntegrationMode } from "./google";
 
 /** Org-level role tags (NOT ladder). */
 export const RoleTagCanonical = z.enum(["casemanager", "compliance", "viewer"]);
@@ -194,6 +195,10 @@ export const UserSettings = z
     dashboardPrefs: UserUnknownRecord.optional(),
     toolsPrefs: UserUnknownRecord.optional(),
     spendingViews: UserUnknownRecord.optional(),
+    googleIntegrationModes: z.object({
+      googleCalendar: GoogleIntegrationMode.optional(),
+      googleDrive: GoogleIntegrationMode.optional(),
+    }).optional(),
   })
   .catchall(z.unknown())
   .partial();
@@ -270,6 +275,42 @@ export const UserGameHighScores = z
   })
   .catchall(z.number().int().nonnegative());
 
+// ── Third-party integration metadata (public — safe for client consumption) ──
+// Tokens are never included here. Raw credentials live server-side in
+// userSecrets/{uid}/integrations/{service} (Cloud Functions access only).
+
+const IntegrationPermissionStatus = z.enum([
+  "connected",
+  "needs_reconnect",
+  "revoked",
+  "error",
+  "disconnected",
+]);
+
+export const GoogleCalendarIntegration = z.object({
+  connected: z.boolean(),
+  googleEmail: z.string().optional(),
+  scopes: z.array(z.string()).optional(),
+  connectedAt: z.string().optional(),   // ISO
+  updatedAt: z.string().optional(),     // ISO
+  lastSyncAt: z.string().optional(),    // ISO
+  accessTokenExpiresAt: z.string().optional(), // ISO — for UI "expires soon" warning only
+  permissionStatus: IntegrationPermissionStatus,
+});
+
+export const GoogleDriveIntegration = z.object({
+  connected: z.boolean(),
+  googleEmail: z.string().optional(),
+  scopes: z.array(z.string()).optional(),
+  connectedAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  accessTokenExpiresAt: z.string().optional(),
+  permissionStatus: IntegrationPermissionStatus,
+});
+
+export type TGoogleCalendarIntegration = z.infer<typeof GoogleCalendarIntegration>;
+export type TGoogleDriveIntegration = z.infer<typeof GoogleDriveIntegration>;
+
 export const UserExtras = z
   .object({
     // Human-editable
@@ -316,6 +357,15 @@ export const UserExtras = z
     // Grouped metrics sub-objects (written by server-side triggers, not user-settable)
     taskMetrics: UserTaskMetrics.nullable().optional(),
     paymentMetrics: UserPaymentMetrics.nullable().optional(),
+
+    // ── Third-party integrations (public metadata only — no tokens) ──────────
+    // Firebase Auth handles app login. Google Calendar/Drive connectors are
+    // separate OAuth integrations. Tokens live server-side in userSecrets/{uid}.
+    // Only safe connection metadata is stored here.
+    integrations: z.object({
+      googleCalendar: GoogleCalendarIntegration.optional(),
+      googleDrive: GoogleDriveIntegration.optional(),
+    }).optional(),
   })
   .strict();
 

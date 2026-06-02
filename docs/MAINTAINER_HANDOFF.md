@@ -39,6 +39,16 @@ Households DB v2 is an internal operations system for housing/grant case work. I
 - `contracts/src/endpointMap.ts` - endpoint map shared with clients
 - `firestore.rules` - Firestore access control
 
+## Google OAuth Credential Boundary
+
+Keep automated email credentials separate from Drive/Calendar integration credentials.
+
+- `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` are for Gmail sender functions in `functions/src/features/inbox/`.
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and optional `GOOGLE_OAUTH_REFRESH_TOKEN` are for Google Drive/Calendar integrations in `functions/src/features/google/`, `functions/src/features/gdrive/`, and `functions/src/features/calendar/`.
+- The shared Google OAuth account, when configured through `GOOGLE_OAUTH_REFRESH_TOKEN`, is read-only by product policy. Posting calendar events, creating folders, uploads, renames, moves, and Sheets writes should use permanent per-user OAuth or an explicit temporary user token.
+
+If Google sign-in shows `redirect_uri_mismatch`, check both sides: the Google Cloud Console authorized redirect URI must match `GOOGLE_OAUTH_REDIRECT_URI`, and the deployed functions must be using the Drive/Calendar OAuth client, not the mailer client. Never commit downloaded OAuth client files such as `client_secret_*.json`.
+
 ## Feature Pattern
 
 Most backend features follow this pattern:

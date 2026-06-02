@@ -1,8 +1,21 @@
 import React from "react";
 import { useAuth } from "@app/auth/AuthProvider";
+import api from "@client/api";
+import type { GoogleIntegrationMode, GoogleIntegrationService } from "@client/googleIntegrations";
 import UsersClient from "@client/users";
 import { RGSelect, RGToggleGroup } from "@entities/ui/forms/InputComponents";
+import {
+  useGoogleIntegrationConnect,
+  useGoogleIntegrationDisconnect,
+  useGoogleIntegrationStatuses,
+} from "@hooks/useGoogleIntegrations";
 import { toast } from "@lib/toast";
+import {
+  clearGoogleDriveAccessToken,
+  getGoogleDriveAccessToken,
+  getGoogleDriveTokenPersistence,
+  setGoogleDriveTokenPersistence,
+} from "@lib/googleDriveAccessToken";
 import { parseTextScalePreference, parseThemeMode, type TextScalePreference, type ThemeMode } from "@lib/userSettings";
 import type { TTaskMode } from "@hdb/contracts";
 
@@ -15,12 +28,176 @@ const TASK_MODES: ReadonlyArray<{ value: TTaskMode; label: string }> = [
   { value: "viewer", label: "Viewer" },
   { value: "workflow", label: "Workflow" },
 ];
+const INTEGRATION_MODES: ReadonlyArray<{ value: GoogleIntegrationMode; label: string }> = [
+  { value: "permanent", label: "Permanent login" },
+  { value: "temporary", label: "Temporary login" },
+  { value: "off", label: "Off" },
+];
+
+function integrationModeFromSettings(
+  settings: Record<string, unknown> | undefined,
+  service: GoogleIntegrationService,
+): GoogleIntegrationMode {
+  const raw = (settings?.googleIntegrationModes as Record<string, unknown> | undefined)?.[service];
+  return raw === "permanent" || raw === "temporary" || raw === "off" ? raw : "off";
+}
+
+function serviceMeta(profile: Record<string, unknown> | null, service: GoogleIntegrationService) {
+  const extras = profile?.extras as Record<string, unknown> | undefined;
+  const integrations = extras?.integrations as Record<string, unknown> | undefined;
+  return integrations?.[service] as Record<string, unknown> | undefined;
+}
+
+function statusMeta(status: unknown): Record<string, unknown> | undefined {
+  if (!status || typeof status !== "object") return undefined;
+  const row = status as Record<string, unknown>;
+  return row.ok === true ? row : undefined;
+}
+
+function IntegrationToggle({
+  title,
+  service,
+  mode,
+  meta,
+  onModeChange,
+  onConnect,
+  onConnectTemporary,
+  onDisconnect,
+  onClearTemporary,
+  busy,
+  hasTemporaryDriveToken,
+}: {
+  title: string;
+  service: GoogleIntegrationService;
+  mode: GoogleIntegrationMode;
+  meta: Record<string, unknown> | undefined;
+  onModeChange: (mode: GoogleIntegrationMode) => void;
+  onConnect: () => void;
+  onConnectTemporary: () => void;
+  onDisconnect: () => void;
+  onClearTemporary: () => void;
+  busy: boolean;
+  hasTemporaryDriveToken: boolean;
+}) {
+  const connected = meta?.permissionStatus === "connected" || meta?.connected === true;
+  const email = typeof meta?.googleEmail === "string" ? meta.googleEmail : "";
+  const tokenPresent = service === "googleDrive" && hasTemporaryDriveToken;
+  const isCalendar = service === "googleCalendar";
+  const description =
+    mode === "permanent"
+      ? connected
+        ? `Server access connected${email ? ` as ${email}` : ""}.`
+        : "Server access is selected but not connected yet."
+      : mode === "temporary"
+        ? service === "googleDrive"
+          ? tokenPresent
+            ? "Browser token is available for this device."
+            : "Browser token will be captured the next time you sign in with Google."
+          : "Temporary Calendar mode is saved, but posting sessions requires permanent server access."
+        : "Integration is disabled for app workflows.";
+  const action =
+    mode === "off"
+      ? {
+          label: "Disconnect",
+          onClick: connected ? onDisconnect : tokenPresent ? onClearTemporary : undefined,
+          variant: "danger" as const,
+          disabled: !connected && !tokenPresent,
+        }
+      : mode === "temporary"
+        ? isCalendar
+          ? {
+              label: "No action",
+              onClick: undefined,
+              variant: "neutral" as const,
+              disabled: true,
+            }
+          : tokenPresent
+            ? {
+                label: "Connected",
+                onClick: onConnectTemporary,
+                variant: "success" as const,
+                disabled: false,
+              }
+            : {
+                label: "Connect",
+                onClick: onConnectTemporary,
+                variant: "primary" as const,
+                disabled: false,
+              }
+        : connected
+          ? {
+              label: "Connected",
+              onClick: onConnect,
+              variant: "success" as const,
+              disabled: false,
+            }
+          : {
+              label: meta?.permissionStatus === "needs_reconnect" ? "Reconnect" : "Connect",
+              onClick: onConnect,
+              variant: "primary" as const,
+              disabled: false,
+            };
+  const buttonClass =
+    action.variant === "danger"
+      ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+      : action.variant === "success"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
+        : action.variant === "neutral"
+          ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+          : "border-slate-900 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900";
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+      <RGToggleGroup
+        label={title}
+        ariaLabel={`${title} mode`}
+        value={mode}
+        onChange={(next) => onModeChange(next as GoogleIntegrationMode)}
+        options={INTEGRATION_MODES.map((m) => ({ value: m.value, label: m.label }))}
+        fullWidth
+        inputClassName="inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800"
+        optionClassName="rounded-lg px-3 py-1.5 text-sm transition"
+        activeOptionClassName="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+        inactiveOptionClassName="text-slate-700 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700"
+        className="block"
+      />
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${buttonClass}`}
+            disabled={busy || action.disabled}
+            onClick={action.onClick}
+          >
+            {busy ? "Working..." : action.label}
+          </button>
+          {mode === "temporary" && service === "googleDrive" && tokenPresent ? (
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              disabled={busy}
+              onClick={onClearTemporary}
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
-  const { profile, reloadProfile } = useAuth();
+  const { profile, reloadProfile, signInWithGoogle } = useAuth();
+  const integrationStatuses = useGoogleIntegrationStatuses();
+  const calendarConnect = useGoogleIntegrationConnect("googleCalendar");
+  const driveConnect = useGoogleIntegrationConnect("googleDrive");
+  const calendarDisconnect = useGoogleIntegrationDisconnect("googleCalendar");
+  const driveDisconnect = useGoogleIntegrationDisconnect("googleDrive");
   const profileSettings =
     profile && typeof profile.settings === "object" && profile.settings
-      ? (profile.settings as { textScale?: string; themeMode?: string })
+      ? (profile.settings as { textScale?: string; themeMode?: string; googleIntegrationModes?: Record<string, unknown> })
       : undefined;
 
   const profileTaskMode: TTaskMode | null =
@@ -33,30 +210,78 @@ export default function SettingsPage() {
     parseThemeMode(profileSettings?.themeMode)
   );
   const [taskMode, setTaskMode] = React.useState<TTaskMode | null>(() => profileTaskMode);
+  const [calendarMode, setCalendarMode] = React.useState<GoogleIntegrationMode>(() =>
+    integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar")
+  );
+  const [driveMode, setDriveMode] = React.useState<GoogleIntegrationMode>(() =>
+    integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleDrive")
+  );
+  const [hasTemporaryDriveToken, setHasTemporaryDriveToken] = React.useState(() => !!getGoogleDriveAccessToken());
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
     setTextScale(parseTextScalePreference(profileSettings?.textScale));
     setThemeMode(parseThemeMode(profileSettings?.themeMode));
-  }, [profileSettings?.textScale, profileSettings?.themeMode]);
+    setCalendarMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar"));
+    setDriveMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleDrive"));
+  }, [profileSettings?.textScale, profileSettings?.themeMode, profileSettings?.googleIntegrationModes]);
 
   React.useEffect(() => {
     setTaskMode(profileTaskMode);
   }, [profileTaskMode]);
 
-  const onSave = async () => {
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("calendar");
+    if (!result) return;
+
+    const rawService = params.get("service");
+    const service: GoogleIntegrationService =
+      rawService === "googleDrive" ? "googleDrive" : "googleCalendar";
+
+    api.bustCache(service === "googleDrive" ? "driveStatus" : "calendarStatus");
+    const refresh =
+      service === "googleDrive"
+        ? integrationStatuses.drive.refetch()
+        : integrationStatuses.calendar.refetch();
+    void refresh.then(() => reloadProfile()).catch(() => reloadProfile());
+
+    const cleanUrl = `${window.location.pathname}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", cleanUrl);
+
+    if (result === "connected") {
+      toast(`${service === "googleDrive" ? "Google Drive" : "Google Calendar"} connected`, { type: "success" });
+    } else if (result === "denied") {
+      toast("Google access was denied", { type: "warn" });
+    } else {
+      toast("Google connection did not complete", { type: "error" });
+    }
+  // Run once on callback landing; refetch functions are stable enough for this redirect cleanup.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveSettings = async (nextModes?: Partial<Record<GoogleIntegrationService, GoogleIntegrationMode>>) => {
     setSaving(true);
     try {
       const baseSettings =
         profile && typeof profile.settings === "object" && profile.settings
           ? (profile.settings as Record<string, unknown>)
           : {};
+      const modes = {
+        ...(typeof baseSettings.googleIntegrationModes === "object" && baseSettings.googleIntegrationModes
+          ? (baseSettings.googleIntegrationModes as Record<string, unknown>)
+          : {}),
+        googleCalendar: nextModes?.googleCalendar ?? calendarMode,
+        googleDrive: nextModes?.googleDrive ?? driveMode,
+      };
 
       await UsersClient.meUpdate({
         settings: {
           ...baseSettings,
           textScale,
           themeMode,
+          googleIntegrationModes: modes,
         },
         ...(taskMode != null
           ? { taskMode, taskModeSetAt: new Date().toISOString(), taskModeSetBy: "self" }
@@ -67,8 +292,85 @@ export default function SettingsPage() {
       toast("Settings saved", { type: "success" });
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed to save settings", { type: "error" });
+      throw e;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onSave = () => saveSettings();
+
+  const applyIntegrationMode = async (service: GoogleIntegrationService, next: GoogleIntegrationMode) => {
+    const previous = service === "googleCalendar" ? calendarMode : driveMode;
+    try {
+      if (service === "googleCalendar") setCalendarMode(next);
+      if (service === "googleDrive") setDriveMode(next);
+
+      await saveSettings({ [service]: next });
+
+      if (next === "temporary" && service === "googleDrive") {
+        setGoogleDriveTokenPersistence("local");
+        toast("Temporary Drive mode saved. Sign in with Google to refresh the local browser token.", { type: "info" });
+      }
+
+      if (next === "off") {
+        if (service === "googleDrive") {
+          clearGoogleDriveAccessToken();
+          setHasTemporaryDriveToken(false);
+          setGoogleDriveTokenPersistence("session");
+        }
+      }
+    } catch (e) {
+      if (service === "googleCalendar") setCalendarMode(previous);
+      if (service === "googleDrive") setDriveMode(previous);
+      toast(e instanceof Error ? e.message : "Failed to update integration", { type: "error" });
+    }
+  };
+
+  const connectIntegration = async (service: GoogleIntegrationService) => {
+    try {
+      if (service === "googleCalendar") {
+        await calendarConnect.mutateAsync();
+      } else {
+        await driveConnect.mutateAsync();
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to start Google connection", { type: "error" });
+    }
+  };
+
+  const disconnectIntegration = async (service: GoogleIntegrationService) => {
+    try {
+      if (service === "googleCalendar") {
+        await calendarDisconnect.mutateAsync();
+      } else {
+        await driveDisconnect.mutateAsync();
+        clearGoogleDriveAccessToken();
+        setHasTemporaryDriveToken(false);
+      }
+      await reloadProfile();
+      toast("Google access disconnected", { type: "success" });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to disconnect Google access", { type: "error" });
+    }
+  };
+
+  const clearTemporaryDriveAccess = () => {
+    clearGoogleDriveAccessToken();
+    setHasTemporaryDriveToken(false);
+    setGoogleDriveTokenPersistence("session");
+    toast("Temporary Drive access cleared", { type: "success" });
+  };
+
+  const connectTemporaryDrive = async () => {
+    try {
+      setGoogleDriveTokenPersistence("local");
+      await signInWithGoogle();
+      setHasTemporaryDriveToken(!!getGoogleDriveAccessToken());
+      toast("Temporary Drive access connected on this device", { type: "success" });
+    } catch (e) {
+      setHasTemporaryDriveToken(!!getGoogleDriveAccessToken());
+      toast(e instanceof Error ? e.message : "Failed to connect temporary Drive access", { type: "error" });
     }
   };
 
@@ -125,6 +427,46 @@ export default function SettingsPage() {
             inactiveOptionClassName="text-slate-700 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700"
             className="block"
           />
+
+          <div className="space-y-3" data-tour="settings-google-integrations">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Google integrations</h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Permanent login stores refresh access server-side. Temporary login uses this browser only. Off disables app access.
+              </p>
+            </div>
+            <IntegrationToggle
+              title="Calendar"
+              service="googleCalendar"
+              mode={calendarMode}
+              meta={statusMeta(integrationStatuses.calendar.data) ?? serviceMeta(profile as Record<string, unknown> | null, "googleCalendar")}
+              busy={saving || calendarConnect.isPending || calendarDisconnect.isPending || integrationStatuses.calendar.isFetching}
+              onModeChange={(next) => void applyIntegrationMode("googleCalendar", next)}
+              onConnect={() => void connectIntegration("googleCalendar")}
+              onConnectTemporary={() => {}}
+              onDisconnect={() => void disconnectIntegration("googleCalendar")}
+              onClearTemporary={clearTemporaryDriveAccess}
+              hasTemporaryDriveToken={hasTemporaryDriveToken}
+            />
+            <IntegrationToggle
+              title="Google Drive"
+              service="googleDrive"
+              mode={driveMode}
+              meta={statusMeta(integrationStatuses.drive.data) ?? serviceMeta(profile as Record<string, unknown> | null, "googleDrive")}
+              busy={saving || driveConnect.isPending || driveDisconnect.isPending || integrationStatuses.drive.isFetching}
+              onModeChange={(next) => void applyIntegrationMode("googleDrive", next)}
+              onConnect={() => void connectIntegration("googleDrive")}
+              onConnectTemporary={() => void connectTemporaryDrive()}
+              onDisconnect={() => void disconnectIntegration("googleDrive")}
+              onClearTemporary={clearTemporaryDriveAccess}
+              hasTemporaryDriveToken={hasTemporaryDriveToken}
+            />
+            {getGoogleDriveTokenPersistence() === "local" ? (
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Temporary Drive tokens are stored in local browser storage on this device.
+              </div>
+            ) : null}
+          </div>
 
           <div className="flex justify-end" data-tour="settings-actions">
             <button className="btn btn-sm" onClick={onSave} disabled={saving} data-tour="settings-save">

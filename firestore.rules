@@ -166,10 +166,20 @@ service cloud.firestore {
       allow update: if sameOrgId(orgId) && topRole() != "viewer";
     }
 
+    // Private OAuth token store — server-only (Cloud Functions admin SDK).
+    // Must be listed BEFORE the catch-all so the intent is clear.
+    // The catch-all is also patched to exclude this collection.
+    match /userSecrets/{uid} {
+      allow read, write: if false;
+    }
+    match /userSecrets/{uid}/{sub=**} {
+      allow read, write: if false;
+    }
+
     // Catch-all: any unlisted collection still requires verified staff + same org.
-    // Restricts access while remaining safe for new collections added later.
-    match /{document=**} {
-      allow read: if verifiedStaff() && (
+    // Uses /{collection}/{document=**} so we can exclude userSecrets by name.
+    match /{collection}/{document=**} {
+      allow read: if collection != 'userSecrets' && verifiedStaff() && (
         isSuperDev()
         || !("orgId" in resource.data)
         || tokenOrgId() == null

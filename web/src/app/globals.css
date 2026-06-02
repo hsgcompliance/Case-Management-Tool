@@ -213,10 +213,15 @@
   /* ---------- Modal ---------- */
   :root {
     --z-dropdown: 200;
-    --z-modal: 1000;
+    --z-floating: 1000;
+    --z-modal: 1100;
     --z-workspace-modal: 1100;
-    --z-modal-nested: 1200;
-    --z-global-pending: 9999;
+    --z-modal-nested: 1100;
+    --z-app-chrome-popover: 3000;
+    --z-tour: 4000;
+    --z-game: 9000;
+    --z-global-pending: 9990;
+    --z-toast: 12000;
   }
 
   .modal-layer {
@@ -234,6 +239,10 @@
   .modal-overlay {
     @apply fixed inset-0 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm;
     z-index: var(--z-modal);
+  }
+
+  .modal-overlay-clear {
+    @apply bg-transparent backdrop-blur-none;
   }
 
   .workspace-modal-overlay {

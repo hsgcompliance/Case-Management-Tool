@@ -1,9 +1,9 @@
 // functions/src/features/gdrive/http.ts
 import {
   secureHandler,
-  OAUTH_CLIENT_ID,
-  OAUTH_CLIENT_SECRET,
-  OAUTH_REFRESH_TOKEN,
+  GOOGLE_OAUTH_CLIENT_ID,
+  GOOGLE_OAUTH_CLIENT_SECRET,
+  GOOGLE_OAUTH_REFRESH_TOKEN,
   DRIVE_SANDBOX_FOLDER_ID,
   requireOrg,
 } from "../../core";
@@ -41,11 +41,17 @@ function buildHints(message: string, diagnostics?: DriveListDiagnostics): string
   if (diagnostics?.authMode === "user_access_token") {
     hints.add("Drive access used the signed-in user's Google access token.");
   }
+  if (diagnostics?.authMode === "server_user_oauth") {
+    hints.add("Drive access used the user's permanent server-side Google Drive connection.");
+  }
   if (diagnostics?.authMode === "service_account") {
     hints.add("Drive access used the project service account.");
   }
   if (diagnostics?.authMode === "shared_refresh_token") {
-    hints.add("This endpoint currently uses one shared OAuth refresh token, not per-user Drive OAuth.");
+    hints.add("Drive access used the shared OAuth account. Shared OAuth is read-only; write actions require permanent per-user Drive access or a temporary user token.");
+  }
+  if (msg.includes("shared_oauth_read_only")) {
+    hints.add("Shared OAuth is configured as read-only. Connect Google Drive permanently or use temporary browser access before creating, moving, renaming, uploading, or writing Sheets data.");
   }
   if (diagnostics?.auth?.hasDriveScope === false) {
     hints.add("The current access token does not include a Google Drive scope.");
@@ -81,6 +87,7 @@ function buildHints(message: string, diagnostics?: DriveListDiagnostics): string
 function classifyError(message: string, diagnostics?: DriveListDiagnostics): string {
   const msg = String(message || "").toLowerCase();
   if (msg.includes("missing_oauth_secrets")) return "auth_config";
+  if (msg.includes("shared_oauth_read_only")) return "auth_mode_read_only";
   if (diagnostics?.auth?.hasDriveScope === false) return "oauth_scope";
   if (Array.isArray(diagnostics?.auth?.missingExpectedScopes) && diagnostics.auth.missingExpectedScopes.length) {
     return "oauth_scope";
@@ -107,6 +114,7 @@ export const gdriveList = secureHandler(
       const out = await listInFolder(folderId, {
         includeDiagnostics: debug,
         googleAccessToken: readGoogleAccessToken(req),
+        userUid: String((req as any).user?.uid || ""),
       });
       const hints = buildHints("", out.diagnostics);
       res.status(200).json({
@@ -147,7 +155,7 @@ export const gdriveList = secureHandler(
   {
     auth: "viewer",
     methods: ["GET", "OPTIONS"],
-    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN, DRIVE_SANDBOX_FOLDER_ID],
+    secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN, DRIVE_SANDBOX_FOLDER_ID],
     memory: "512MiB",
     concurrency: 4,
     timeoutSeconds: 60,
@@ -156,16 +164,32 @@ export const gdriveList = secureHandler(
 
 export const gdriveCreateFolder = secureHandler(
   async (req, res) => {
-    const body = GDriveCreateFolderBody.parse(req.body ?? {});
-    const r = await createFolder(body.parentId, body.name, {
-      googleAccessToken: readGoogleAccessToken(req),
-    });
-    res.status(200).json({ ok: true, folder: r });
+    try {
+      const body = GDriveCreateFolderBody.parse(req.body ?? {});
+      const r = await createFolder(body.parentId, body.name, {
+        googleAccessToken: readGoogleAccessToken(req),
+        userUid: String((req as any).user?.uid || ""),
+      });
+      res.status(200).json({ ok: true, folder: r });
+    } catch (e: any) {
+      const msg = String(e?.message || e || "gdrive_create_folder_failed");
+      const readOnly = msg.includes("shared_oauth_read_only");
+      res.status(readOnly ? 403 : 500).json({
+        ok: false,
+        error: msg,
+        ...(readOnly
+          ? {
+              category: "auth_mode_read_only",
+              hint: "Shared OAuth is read-only. Connect Google Drive permanently or use temporary browser access before creating folders.",
+            }
+          : {}),
+      });
+    }
   },
   {
     auth: "viewer",
     methods: ["POST", "OPTIONS"],
-    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+    secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
   }
 );
 
@@ -176,17 +200,28 @@ export const gdriveBuildCustomerFolder = secureHandler(
       const folder = await buildCustomerFolder({
         ...body,
         googleAccessToken: readGoogleAccessToken(req),
+        userUid: String((req as any).user?.uid || ""),
       });
       res.status(200).json({ ok: true, folder });
     } catch (e: any) {
       const msg = String(e?.message || e || "gdrive_build_failed");
-      res.status(500).json({ ok: false, error: msg });
+      const readOnly = msg.includes("shared_oauth_read_only");
+      res.status(readOnly ? 403 : 500).json({
+        ok: false,
+        error: msg,
+        ...(readOnly
+          ? {
+              category: "auth_mode_read_only",
+              hint: "Shared OAuth is read-only. Connect Google Drive permanently or use temporary browser access before building customer folders.",
+            }
+          : {}),
+      });
     }
   },
   {
     auth: "user",
     methods: ["POST", "OPTIONS"],
-    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+    secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
     timeoutSeconds: 120,
     memory: "256MiB",
   },
@@ -199,18 +234,29 @@ export const gdriveUpload = secureHandler(
       const r = await uploadSmallFile({
         ...body,
         googleAccessToken: readGoogleAccessToken(req),
+        userUid: String((req as any).user?.uid || ""),
       });
       res.status(200).json({ ok: true, file: r });
     } catch (e: any) {
-      const msg = e?.message || String(e);
-      const code = msg.includes("file_too_large") ? 413 : 400;
-      res.status(code).json({ ok: false, error: msg });
+      const msg = String(e?.message || e);
+      const readOnly = msg.includes("shared_oauth_read_only");
+      const code = readOnly ? 403 : msg.includes("file_too_large") ? 413 : 400;
+      res.status(code).json({
+        ok: false,
+        error: msg,
+        ...(readOnly
+          ? {
+              category: "auth_mode_read_only",
+              hint: "Shared OAuth is read-only. Connect Google Drive permanently or use temporary browser access before uploading files.",
+            }
+          : {}),
+      });
     }
   },
   {
     auth: "user",
     methods: ["POST", "OPTIONS"],
-    secrets: [OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN],
+    secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
   }
 );
 

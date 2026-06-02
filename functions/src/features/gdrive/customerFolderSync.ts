@@ -148,8 +148,8 @@ function scoreFolderMatch(folder: IndexFolder, customer: CustomerRow): { score: 
   return { score: Math.max(0, Math.min(100, score)), reasons };
 }
 
-async function listFoldersInParent(folderId: string, status: "active" | "exited"): Promise<IndexFolder[]> {
-  const drive = await getDriveClient();
+async function listFoldersInParent(folderId: string, status: "active" | "exited", userUid?: string): Promise<IndexFolder[]> {
+  const drive = await getDriveClient({ userUid });
   const out = await drive.files.list({
     q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     fields: "files(id,name,webViewLink,createdTime)",
@@ -169,14 +169,14 @@ async function listFoldersInParent(folderId: string, status: "active" | "exited"
   }));
 }
 
-async function loadIndexFolders(orgId: string) {
+async function loadIndexFolders(orgId: string, userUid?: string) {
   const config = await getOrgGDriveConfig(orgId);
   const folders: IndexFolder[] = [];
   if (config.customerFolderIndex.activeParentId) {
-    folders.push(...await listFoldersInParent(config.customerFolderIndex.activeParentId, "active"));
+    folders.push(...await listFoldersInParent(config.customerFolderIndex.activeParentId, "active", userUid));
   }
   if (config.customerFolderIndex.exitedParentId) {
-    folders.push(...await listFoldersInParent(config.customerFolderIndex.exitedParentId, "exited"));
+    folders.push(...await listFoldersInParent(config.customerFolderIndex.exitedParentId, "exited", userUid));
   }
   return { folders, config };
 }
@@ -226,8 +226,8 @@ function quoteSheetTitle(title: string) {
   return `'${String(title || "").replace(/'/g, "''")}'`;
 }
 
-async function readSheetLookup(sheetId: string) {
-  const sheets = await getSheetsClient();
+async function readSheetLookup(sheetId: string, userUid?: string) {
+  const sheets = await getSheetsClient({ userUid, requireWritable: true });
   const meta = await sheets.spreadsheets.get({
     spreadsheetId: sheetId,
     fields: "sheets(properties(sheetId,title,index))",
@@ -275,8 +275,9 @@ async function updateIndexRow(args: {
   resultMessage: string;
   nextName?: string;
   nextCwId?: string | null;
+  userUid?: string;
 }) {
-  const lookup = await readSheetLookup(args.sheetId);
+  const lookup = await readSheetLookup(args.sheetId, args.userUid);
   const folderIdCol = lookup.headerMap.get("Folder ID");
   if (folderIdCol == null) throw new Error("customer_index_sheet_missing_folder_id_column");
 
@@ -327,8 +328,9 @@ async function renameFolderAndUpdateIndex(args: {
   folder: IndexFolder;
   nextName: string;
   sheetId?: string;
+  userUid?: string;
 }) {
-  const drive = await getDriveClient();
+  const drive = await getDriveClient({ userUid: args.userUid, requireWritable: true });
   await drive.files.update({
     fileId: args.folder.id,
     requestBody: { name: args.nextName },
@@ -343,6 +345,7 @@ async function renameFolderAndUpdateIndex(args: {
       nextName: args.nextName,
       nextCwId: parseFolderName(args.nextName).cwid,
       resultMessage: `renamed by app (${new Date().toISOString()})`,
+      userUid: args.userUid,
     });
   }
 }
@@ -385,13 +388,14 @@ export const gdriveCustomerFolderSync = secureHandler(
   async (req, res) => {
     const body = ReconcileBody.parse(req.body || {});
     const caller = (req as any).user;
+    const userUid = String(caller?.uid || "");
     const orgId = requireOrg(caller);
     if (body.mode === "reconcile") {
       requireLevel(caller, "admin");
     }
 
     const [{ folders, config }, customers] = await Promise.all([
-      loadIndexFolders(orgId),
+      loadIndexFolders(orgId, userUid),
       loadCustomers(orgId, { customerId: body.customerId, limit: body.limit }),
     ]);
 
@@ -425,6 +429,7 @@ export const gdriveCustomerFolderSync = secureHandler(
         folder: chosen.folder,
         targetStatus: folderTargetStatus(active),
         resultMessage: `${active ? "unarchive" : "archive"} requested by app (${new Date().toISOString()})`,
+        userUid,
       });
 
       res.status(200).json({
@@ -471,7 +476,7 @@ export const gdriveCustomerFolderSync = secureHandler(
       }
 
       if (body.apply !== false) {
-        await renameFolderAndUpdateIndex({ folder: targetFolder, nextName, sheetId });
+        await renameFolderAndUpdateIndex({ folder: targetFolder, nextName, sheetId, userUid });
         await patchCustomerLinkedFolderName(customer, targetFolder.id, nextName);
       }
 
@@ -543,6 +548,7 @@ export const gdriveCustomerFolderSync = secureHandler(
               folder,
               targetStatus: item.targetFolderStatus,
               resultMessage: `reconciled from customer status (${new Date().toISOString()})`,
+              userUid,
             });
           }
         }

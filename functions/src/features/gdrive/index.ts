@@ -9,3 +9,8 @@ export {
 } from "./http";
 export { gdriveCustomerFolderIndex } from "./customerFolderIndex";
 export { gdriveCustomerFolderSync } from "./customerFolderSync";
+export {
+  attachCustomerWorkbookByUrl,
+  listCustomerFolderWorkbookCandidates,
+  attachCustomerWorkbookCandidate,
+} from "./workbookHttp";

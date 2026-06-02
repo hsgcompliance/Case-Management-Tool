@@ -28,6 +28,7 @@ export * as customers from "./customers";
 export * as creditCards from "./creditCards";
 export * as enrollments from "./enrollments";
 export * as gdrive from "./gdrive";
+export * as google from "./google";
 export * as grants from "./grants";
 export * as inbox from "./inbox";
 export * as jotform from "./jotform";
@@ -178,6 +179,28 @@ export type {
   TGDriveBuildSettings,
 } from "./gdrive";
 export { GDRIVE_TEMPLATE_TYPES } from "./gdrive";
+
+// Google integrations
+export type {
+  TGoogleAuthMode,
+  TGoogleConnectStartBody,
+  TGoogleConnectStartRespBody,
+  TGoogleDisconnectRespBody,
+  TGoogleEndpointError,
+  TGoogleIntegrationMode,
+  TGoogleIntegrationStatus,
+  TGoogleIntegrationStatusRespBody,
+  TGooglePermissionStatus,
+  TGoogleService,
+} from "./google";
+export {
+  GoogleAuthMode,
+  GoogleConnectStartBody,
+  GoogleIntegrationMode,
+  GoogleIntegrationStatus,
+  GooglePermissionStatus,
+  GoogleService,
+} from "./google";
 
 // Grants — UPDATED
 export type {

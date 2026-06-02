@@ -31,11 +31,31 @@ import { DetailsTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab,
 import { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 import { GrantAdminMenu } from "./GrantAdminMenu";
+import { getGrantFinancialVisibility, shouldRetainBudgetForGrantForm } from "./financialVisibility";
 
 const num = (n: unknown, fallback = 0) => {
   const v = typeof n === "number" ? n : Number(n);
   return Number.isFinite(v) ? v : fallback;
 };
+
+const DEFAULT_FINANCIAL_CONFIG = {
+  grant: {
+    model: "budgeted",
+    budgetEnabled: true,
+    billingEnabled: false,
+    allocationEnabled: false,
+    ledgerEnabled: true,
+    ledgerMode: "spendDown",
+  },
+  program: {
+    model: "serviceOnly",
+    budgetEnabled: false,
+    billingEnabled: false,
+    allocationEnabled: false,
+    ledgerEnabled: false,
+    ledgerMode: "none",
+  },
+} as const;
 
 const currency = (x: number) => fmtCurrencyUSD(x);
 
@@ -75,6 +95,24 @@ const normalizeGrantForForm = (g: Partial<Grant>) => ({
   startDate: toISOOrEmpty(g.startDate),
   endDate: toISOOrEmpty(g.endDate),
 });
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function seedFinancialConfigForEdit(grant: Partial<Grant> | Record<string, unknown>) {
+  const next = deepClone((grant || {}) as Record<string, unknown>);
+  if (!isPlainObject(next.financialConfig)) {
+    next.financialConfig = getGrantFinancialVisibility(next as Partial<Grant>).capabilities.config;
+  }
+  if (
+    shouldRetainBudgetForGrantForm(next as Partial<Grant>) &&
+    !isPlainObject(next.budget)
+  ) {
+    next.budget = { total: 0, lineItems: [] };
+  }
+  return next;
+}
 
 function recomputeBudgetTotals(budget: unknown) {
   const b = deepClone((budget || {}) as Record<string, unknown>);
@@ -298,6 +336,10 @@ export default function GrantDetailModal({
           status: "draft",
           active: false,
           kind: requestedKind === "program" ? "program" : "grant",
+          financialConfig:
+            requestedKind === "program"
+              ? DEFAULT_FINANCIAL_CONFIG.program
+              : DEFAULT_FINANCIAL_CONFIG.grant,
           ...(requestedKind === "program" ? { budget: { total: 0, lineItems: [] } } : {}),
           ...(requestedPreset === "credit-card"
             ? {
@@ -347,17 +389,23 @@ export default function GrantDetailModal({
     () => grantKindOf((isCreate ? model : (grant as Record<string, unknown> | null)) || model),
     [isCreate, model, grant],
   );
-  const showBudgetTab = currentKind === "grant";
-  const showActivityTab = currentKind !== "program";
+  const financialVisibility = useMemo(
+    () => getGrantFinancialVisibility((editing ? model : grant) as Partial<Grant> | null | undefined),
+    [editing, model, grant],
+  );
+  const showBudgetTab =
+    financialVisibility.showBudgetEditor ||
+    financialVisibility.showBillingActivity ||
+    financialVisibility.showLedgerActivity;
 
   // Show allocation tab when the grant/budget has allocationEnabled, or any line item has capEnabled
   const showAllocationTab = React.useMemo(() => {
     const b = (editing ? model : grant)?.budget as Record<string, unknown> | undefined;
+    if (financialVisibility.showAllocation) return true;
     if (!b) return false;
-    if (b.allocationEnabled === true) return true;
     const lineItems = Array.isArray(b.lineItems) ? b.lineItems as Record<string, unknown>[] : [];
     return lineItems.some((li) => li.capEnabled === true);
-  }, [editing, model, grant]);
+  }, [editing, financialVisibility.showAllocation, model, grant]);
   const roleProfile = profile as { topRole?: unknown; role?: unknown; roles?: unknown } | null;
   const isViewer = isViewerLike(roleProfile);
   const isAdminRole = isAdminLike(roleProfile);
@@ -404,6 +452,15 @@ export default function GrantDetailModal({
   const saveDisabled =
     !String(model?.name ?? "").trim() || !String(model?.startDate ?? "").trim();
 
+  const toggleEditing = () => {
+    if (editing) {
+      setEditing(false);
+      return;
+    }
+    setModel((prev) => seedFinancialConfigForEdit(prev && Object.keys(prev).length ? prev : grant || {}));
+    setEditing(true);
+  };
+
   const handleSave = async () => {
     try {
       if (!canEditGrant) return;
@@ -424,7 +481,7 @@ export default function GrantDetailModal({
       }
 
       const budget = recomputeBudgetTotals(updates.budget);
-      if (String(updates.kind || currentKind) === "program") {
+      if (!shouldRetainBudgetForGrantForm(updates as Partial<Grant>)) {
         updates.budget = sanitizeBudgetForWrite({ total: 0, lineItems: [] });
       } else {
         updates.budget = sanitizeBudgetForWrite(budget);
@@ -559,11 +616,18 @@ export default function GrantDetailModal({
     if (!canEditKind) return;
     const nextKind = pendingKind;
     if (!nextKind) return;
-    setModel((m) => ({
-      ...m,
-      kind: nextKind,
-      ...(nextKind === "program" ? { budget: { total: 0, lineItems: [] } } : {}),
-    }));
+    setModel((m) => {
+      const nextModel = {
+        ...m,
+        kind: nextKind,
+        financialConfig:
+          m.financialConfig ??
+          (nextKind === "program" ? DEFAULT_FINANCIAL_CONFIG.program : DEFAULT_FINANCIAL_CONFIG.grant),
+      };
+      return shouldRetainBudgetForGrantForm(nextModel)
+        ? nextModel
+        : { ...nextModel, budget: { total: 0, lineItems: [] } };
+    });
     setKindDialogOpen(false);
     setPendingKind(null);
   };
@@ -664,7 +728,7 @@ export default function GrantDetailModal({
               {!isCreate && canEditGrant && (
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={() => setEditing((v) => !v)}
+                  onClick={toggleEditing}
                 >
                   {editing ? "Cancel" : "Edit"}
                 </button>
@@ -729,7 +793,7 @@ export default function GrantDetailModal({
             {!isCreate && canEditGrant && (
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => setEditing((v) => !v)}
+                onClick={toggleEditing}
               >
                 {editing ? "Cancel" : "Edit"}
               </button>
@@ -807,6 +871,7 @@ export default function GrantDetailModal({
           onRequestKindChange={requestKindChange}
           currency={currency}
           STATUS_OPTS={STATUS_OPTS}
+          financialCapabilities={financialVisibility.capabilities}
         />
       )}
 
@@ -878,7 +943,7 @@ export default function GrantDetailModal({
       >
         <div className="text-sm text-slate-700">
           Changing kind to <b>{pendingKind || "-"}</b> may change budget behavior and reporting.
-          Programs are zero-budget and hide budget controls. Grants expose budget controls.
+          Financial settings determine whether budget, billing, allocation, and ledger controls remain available.
         </div>
       </Modal>
     </>
@@ -924,6 +989,7 @@ function TabsRouter(props: {
   onRequestKindChange: (nextKind: "grant" | "program") => void;
   currency: (n: number) => string;
   STATUS_OPTS: readonly string[];
+  financialCapabilities: ReturnType<typeof getGrantFinancialVisibility>["capabilities"];
 }) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<GrantTab>(tabFromQuery(searchParams.get("tab")));
@@ -996,6 +1062,7 @@ function TabsRouter(props: {
           recomputeBudgetTotals={recomputeBudgetTotals}
           num={num}
           grantId={props.grantId}
+          drawsDownBudget={props.financialCapabilities.drawsDownBudget}
         />
       )}
 

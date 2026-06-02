@@ -26,6 +26,8 @@ import type {
   EnrollmentsUndoMigrationResp,
   EnrollmentsAdminReverseLedgerEntryReq,
   EnrollmentsAdminReverseLedgerEntryResp,
+  EnrollmentActionsApplyReq,
+  EnrollmentActionsApplyResp,
   EnrollmentsVoidProjectionsReq,
   EnrollmentsVoidProjectionsResp,
   EnrollmentsListQuery,
@@ -315,6 +317,13 @@ export const Enrollments = {
       "enrollmentsAdminReverseLedgerEntry",
       body,
       idemKey({ scope: "enrollments", op: "adminReverseLedgerEntry", body })
+    ),
+
+  actionsApply: (body: EnrollmentActionsApplyReq): Promise<EnrollmentActionsApplyResp> =>
+    api.callIdem(
+      "enrollmentActionsApply",
+      body,
+      idemKey({ scope: "enrollments", op: "actionsApply", body })
     ),
 };
 

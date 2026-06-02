@@ -16,6 +16,7 @@ This directory uses two classes of docs:
 - `docs/PRIVACY_AND_REPO_HYGIENE.md` - privacy, secret, archive, and local-only rules.
 - `docs/PRODUCT_BACKLOG_NOTES.md` - sanitized product backlog context extracted from old prompts.
 - `docs/MIGRATION_HISTORY.md` - sanitized historical context from the completed V1 to V2 migration.
+- `docs/SYSTEM_SOP.md` - operator SOP for architecture, storage, billing, editing, security, roles, org scope, privacy, and integrations.
 - `scripts/README.md` - script catalog and safe usage notes.
 
 ## Reviewed Feature Docs
@@ -44,7 +45,9 @@ organized by active topic. Do not commit or push its contents.
 | `active-projects.local/tour-system/` | tour/onboarding system revamp — current state, open questions |
 | `active-projects.local/task-revamp/` | new task/to-do system design — what's kept (approve-user, rent-cert), what's retired |
 | `active-projects.local/org-config/` | org config page upgrade — scope and open questions |
+| `active-projects.local/grant-collection-update/` | TSS billable program model, financialConfig rollout, enrollment actions, budget math redesign, and grant rollover planning |
 | `active-projects.local/arcade-manager/` | arcade manager admin surface — related to secret-games, operator controls layer |
+| `active-projects.local/google-integrations/` | active Google Drive, Calendar, Sheets, OAuth, settings, and customer workbook integration build-out |
 
 ## Local-Only Docs
 

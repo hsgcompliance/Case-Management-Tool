@@ -20,23 +20,30 @@ import {
 import { toast } from "@lib/toast";
 import { fmtDateOrDash } from "@lib/formatters";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
-import { parseISO10, toISODate } from "@lib/date";
+import { addDays, addMonthsISO, parseISO10, toISODate } from "@lib/date";
 import { RowStateBadge } from "@entities/ui/rowState";
 import { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
 import type { EnrollmentsPatchReq } from "@types";
-
-type ComplianceKey =
-  | "caseworthyEntryComplete"
-  | "hmisEntryComplete"
-  | "caseworthyExitComplete"
-  | "hmisExitComplete";
+import { normalizeGrantComplianceConfig, type TGrantComplianceControl } from "@hdb/contracts";
 
 function isoToday(): string {
   return toISODate(new Date());
 }
 
-function defaultEnrollmentEndDateForGrant(_startDate?: string | null, grantEndDate?: string | null): string {
+function defaultEnrollmentEndDateForGrant(
+  startDate?: string | null,
+  grantEndDate?: string | null,
+  authorizationMonths?: number | null,
+): string {
+  const start = String(startDate || "").slice(0, 10);
+  const months = Number(authorizationMonths);
+  if (start && Number.isFinite(months) && months > 0) {
+    const nextStart = addMonthsISO(start, Math.floor(months));
+    const parsed = parseISO10(nextStart);
+    const end = parsed ? toISODate(addDays(parsed, -1)) : "";
+    return capEnrollmentEndDate(end, grantEndDate);
+  }
   return String(grantEndDate || "").slice(0, 10);
 }
 
@@ -57,7 +64,16 @@ function isInactiveEnrollment(row: Enrollment): boolean {
   return toOpenClosed(row) === "closed";
 }
 
-function complianceFlag(row: Enrollment, key: ComplianceKey): boolean {
+function complianceFieldKey(control: TGrantComplianceControl): string | null {
+  const field = String(control.field || `compliance.${control.key}`).trim();
+  if (!field.startsWith("compliance.")) return null;
+  const key = field.slice("compliance.".length).trim();
+  return key || null;
+}
+
+function complianceFlag(row: Enrollment, control: TGrantComplianceControl): boolean {
+  const key = complianceFieldKey(control);
+  if (!key) return false;
   const c = row.compliance as Record<string, unknown> | null | undefined;
   return Boolean(c?.[key]);
 }
@@ -90,6 +106,14 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     }
     return map;
   }, [grants]);
+  const grantById = React.useMemo(() => {
+    const map = new Map<string, any>();
+    for (const g of grants) {
+      const id = String(g.id || "").trim();
+      if (id) map.set(id, g);
+    }
+    return map;
+  }, [grants]);
 
   const enroll = useEnrollCustomer();
   const patch = useEnrollmentsPatch();
@@ -104,6 +128,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const [grantId, setGrantId] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState<string>(isoToday());
   const [endDate, setEndDate] = React.useState<string>("");
+  const [endDateTouched, setEndDateTouched] = React.useState<boolean>(false);
   const [generateTaskSchedule, setGenerateTaskSchedule] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -134,11 +159,21 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
 
   const today = React.useMemo(() => isoToday(), []);
   const selectedGrantEndDate = grantId ? grantEndDateById.get(String(grantId)) || "" : "";
+  const selectedGrant = grantId ? grantById.get(String(grantId)) : null;
+  const selectedAuthorizationMonths = Number((selectedGrant as any)?.enrollmentDefaults?.authorizationMonths);
 
   React.useEffect(() => {
-    if (!selectedGrantEndDate) return;
-    setEndDate((current) => capEnrollmentEndDate(current, selectedGrantEndDate));
-  }, [selectedGrantEndDate]);
+    if (endDateTouched) {
+      if (!selectedGrantEndDate) return;
+      setEndDate((current) => capEnrollmentEndDate(current, selectedGrantEndDate));
+      return;
+    }
+    setEndDate(defaultEnrollmentEndDateForGrant(
+      startDate,
+      selectedGrantEndDate,
+      selectedAuthorizationMonths,
+    ));
+  }, [endDateTouched, selectedAuthorizationMonths, selectedGrantEndDate, startDate]);
 
   const closeTargetPayments = React.useMemo(() => {
     const payments = Array.isArray((closeTarget as any)?.payments) ? ((closeTarget as any).payments as any[]) : [];
@@ -225,7 +260,9 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           active: true,
           generateTaskSchedule,
           ...(startDate ? { startDate } : {}),
-          ...(endDate ? { endDate: capEnrollmentEndDate(endDate, selectedGrantEndDate) } : {}),
+          ...(endDate || endDateTouched
+            ? { endDate: endDate ? capEnrollmentEndDate(endDate, selectedGrantEndDate) : null }
+            : {}),
         },
       });
       setGrantId(null);
@@ -254,10 +291,12 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     await patch.mutateAsync(body);
   };
 
-  const toggleCompliance = async (row: Enrollment, key: ComplianceKey) => {
+  const toggleCompliance = async (row: Enrollment, control: TGrantComplianceControl) => {
+    const key = complianceFieldKey(control);
+    if (!key) return;
     setError(null);
     try {
-      const next = !complianceFlag(row, key);
+      const next = !complianceFlag(row, control);
       const currentCompliance = (row.compliance || {}) as Record<string, unknown>;
       await patchEnrollment(row.id, {
         compliance: {
@@ -408,51 +447,31 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   };
 
   const renderComplianceButtons = (row: Enrollment) => {
-    if (isInactiveEnrollment(row)) {
-      const hmis = complianceFlag(row, "hmisExitComplete");
-      const cw = complianceFlag(row, "caseworthyExitComplete");
-      return (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={["rounded-full border px-2 py-1 text-xs font-medium", badgeClasses(cw)].join(" ")}
-            onClick={() => void toggleCompliance(row, "caseworthyExitComplete")}
-            disabled={busy}
-          >
-            CW Exit {cw ? "Done" : "Pending"}
-          </button>
-          <button
-            type="button"
-            className={["rounded-full border px-2 py-1 text-xs font-medium", badgeClasses(hmis)].join(" ")}
-            onClick={() => void toggleCompliance(row, "hmisExitComplete")}
-            disabled={busy}
-          >
-            HMIS Exit {hmis ? "Done" : "Pending"}
-          </button>
-        </div>
-      );
+    const grant = grantById.get(String(row.grantId || "")) || {};
+    const config = normalizeGrantComplianceConfig(grant as Record<string, unknown>);
+    const controls = (isInactiveEnrollment(row) ? config.inactive || [] : config.active || [])
+      .filter((control) => complianceFieldKey(control));
+
+    if (!controls.length) {
+      return <span className="text-xs text-slate-400">None</span>;
     }
 
-    const hmis = complianceFlag(row, "hmisEntryComplete");
-    const cw = complianceFlag(row, "caseworthyEntryComplete");
     return (
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={["rounded-full border px-2 py-1 text-xs font-medium", badgeClasses(cw)].join(" ")}
-          onClick={() => void toggleCompliance(row, "caseworthyEntryComplete")}
-          disabled={busy}
-        >
-          CW Entry {cw ? "Done" : "Pending"}
-        </button>
-        <button
-          type="button"
-          className={["rounded-full border px-2 py-1 text-xs font-medium", badgeClasses(hmis)].join(" ")}
-          onClick={() => void toggleCompliance(row, "hmisEntryComplete")}
-          disabled={busy}
-        >
-          HMIS Entry {hmis ? "Done" : "Pending"}
-        </button>
+        {controls.map((control) => {
+          const done = complianceFlag(row, control);
+          return (
+            <button
+              key={control.key}
+              type="button"
+              className={["rounded-full border px-2 py-1 text-xs font-medium", badgeClasses(done)].join(" ")}
+              onClick={() => void toggleCompliance(row, control)}
+              disabled={busy}
+            >
+              {control.label} {done ? "Done" : "Pending"}
+            </button>
+          );
+        })}
       </div>
     );
   };
@@ -550,7 +569,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             <span className="label">Grant / Program</span>
             <GrantSelect
               value={grantId}
-              onChange={setGrantId}
+              onChange={(next) => {
+                setGrantId(next);
+                setEndDateTouched(false);
+              }}
               includeUnassigned
               placeholderLabel="-- Select grant or program --"
               disabled={busy}
@@ -575,7 +597,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
               type="date"
               value={endDate}
               max={selectedGrantEndDate || undefined}
-              onChange={(e) => setEndDate(capEnrollmentEndDate(e.currentTarget.value, selectedGrantEndDate))}
+              onChange={(e) => {
+                setEndDateTouched(true);
+                setEndDate(capEnrollmentEndDate(e.currentTarget.value, selectedGrantEndDate));
+              }}
               disabled={busy}
             />
           </label>

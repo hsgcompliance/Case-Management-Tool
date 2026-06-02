@@ -58,6 +58,7 @@ web/.git/
 *.crt
 *.cer
 *.secret*
+*client_secret*.json
 *service-account*.json
 *credentials*.json
 scripts/env.config
@@ -76,6 +77,8 @@ functions/build/
 functions/vendor/
 functions/.tmp-*.mjs
 web/vendor/
+mobile-web/vendor/
+mobile-web/dist/
 functions_dump.txt
 
 # Internal-only data and non-deploy materials
@@ -88,6 +91,7 @@ docs/*
 !docs/PRODUCT_BACKLOG_NOTES.md
 !docs/DOC_REVIEW.md
 !docs/MIGRATION_HISTORY.md
+!docs/SYSTEM_SOP.md
 google Scripts Integration/
 scripts/out/
 scripts/prompts/

@@ -8,7 +8,7 @@ import { Modal } from "@entities/ui/Modal";
 import { HelpButton } from "@entities/help/HelpButton";
 import { useAuth } from "@app/auth/AuthProvider";
 import { isViewerLike } from "@lib/roles";
-import { useCustomer, usePatchCustomers, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
+import { useCustomer, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
 import { useSheetArchiveClient, useSheetUnarchiveClient } from "@hooks/useGDrive";
 import { qk } from "@hooks/queryKeys";
 import type { CustomersUpsertReq } from "@types";
@@ -162,7 +162,6 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
   }, [creating, loadingDetail, detail]);
 
   const upsert = useUpsertCustomers();
-  const patchCustomer = usePatchCustomers();
   const setCustomerActive = useSetCustomerActive();
   const softDeleteCustomer = useSoftDeleteCustomers();
   const archiveClient = useSheetArchiveClient();
@@ -331,28 +330,6 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Save failed. Please try again.");
     }
-  };
-
-  const onSaveNotes = async (notes: string) => {
-    if (isViewer) return;
-    if (creating || !customerIdStr) return;
-    const detailMeta =
-      detail && typeof detail === "object" && (detail as Record<string, unknown>).meta && typeof (detail as Record<string, unknown>).meta === "object"
-        ? ((detail as Record<string, unknown>).meta as Record<string, unknown>)
-        : {};
-    const modelMeta =
-      model && typeof model === "object" && model.meta && typeof model.meta === "object"
-        ? (model.meta as Record<string, unknown>)
-        : {};
-    const nextMeta = {
-      ...detailMeta,
-      ...modelMeta,
-      notes: notes.trim() ? notes : null,
-    };
-    await patchCustomer.mutateAsync({
-      id: customerIdStr,
-      patch: { meta: nextMeta },
-    });
   };
 
   const titleName =
@@ -565,8 +542,8 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                 setModel={setModel}
                 onToggleActive={onToggleActive}
                 statusBusy={setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending}
-                onSaveNotes={!creating && !isViewer ? onSaveNotes : undefined}
-                notesSaving={patchCustomer.isPending}
+                customerId={!creating ? customerIdStr || undefined : undefined}
+                isViewer={isViewer}
               />
             )}
             {tab === "enrollments" && hasRecord && <EnrollmentsTab customerId={customerId!} />}

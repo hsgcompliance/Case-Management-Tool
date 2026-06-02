@@ -12,6 +12,7 @@ import {
 } from "@entities/Page/dashboardStyle/data/pinnedGrants";
 import type { TGrant as Grant } from "@types";
 import { fmtCurrencyUSD } from "@lib/formatters";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
 
@@ -50,6 +51,10 @@ function getGrantKind(g: Grant): "grant" | "program" {
   if (k === "program") return "program";
   if (k === "grant") return "grant";
   return Number((g as any)?.budget?.total ?? 0) <= 0 ? "program" : "grant";
+}
+
+function getFinancialCapabilities(g: Grant) {
+  return getGrantFinancialCapabilities(g as Record<string, unknown>);
 }
 
 function getBudgetLineItems(g: Grant): Array<{
@@ -118,7 +123,7 @@ function eligibilityEntries(value: unknown): Array<[string, string]> {
 
 function buildPages(g: Grant): Page[] {
   const pages: Page[] = [{ kind: "enrollment" }];
-  if (getGrantKind(g) === "grant") {
+  if (getFinancialCapabilities(g).hasFinancialActivity) {
     for (const item of getBudgetLineItems(g)) {
       pages.push({ kind: "lineItem", item });
     }
@@ -156,6 +161,8 @@ function PinnedGrantCard({
 
   const g = grant as Grant;
   const kind = getGrantKind(g);
+  const financialCapabilities = getFinancialCapabilities(g);
+  const drawsDownBudget = financialCapabilities.drawsDownBudget;
   const status = String((g as any)?.status || "draft");
   const pages = buildPages(g);
   const safePage = Math.min(pageIdx, pages.length - 1);
@@ -230,18 +237,19 @@ function PinnedGrantCard({
 
         {currentPage.kind === "lineItem" && (() => {
           const li = currentPage.item;
-          const pct = li.amount > 0 ? Math.min(100, (li.spent / li.amount) * 100) : 0;
+          const pct = drawsDownBudget && li.amount > 0 ? Math.min(100, (li.spent / li.amount) * 100) : 100;
+          const activityTotal = li.spent + li.projected;
           return (
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Line Item</div>
               <div className="font-semibold text-slate-800 dark:text-slate-100">{li.label}</div>
               <div className="space-y-1 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Budget</span>
+                  <span className="text-slate-500">{drawsDownBudget ? "Budget" : "Reference"}</span>
                   <span className="font-medium">{fmtUsd(li.amount)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Spent</span>
+                  <span className="text-slate-500">{drawsDownBudget ? "Spent" : "Recorded Spend"}</span>
                   <span className="text-amber-600 dark:text-amber-400">{fmtUsd(li.spent)}</span>
                 </div>
                 {li.projected > 0 && (
@@ -253,12 +261,12 @@ function PinnedGrantCard({
               </div>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div
-                  className={`h-full rounded-full ${li.remaining < 0 ? "bg-rose-500" : "bg-amber-400"}`}
+                  className={`h-full rounded-full ${drawsDownBudget && li.remaining < 0 ? "bg-rose-500" : "bg-amber-400"}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <div className={`text-right text-xs font-bold ${li.remaining < 0 ? "text-rose-500" : "text-emerald-500"}`}>
-                {fmtUsd(li.remaining)} remaining
+              <div className={`text-right text-xs font-bold ${drawsDownBudget && li.remaining < 0 ? "text-rose-500" : "text-emerald-500"}`}>
+                {drawsDownBudget ? `${fmtUsd(li.remaining)} remaining` : `${fmtUsd(activityTotal)} activity`}
               </div>
             </div>
           );
