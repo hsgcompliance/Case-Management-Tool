@@ -19,12 +19,14 @@ export function SettingsPage() {
   const qc = useQueryClient();
   const [appCacheCleared, setAppCacheCleared] = useState(false);
   const [calendarBanner, setCalendarBanner] = useState<"connected" | "denied" | "error" | null>(null);
+  const [bannerService, setBannerService] = useState<"googleCalendar" | "googleDrive">("googleCalendar");
 
   // Handle OAuth redirect-back query params
   useEffect(() => {
     const result = searchParams.get("calendar");
     if (!result) return;
     const service = searchParams.get("service") === "googleDrive" ? "googleDrive" : "googleCalendar";
+    setBannerService(service);
 
     if (result === "connected") {
       setCalendarBanner("connected");
@@ -130,7 +132,7 @@ export function SettingsPage() {
                 label: "Connect",
                 onClick: () => driveIntegration.connect(),
                 disabled: false,
-                style: "border-indigo-600 bg-indigo-600 text-white",
+                style: "border-sky-300 bg-sky-100 text-sky-900 shadow-sm shadow-sky-100",
               }
           : connected_
             ? {
@@ -143,7 +145,7 @@ export function SettingsPage() {
                 label: needsReconnect_ ? "Reconnect" : "Connect",
                 onClick: () => (service === "googleCalendar" ? connect() : driveIntegration.connect()),
                 disabled: false,
-                style: "border-indigo-600 bg-indigo-600 text-white",
+                style: "border-sky-300 bg-sky-100 text-sky-900 shadow-sm shadow-sky-100",
               };
     const isBusy = busy || updatingPrefs;
 
@@ -173,12 +175,12 @@ export function SettingsPage() {
             </button>
           ))}
         </div>
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3">
           <button
             type="button"
             disabled={isBusy || action.disabled}
             onClick={() => void action.onClick?.()}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${action.style}`}
+            className={`w-full rounded-xl border px-4 py-3 text-sm font-semibold transition-colors disabled:opacity-50 ${action.style}`}
           >
             {isBusy ? "Working..." : action.label}
           </button>
@@ -205,10 +207,10 @@ export function SettingsPage() {
           <span>{calendarBanner === "connected" ? "âœ“" : "âš ï¸"}</span>
           <span>
             {calendarBanner === "connected"
-              ? "Google Calendar connected successfully."
+              ? `${bannerService === "googleDrive" ? "Google Drive" : "Google Calendar"} connected successfully.`
               : calendarBanner === "denied"
-                ? "Google Calendar access was denied."
-                : "Something went wrong connecting Google Calendar."}
+                ? `${bannerService === "googleDrive" ? "Google Drive" : "Google Calendar"} access was denied.`
+                : `Something went wrong connecting ${bannerService === "googleDrive" ? "Google Drive" : "Google Calendar"}.`}
           </span>
           <button
             type="button"

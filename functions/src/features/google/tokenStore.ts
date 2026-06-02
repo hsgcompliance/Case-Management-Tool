@@ -62,6 +62,45 @@ export async function readPublicMeta(
   return (snap.data()?.integrations?.[service] as GoogleIntegrationMeta) ?? null;
 }
 
+// ── Scope helpers ─────────────────────────────────────────────────────────────
+
+export const SCOPE_DISPLAY_NAMES: Record<string, string> = {
+  "https://www.googleapis.com/auth/drive":                    "Google Drive file access",
+  "https://www.googleapis.com/auth/drive.file":               "Google Drive file access",
+  "https://www.googleapis.com/auth/drive.readonly":           "Google Drive read access",
+  "https://www.googleapis.com/auth/spreadsheets":             "Google Sheets access",
+  "https://www.googleapis.com/auth/spreadsheets.readonly":    "Google Sheets read access",
+  "https://www.googleapis.com/auth/calendar.events":          "Google Calendar access",
+  "https://www.googleapis.com/auth/calendar.events.readonly": "Google Calendar read access",
+};
+
+export type MissingScopesInfo = {
+  missingScopes: string[];
+  missingPermissions: string[];
+};
+
+/**
+ * Checks whether the stored token for a user/service is missing any of the
+ * required scopes. Returns null when all scopes are present or when no token
+ * exists (no token = not connected, not a scope error — callers handle that
+ * separately). Returns MissingScopesInfo when scopes are stored but incomplete.
+ */
+export async function getMissingScopes(
+  uid: string,
+  service: GoogleService,
+  requiredScopes: string[],
+): Promise<MissingScopesInfo | null> {
+  const record = await readToken(uid, service);
+  if (!record?.scopes?.length) return null; // not connected — not a scope error
+  const missing = requiredScopes.filter((s) => !record.scopes.includes(s));
+  if (!missing.length) return null;
+  const seen = new Set<string>();
+  const missingPermissions = missing
+    .map((s) => SCOPE_DISPLAY_NAMES[s] ?? s)
+    .filter((name) => (seen.has(name) ? false : (seen.add(name), true)));
+  return { missingScopes: missing, missingPermissions };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 export function tokenToPublicMeta(record: GoogleTokenRecord): GoogleIntegrationMeta {

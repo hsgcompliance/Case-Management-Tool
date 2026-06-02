@@ -8,6 +8,7 @@ import {
   useGoogleIntegrationConnect,
   useGoogleIntegrationDisconnect,
   useGoogleIntegrationStatuses,
+  useGoogleIntegrationScopes,
 } from "@hooks/useGoogleIntegrations";
 import { toast } from "@lib/toast";
 import {
@@ -144,7 +145,11 @@ function IntegrationToggle({
         ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
         : action.variant === "neutral"
           ? "border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
-          : "border-slate-900 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900";
+          : "border-sky-300 bg-sky-100 text-sky-900 shadow-sm shadow-sky-100 hover:border-sky-400 hover:bg-sky-200 dark:border-sky-700 dark:bg-sky-950/50 dark:text-sky-100 dark:shadow-none dark:hover:bg-sky-900/70";
+  const buttonEmphasis =
+    action.variant === "primary"
+      ? "min-w-[150px] px-5 py-2.5 text-sm"
+      : "min-w-[116px] px-4 py-2 text-xs";
 
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -166,7 +171,7 @@ function IntegrationToggle({
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${buttonClass}`}
+            className={`rounded-lg border font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${buttonEmphasis} ${buttonClass}`}
             disabled={busy || action.disabled}
             onClick={action.onClick}
           >
@@ -191,6 +196,7 @@ function IntegrationToggle({
 export default function SettingsPage() {
   const { profile, reloadProfile, signInWithGoogle } = useAuth();
   const integrationStatuses = useGoogleIntegrationStatuses();
+  const driveScopes = useGoogleIntegrationScopes("googleDrive");
   const calendarConnect = useGoogleIntegrationConnect("googleCalendar");
   const driveConnect = useGoogleIntegrationConnect("googleDrive");
   const calendarDisconnect = useGoogleIntegrationDisconnect("googleCalendar");
@@ -461,6 +467,34 @@ export default function SettingsPage() {
               onClearTemporary={clearTemporaryDriveAccess}
               hasTemporaryDriveToken={hasTemporaryDriveToken}
             />
+            {/* Inline warning when Drive is connected but user unchecked a scope */}
+            {driveMode === "permanent" && !driveScopes.isLoading && driveScopes.scopes.length > 0 && (
+              (!driveScopes.hasDriveScope || !driveScopes.hasSheetsScope) && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold">Some permissions were not granted</div>
+                      <div className="mt-0.5 text-amber-800">
+                        {[
+                          !driveScopes.hasDriveScope && "Google Drive file access",
+                          !driveScopes.hasSheetsScope && "Google Sheets access",
+                        ].filter(Boolean).join(" and ")}{" "}
+                        {(!driveScopes.hasDriveScope && !driveScopes.hasSheetsScope) ? "were" : "was"} not granted.
+                        Click Re-authorize to add {(!driveScopes.hasDriveScope && !driveScopes.hasSheetsScope) ? "them" : "it"}.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+                      disabled={driveConnect.isPending}
+                      onClick={() => void connectIntegration("googleDrive")}
+                    >
+                      {driveConnect.isPending ? "Opening..." : "Re-authorize"}
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
             {getGoogleDriveTokenPersistence() === "local" ? (
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 Temporary Drive tokens are stored in local browser storage on this device.

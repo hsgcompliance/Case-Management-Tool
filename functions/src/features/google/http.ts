@@ -85,6 +85,32 @@ const SERVICE_SCOPES: Record<GoogleService, string[]> = {
   ],
 };
 
+function oauthErrorDetails(err: unknown): Record<string, unknown> {
+  const anyErr = err as {
+    message?: unknown;
+    code?: unknown;
+    response?: {
+      status?: unknown;
+      statusText?: unknown;
+      data?: {
+        error?: unknown;
+        error_description?: unknown;
+        error_uri?: unknown;
+      };
+    };
+  };
+  const data = anyErr?.response?.data;
+  return {
+    message: typeof anyErr?.message === "string" ? anyErr.message : String(err),
+    code: anyErr?.code,
+    status: anyErr?.response?.status,
+    statusText: anyErr?.response?.statusText,
+    oauthError: data?.error,
+    oauthErrorDescription: data?.error_description,
+    oauthErrorUri: data?.error_uri,
+  };
+}
+
 // -- Connect start - generates OAuth URL --------------------------------------
 
 function makeConnectStart(service: GoogleService) {
@@ -118,6 +144,7 @@ function makeConnectStart(service: GoogleService) {
       auth: "user",
       methods: ["POST", "OPTIONS"],
       secrets: GOOGLE_SECRETS,
+      memory: "512MiB",
     },
   );
 }
@@ -133,6 +160,7 @@ export const googleOAuthCallback = onRequest(
   {
     region: RUNTIME.region,
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_STATE_SECRET],
+    memory: "512MiB",
     concurrency: 20,
   },
   async (req, res) => {
@@ -233,7 +261,7 @@ export const googleOAuthCallback = onRequest(
       logger.info("OAuth callback: token stored", { uid, service, googleEmail, scopeCount: record.scopes.length });
       res.redirect(`${settingsUrl}?calendar=connected&service=${service}`);
     } catch (err) {
-      logger.error("OAuth callback: token exchange failed", { uid, service, err: String(err) });
+      logger.error("OAuth callback: token exchange failed", { uid, service, ...oauthErrorDetails(err) });
       res.redirect(`${settingsUrl}?calendar=error&msg=exchange_failed`);
     }
   },
@@ -267,6 +295,7 @@ function makeDisconnect(service: GoogleService) {
       auth: "user",
       methods: ["POST", "OPTIONS"],
       secrets: GOOGLE_SECRETS,
+      memory: "512MiB",
     },
   );
 }
@@ -298,7 +327,7 @@ function makeGetStatus(service: GoogleService) {
         permissionStatus: record.status,
       });
     },
-    { auth: "user", methods: ["GET", "POST", "OPTIONS"], secrets: GOOGLE_SECRETS },
+    { auth: "user", methods: ["GET", "POST", "OPTIONS"], secrets: GOOGLE_SECRETS, memory: "512MiB" },
   );
 }
 

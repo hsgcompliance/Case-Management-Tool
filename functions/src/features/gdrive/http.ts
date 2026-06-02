@@ -8,9 +8,27 @@ import {
   requireOrg,
 } from "../../core";
 import { GDriveListQuery, GDriveCreateFolderBody, GDriveUploadBody, GDriveBuildCustomerFolderBody } from "./schemas";
-import { listInFolder, createFolder, uploadSmallFile, buildCustomerFolder, type DriveListDiagnostics } from "./service";
+import { listInFolder, createFolder, uploadSmallFile, buildCustomerFolder, ScopeMissingError, type DriveListDiagnostics } from "./service";
 import { z } from "zod";
 import { getOrgGDriveConfig, patchOrgGDriveConfig } from "./orgConfig";
+
+// -- Scope error helper --------------------------------------------------------
+
+function buildScopeErrorResponse(err: ScopeMissingError) {
+  const permissions = err.missingPermissions;
+  const hint =
+    `${permissions.join(" and ")} ${permissions.length === 1 ? "was" : "were"} not granted during Google setup. ` +
+    `Click Re-authorize to add ${permissions.length === 1 ? "it" : "them"}.`;
+  return {
+    ok: false as const,
+    error: "oauth_scope_missing",
+    category: "oauth_scope" as const,
+    missingScopes: err.missingScopes,
+    missingPermissions: permissions,
+    hint,
+    reconnectService: err.reconnectService,
+  };
+}
 
 function queryFlag(v: unknown): boolean {
   const raw = Array.isArray(v) ? v[0] : v;
@@ -130,6 +148,10 @@ export const gdriveList = secureHandler(
           : {}),
       });
     } catch (e: any) {
+      if (e instanceof ScopeMissingError) {
+        res.status(403).json(buildScopeErrorResponse(e));
+        return;
+      }
       const msg = String(e?.message || e || "gdrive_list_failed");
       const diagnostics = (e?.diagnostics || undefined) as DriveListDiagnostics | undefined;
       const code = inferStatusCode(msg, diagnostics);
@@ -172,6 +194,7 @@ export const gdriveCreateFolder = secureHandler(
       });
       res.status(200).json({ ok: true, folder: r });
     } catch (e: any) {
+      if (e instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(e)); return; }
       const msg = String(e?.message || e || "gdrive_create_folder_failed");
       const readOnly = msg.includes("shared_oauth_read_only");
       res.status(readOnly ? 403 : 500).json({
@@ -204,6 +227,7 @@ export const gdriveBuildCustomerFolder = secureHandler(
       });
       res.status(200).json({ ok: true, folder });
     } catch (e: any) {
+      if (e instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(e)); return; }
       const msg = String(e?.message || e || "gdrive_build_failed");
       const readOnly = msg.includes("shared_oauth_read_only");
       res.status(readOnly ? 403 : 500).json({
@@ -238,6 +262,7 @@ export const gdriveUpload = secureHandler(
       });
       res.status(200).json({ ok: true, file: r });
     } catch (e: any) {
+      if (e instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(e)); return; }
       const msg = String(e?.message || e);
       const readOnly = msg.includes("shared_oauth_read_only");
       const code = readOnly ? 403 : msg.includes("file_too_large") ? 413 : 400;
