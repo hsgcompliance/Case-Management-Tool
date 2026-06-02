@@ -34,3 +34,4 @@ export * from "./features/metrics";
 export * from "./features/users";
 export * from "./features/tours";
 export * from "./features/orgs";
+export * from "./features/calendar";

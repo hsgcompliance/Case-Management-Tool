@@ -4,7 +4,8 @@
   "workspaces": [
     "contracts",
     "web",
-    "functions"
+    "functions",
+    "mobile-web"
   ],
   "dependencies": {
     "firebase-admin": "^13.10.0",
@@ -14,7 +15,12 @@
   "scripts": {
     "build:functions": "npm -w functions run build",
     "build:web": "npm -w web run build",
+    "build:mobile": "npm -w mobile-web run build",
     "build:contracts": "npm -w contracts run build",
+    "dev:mobile": "npm -w mobile-web run dev",
+    "deploy:web": "node scripts/deploy-hosting-safe.mjs",
+    "deploy:mobile": "npm run build:mobile && firebase deploy --only hosting:mobile",
+    "deploy:mobile:no-push": "npm run build:mobile && firebase deploy --only hosting:mobile --no-push",
     "deploy:hosting": "node scripts/deploy-hosting-safe.mjs",
     "deploy:hosting:no-push": "node scripts/deploy-hosting-safe.mjs --no-push",
     "deploy:functions": "node scripts/deploy-functions-safe.mjs housing-db-v2",

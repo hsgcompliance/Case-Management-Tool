@@ -14,6 +14,7 @@ import type {
   EnrollmentsMigrateReq,
   EnrollmentsUndoMigrationReq,
   EnrollmentsAdminReverseLedgerEntryReq,
+  EnrollmentActionsApplyReq,
 } from "@types";
 import { qk } from "./queryKeys";
 import { RQ_DEFAULTS, RQ_DETAIL } from "./base";
@@ -687,6 +688,20 @@ export function useEnrollmentsAdminReverseLedgerEntry() {
       EnrollmentsAPI.adminReverseLedgerEntry(body),
     onSuccess: async () => {
       await invalidateEnrollmentQueries(qc);
+    },
+  });
+}
+
+export function useEnrollmentActionsApply() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root],
+    mutationFn: (body: EnrollmentActionsApplyReq) => EnrollmentsAPI.actionsApply(body),
+    onSuccess: async (_result, body) => {
+      await invalidateEnrollmentQueries(qc, {
+        enrollmentIds: [String(body.enrollmentId || "").trim()],
+      });
     },
   });
 }

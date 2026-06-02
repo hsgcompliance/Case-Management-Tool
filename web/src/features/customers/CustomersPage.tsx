@@ -108,6 +108,46 @@ function normName(c: TCustomerEntity) {
   ).toLowerCase();
 }
 
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const prev = Array.from({ length: n + 1 }, (_, j) => j);
+  const curr = new Array<number>(n + 1);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      curr[j] =
+        a[i - 1] === b[j - 1]
+          ? prev[j - 1]
+          : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+    }
+    for (let j = 0; j <= n; j++) prev[j] = curr[j];
+  }
+  return prev[n];
+}
+
+// prefix match ("cori" → "corrine") or 1-edit tolerance ("willson" → "wilson")
+function tokenFuzzy(qt: string, nt: string): boolean {
+  if (nt.startsWith(qt)) return true;
+  if (qt.length < 4) return false;
+  if (Math.abs(qt.length - nt.length) > 2) return false;
+  return levenshtein(qt, nt) <= 1;
+}
+
+function matchesSearch(q: string, c: TCustomerEntity): boolean {
+  const name = normName(c);
+  const alias = String((c as any)?.alias || "").toLowerCase().trim();
+  const id = String(c?.id || "").toLowerCase();
+  const hmisId = String(c?.hmisId || "").toLowerCase();
+  const cwId = String(c?.cwId || "").toLowerCase();
+
+  if (name.includes(q) || alias.includes(q) || id.includes(q) || hmisId.includes(q) || cwId.includes(q)) return true;
+
+  const qTokens = q.split(/\s+/).filter(Boolean);
+  if (!qTokens.length) return true;
+  const haystack = [...name.split(/\s+/), ...alias.split(/\s+/)].filter(Boolean);
+  return qTokens.every((qt) => haystack.some((nt) => tokenFuzzy(qt, nt)));
+}
+
 function displayName(c: TCustomerEntity) {
   return (
     (c?.name && String(c.name).trim()) ||
@@ -363,13 +403,7 @@ export function CustomersPage() {
   const displayRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sourceRows;
-    return sourceRows.filter(
-      (c) =>
-        normName(c).includes(q) ||
-        String(c?.id || "").toLowerCase().includes(q) ||
-        String(c?.hmisId || "").toLowerCase().includes(q) ||
-        String(c?.cwId || "").toLowerCase().includes(q),
-    );
+    return sourceRows.filter((c) => matchesSearch(q, c));
   }, [search, sourceRows]);
 
   const activeCardPoolRows = React.useMemo(
@@ -446,15 +480,7 @@ export function CustomersPage() {
 
   const newPageDisplayRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    const rows = !q
-      ? locallyFilteredRows
-      : locallyFilteredRows.filter(
-      (customer) =>
-        normName(customer).includes(q) ||
-        String(customer?.id || "").toLowerCase().includes(q) ||
-        String(customer?.hmisId || "").toLowerCase().includes(q) ||
-        String(customer?.cwId || "").toLowerCase().includes(q),
-      );
+    const rows = !q ? locallyFilteredRows : locallyFilteredRows.filter((customer) => matchesSearch(q, customer));
     return sortCustomerRows(rows, sortMode);
   }, [locallyFilteredRows, search, sortMode]);
 

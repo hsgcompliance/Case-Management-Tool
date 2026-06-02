@@ -8,9 +8,11 @@ const ROOT = path.resolve(SCRIPT_DIR, "..");
 const contractsDir = path.join(ROOT, "contracts");
 const functionsVendorContractsDir = path.join(ROOT, "functions", "vendor", "contracts");
 const webVendorContractsDir = path.join(ROOT, "web", "vendor", "contracts");
+const mobileVendorContractsDir = path.join(ROOT, "mobile-web", "vendor", "contracts");
 const vendorDirs = [
   path.join(ROOT, "functions", "vendor"),
   path.join(ROOT, "web", "vendor"),
+  path.join(ROOT, "mobile-web", "vendor"),
 ];
 
 function sh(cmd, cwd) {
@@ -46,6 +48,11 @@ mkdirSync(webVendorContractsDir, { recursive: true });
 cpSync(path.join(contractsDir, "package.json"), path.join(webVendorContractsDir, "package.json"));
 cpSync(path.join(contractsDir, "dist"), path.join(webVendorContractsDir, "dist"), { recursive: true });
 
+rmSync(mobileVendorContractsDir, { recursive: true, force: true });
+mkdirSync(mobileVendorContractsDir, { recursive: true });
+cpSync(path.join(contractsDir, "package.json"), path.join(mobileVendorContractsDir, "package.json"));
+cpSync(path.join(contractsDir, "dist"), path.join(mobileVendorContractsDir, "dist"), { recursive: true });
+
 const tgzName = shOut("npm pack --silent", contractsDir);
 let tgzPath = path.join(contractsDir, tgzName);
 
@@ -62,5 +69,7 @@ for (const vendorDir of vendorDirs) {
 
 console.log(`Packed -> functions/vendor/contracts.tgz (${tgzName})`);
 console.log(`Packed -> web/vendor/contracts.tgz (${tgzName})`);
+console.log(`Packed -> mobile-web/vendor/contracts.tgz (${tgzName})`);
 console.log("Synced -> functions/vendor/contracts (package.json + dist)");
 console.log("Synced -> web/vendor/contracts (package.json + dist)");
+console.log("Synced -> mobile-web/vendor/contracts (package.json + dist)");

@@ -2,10 +2,12 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@app/auth/AuthProvider";
 import { isAdminLike, isDevLike, isSuperDevLike } from "@lib/roles";
+import { useOverlayLayer } from "@entities/ui/overlayLayers";
 
 export default function MyProfileDropdown() {
   const { user, profile, signOut } = useAuth();
@@ -13,8 +15,12 @@ export default function MyProfileDropdown() {
   const pathname = usePathname() || "";
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
   const ref = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { zIndex, bringToFront } = useOverlayLayer(open, "appChromePopover");
 
   const roles: string[] = Array.isArray(profile?.roles)
     ? (profile!.roles as string[])
@@ -26,16 +32,46 @@ export default function MyProfileDropdown() {
   const isDev = isDevLike(profile as { topRole?: unknown; role?: unknown } | null);
   const isSuperDev = isSuperDevLike(profile as { topRole?: unknown; role?: unknown; roles?: unknown } | null);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const updateMenuPosition = React.useCallback(() => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMenuPos({
+      top: rect.bottom + 8,
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, []);
+
   // click-away
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (open && ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        open &&
+        ref.current &&
+        !ref.current.contains(target) &&
+        !menuRef.current?.contains(target)
+      ) {
         setOpen(false);
       }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
 
   // escape to close
   useEffect(() => {
@@ -63,7 +99,10 @@ export default function MyProfileDropdown() {
       <button
         type="button"
         ref={btnRef}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) updateMenuPosition();
+          setOpen((o) => !o);
+        }}
         className="flex items-center gap-2 text-sm focus:outline-none"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -86,11 +125,14 @@ export default function MyProfileDropdown() {
         </span>
       </button>
 
-      {open && (
+      {open && mounted && createPortal((
         <div
           id="profile-menu"
           role="menu"
-          className="absolute right-0 z-[310] mt-2 w-64 rounded border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-900"
+          ref={menuRef}
+          className="fixed w-64 rounded border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-900"
+          style={{ top: menuPos.top, right: menuPos.right, zIndex }}
+          onMouseDown={bringToFront}
         >
           <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
             <div className="truncate font-medium text-slate-900 dark:text-slate-100">
@@ -174,7 +216,7 @@ export default function MyProfileDropdown() {
             Sign out
           </button>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

@@ -101,6 +101,12 @@ export const qk = {
     sheetFolderIndex: () => ["gdrive", "sheetFolderIndex"] as const,
     config: ["gdrive", "config"] as const,
   },
+  google: {
+    root: ["google"] as const,
+    integration: (service: "googleCalendar" | "googleDrive") =>
+      ["google", "integration", service] as const,
+    integrations: () => ["google", "integrations"] as const,
+  },
   users: {
     root: ["users"] as const,
     list: (f: Record<string, unknown> = {}) => ["users", "list", stable(f || {})] as const,

@@ -1,5 +1,13 @@
 {
   "projects": {
     "default": "housing-db-v2"
+  },
+  "targets": {
+    "housing-db-v2": {
+      "hosting": {
+        "web": ["housing-db-v2"],
+        "mobile": ["housing-db-mobile"]
+      }
+    }
   }
 }

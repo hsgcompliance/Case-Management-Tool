@@ -650,6 +650,44 @@ import type {
   TGDriveCustomerFolderSyncBody,
   TGDriveSyncReconcileItem,
 } from "./gdrive";
+
+/* ============================================================================
+   Google Integrations
+============================================================================ */
+import type {
+  TGoogleConnectStartBody,
+  TGoogleConnectStartRespBody,
+  TGoogleDisconnectRespBody,
+  TGoogleEndpointError,
+  TGoogleIntegrationStatusRespBody,
+} from "./google";
+
+export type GoogleConnectStartReq = TGoogleConnectStartBody;
+export type GoogleConnectStartResp = Ok<TGoogleConnectStartRespBody> | TGoogleEndpointError;
+export type GoogleDisconnectReq = Record<string, never>;
+export type GoogleDisconnectResp = Ok<TGoogleDisconnectRespBody> | TGoogleEndpointError;
+export type GoogleStatusReq = void;
+export type GoogleStatusResp = Ok<TGoogleIntegrationStatusRespBody> | TGoogleEndpointError;
+export type CalendarPostEventReq = {
+  customerName: string;
+  type: string;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  note?: string;
+  activityId?: string;
+};
+export type CalendarPostEventResp =
+  | Ok<{ eventId: string }>
+  | (TGoogleEndpointError & {
+      code?:
+        | "calendar_not_connected"
+        | "calendar_needs_reconnect"
+        | "calendar_permission_denied"
+        | "calendar_api_disabled"
+        | "calendar_token_refresh_failed"
+        | "unknown";
+    });
 export type {
   TCustomerFolder,
   TGDriveBuildCustomerFolderBody,
@@ -674,9 +712,21 @@ export type GDriveFile = {
   [k: string]: unknown;
 };
 
-export type GDriveListResp = Ok<{ files?: GDriveFile[]; nextPageToken?: string } & Record<string, unknown>>;
-export type GDriveCreateFolderResp = Ok<{ folder: GDriveFile }>;
-export type GDriveUploadResp = Ok<{ file: GDriveFile }>;
+export type GDriveEndpointError = TGoogleEndpointError & {
+  code?: TGoogleEndpointError["code"] | "drive_auth_unavailable" | "drive_not_connected";
+  category?:
+    | "auth_config"
+    | "oauth_scope"
+    | "not_found_or_unshared"
+    | "permission_denied"
+    | "auth_failed"
+    | "auth_mode_read_only"
+    | "drive_api_error";
+};
+
+export type GDriveListResp = Ok<{ files?: GDriveFile[]; nextPageToken?: string } & Record<string, unknown>> | GDriveEndpointError;
+export type GDriveCreateFolderResp = Ok<{ folder: GDriveFile }> | GDriveEndpointError;
+export type GDriveUploadResp = Ok<{ file: GDriveFile }> | GDriveEndpointError;
 export type GDriveBuildCustomerFolderResp = Ok<{
   folder: {
     id: string;
@@ -684,8 +734,8 @@ export type GDriveBuildCustomerFolderResp = Ok<{
     url: string;
     warnings?: TGDriveCustomerFolderBuildWarning[];
   };
-}>;
-export type GDriveCustomerFolderIndexResp = Ok<{ folders: TCustomerFolder[] }>;
+}> | GDriveEndpointError;
+export type GDriveCustomerFolderIndexResp = Ok<{ folders: TCustomerFolder[]; warnings?: Array<Record<string, unknown>> }> | GDriveEndpointError;
 export type GDriveConfigGetResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
 export type GDriveConfigPatchResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
 export type GDriveCustomerFolderSyncResp = Ok<{
@@ -705,7 +755,7 @@ export type GDriveCustomerFolderSyncResp = Ok<{
   count?: number;
   sheetConfigured?: boolean;
   items?: TGDriveSyncReconcileItem[];
-}>;
+}> | GDriveEndpointError;
 
 /* =============================================================================
    Inbox
@@ -1071,6 +1121,14 @@ export interface EndpointMap {
   inboxDigestHtmlPreview: { req: InboxDigestHtmlPreviewReq; resp: InboxDigestHtmlPreviewResp };
 
   // DRIVE
+  calendarConnectStart: { req: GoogleConnectStartReq; resp: GoogleConnectStartResp };
+  driveConnectStart: { req: GoogleConnectStartReq; resp: GoogleConnectStartResp };
+  calendarDisconnect: { req: GoogleDisconnectReq; resp: GoogleDisconnectResp };
+  driveDisconnect: { req: GoogleDisconnectReq; resp: GoogleDisconnectResp };
+  calendarStatus: { req: GoogleStatusReq; resp: GoogleStatusResp };
+  driveStatus: { req: GoogleStatusReq; resp: GoogleStatusResp };
+  calendarPostEvent: { req: CalendarPostEventReq; resp: CalendarPostEventResp };
+
   gdriveList: { req: TGDriveListQuery; resp: GDriveListResp };
   gdriveCreateFolder: { req: TGDriveCreateFolderBody; resp: GDriveCreateFolderResp };
   gdriveUpload: { req: TGDriveUploadBody; resp: GDriveUploadResp };

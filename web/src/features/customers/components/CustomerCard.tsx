@@ -19,6 +19,7 @@ import { toApiError } from "@client/api";
 import { normalizePayments, currency, todayISO, nextRentCertDue } from "./paymentScheduleUtils";
 import { customerContactRoleForUid } from "../contactCaseManagers";
 import { getCustomerDriveFolderLink } from "../customerDriveFolder";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const CARD_TASKS_LIMIT = 1000;
@@ -329,7 +330,17 @@ function budgetSummaryForGrant(grant: Record<string, unknown> | null | undefined
   const total = Number(budget.total ?? totals.total ?? 0) || 0;
   const spent = Number(totals.spent ?? budget.spent ?? 0) || 0;
   const projected = Number(totals.projected ?? budget.projected ?? 0) || 0;
-  return { total, spent, projected, available: total - spent - projected };
+  const capabilities = getGrantFinancialCapabilities((grant || {}) as Record<string, unknown>);
+  const drawsDownBudget = capabilities.drawsDownBudget;
+  return {
+    total,
+    spent,
+    projected,
+    available: total - spent - projected,
+    activityTotal: spent + projected,
+    drawsDownBudget,
+    isBillingMode: !drawsDownBudget && (capabilities.billingEnabled || capabilities.usesBillingLedger),
+  };
 }
 
 function PaymentScheduleQuickModal({
@@ -395,12 +406,20 @@ function PaymentScheduleQuickModal({
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">
-          {[
-            ["Budget", budget.total],
-            ["Spent", budget.spent],
-            ["Projected", budget.projected],
-            ["Available", budget.available],
-          ].map(([label, value]) => (
+          {(budget.drawsDownBudget
+            ? [
+                ["Budget", budget.total],
+                ["Spent", budget.spent],
+                ["Projected", budget.projected],
+                ["Available", budget.available],
+              ]
+            : [
+                ["Reference", budget.total],
+                [budget.isBillingMode ? "Recorded Spend" : "Spent", budget.spent],
+                ["Projected", budget.projected],
+                ["Activity Total", budget.activityTotal],
+              ]
+          ).map(([label, value]) => (
             <div key={String(label)} className="rounded-lg border border-slate-200 bg-white p-3">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
               <div className="mt-1 text-lg font-bold text-slate-900">{fmtCurrencyUSD(Number(value))}</div>

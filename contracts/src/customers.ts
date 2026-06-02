@@ -124,6 +124,39 @@ export const CustomerInputSchema = z
     // Drive folders + misc metadata
     meta: CustomerMeta,
 
+  // Customer workbook integration — persisted separately from meta to keep it top-level queryable
+  customerDrive: z
+    .object({
+      folderId: z.string().nullish(),
+      folderUrl: z.string().nullish(),
+      linkedWorkbooks: z
+        .object({
+          tss: z
+            .object({
+              spreadsheetId: z.string().nullish(),
+              spreadsheetUrl: z.string().nullish(),
+              spreadsheetName: z.string().nullish(),
+              standardKey: z.string().nullish(),
+              linkedEnrollmentId: z.string().nullish(),
+              status: z.enum(["linked", "needsReview", "notFound", "error"]).nullish(),
+              linkedBy: z.string().nullish(),
+              linkedAt: z.string().nullish(),
+              updatedAt: z.string().nullish(),
+              detectedSheets: z.array(z.string()).nullish(),
+              defaultEmbedSheetName: z.string().nullish(),
+              defaultSheetGid: z.union([z.string(), z.number()]).nullish(),
+              progressNotesGid: z.union([z.string(), z.number()]).nullish(),
+              lastValidatedAt: z.string().nullish(),
+            })
+            .passthrough()
+            .nullish(),
+        })
+        .passthrough()
+        .nullish(),
+    })
+    .passthrough()
+    .nullish(),
+
     // server-managed timestamps (accepted but ignored on write)
     createdAt: TsLike.nullish().optional(),
     updatedAt: TsLike.nullish().optional(),

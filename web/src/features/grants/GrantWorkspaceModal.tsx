@@ -6,6 +6,7 @@ import { useGrants } from "@hooks/useGrants";
 import type { TGrant as Grant } from "@types";
 import FullPageModal from "@entities/ui/FullPageModal";
 import GrantDetailModal from "./GrantModal";
+import NewGrantProgramWorkspaceModal from "./creation/NewGrantProgramFlow";
 
 type Props = {
   grantId: string | null;
@@ -27,6 +28,16 @@ export default function GrantWorkspaceModal({
     { active: true, limit: 300 },
     { enabled: !!grantId && grantId !== "new", staleTime: 60_000 },
   );
+
+  if (!grantId || grantId === "new") {
+    return (
+      <NewGrantProgramWorkspaceModal
+        initialCreateData={initialCreateData}
+        onClose={onClose}
+        onCreated={onCreated}
+      />
+    );
+  }
 
   const breadcrumbLabel = React.useMemo(() => {
     if (!grantId || grantId === "new") return "New Grant";

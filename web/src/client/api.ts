@@ -223,6 +223,13 @@ export const endpointsStrict = {
   gdriveBuildCustomerFolder:     { method: 'POST', path: 'gdriveBuildCustomerFolder' },
   gdriveConfigGet:               { method: 'GET',  path: 'gdriveConfigGet' },
   gdriveConfigPatch:             { method: 'POST', path: 'gdriveConfigPatch' },
+  calendarConnectStart:          { method: 'POST', path: 'calendarConnectStart' },
+  driveConnectStart:             { method: 'POST', path: 'driveConnectStart' },
+  calendarDisconnect:            { method: 'POST', path: 'calendarDisconnect' },
+  driveDisconnect:               { method: 'POST', path: 'driveDisconnect' },
+  calendarStatus:                { method: 'GET',  path: 'calendarStatus' },
+  driveStatus:                   { method: 'GET',  path: 'driveStatus' },
+  calendarPostEvent:             { method: 'POST', path: 'calendarPostEvent' },
 
   // CUSTOMERS
   customersUpsert:               { method: 'POST',  path: 'customersUpsert' },
@@ -320,6 +327,11 @@ export const endpointsLoose = {
 
   // DRIVE (runtime admin tooling)
   gdriveCustomerFolderSync:     { method: 'POST',  path: 'gdriveCustomerFolderSync' },
+
+  // CUSTOMER WORKBOOK — server-side Drive OAuth integration
+  attachCustomerWorkbookByUrl:              { method: 'POST', path: 'attachCustomerWorkbookByUrl' },
+  listCustomerFolderWorkbookCandidates:     { method: 'GET',  path: 'listCustomerFolderWorkbookCandidates' },
+  attachCustomerWorkbookCandidate:          { method: 'POST', path: 'attachCustomerWorkbookCandidate' },
 
 
 } as const satisfies Record<string, EndpointDef>;
@@ -664,6 +676,7 @@ export function createApi({
   const defaultCacheTtlMs = (name: string, method: HttpMethod) => {
     if (method !== 'GET') return 0;
     if (name === 'tasksOtherListMy') return 0;
+    if (['calendarStatus', 'driveStatus'].includes(name)) return 0;
     if (['enrollmentGetById'].includes(name)) return 60_000;
     if (['enrollmentsList', 'usersList', 'customersList'].includes(name)) return 600_000;
     if (['grantsList', 'grantsStructure'].includes(name)) return 300_000;

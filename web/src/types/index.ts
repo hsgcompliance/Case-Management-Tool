@@ -60,6 +60,15 @@ export type {
   TGrant,
   TGrantStatus,
   TGrantKind,
+  TGrantFinancialModel,
+  TGrantLedgerMode,
+  TGrantFinancialConfig,
+  TGrantFinancialConfigPatch,
+  TGrantCompliancePreset,
+  TGrantComplianceControl,
+  TGrantComplianceConfig,
+  TGrantFinancialCapabilities,
+  TGrantLineItemAmountSemantics,
   TGrantBudgetLineItem,
   TGrantBudgetTotals,
   TGrantBudget,
@@ -100,6 +109,13 @@ export type {
   TGDriveUploadBody,
   TGDriveBuildCustomerFolderBody,
   TCustomerFolder,
+
+  TGoogleAuthMode,
+  TGoogleEndpointError,
+  TGoogleIntegrationMode,
+  TGoogleIntegrationStatus,
+  TGooglePermissionStatus,
+  TGoogleService,
 
   InboxSource,
   TInboxItem,
@@ -388,6 +404,11 @@ export type GDriveConfigPatchResp = RespOf<"gdriveConfigPatch">;
 
 export type GDriveCustomerFolderIndexResp = RespOf<"gdriveCustomerFolderIndex">;
 export type GDriveBuildCustomerFolderResp = RespOf<"gdriveBuildCustomerFolder">;
+
+export type GoogleConnectStartResp = RespOf<"calendarConnectStart"> | RespOf<"driveConnectStart">;
+export type GoogleDisconnectResp = RespOf<"calendarDisconnect"> | RespOf<"driveDisconnect">;
+export type GoogleStatusResp = RespOf<"calendarStatus"> | RespOf<"driveStatus">;
+export type CalendarPostEventResp = RespOf<"calendarPostEvent">;
 
 // If you still want these names explicitly:
 export type GDriveFile =

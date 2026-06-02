@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { createPortal } from "react-dom";
 import { toApiError } from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
@@ -14,6 +15,7 @@ import {
   ACTIVE_PARENT_ID,
   EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
+import { useGoogleIntegrationStatus } from "@hooks/useGoogleIntegrations";
 import {
   useJotformFormsLite,
   useJotformSubmissionsLite,
@@ -26,7 +28,11 @@ import {
 } from "@hooks/useJotform";
 import { JotformDigestDetailCard } from "@features/widgets/jotform/components/JotformDigestDetailCard";
 import { fmtBytes, fmtDateOrDash, fmtDateSmartOrDash } from "@lib/formatters";
-import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
+import {
+  getGoogleDriveAccessToken,
+  getGoogleDriveTokenPersistence,
+  setGoogleDriveTokenPersistence,
+} from "@lib/googleDriveAccessToken";
 import { resolveFunctionsBase } from "@lib/functionsBase";
 import { appCheck } from "@lib/firebase";
 import { getToken as getAppCheckToken } from "firebase/app-check";
@@ -121,6 +127,27 @@ function scoreMatch(
   else if (ff.startsWith(first.toLowerCase())) score += 3;
   if (cwid && fc === cwid.toLowerCase()) score += 15;
   return score;
+}
+
+function MiniStatusPill({
+  label,
+  tone = "slate",
+}: {
+  label: string;
+  tone?: "slate" | "green" | "amber" | "red" | "blue";
+}) {
+  const classes = {
+    slate: "border-slate-200 bg-slate-50 text-slate-600",
+    green: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    red: "border-red-200 bg-red-50 text-red-700",
+    blue: "border-sky-200 bg-sky-50 text-sky-700",
+  }[tone];
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${classes}`}>
+      {label}
+    </span>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -336,6 +363,7 @@ function fileToBase64(file: File): Promise<string> {
 function GDriveBlock({ customerId }: { customerId: string }) {
   const { signInWithGoogle, user } = useAuth();
   const { data: customer } = useCustomer(customerId, { enabled: !!customerId });
+  const driveStatusQ = useGoogleIntegrationStatus("googleDrive", { staleTime: 60_000 });
   const patchCustomer = usePatchCustomers();
   const upload = useGDriveUpload();
   const [connectingGoogle, setConnectingGoogle] = React.useState(false);
@@ -346,9 +374,10 @@ function GDriveBlock({ customerId }: { customerId: string }) {
   const handleConnectGoogle = async () => {
     setConnectingGoogle(true);
     try {
+      setGoogleDriveTokenPersistence("local");
       await signInWithGoogle();
       setHasDriveToken(!!getGoogleDriveAccessToken());
-      toast("Google Drive connected.", { type: "success" });
+      toast("Temporary Google Drive access connected for this browser.", { type: "success" });
     } catch (err) {
       toast(toApiError(err).error || "Google sign-in failed.", { type: "error" });
     } finally {
@@ -428,6 +457,12 @@ function GDriveBlock({ customerId }: { customerId: string }) {
   );
 
   const firstFolder = folders[0] ?? null;
+  const driveStatus = driveStatusQ.data as Record<string, unknown> | undefined;
+  const serverConnected = driveStatus?.permissionStatus === "connected" || driveStatus?.connected === true;
+  const serverStatus = driveStatusQ.isLoading
+    ? "loading"
+    : String(driveStatus?.permissionStatus || "disconnected");
+  const tokenPersistence = getGoogleDriveTokenPersistence();
 
   const filesQ = useGDriveList(
     { folderId: firstFolder?.id },
@@ -788,6 +823,25 @@ function GDriveBlock({ customerId }: { customerId: string }) {
           </div>
         )}
 
+        <div className="mb-4 flex flex-wrap items-center gap-1.5">
+          <MiniStatusPill
+            label={hasDriveToken ? `Temporary access: ${tokenPersistence}` : "Temporary access: missing"}
+            tone={hasDriveToken ? "blue" : "amber"}
+          />
+          <MiniStatusPill
+            label={`Server Drive: ${serverConnected ? "connected" : serverStatus}`}
+            tone={serverConnected ? "green" : serverStatus === "loading" ? "slate" : "amber"}
+          />
+          {firstFolder ? (
+            <MiniStatusPill label="Folder linked" tone="green" />
+          ) : (
+            <MiniStatusPill label="No folder linked" tone="amber" />
+          )}
+          <Link href="/settings" className="ml-auto text-xs text-sky-700 underline hover:text-sky-900">
+            Integration settings
+          </Link>
+        </div>
+
         {diagResult && (
           <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-xs">
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2">
@@ -978,8 +1032,11 @@ function GDriveBlock({ customerId }: { customerId: string }) {
                   disabled={connectingGoogle}
                   onClick={() => void handleConnectGoogle()}
                 >
-                  Re-connect
+                  Connect now
                 </button>
+                <Link href="/settings" className="shrink-0 text-xs text-red-700 underline hover:text-red-900">
+                  Settings
+                </Link>
               </div>
             ) : files.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-sm text-slate-400">

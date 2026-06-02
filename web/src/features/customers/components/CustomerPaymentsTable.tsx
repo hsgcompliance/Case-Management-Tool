@@ -13,6 +13,7 @@ type Props = {
   onManage: (row: CustomerPaymentRow, key: string) => void;
   onAdjustSchedule?: (row: CustomerPaymentRow, key: string) => void;
   onDeleteRow?: (row: CustomerPaymentRow, key: string) => void;
+  rowIssues?: Record<string, { label: string } | undefined>;
   selectedKey?: string | null;
   renderSelectedRowDetail?: (row: CustomerPaymentRow, key: string) => React.ReactNode;
   onTogglePaid?: (row: CustomerPaymentRow, nextPaid: boolean) => void | Promise<void>;
@@ -36,6 +37,7 @@ export default function CustomerPaymentsTable({
   onManage,
   onAdjustSchedule,
   onDeleteRow,
+  rowIssues,
   selectedKey = null,
   renderSelectedRowDetail,
   onTogglePaid,
@@ -103,6 +105,7 @@ export default function CustomerPaymentsTable({
           {rows.map((row, idx) => {
             const p: any = row.payment || {};
             const key = `${row.enrollmentId}:${String(p.id || idx)}`;
+            const issue = rowIssues?.[key];
             const isSelected = selectedKey === key;
             const optimisticPaid = Object.prototype.hasOwnProperty.call(paidOverrides, key)
               ? !!paidOverrides[key]
@@ -119,7 +122,22 @@ export default function CustomerPaymentsTable({
             return (
               <React.Fragment key={key}>
                 <tr className={["border-t border-slate-200 odd:bg-white even:bg-slate-50/60", isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : ""].join(" ")}>
-                  <td className="px-3 py-2 text-slate-800">{fmtDateOrDash(paymentDate(p))}</td>
+                  <td className="px-3 py-2 text-slate-800">
+                    <span className="inline-flex items-center gap-2">
+                      <span>{fmtDateOrDash(paymentDate(p))}</span>
+                      {issue ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 text-[11px] font-bold leading-none text-amber-800"
+                          title={issue.label}
+                          aria-label={issue.label}
+                          onClick={() => onManage(row, key)}
+                        >
+                          !
+                        </button>
+                      ) : null}
+                    </span>
+                  </td>
                   <td className="px-3 py-2"><PaymentTypeBadge payment={p} /></td>
                   <td className="px-3 py-2 text-slate-800">{fmtCurrencyUSD(p.amount || 0)}</td>
                   <td className="px-3 py-2 text-slate-800">

@@ -604,6 +604,7 @@ export function BudgetActivityTab({
   recomputeBudgetTotals,
   num,
   grantId,
+  drawsDownBudget = true,
 }: {
   editing: boolean;
   model: Record<string, any>;
@@ -613,6 +614,7 @@ export function BudgetActivityTab({
   recomputeBudgetTotals: (b: any) => any;
   num: (n: unknown, fallback?: number) => number;
   grantId?: string;
+  drawsDownBudget?: boolean;
 }) {
   const activityQ = useGrantActivity(grantId ?? "", 2000);
   const allActivity: any[] = useMemo(() => (Array.isArray(activityQ.data) ? activityQ.data : []), [activityQ.data]);
@@ -1094,6 +1096,10 @@ export function BudgetActivityTab({
     if (nextExpandedId && !isRentalAssistanceLineItem(lineItem)) refreshActivityData();
   };
   const colCount = editing ? 11 : 10;
+  const amountLabel = drawsDownBudget ? "Budget" : "Reference";
+  const totalLabel = drawsDownBudget ? "Budget" : "Reference Total";
+  const balanceLabel = drawsDownBudget ? "Balance" : "Reference Remaining";
+  const availableLabel = drawsDownBudget ? "Available" : "Reference Available";
   const lineHeaderButton = (key: LineItemSortKey, label: string, className = "") => (
     <button type="button" className={`w-full text-left ${className}`} onClick={() => toggleLineItemSort(key)}>
       {label}
@@ -1103,9 +1109,15 @@ export function BudgetActivityTab({
   return (
     <div className="mt-4 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-[280px] flex-1">
-          <SpendBar total={total} spent={spent} projected={projected} currency={currency} />
-        </div>
+        {drawsDownBudget ? (
+          <div className="min-w-[280px] flex-1">
+            <SpendBar total={total} spent={spent} projected={projected} currency={currency} />
+          </div>
+        ) : (
+          <div className="min-w-[280px] flex-1 rounded-[14px] border border-indigo-200 bg-indigo-50/70 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100">
+            Billing mode: line-item amounts are reference/category values for reporting. They are not grant budget caps.
+          </div>
+        )}
         <button
           type="button"
           className="btn btn-secondary btn-sm"
@@ -1119,18 +1131,18 @@ export function BudgetActivityTab({
 
       <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
         {[
-          { label: "Budget", value: total, editable: true, colorFn: null, title: tip("Total planned budget for this grant.") },
+          { label: totalLabel, value: total, editable: true, colorFn: null, title: tip(drawsDownBudget ? "Total planned budget for this grant." : "Optional reference total for billing/reporting. This is not a hard cap.") },
           { label: "Spent", value: spent, editable: false, colorFn: null, title: tip("Posted ledger spend across all line items.") },
-          { label: "Balance", value: spentBalance, editable: false, colorFn: colorVal, title: tip("Budget minus posted spend.") },
+          { label: balanceLabel, value: spentBalance, editable: false, colorFn: drawsDownBudget ? colorVal : null, title: tip(drawsDownBudget ? "Budget minus posted spend." : "Reference total minus posted spend. This is not availability enforcement.") },
           { label: "Projected Spend", value: projectedSpend, editable: false, colorFn: null, title: tip("Posted spend plus projected obligations.") },
-          { label: "Available", value: projectedBalance, editable: false, colorFn: colorVal, title: tip("Most important number. Budget minus projected spend.") },
+          { label: availableLabel, value: projectedBalance, editable: false, colorFn: drawsDownBudget ? colorVal : null, title: tip(drawsDownBudget ? "Most important number. Budget minus projected spend." : "Reference total minus projected spend. This is not a hard cap.") },
         ].map(({ label, value, editable, colorFn, title }) => (
           <div key={label} className="rounded-[14px] border border-slate-200 px-3 py-2.5" title={title}>
             <div className="mb-1 text-xs text-slate-500">{label}</div>
             {editable && editing ? (
               <input className="input mt-0.5 text-sm font-semibold" type="number" value={budget.total} onChange={(e) => setTotal(Number(e.currentTarget.value))} />
             ) : (
-              <div className={`${label === "Available" ? "text-base font-bold" : "font-semibold"} ${colorFn ? colorFn(value) : "text-slate-900 dark:text-slate-100"}`}>
+              <div className={`${label === availableLabel ? "text-base font-bold" : "font-semibold"} ${colorFn ? colorFn(value) : "text-slate-900 dark:text-slate-100"}`}>
                 {currency(value)}
               </div>
             )}
@@ -1195,11 +1207,11 @@ export function BudgetActivityTab({
             <tr>
               <th title={tip("Line item label. Expand to review activity tied to this budget bucket.")}>{lineHeaderButton("label", "Label")}</th>
               <th className="w-44" title={tip("Reporting category for grouping line item totals across grants. Blank or N/A leaves it uncategorized.")}>{lineHeaderButton("type", "Type")}</th>
-              <th className="text-right" title={tip("Planned dollars assigned to this line item.")}>{lineHeaderButton("budget", "Budget", "text-right")}</th>
+              <th className="text-right" title={tip(drawsDownBudget ? "Planned dollars assigned to this line item." : "Reference amount for billing/reporting. Not a hard cap.")}>{lineHeaderButton("budget", amountLabel, "text-right")}</th>
               <th className="text-right" title={tip("Posted ledger spend recorded against this line item.")}>{lineHeaderButton("spent", "Spent", "text-right")}</th>
-              <th className="text-right" title={tip("Budget minus posted spend.")}>{lineHeaderButton("balance", "Balance", "text-right")}</th>
+              <th className="text-right" title={tip(drawsDownBudget ? "Budget minus posted spend." : "Reference amount minus posted spend. Not enforced as availability.")}>{lineHeaderButton("balance", balanceLabel, "text-right")}</th>
               <th className="text-right" title={tip("Posted spend plus projected obligations.")}>{lineHeaderButton("projectedSpend", "Projected Spend", "text-right")}</th>
-              <th className="text-right" title={tip("Most important number. Budget minus projected spend.")}>{lineHeaderButton("available", "Available", "text-right")}</th>
+              <th className="text-right" title={tip(drawsDownBudget ? "Most important number. Budget minus projected spend." : "Reference amount minus projected spend. Not enforced as a hard cap.")}>{lineHeaderButton("available", availableLabel, "text-right")}</th>
               <th className="w-16" title={tip("Visual spend progress for this line item.")} />
               <th className="w-28" title={tip("Compact status chips for lock and cap settings.")}>{lineHeaderButton("status", "Status", "text-center")}</th>
               {!editing && <th className="w-14 text-right" title={tip("Line item actions.")}>Actions</th>}
@@ -1225,16 +1237,20 @@ export function BudgetActivityTab({
                 const liActivity = grantId ? activityForLineItem(liId) : [];
 
                 const menuItems: ActionItem[] = [
-                  {
-                    key: "add-funds",
-                    label: "Add Funds",
-                    onSelect: () => setFundsState({ index: i, mode: "add" }),
-                  },
-                  {
-                    key: "move-funds",
-                    label: "Move Funds",
-                    onSelect: () => setFundsState({ index: i, mode: "move" }),
-                  },
+                  ...(drawsDownBudget
+                    ? [
+                        {
+                          key: "add-funds",
+                          label: "Add Funds",
+                          onSelect: () => setFundsState({ index: i, mode: "add" }),
+                        },
+                        {
+                          key: "move-funds",
+                          label: "Move Funds",
+                          onSelect: () => setFundsState({ index: i, mode: "move" }),
+                        },
+                      ]
+                    : []),
                   {
                     key: "view-activity",
                     label: "View Activity",
@@ -1304,13 +1320,13 @@ export function BudgetActivityTab({
                     </td>
                     <td className="text-right">
                       {editing ? (
-                        <input className="input w-28 text-right text-sm" type="number" value={num(li.amount)} onChange={(e) => updateLineItem(i, { amount: Number(e.currentTarget.value) })} title={tip("Edit the planned budget for this line item.")} />
+                        <input className="input w-28 text-right text-sm" type="number" value={num(li.amount)} onChange={(e) => updateLineItem(i, { amount: Number(e.currentTarget.value) })} title={tip(drawsDownBudget ? "Edit the planned budget for this line item." : "Edit the reference amount for this billing/reporting category. This is not a hard cap.")} />
                       ) : (
-                        <span title={tip("Planned dollars assigned to this line item.")}>{currency(liAmount)}</span>
+                        <span title={tip(drawsDownBudget ? "Planned dollars assigned to this line item." : "Reference amount for this billing/reporting category. Not a hard cap.")}>{currency(liAmount)}</span>
                       )}
                     </td>
                     <td className="text-right text-slate-700 dark:text-slate-300" title={tip("Posted ledger spend recorded against this line item.")}>{currency(liSpent)}</td>
-                    <td className={`text-right ${colorVal(liSpentBal)}`} title={tip("Budget minus posted spend.")}>{currency(liSpentBal)}</td>
+                    <td className={`text-right ${drawsDownBudget ? colorVal(liSpentBal) : "text-slate-700 dark:text-slate-300"}`} title={tip(drawsDownBudget ? "Budget minus posted spend." : "Reference amount minus posted spend. Not enforced as availability.")}>{currency(liSpentBal)}</td>
                     <td className="text-right">
                       {editing ? (
                         <input className="input w-28 text-right text-sm" type="number" value={num(li.projected)} onChange={(e) => updateLineItem(i, { projected: Number(e.currentTarget.value) })} title={tip("Projected obligations not yet posted to the ledger.")} />
@@ -1318,8 +1334,8 @@ export function BudgetActivityTab({
                         <span className="text-slate-700 dark:text-slate-300" title={tip("Posted spend plus projected obligations.")}>{currency(liProjectedSpend)}</span>
                       )}
                     </td>
-                    <td className={`text-right font-semibold ${colorVal(liProjBal)}`} title={tip("Budget minus projected spend. This is the key availability number.")}>{currency(liProjBal)}</td>
-                    <td title={tip("Visual progress based on posted spend against budget.")}><MiniBar spent={liSpent} amount={liAmount} /></td>
+                    <td className={`text-right font-semibold ${drawsDownBudget ? colorVal(liProjBal) : "text-slate-700 dark:text-slate-300"}`} title={tip(drawsDownBudget ? "Budget minus projected spend. This is the key availability number." : "Reference amount minus projected spend. Not a hard cap.")}>{currency(liProjBal)}</td>
+                    <td title={tip(drawsDownBudget ? "Visual progress based on posted spend against budget." : "Visual comparison against reference amount only.")}><MiniBar spent={liSpent} amount={liAmount} /></td>
                     <td className="text-center">
                       {editing ? (
                         <div className="flex flex-wrap items-center justify-center gap-1">
