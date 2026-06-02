@@ -40,6 +40,28 @@ export function useGoogleIntegrationConnect(service: GoogleIntegrationService) {
   });
 }
 
+const DRIVE_SCOPE    = "https://www.googleapis.com/auth/drive";
+const SHEETS_SCOPE   = "https://www.googleapis.com/auth/spreadsheets";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+/**
+ * Exposes which Google API scopes were actually granted for a connected service.
+ * Returns false for each scope if the service is disconnected or the status
+ * hasn't loaded yet — components should still render, just in a degraded state.
+ */
+export function useGoogleIntegrationScopes(service: GoogleIntegrationService) {
+  const statusQ = useGoogleIntegrationStatus(service, { staleTime: 60_000 });
+  const raw = statusQ.data as Record<string, unknown> | undefined;
+  const scopes = Array.isArray(raw?.scopes) ? (raw.scopes as string[]) : [];
+  return {
+    isLoading: statusQ.isLoading,
+    scopes,
+    hasDriveScope:    scopes.some((s) => s === DRIVE_SCOPE || s.startsWith("https://www.googleapis.com/auth/drive")),
+    hasSheetsScope:   scopes.includes(SHEETS_SCOPE),
+    hasCalendarScope: scopes.includes(CALENDAR_SCOPE),
+  };
+}
+
 export function useGoogleIntegrationDisconnect(service: GoogleIntegrationService) {
   const qc = useQueryClient();
   return useMutation({

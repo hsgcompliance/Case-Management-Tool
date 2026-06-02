@@ -8,6 +8,7 @@ import {
 } from "../../core";
 import * as logger from "firebase-functions/logger";
 import { buildOAuthClient } from "../google/oauthClient";
+import { getMissingScopes } from "../google/tokenStore";
 
 let googleapisPromise: Promise<typeof import("googleapis")> | null = null;
 async function getGoogle() {
@@ -71,6 +72,31 @@ type DriveContext = {
 };
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+
+/**
+ * Thrown when the user's stored OAuth token exists but is missing a required
+ * scope — meaning they unchecked a permission on the Google consent screen.
+ * HTTP handlers catch this and return a structured response that names the
+ * blocked permission and tells the frontend which service to re-authorize.
+ */
+export class ScopeMissingError extends Error {
+  readonly isScopeMissing = true;
+  readonly missingScopes: string[];
+  readonly missingPermissions: string[];
+  readonly reconnectService: "googleDrive" | "googleCalendar";
+
+  constructor(
+    missingScopes: string[],
+    missingPermissions: string[],
+    reconnectService: "googleDrive" | "googleCalendar",
+  ) {
+    super("oauth_scope_missing");
+    this.missingScopes = missingScopes;
+    this.missingPermissions = missingPermissions;
+    this.reconnectService = reconnectService;
+  }
+}
 
 function toDriveErrorInfo(err: any): DriveErrorInfo {
   const responseStatus = Number(err?.response?.status);
@@ -342,11 +368,23 @@ async function buildUserAccessTokenContext(googleAccessToken: string) {
   };
 }
 
-async function buildServerUserOAuthContext(uid: string) {
+async function buildServerUserOAuthContext(uid: string, requiredScopes?: string[]) {
   const cleanUid = String(uid || "").trim();
   if (!cleanUid) throw new Error("missing_server_user_uid");
   const authResult = await buildOAuthClient(cleanUid, "googleDrive");
   if (!authResult.ok) throw new Error(`server_google_drive_${authResult.code}`);
+
+  // Check whether the stored token actually has the required scopes.
+  // The user may have unchecked a permission on the Google consent screen.
+  // If scopes are missing we throw ScopeMissingError rather than proceeding —
+  // the HTTP layer catches this and returns a named-permission error to the client.
+  if (requiredScopes?.length) {
+    const missing = await getMissingScopes(cleanUid, "googleDrive", requiredScopes);
+    if (missing) {
+      throw new ScopeMissingError(missing.missingScopes, missing.missingPermissions, "googleDrive");
+    }
+  }
+
   const { google } = await getGoogle();
   const drive = google.drive({ version: "v3", auth: authResult.auth });
   return {
@@ -357,7 +395,7 @@ async function buildServerUserOAuthContext(uid: string) {
     authDiagnostics: {
       hasRefreshToken: true,
       oauthClientIdSuffix: "",
-      expectedScopes: [DRIVE_SCOPE],
+      expectedScopes: requiredScopes ?? [DRIVE_SCOPE],
       hasDriveScope: true,
     },
   };
@@ -368,6 +406,7 @@ async function buildDriveContext(opts?: {
   includeDiagnostics?: boolean;
   userUid?: string;
   requireWritable?: boolean;
+  requiredScopes?: string[];
 }): Promise<DriveContext> {
   const configuredMode = GOOGLE_DRIVE_AUTH_MODE.value();
   const userUid = String(opts?.userUid || "").trim();
@@ -381,7 +420,7 @@ async function buildDriveContext(opts?: {
     try {
       const context =
         mode === "server_user_oauth"
-          ? await buildServerUserOAuthContext(userUid)
+          ? await buildServerUserOAuthContext(userUid, opts?.requiredScopes)
           : mode === "user_access_token"
           ? await buildUserAccessTokenContext(googleAccessToken)
           : mode === "service_account"
@@ -402,6 +441,9 @@ async function buildDriveContext(opts?: {
         selection: opts?.includeDiagnostics ? selection : undefined,
       };
     } catch (err: any) {
+      // ScopeMissingError means the user connected but didn't grant required scopes.
+      // Don't fall through to other auth modes — surface the specific permission error.
+      if (err instanceof ScopeMissingError) throw err;
       selection.failures.push({
         mode,
         reason: shortErrorMessage(err, `drive_auth_${mode}_failed`),
@@ -447,6 +489,7 @@ export async function getDriveClient(opts?: {
   includeDiagnostics?: boolean;
   userUid?: string;
   requireWritable?: boolean;
+  requiredScopes?: string[];
 }) {
   const { drive } = await buildDriveContext(opts);
   return drive;
@@ -457,8 +500,12 @@ export async function getSheetsClient(opts?: {
   includeDiagnostics?: boolean;
   userUid?: string;
   requireWritable?: boolean;
+  requiredScopes?: string[];
 }) {
-  const { authClient } = await buildDriveContext(opts);
+  const { authClient } = await buildDriveContext({
+    ...opts,
+    requiredScopes: opts?.requiredScopes ?? [SHEETS_SCOPE],
+  });
   const { google } = await getGoogle();
   return google.sheets({ version: "v4", auth: authClient as any });
 }
@@ -473,7 +520,7 @@ export async function listInFolder(
   folderId: string,
   opts?: { includeDiagnostics?: boolean; googleAccessToken?: string; userUid?: string }
 ) {
-  const context = await buildDriveContext(opts);
+  const context = await buildDriveContext({ ...opts, requiredScopes: [DRIVE_SCOPE] });
   const { drive } = context;
   const includeDiagnostics = opts?.includeDiagnostics === true;
   const diagnostics: DriveListDiagnostics = {
@@ -576,7 +623,7 @@ export async function createFolder(
   name: string,
   opts?: { googleAccessToken?: string; includeDiagnostics?: boolean; userUid?: string }
 ) {
-  const drive = await getDriveClient({ ...opts, requireWritable: true });
+  const drive = await getDriveClient({ ...opts, requireWritable: true, requiredScopes: [DRIVE_SCOPE] });
   const r = await drive.files.create({
     requestBody: { name, mimeType: "application/vnd.google-apps.folder", parents: [parentId] },
     fields: "id,name,webViewLink,driveId,parents",
@@ -597,6 +644,7 @@ export async function buildCustomerFolder(args: {
     googleAccessToken: args.googleAccessToken,
     userUid: args.userUid,
     requireWritable: true,
+    requiredScopes: [DRIVE_SCOPE],
   });
 
   // Create main folder
@@ -691,7 +739,7 @@ export async function uploadSmallFile(args: {
   userUid?: string;
 }) {
   const { parentId, name, contentBase64, mimeType = "application/pdf", googleAccessToken, userUid } = args;
-  const drive = await getDriveClient({ googleAccessToken, userUid, requireWritable: true });
+  const drive = await getDriveClient({ googleAccessToken, userUid, requireWritable: true, requiredScopes: [DRIVE_SCOPE] });
   const media = { mimeType, body: Buffer.from(contentBase64, "base64") };
 
   // ~10MB guardrail

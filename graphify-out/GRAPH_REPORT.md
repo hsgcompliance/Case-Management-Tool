@@ -1,11 +1,11 @@
 # Graph Report - .  (2026-06-02)
 
 ## Corpus Check
-- 710 files · ~647,967 words
+- 710 files · ~648,648 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3905 nodes · 5124 edges · 681 communities detected
+- 3906 nodes · 5125 edges · 681 communities detected
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
 - Token cost: 0 input · 0 output
 
@@ -923,28 +923,28 @@ Cohesion: 0.14
 Nodes (7): emptyClientTotals(), emptyGrantEnrollCounts(), emptyPopCounts(), enrollmentState(), enrollmentStatus(), isActiveCustomer(), statusOfCustomer()
 
 ### Community 51 - "Community 51"
-Cohesion: 0.12
-Nodes (1): useGrants()
-
-### Community 52 - "Community 52"
 Cohesion: 0.19
 Nodes (10): capMatchesWant(), evaluateGate(), hasAnyCap(), hasLevel(), normTok(), RoleGate(), roleRankFromClaims(), roleTagsFromClaims() (+2 more)
 
-### Community 53 - "Community 53"
+### Community 52 - "Community 52"
 Cohesion: 0.2
 Nodes (11): amountToCents(), dateIso10(), invoiceLooksLikeCreditCardSpend(), itemMatchesCard(), ledgerMatchesCard(), ledgerRow(), matchingTerms(), monthFrom() (+3 more)
 
-### Community 54 - "Community 54"
+### Community 53 - "Community 53"
 Cohesion: 0.18
 Nodes (7): emptyTree(), groupsToTree(), makeDefaultFormSchemas(), makeEmptyDraft(), makeFormSchema(), newId(), pipelineToDraft()
 
-### Community 55 - "Community 55"
+### Community 54 - "Community 54"
 Cohesion: 0.17
 Nodes (10): applyCustomerActiveToggle(), clone(), isCustomerActive(), isReservedRouteId(), onSave(), onToggleActive(), resetToServer(), stable() (+2 more)
 
-### Community 56 - "Community 56"
+### Community 55 - "Community 55"
 Cohesion: 0.14
 Nodes (4): sanitizeIndexQuery(), sanitizeParentId(), useGDriveBuildCustomerFolder(), useGDriveCustomerFolderIndex()
+
+### Community 56 - "Community 56"
+Cohesion: 0.12
+Nodes (1): useGrants()
 
 ### Community 57 - "Community 57"
 Cohesion: 0.23
@@ -1247,68 +1247,68 @@ Cohesion: 0.5
 Nodes (7): attachWorkbookByUrl(), attachWorkbookCandidate(), buildUserDriveClient(), extractSpreadsheetId(), getCustomerDoc(), isWorkbookMime(), listFolderCandidates()
 
 ### Community 132 - "Community 132"
+Cohesion: 0.25
+Nodes (0): 
+
+### Community 133 - "Community 133"
 Cohesion: 0.39
 Nodes (5): deliverScheduledDigest(), escapeHtml(), extractBodyHtml(), getUserContact(), sendCombinedCaseloadDigest()
 
-### Community 133 - "Community 133"
+### Community 134 - "Community 134"
 Cohesion: 0.5
 Nodes (7): encodeHeaderValue(), escapeHtml(), getGoogle(), getOAuth2(), sendHtmlEmail(), sendInviteService(), sendMonthlySummaryService()
 
-### Community 134 - "Community 134"
+### Community 135 - "Community 135"
 Cohesion: 0.61
 Nodes (6): dobYear(), findDuplicates(), jaro(), jaroWinkler(), n(), scoreDuplicate()
 
-### Community 135 - "Community 135"
+### Community 136 - "Community 136"
 Cohesion: 0.43
 Nodes (6): isRentalAssistance(), PaymentTypeBadge(), PaymentTypeChip(), paymentTypeLabel(), resolvePaymentType(), resolveSubtype()
 
-### Community 136 - "Community 136"
+### Community 137 - "Community 137"
 Cohesion: 0.25
 Nodes (0): 
 
-### Community 137 - "Community 137"
+### Community 138 - "Community 138"
 Cohesion: 0.43
 Nodes (6): findFiberKey(), firstDebugSource(), getFiberForNode(), getName(), getReactSourceFromDom(), normalizeFile()
 
-### Community 138 - "Community 138"
+### Community 139 - "Community 139"
 Cohesion: 0.46
 Nodes (7): addChild(), defaultOperator(), newCondition(), newGroup(), newId(), removeChild(), updateNode()
 
-### Community 139 - "Community 139"
+### Community 140 - "Community 140"
 Cohesion: 0.29
 Nodes (3): CustomerWorkspaceErrorBoundary, CustomerWorkspaceModal(), displayName()
 
-### Community 140 - "Community 140"
+### Community 141 - "Community 141"
 Cohesion: 0.36
 Nodes (5): errorMessage(), openRunner(), parsePayload(), prettyJson(), runEndpoint()
 
-### Community 141 - "Community 141"
+### Community 142 - "Community 142"
 Cohesion: 0.25
 Nodes (0): 
 
-### Community 142 - "Community 142"
+### Community 143 - "Community 143"
 Cohesion: 0.46
 Nodes (5): ACUITY_PRESET(), DEFAULT_DRAFT(), loadExisting(), loadPreset(), REFERRAL_PRESET()
 
-### Community 143 - "Community 143"
+### Community 144 - "Community 144"
 Cohesion: 0.25
 Nodes (0): 
 
-### Community 144 - "Community 144"
+### Community 145 - "Community 145"
 Cohesion: 0.43
 Nodes (3): allowedOrigins(), normalizeOrigin(), setCors()
 
-### Community 145 - "Community 145"
+### Community 146 - "Community 146"
 Cohesion: 0.33
 Nodes (2): normId(), normStr()
 
-### Community 146 - "Community 146"
+### Community 147 - "Community 147"
 Cohesion: 0.38
 Nodes (4): removeUndefinedDeepFromJson(), sanitizeFlatObject(), sanitizeNestedObject(), truncateLongStrings()
-
-### Community 147 - "Community 147"
-Cohesion: 0.29
-Nodes (0): 
 
 ### Community 148 - "Community 148"
 Cohesion: 0.48
@@ -1536,43 +1536,43 @@ Nodes (2): docToActivity(), tsToISO()
 
 ### Community 204 - "Community 204"
 Cohesion: 0.6
-Nodes (2): stableSortObject(), stableStringify()
+Nodes (3): isBrowserLocalhost(), isEmulatorRequested(), shouldUseEmulators()
 
 ### Community 205 - "Community 205"
+Cohesion: 0.6
+Nodes (2): stableSortObject(), stableStringify()
+
+### Community 206 - "Community 206"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 206 - "Community 206"
+### Community 207 - "Community 207"
 Cohesion: 0.6
 Nodes (3): classifyError(), resetAuthAttempt(), startGoogleSignIn()
 
-### Community 207 - "Community 207"
+### Community 208 - "Community 208"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 208 - "Community 208"
+### Community 209 - "Community 209"
 Cohesion: 0.5
 Nodes (2): sanitizeCreditCardForWrite(), stripUndefinedDeep()
 
-### Community 209 - "Community 209"
+### Community 210 - "Community 210"
 Cohesion: 0.6
 Nodes (4): driveHeaders(), maybeDriveHeaders(), sanitizeCustomerFolderIndexQuery(), sanitizeParentId()
 
-### Community 210 - "Community 210"
+### Community 211 - "Community 211"
 Cohesion: 0.6
 Nodes (3): currentMonth(), ledgerToRow(), queueToRow()
 
-### Community 211 - "Community 211"
+### Community 212 - "Community 212"
 Cohesion: 0.4
 Nodes (0): 
-
-### Community 212 - "Community 212"
-Cohesion: 0.5
-Nodes (2): getCardHealth(), SpentRemainingPanel()
 
 ### Community 213 - "Community 213"
-Cohesion: 0.4
-Nodes (0): 
+Cohesion: 0.5
+Nodes (2): getCardHealth(), SpentRemainingPanel()
 
 ### Community 214 - "Community 214"
 Cohesion: 0.4
@@ -1587,36 +1587,36 @@ Cohesion: 0.4
 Nodes (0): 
 
 ### Community 217 - "Community 217"
+Cohesion: 0.4
+Nodes (0): 
+
+### Community 218 - "Community 218"
 Cohesion: 0.6
 Nodes (3): handleClose(), handleSubmit(), parseLast4()
 
-### Community 218 - "Community 218"
+### Community 219 - "Community 219"
 Cohesion: 0.9
 Nodes (4): contactCaseManagerIdsForCustomer(), customerContactRoleForUid(), normalizeOtherContacts(), trimOrEmpty()
 
-### Community 219 - "Community 219"
+### Community 220 - "Community 220"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 220 - "Community 220"
+### Community 221 - "Community 221"
 Cohesion: 0.6
 Nodes (3): asTaskDefs(), async(), maybeGenerateTasks()
 
-### Community 221 - "Community 221"
+### Community 222 - "Community 222"
 Cohesion: 0.5
 Nodes (2): isTypingTarget(), shouldHandleGlobalGameKey()
 
-### Community 222 - "Community 222"
+### Community 223 - "Community 223"
 Cohesion: 0.4
 Nodes (0): 
-
-### Community 223 - "Community 223"
-Cohesion: 0.5
-Nodes (2): DEFAULT_TEMPLATE(), removeTemplate()
 
 ### Community 224 - "Community 224"
-Cohesion: 0.4
-Nodes (0): 
+Cohesion: 0.5
+Nodes (2): DEFAULT_TEMPLATE(), removeTemplate()
 
 ### Community 225 - "Community 225"
 Cohesion: 0.4
@@ -1627,24 +1627,24 @@ Cohesion: 0.4
 Nodes (0): 
 
 ### Community 227 - "Community 227"
-Cohesion: 0.5
-Nodes (2): useGoogleIntegrationStatus(), useGoogleIntegrationStatuses()
-
-### Community 228 - "Community 228"
-Cohesion: 0.8
-Nodes (4): getInboxDetailKind(), hasWord(), isInboxClosed(), tok()
-
-### Community 229 - "Community 229"
 Cohesion: 0.4
 Nodes (0): 
 
+### Community 228 - "Community 228"
+Cohesion: 0.5
+Nodes (2): useGoogleIntegrationStatus(), useGoogleIntegrationStatuses()
+
+### Community 229 - "Community 229"
+Cohesion: 0.8
+Nodes (4): getInboxDetailKind(), hasWord(), isInboxClosed(), tok()
+
 ### Community 230 - "Community 230"
-Cohesion: 0.7
-Nodes (4): inBrowser(), isReassignDebugEnabled(), reassignDebugLog(), setReassignDebugEnabled()
+Cohesion: 0.4
+Nodes (0): 
 
 ### Community 231 - "Community 231"
-Cohesion: 0.6
-Nodes (3): isBrowserLocalhost(), isEmulatorRequested(), shouldUseEmulators()
+Cohesion: 0.7
+Nodes (4): inBrowser(), isReassignDebugEnabled(), reassignDebugLog(), setReassignDebugEnabled()
 
 ### Community 232 - "Community 232"
 Cohesion: 0.5

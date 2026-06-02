@@ -12,9 +12,16 @@ import {
   ACTIVE_PARENT_ID,
   EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
+import { useGoogleIntegrationConnect } from "@hooks/useGoogleIntegrations";
 import { fmtBytes, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
 import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
+import { PermissionErrorBanner, isScopeError, type ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
+import {
+  FileTypeIcon,
+  FOLDER_MIME,
+  getMimeCategory as _getMimeCategory,
+} from "@entities/gdrive/FileTypeIcon";
 import type { TCustomerFolder } from "@types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,10 +38,13 @@ type LinkedFolder = {
 type DriveFile = {
   id?: string;
   name?: string;
+  mimeType?: string;
   size?: number | string;
   modifiedTime?: string;
   webViewLink?: string;
 };
+
+// FileTypeIcon, FOLDER_MIME, getMimeCategory imported from @entities/gdrive/FileTypeIcon
 
 const FOLDER_TEMPLATES = DRIVE_FILE_TEMPLATES;
 const ORIGINAL_CUSTOMER_FILE_TOOL_URL =
@@ -49,7 +59,15 @@ const CUSTOMER_FILE_PARENT_FOLDER_URL =
 function readFiles(input: unknown): DriveFile[] {
   if (!input || typeof input !== "object") return [];
   const files = (input as { files?: unknown }).files;
-  return Array.isArray(files) ? (files as DriveFile[]) : [];
+  if (!Array.isArray(files)) return [];
+  return (files as Array<Record<string, unknown>>).map((f) => ({
+    id:           typeof f.id === "string" ? f.id : undefined,
+    name:         typeof f.name === "string" ? f.name : undefined,
+    mimeType:     typeof f.mimeType === "string" ? f.mimeType : undefined,
+    size:         f.size != null ? (f.size as number | string) : undefined,
+    modifiedTime: typeof f.modifiedTime === "string" ? f.modifiedTime : undefined,
+    webViewLink:  typeof f.webViewLink === "string" ? f.webViewLink : undefined,
+  }));
 }
 
 function parseFolderId(input: string): string | null {
@@ -610,6 +628,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   const patchCustomer = usePatchCustomers();
   const upload = useGDriveUpload();
   const folderSync = useGDriveCustomerFolderSync();
+  const driveConnect = useGoogleIntegrationConnect("googleDrive");
 
   const customerFirst = String((customer as any)?.firstName || "");
   const customerLast = String((customer as any)?.lastName || "");
@@ -634,7 +653,9 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   );
 
   const [activeFolder, setActiveFolder] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  // Subfolder navigation — stack of { id, name } pushed as user drills in
+  const [subfolderStack, setSubfolderStack] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [error, setError] = React.useState<string | ScopeErrorPayload | null>(null);
   const [showBuildDialog, setShowBuildDialog] = React.useState(false);
   const [showLinkDialog, setShowLinkDialog] = React.useState(false);
   const [folderInput, setFolderInput] = React.useState("");
@@ -642,7 +663,25 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   const [mapperBusyFolderId, setMapperBusyFolderId] = React.useState<string | null>(null);
   // Background build state: null = idle, "building" = in-progress
   const [buildingName, setBuildingName] = React.useState<string | null>(null);
+  // Inline subfolder creation
+  const [showSubfolderInput, setShowSubfolderInput] = React.useState(false);
+  const [newSubfolderName, setNewSubfolderName] = React.useState("");
+  const [creatingSubfolder, setCreatingSubfolder] = React.useState(false);
+  // Drag-and-drop upload
+  const [isDragging, setIsDragging] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const dropZoneRef = React.useRef<HTMLDivElement>(null);
+
+  // The folder being listed — current subfolder or the root linked folder
+  const listFolderId = subfolderStack.length > 0
+    ? subfolderStack[subfolderStack.length - 1].id
+    : activeFolder;
+
+  // Reset subfolder stack when the user switches the linked root folder
+  React.useEffect(() => {
+    setSubfolderStack([]);
+    setShowSubfolderInput(false);
+  }, [activeFolder]);
 
   React.useEffect(() => {
     if (!activeFolder && folders.length > 0) setActiveFolder(folders[0].id);
@@ -650,8 +689,8 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   }, [folders, activeFolder]);
 
   const filesQ = useGDriveList(
-    { folderId: activeFolder || undefined },
-    { enabled: !!activeFolder, staleTime: 10_000 },
+    { folderId: listFolderId || undefined },
+    { enabled: !!listFolderId, staleTime: 10_000 },
   );
   const files = readFiles(filesQ.data);
   const filesError = filesQ.error ? toApiError(filesQ.error).error : null;
@@ -785,26 +824,58 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   };
 
   const onUpload = async (file: File) => {
-    if (!activeFolder) return;
+    if (!listFolderId) return;
     if (file.size > 10 * 1024 * 1024) { setError("File must be 10MB or less."); return; }
     setError(null);
-    const contentBase64 = await fileToBase64(file);
-    await upload.mutateAsync({ parentId: activeFolder, name: file.name, mimeType: file.type || "application/octet-stream", contentBase64 });
-    await filesQ.refetch();
+    try {
+      const contentBase64 = await fileToBase64(file);
+      await upload.mutateAsync({ parentId: listFolderId, name: file.name, mimeType: file.type || "application/octet-stream", contentBase64 });
+      await filesQ.refetch();
+    } catch (err) {
+      const apiErr = toApiError(err);
+      setError(isScopeError(apiErr) ? (apiErr as ScopeErrorPayload) : (apiErr.error || "Upload failed."));
+    }
+  };
+
+  const onUploadFiles = async (fileList: FileList | null) => {
+    if (!fileList) return;
+    for (const file of Array.from(fileList)) {
+      await onUpload(file);
+    }
   };
 
   const onCreateSubfolder = async () => {
-    if (!activeFolder) return;
-    const name = window.prompt("New subfolder name");
-    if (!name || !name.trim()) return;
+    const name = newSubfolderName.trim();
+    if (!name || !listFolderId) return;
+    setCreatingSubfolder(true);
     setError(null);
-    // Use raw createFolder API directly (small inline call)
-    const { GDrive } = await import("@client/gdrive");
-    await GDrive.createFolder({ parentId: activeFolder, name: name.trim() });
-    await filesQ.refetch();
+    try {
+      const { GDrive } = await import("@client/gdrive");
+      await GDrive.createFolder({ parentId: listFolderId, name });
+      setNewSubfolderName("");
+      setShowSubfolderInput(false);
+      await filesQ.refetch();
+    } catch (err) {
+      const apiErr = toApiError(err);
+      setError(isScopeError(apiErr) ? (apiErr as ScopeErrorPayload) : (apiErr.error || "Failed to create subfolder."));
+    } finally {
+      setCreatingSubfolder(false);
+    }
   };
 
-  const busy = patchCustomer.isPending || upload.isPending || filesQ.isFetching || folderSync.isPending;
+  const onNavigateInto = (folder: DriveFile) => {
+    if (!folder.id || !folder.name) return;
+    setSubfolderStack((prev) => [...prev, { id: folder.id!, name: folder.name! }]);
+    setShowSubfolderInput(false);
+  };
+
+  const onBreadcrumbNav = (depth: number) => {
+    // depth = -1 means root, 0 means first subfolder, etc.
+    setSubfolderStack((prev) => depth < 0 ? [] : prev.slice(0, depth + 1));
+    setShowSubfolderInput(false);
+  };
+
+  const busy = patchCustomer.isPending || upload.isPending || filesQ.isFetching || folderSync.isPending || creatingSubfolder;
 
   const customerDisplayName =
     String((customer as any)?.name || "").trim() ||
@@ -976,27 +1047,35 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
           <div className="text-base font-semibold text-slate-800">{customerDisplayName} — Drive Files</div>
         )}
         {error && (
-          <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            <div>{error}</div>
-            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              <a
-                href={ORIGINAL_CUSTOMER_FILE_TOOL_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-red-800 underline underline-offset-2 hover:text-red-950"
-              >
-                Open original customer filer tool
-              </a>
-              <a
-                href={CUSTOMER_FILE_PARENT_FOLDER_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-red-800 underline underline-offset-2 hover:text-red-950"
-              >
-                Open customer file folder
-              </a>
+          isScopeError(error) ? (
+            <PermissionErrorBanner
+              payload={error as ScopeErrorPayload}
+              reauthorizing={driveConnect.isPending}
+              onReauthorize={() => void driveConnect.mutateAsync().catch(() => null)}
+            />
+          ) : (
+            <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div>{String(error)}</div>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                <a
+                  href={ORIGINAL_CUSTOMER_FILE_TOOL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-red-800 underline underline-offset-2 hover:text-red-950"
+                >
+                  Open original customer filer tool
+                </a>
+                <a
+                  href={CUSTOMER_FILE_PARENT_FOLDER_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-red-800 underline underline-offset-2 hover:text-red-950"
+                >
+                  Open customer file folder
+                </a>
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {/* Background build progress banner */}
@@ -1165,71 +1244,238 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
             </div>
           </div>
 
-          {/* File list */}
-          <div className="rounded-xl border border-slate-200">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
-              <div className="text-sm font-medium text-slate-900">Files</div>
-              <div className="flex items-center gap-2">
-                <button className="btn btn-ghost btn-sm" onClick={() => void filesQ.refetch()} disabled={!activeFolder || busy}>
-                  Refresh
+          {/* File browser */}
+          <div className="rounded-xl border border-slate-200 flex flex-col min-h-0">
+
+            {/* Header row */}
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 shrink-0">
+              {/* Breadcrumb */}
+              <div className="flex min-w-0 items-center gap-1 text-sm overflow-hidden">
+                <button
+                  type="button"
+                  className={[
+                    "shrink-0 font-medium transition-colors",
+                    subfolderStack.length > 0 ? "text-sky-600 hover:text-sky-800" : "text-slate-900 cursor-default",
+                  ].join(" ")}
+                  onClick={() => onBreadcrumbNav(-1)}
+                  disabled={subfolderStack.length === 0}
+                >
+                  Files
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => fileInputRef.current?.click()} disabled={!activeFolder || busy}>
+                {subfolderStack.map((seg, idx) => (
+                  <React.Fragment key={seg.id}>
+                    <span className="text-slate-300 shrink-0">/</span>
+                    <button
+                      type="button"
+                      className={[
+                        "truncate max-w-[120px] transition-colors",
+                        idx < subfolderStack.length - 1
+                          ? "text-sky-600 hover:text-sky-800"
+                          : "text-slate-900 font-medium cursor-default",
+                      ].join(" ")}
+                      onClick={() => onBreadcrumbNav(idx)}
+                      disabled={idx === subfolderStack.length - 1}
+                      title={seg.name}
+                    >
+                      {seg.name}
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+
+              {/* Actions */}
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => void filesQ.refetch()}
+                  disabled={!listFolderId || busy}
+                  title="Refresh"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!listFolderId || busy}
+                >
                   Upload
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => void onCreateSubfolder()} disabled={!activeFolder || busy}>
-                  + Subfolder
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => { setShowSubfolderInput((v) => !v); setNewSubfolderName(""); }}
+                  disabled={!listFolderId || busy}
+                >
+                  + Folder
                 </button>
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   className="hidden"
-                  onChange={(e) => {
-                    const file = e.currentTarget.files?.[0];
-                    if (file) void onUpload(file);
-                    e.currentTarget.value = "";
-                  }}
+                  onChange={(e) => { void onUploadFiles(e.currentTarget.files); e.currentTarget.value = ""; }}
                 />
               </div>
             </div>
 
-            {!activeFolder ? (
-              <div className="p-3 text-sm text-slate-600">Select a linked folder to view files.</div>
-            ) : filesQ.isLoading ? (
-              <div className="p-3 text-sm text-slate-600">Loading files…</div>
-            ) : filesQ.isError ? (
-              <div className="p-3 text-sm text-rose-700">Failed to load files: {filesError || "Drive request failed."}</div>
-            ) : files.length === 0 ? (
-              <div className="p-3 text-sm text-slate-600">No files found. Upload or open the folder in Drive.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Name</th>
-                      <th className="px-3 py-2 text-left">Modified</th>
-                      <th className="px-3 py-2 text-left">Size</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {files.map((f, idx) => (
-                      <tr key={`${f.id || f.name || "file"}:${idx}`} className="border-t border-slate-100 hover:bg-slate-50">
-                        <td className="px-3 py-2">
-                          {f.webViewLink ? (
-                            <a href={f.webViewLink} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline dark:text-sky-300">
-                              {f.name || "(untitled)"}
-                            </a>
-                          ) : (
-                            f.name || "(untitled)"
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-slate-500">{fmtDateOrDash(f.modifiedTime)}</td>
-                        <td className="px-3 py-2 text-slate-500">{fmtBytes(f.size)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {/* Inline create subfolder */}
+            {showSubfolderInput && (
+              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 shrink-0">
+                <input
+                  autoFocus
+                  className="input input-sm flex-1 text-sm"
+                  placeholder="New folder name"
+                  value={newSubfolderName}
+                  onChange={(e) => setNewSubfolderName(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void onCreateSubfolder();
+                    if (e.key === "Escape") { setShowSubfolderInput(false); setNewSubfolderName(""); }
+                  }}
+                  disabled={creatingSubfolder}
+                />
+                <button
+                  type="button"
+                  className="btn btn-xs btn-primary shrink-0"
+                  disabled={!newSubfolderName.trim() || creatingSubfolder}
+                  onClick={() => void onCreateSubfolder()}
+                >
+                  {creatingSubfolder ? "Creating…" : "Create"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs shrink-0"
+                  onClick={() => { setShowSubfolderInput(false); setNewSubfolderName(""); }}
+                >
+                  Cancel
+                </button>
               </div>
             )}
+
+            {/* File list body — also a drag-and-drop zone */}
+            <div
+              ref={dropZoneRef}
+              className={[
+                "relative flex-1 min-h-0 transition-colors",
+                isDragging ? "bg-sky-50 outline outline-2 outline-dashed outline-sky-300 outline-offset-[-2px] rounded-b-xl" : "",
+              ].join(" ")}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setIsDragging(true); }}
+              onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={(e) => {
+                if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setIsDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                void onUploadFiles(e.dataTransfer.files);
+              }}
+            >
+              {isDragging && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-b-xl">
+                  <div className="rounded-xl bg-white/90 px-4 py-2 text-sm font-medium text-sky-700 shadow-sm">
+                    Drop to upload
+                  </div>
+                </div>
+              )}
+
+              {!listFolderId ? (
+                <div className="p-4 text-sm text-slate-500">Select a linked folder to view files.</div>
+              ) : filesQ.isLoading ? (
+                <div className="flex items-center gap-2 p-4 text-sm text-slate-500">
+                  <svg className="h-4 w-4 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
+                  </svg>
+                  Loading…
+                </div>
+              ) : filesQ.isError ? (
+                <div className="p-3">
+                  {isScopeError(filesQ.error) ? (
+                    <PermissionErrorBanner
+                      payload={filesQ.error as unknown as ScopeErrorPayload}
+                      reauthorizing={driveConnect.isPending}
+                      onReauthorize={() => void driveConnect.mutateAsync().catch(() => null)}
+                    />
+                  ) : (
+                    <div className="text-sm text-rose-700">Failed to load: {filesError || "Drive request failed."}</div>
+                  )}
+                </div>
+              ) : files.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-sm text-slate-400">
+                  <svg className="h-8 w-8 text-slate-200" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" />
+                  </svg>
+                  <span>Empty folder</span>
+                  <span className="text-xs text-slate-300">Upload a file or create a subfolder</span>
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {files.map((f, idx) => {
+                    const isFolder = f.mimeType === FOLDER_MIME;
+                    return (
+                      <li
+                        key={`${f.id || f.name || "f"}:${idx}`}
+                        className="group flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 transition-colors"
+                      >
+                        <FileTypeIcon mime={f.mimeType} />
+
+                        <div className="min-w-0 flex-1">
+                          {isFolder ? (
+                            <button
+                              type="button"
+                              className="w-full truncate text-left text-sm font-medium text-slate-900 hover:text-sky-700 transition-colors"
+                              onClick={() => onNavigateInto(f)}
+                              title={f.name}
+                            >
+                              {f.name || "(untitled)"}
+                            </button>
+                          ) : (
+                            <a
+                              href={f.webViewLink || "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block truncate text-sm text-slate-900 hover:text-sky-700 transition-colors"
+                              title={f.name}
+                            >
+                              {f.name || "(untitled)"}
+                            </a>
+                          )}
+                          {f.modifiedTime && (
+                            <div className="text-[11px] text-slate-400">{fmtDateOrDash(f.modifiedTime)}</div>
+                          )}
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {!isFolder && f.size != null && (
+                            <span className="text-[11px] text-slate-400">{fmtBytes(f.size)}</span>
+                          )}
+                          {isFolder ? (
+                            <button
+                              type="button"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50 transition-colors"
+                              onClick={() => onNavigateInto(f)}
+                            >
+                              Open →
+                            </button>
+                          ) : null}
+                          {f.webViewLink ? (
+                            <a
+                              href={f.webViewLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                              title="Open in Google Drive"
+                            >
+                              ↗
+                            </a>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
 

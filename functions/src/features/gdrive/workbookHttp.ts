@@ -11,6 +11,23 @@ import {
   listFolderCandidates,
   attachWorkbookCandidate,
 } from "./workbookService";
+import { ScopeMissingError } from "./service";
+
+function buildScopeErrorResponse(err: ScopeMissingError) {
+  const permissions = err.missingPermissions;
+  const hint =
+    `${permissions.join(" and ")} ${permissions.length === 1 ? "was" : "were"} not granted during Google setup. ` +
+    `Click Re-authorize to add ${permissions.length === 1 ? "it" : "them"}.`;
+  return {
+    ok: false as const,
+    error: "oauth_scope_missing",
+    category: "oauth_scope" as const,
+    missingScopes: err.missingScopes,
+    missingPermissions: permissions,
+    hint,
+    reconnectService: err.reconnectService,
+  };
+}
 
 const SECRETS = [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_STATE_SECRET];
 
@@ -45,6 +62,7 @@ export const attachCustomerWorkbookByUrl = secureHandler(
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
       const isZod = err?.name === "ZodError";
       const msg = isZod ? "invalid_request" : String(err?.message || "attach_workbook_failed");
       const code = isZod ? 400 : Number(err?.code);
@@ -130,6 +148,7 @@ export const attachCustomerWorkbookCandidate = secureHandler(
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
       const isZod = err?.name === "ZodError";
       const msg = isZod ? "invalid_request" : String(err?.message || "attach_candidate_failed");
       const code = isZod ? 400 : Number(err?.code);
