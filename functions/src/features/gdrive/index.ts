@@ -13,4 +13,5 @@ export {
   attachCustomerWorkbookByUrl,
   listCustomerFolderWorkbookCandidates,
   attachCustomerWorkbookCandidate,
+  getWorkbookData,
 } from "./workbookHttp";

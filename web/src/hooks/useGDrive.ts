@@ -76,6 +76,10 @@ export function useGDriveBuildCustomerFolder(
 ) {
   const qc = useQueryClient();
   const normalizedIndexQuery = sanitizeIndexQuery(indexQuery);
+  // This hook only creates the Drive folder. Customer-link persistence should
+  // follow the Google integrations storage order:
+  // customerDrive.folderId -> meta.driveFolderId -> meta.driveFolders[0].id.
+  // Callers are responsible for mirroring legacy fields during migration.
   return useInvalidateMutation({
     queryClient: qc,
     mutationFn: (body: TGDriveBuildCustomerFolderBody) => GDrive.buildCustomerFolder(body),
@@ -191,6 +195,9 @@ async function appsScriptFetch(route: string, params: Record<string, string>, to
 
 export function useSheetCustomerFolderIndex(opts?: { enabled?: boolean; staleTime?: number }) {
   const enabled = (opts?.enabled ?? true) && !!FOLDER_INDEX_SHEET_ID;
+  // Legacy Apps Script/Sheets index reader. Prefer useGDriveCustomerFolderIndex
+  // for new customer folder resolution and keep this for archive/index fallback
+  // paths until the Drive storage migration is complete.
   return useQuery<{ ok: boolean; folders: TCustomerFolder[] }>({
     ...RQ_DEFAULTS,
     enabled,

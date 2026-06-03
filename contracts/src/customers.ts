@@ -43,6 +43,9 @@ export const CustomerAcuity = z
 
 export const CustomerMeta = z
   .object({
+    // Legacy Drive folder link list. Compatibility read order is:
+    // customerDrive.folderId -> meta.driveFolderId -> meta.driveFolders[0].id.
+    // New structured Drive state should live under customerDrive, not meta.
     driveFolders: z
       .array(
         z.object({
@@ -54,6 +57,8 @@ export const CustomerMeta = z
         }),
       )
       .optional(),
+    // Legacy primary folder pointer kept for backward compatibility. Prefer
+    // customerDrive.folderId for new resolvers and mirror writes during migration.
     driveFolderId: z.string().nullish(),
     notes: z.string().nullish(),
   })
@@ -121,12 +126,14 @@ export const CustomerInputSchema = z
     acuityScore: z.number().nullish(),
     acuity: CustomerAcuity,
 
-    // Drive folders + misc metadata
+    // Drive folders + misc metadata. Drive fields here are compatibility
+    // fallbacks; new structured Drive state belongs under customerDrive.
     meta: CustomerMeta,
 
   // Customer workbook integration — persisted separately from meta to keep it top-level queryable
   customerDrive: z
     .object({
+      // Current primary customer folder pointer for Drive/workbook flows.
       folderId: z.string().nullish(),
       folderUrl: z.string().nullish(),
       linkedWorkbooks: z

@@ -482,6 +482,9 @@ function GDriveBlock({ customerId }: { customerId: string }) {
       : "";
 
   const saveLinkedFolders = async (nextFolders: LinkedFolder[]) => {
+    // Transitional customer folder write. Keep folder resolution aligned with
+    // Google integrations: customerDrive.folderId first, then legacy meta fields.
+    // This panel still writes meta.driveFolders until the customerDrive migration.
     await patchCustomer.mutateAsync({
       id: customerId,
       patch: {

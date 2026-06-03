@@ -726,6 +726,9 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   );
 
   const saveLinkedFolders = async (nextFolders: LinkedFolder[]) => {
+    // Transitional customer folder write. During the Drive storage migration,
+    // mirror this primary folder into customerDrive.folderId and meta.driveFolderId
+    // when the canonical customerDrive object is introduced for this panel.
     await patchCustomer.mutateAsync({
       id: customerId,
       patch: {

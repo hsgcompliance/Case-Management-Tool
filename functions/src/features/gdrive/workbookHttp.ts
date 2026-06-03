@@ -12,6 +12,7 @@ import {
   attachWorkbookCandidate,
 } from "./workbookService";
 import { ScopeMissingError } from "./service";
+import { extractWorkbook, WorkbookNotLinkedError, WorkbookNotConnectedError } from "./workbookExtractor";
 
 function buildScopeErrorResponse(err: ScopeMissingError) {
   const permissions = err.missingPermissions;
@@ -164,5 +165,62 @@ export const attachCustomerWorkbookCandidate = secureHandler(
     secrets: SECRETS,
     memory: "256MiB",
     timeoutSeconds: 30,
+  },
+);
+
+// ── GET getWorkbookData ───────────────────────────────────────────────────────
+// Read-only native extraction of TSS workbook content (Slice A).
+//
+// Strict per-user server OAuth ONLY (workbook-content policy). The caller passes
+// only customerId — the spreadsheet id is resolved from the customer record and
+// the config is resolved server-side. Fails closed: not connected / missing scope
+// returns a structured error so the UI falls back to the iframe / open-sheet path.
+
+export const getWorkbookData = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+    const customerId = String((req.query as Record<string, unknown>)?.customerId || "").trim();
+
+    if (!customerId) {
+      res.status(400).json({ ok: false, error: "missing_customerId" });
+      return;
+    }
+
+    try {
+      const extract = await extractWorkbook({ customerId, uid, orgId });
+      res.json({ ok: true, extract });
+    } catch (err: any) {
+      // Scope missing → named-permission re-authorize banner.
+      if (err instanceof ScopeMissingError) {
+        res.status(403).json(buildScopeErrorResponse(err));
+        return;
+      }
+      // Not connected → UI falls back to iframe/open-sheet.
+      if (err instanceof WorkbookNotConnectedError || String(err?.message) === "google_not_connected") {
+        res.status(409).json({
+          ok: false,
+          error: "google_not_connected",
+          category: "not_connected",
+          reconnectService: "googleDrive",
+          hint: "Connect Google Drive to view workbook content in the app. You can still open the sheet directly.",
+        });
+        return;
+      }
+      // No workbook linked on the customer.
+      if (err instanceof WorkbookNotLinkedError || String(err?.message) === "workbook_not_linked") {
+        res.status(404).json({ ok: false, error: "workbook_not_linked" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: String(err?.message || "workbook_extract_failed") });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["GET", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "512MiB",
+    timeoutSeconds: 60,
   },
 );

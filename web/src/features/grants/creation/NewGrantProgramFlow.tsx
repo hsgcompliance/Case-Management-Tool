@@ -17,7 +17,7 @@ import {
   createInitialGrantProgramDraft,
   DEFAULT_ELIGIBILITY,
   DEFAULT_LEVEL_OF_ASSISTANCE,
-  FINANCIAL_CONFIG_PRESETS,
+  FINANCIAL_LINE_ITEM_PRESETS,
   type FlowInvoiceOption,
   type FlowLineItem,
   type GrantProgramFinancialModel,
@@ -37,7 +37,7 @@ const FLOW_STEPS: Array<{ step: FlowStep; label: string }> = [
   { step: 1, label: "Start" },
   { step: 2, label: "Config" },
   { step: 3, label: "Services" },
-  { step: 4, label: "Budget" },
+  { step: 4, label: "Financial" },
   { step: 5, label: "Tasks" },
   { step: 6, label: "Display" },
   { step: 7, label: "Review" },
@@ -62,6 +62,12 @@ function financialModelLabel(model: GrantProgramFinancialModel) {
   if (model === "budgeted") return "Budgeted spend-down";
   if (model === "billable") return "Billable ledger";
   return "Service only";
+}
+
+function financialStepLabel(model: GrantProgramFinancialModel) {
+  if (model === "budgeted") return "Budget";
+  if (model === "billable") return "Billing";
+  return "No finance";
 }
 
 function lifecycleLabel(kind: GrantProgramLifecycle) {
@@ -281,6 +287,16 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
       financialModel: model,
       allocationEnabled: model === "billable" ? true : model === "serviceOnly" ? false : prev.allocationEnabled,
       authorizationMonths: model === "billable" && !prev.authorizationMonths ? "12" : prev.authorizationMonths,
+      budgetTotal: model === "serviceOnly" ? "" : prev.budgetTotal,
+      lineItems: model === "serviceOnly" ? [] : prev.lineItems,
+    }));
+  };
+
+  const applyLineItemPreset = (preset: keyof typeof FINANCIAL_LINE_ITEM_PRESETS) => {
+    setDraft((prev) => ({
+      ...prev,
+      lineItems: FINANCIAL_LINE_ITEM_PRESETS[preset].map((item) => ({ ...item })),
+      allocationEnabled: prev.financialModel === "billable" ? true : prev.allocationEnabled,
     }));
   };
 
@@ -568,13 +584,28 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
   ) : step === 4 ? (
     <StepFrame
       eyebrow="Page 4"
-      title="Line items and budget"
-      description="Budgeted records use amounts as spend-down allocations. Billable records use line items as billing and allocation categories."
+      title={draft.financialModel === "budgeted" ? "Budget and line items" : draft.financialModel === "billable" ? "Billing categories and ledger setup" : "Service-only setup"}
+      description={draft.financialModel === "budgeted" ? "Line-item amounts are spend-down allocations and drive remaining budget math." : draft.financialModel === "billable" ? "Line items are billing and allocation categories. Amounts are optional references, not hard caps." : "Service-only records do not use budget, billing, allocation, or ledger setup."}
     >
       {draft.financialModel === "serviceOnly" ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">Service-only records skip budget, billing, allocation, and ledger setup.</div>
       ) : (
         <div className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <button type="button" className={optionClass(false)} onClick={() => applyLineItemPreset("rentalAssistance")}>
+              <div className="text-sm font-semibold">Rental assistance</div>
+              <div className="mt-1 text-xs leading-5 text-slate-600">Rent, deposit, and utility categories for assistance workflows.</div>
+            </button>
+            <button type="button" className={optionClass(false)} onClick={() => applyLineItemPreset("creditCard")}>
+              <div className="text-sm font-semibold">Credit card</div>
+              <div className="mt-1 text-xs leading-5 text-slate-600">Single card/category setup for payment tracking.</div>
+            </button>
+            <button type="button" className={optionClass(draft.financialModel === "billable")} onClick={() => applyLineItemPreset("tssBilling")}>
+              <div className="text-sm font-semibold">TSS billing</div>
+              <div className="mt-1 text-xs leading-5 text-slate-600">TSS billing/allocation categories with support services.</div>
+            </button>
+          </div>
+
           {draft.financialModel === "budgeted" ? (
             <label className="field max-w-xs">
               <span className="label">Total budget</span>
@@ -590,7 +621,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
               />
             </label>
           ) : (
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">Billable line items are categories. Amounts are saved as zero in this create flow so they are not treated as hard caps.</div>
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">Billable line items are categories. Reference amounts can be adjusted later in the editor without making them hard spend-down caps.</div>
           )}
 
           <div className="space-y-3">
@@ -828,7 +859,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
                 ].join(" ")}
                 onClick={() => setStep(item.step)}
               >
-                {item.label}
+                {item.step === 4 ? financialStepLabel(draft.financialModel) : item.label}
               </button>
             ))}
           </div>
