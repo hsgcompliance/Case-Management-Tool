@@ -15,4 +15,5 @@ export {
   attachCustomerWorkbookCandidate,
   convertCustomerWorkbookXlsx,
   getWorkbookData,
+  appendCustomerWorkbookRow,
 } from "./workbookHttp";

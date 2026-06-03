@@ -268,25 +268,24 @@ function isRowBlank(grid: Grid, rowIdx: number, colMap: Map<string, number>): bo
   return true;
 }
 
-function extractDataTable(
-  entity: TssNS.TssDisplayEntityConfig,
-  grid: Grid,
-  variant: TssNS.TssWorkbookVariant,
-): { rows: TssNS.TssExtractedRow[]; warnings: TssNS.TssExtractionWarning[]; status: TssNS.TssExtractedEntityStatus } {
-  const warnings: TssNS.TssExtractionWarning[] = [];
-  const range = effectiveRange(entity, variant);
-  const fields = entity.fields ?? [];
-  if (!range || !fields.length) {
-    return { rows: [], warnings, status: "missing_headers" };
-  }
+type TableLayout = {
+  headerRow: number;            // 0-based
+  colMap: Map<string, number>;  // fieldId → 0-based column index
+  warnings: TssNS.TssExtractionWarning[];
+};
 
-  // 1. Determine the header row — drift-tolerant.
-  //
-  // Build candidate rows in priority order: the variant's fixed headerRow, the
-  // configured candidates, the scan window, then a broad fallback over the first
-  // 30 rows. We VERIFY each candidate actually contains the required headers
-  // rather than trusting a fixed row blindly (sheets drift), and fall back to a
-  // relaxed score match if nothing satisfies the strict requirement.
+/**
+ * Locate a data table's header row (drift-tolerant) and map fields → columns.
+ * Shared by read extraction and append-row writing so both agree on layout.
+ * Returns null when no header row can be located.
+ */
+function resolveTableLayout(
+  grid: Grid,
+  range: RangeCfg,
+  fields: readonly TssNS.TssSmartHeaderConfig[],
+  entityId: string,
+): TableLayout | null {
+  const warnings: TssNS.TssExtractionWarning[] = [];
   const mustContain = range.headerScan?.mustContainHeaderIds ?? [];
   const scoreIds = range.headerScan?.scoreHeaderIds ?? mustContain;
   const rowIdsAt = (rowIdx: number) => new Set((grid[rowIdx] ?? []).map((c) => tss.smartHeaderId(c)));
@@ -295,45 +294,33 @@ function extractDataTable(
     return scoreIds.reduce((acc, id) => acc + (ids.has(id) ? 1 : 0), 0);
   };
 
+  // Candidate rows in priority order: fixed headerRow, configured candidates,
+  // scan window, then a broad fallback over the first 30 rows.
   const candidateRows: number[] = [];
   if (typeof range.headerRow === "number") candidateRows.push(range.headerRow - 1);
   for (const n of range.headerRowCandidates ?? []) candidateRows.push(n - 1);
   if (range.headerScan) {
     for (let r = range.headerScan.minRow - 1; r <= range.headerScan.maxRow - 1; r++) candidateRows.push(r);
   }
-  for (let r = 0; r < Math.min(30, MAX_SCAN_ROWS); r++) candidateRows.push(r); // broad fallback
+  for (let r = 0; r < Math.min(30, MAX_SCAN_ROWS); r++) candidateRows.push(r);
   const seenRows = new Set<number>();
   const orderedRows = candidateRows.filter((r) => r >= 0 && !seenRows.has(r) && (seenRows.add(r), true));
 
   let headerRow = -1;
   let bestScore = -1;
-  // Strict pass: must contain all required header ids; pick the best-scoring row.
   for (const r of orderedRows) {
     if (mustContain.length && !mustContain.every((id) => rowIdsAt(r).has(id))) continue;
     const sc = rowScore(r);
     if (sc > bestScore) { bestScore = sc; headerRow = r; }
   }
-  // Relaxed pass: nothing met the strict requirement — accept the row with the
-  // most scored-header matches, if it's a confident match (>= 2 columns).
   if (headerRow < 0) {
     for (const r of orderedRows) {
       const sc = rowScore(r);
       if (sc >= 2 && sc > bestScore) { bestScore = sc; headerRow = r; }
     }
   }
+  if (headerRow < 0) return null;
 
-  if (headerRow < 0) {
-    warnings.push({
-      code: "headers_not_found",
-      message: `Could not locate the header row for "${entity.label}".`,
-      entityId: entity.id,
-      sheetId: range.sheetId,
-      severity: "warning",
-    });
-    return { rows: [], warnings, status: "missing_headers" };
-  }
-
-  // 2. Build fieldId → column index map.
   const headerCells = grid[headerRow] ?? [];
   const colMap = new Map<string, number>();
   for (const field of fields) {
@@ -346,24 +333,54 @@ function extractDataTable(
     else warnings.push({
       code: "column_not_found",
       message: `Column for "${field.expected}" not found.`,
-      entityId: entity.id,
+      entityId,
       sheetId: range.sheetId,
       fieldId: field.id,
       severity: "info",
     });
   }
+  return { headerRow, colMap, warnings };
+}
 
+/** First data-start row (0-based), honoring fixed config only when the fixed header matched. */
+function dataStartRow(range: RangeCfg, headerRow: number): number {
+  const usedFixedHeader = typeof range.headerRow === "number" && headerRow === range.headerRow - 1;
+  return (usedFixedHeader && typeof range.dataStartRow === "number")
+    ? range.dataStartRow - 1
+    : headerRow + (range.dataStartRowOffset ?? 1);
+}
+
+function extractDataTable(
+  entity: TssNS.TssDisplayEntityConfig,
+  grid: Grid,
+  variant: TssNS.TssWorkbookVariant,
+): { rows: TssNS.TssExtractedRow[]; warnings: TssNS.TssExtractionWarning[]; status: TssNS.TssExtractedEntityStatus } {
+  const range = effectiveRange(entity, variant);
+  const fields = entity.fields ?? [];
+  if (!range || !fields.length) {
+    return { rows: [], warnings: [], status: "missing_headers" };
+  }
+
+  const layout = resolveTableLayout(grid, range, fields, entity.id);
+  if (!layout) {
+    return {
+      rows: [],
+      warnings: [{
+        code: "headers_not_found",
+        message: `Could not locate the header row for "${entity.label}".`,
+        entityId: entity.id,
+        sheetId: range.sheetId,
+        severity: "warning",
+      }],
+      status: "missing_headers",
+    };
+  }
+  const { headerRow, colMap, warnings } = layout;
   if (!colMap.size) {
     return { rows: [], warnings, status: "missing_headers" };
   }
 
-  // 3. Determine data start row. Only trust the configured fixed dataStartRow
-  //    when we actually landed on the configured fixed headerRow; otherwise the
-  //    sheet drifted and we derive it from the header row we found.
-  const usedFixedHeader = typeof range.headerRow === "number" && headerRow === range.headerRow - 1;
-  const dataStart = (usedFixedHeader && typeof range.dataStartRow === "number")
-    ? range.dataStartRow - 1
-    : headerRow + (range.dataStartRowOffset ?? 1);
+  const dataStart = dataStartRow(range, headerRow);
 
   // 4. Read rows until dataEnd.
   const rows: TssNS.TssExtractedRow[] = [];
@@ -512,6 +529,111 @@ export async function extractWorkbook(args: {
     configVersion: cfg.version,
     // spreadsheetModifiedTime deferred — needs Drive metadata, not just Sheets scope.
   };
+}
+
+// ── Append row (write-back) ─────────────────────────────────────────────────
+
+/** 0-based column index → A1 column letters. 0→"A", 25→"Z", 26→"AA". */
+function idxToCol(idx: number): string {
+  let n = idx + 1;
+  let out = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+export class WorkbookEntityNotWritableError extends Error {
+  constructor(msg = "entity_not_writable") { super(msg); }
+}
+
+/**
+ * Append a row to a dataTable entity (Slice A: progress notes). Strict per-user
+ * server OAuth so the write is attributed to the signed-in user. Append-only:
+ * we locate the first empty data row of the resolved table and write the mapped
+ * fields there — never editing existing rows.
+ */
+export async function appendWorkbookRow(args: {
+  customerId: string;
+  uid: string;
+  orgId: string;
+  entityId: string;
+  values: Record<string, string>;
+}): Promise<{ rowKey: string; spreadsheetId: string }> {
+  const { customerId, uid, orgId, entityId, values } = args;
+
+  // 1. Resolve workbook + config (same path as extraction).
+  const snap = await admin.firestore().collection("customers").doc(customerId).get();
+  const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  const spreadsheetId = String(customer?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
+  if (!spreadsheetId) throw new WorkbookNotLinkedError();
+
+  const orgConfig = await getOrgGDriveConfig(orgId);
+  const override = orgConfig.worksheetConfig ?? null;
+  const cfg = tss.resolveTssWorksheetConfig(override);
+
+  const entity = Object.values(cfg.entities).find((e) => e.id === entityId);
+  if (!entity) throw new WorkbookEntityNotWritableError("entity_not_found");
+  if (entity.renderKind !== "dataTable" || entity.direction === "worksheetToApp") {
+    throw new WorkbookEntityNotWritableError();
+  }
+
+  // 2. Strict per-user OAuth Sheets client (write attributed to the user).
+  const sheetsApi = await getWorkbookSheetsClient({ userUid: uid, requiredScopes: [SHEETS_SCOPE] });
+
+  // 3. Resolve sheet + variant + grid.
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(title,sheetId)",
+  });
+  const sheets: SheetMeta[] = (meta.data?.sheets ?? [])
+    .map((s: any) => ({ title: String(s?.properties?.title ?? ""), sheetId: Number(s?.properties?.sheetId ?? 0) }))
+    .filter((s: SheetMeta) => s.title);
+  const variant = tss.resolveWorkbookVariant(override, detectVariant(cfg, sheets));
+
+  const range = effectiveRange(entity, variant);
+  const fields = entity.fields ?? [];
+  if (!range || !fields.length) throw new WorkbookEntityNotWritableError("entity_has_no_table");
+
+  const sheetTitle = resolveSheetTitle(cfg, range.sheetId, sheets);
+  if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
+  const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
+
+  // 4. Resolve layout + find the first empty data row to append into.
+  const layout = resolveTableLayout(grid, range, fields, entity.id);
+  if (!layout || !layout.colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
+  const { colMap } = layout;
+  const start = dataStartRow(range, layout.headerRow);
+
+  let insertRow = -1;
+  for (let r = start; r < MAX_SCAN_ROWS; r++) {
+    if (isRowBlank(grid, r, colMap)) { insertRow = r; break; }
+  }
+  if (insertRow < 0) throw new WorkbookEntityNotWritableError("table_full");
+
+  // 5. Build the row array spanning the mapped columns and write it.
+  const cols = [...colMap.values()];
+  const minCol = Math.min(...cols);
+  const maxCol = Math.max(...cols);
+  const rowArr: string[] = new Array(maxCol - minCol + 1).fill("");
+  for (const field of fields) {
+    const col = colMap.get(field.id);
+    if (col == null) continue;
+    const v = values[field.id];
+    if (v != null && String(v).length) rowArr[col - minCol] = String(v);
+  }
+
+  const a1 = `${quoteTitle(sheetTitle)}!${idxToCol(minCol)}${insertRow + 1}:${idxToCol(maxCol)}${insertRow + 1}`;
+  await sheetsApi.spreadsheets.values.update({
+    spreadsheetId,
+    range: a1,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [rowArr] },
+  });
+
+  return { rowKey: `row-${insertRow + 1}`, spreadsheetId };
 }
 
 export { ScopeMissingError };
