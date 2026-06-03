@@ -106,6 +106,96 @@ function DataTable({
   );
 }
 
+// ── notes-list renderer (progress notes) ────────────────────────────────────
+// Long-form entries render far better as stacked cards than as a wide table.
+
+function cellText(row: TssNS.TssExtractedRow, fieldId: string | undefined): string {
+  if (!fieldId) return "";
+  const cell = row.values[fieldId];
+  return cell?.displayValue ?? (cell?.value != null ? String(cell.value) : "");
+}
+
+function NotesList({
+  entity,
+  cfgEntity,
+}: {
+  entity: TssNS.TssExtractedEntity;
+  cfgEntity: TssNS.TssDisplayEntityConfig | undefined;
+}) {
+  const fields = cfgEntity?.fields ?? [];
+  const byId = (pred: (f: TssNS.TssSmartHeaderConfig) => boolean) => fields.find(pred)?.id;
+
+  // Identify roles from the config rather than hardcoding ids.
+  const dateId    = byId((f) => f.dataType === "date");
+  const tierId    = byId((f) => f.optionSourceId === "serviceTier" || /tier/i.test(f.id));
+  const summaryId = byId((f) => f.id === "summary") ?? byId((f) => f.dataType === "longText");
+  const responseId = byId((f) => /response|progress/i.test(f.id) && f.id !== summaryId);
+
+  // Remaining fields become a compact meta footer (label: value), excluding
+  // the ones already shown and any empty values.
+  const shown = new Set([dateId, tierId, summaryId, responseId].filter(Boolean) as string[]);
+  const metaFields = fields.filter((f) => !shown.has(f.id) && f.dataType !== "computed");
+
+  const labelOf = (id?: string) => fields.find((f) => f.id === id)?.display?.label
+    ?? fields.find((f) => f.id === id)?.expected ?? "";
+
+  // Newest first when a date column exists.
+  const rows = [...(entity.rows ?? [])];
+  if (dateId) {
+    rows.sort((a, b) => {
+      const da = Date.parse(cellText(a, dateId)); const db = Date.parse(cellText(b, dateId));
+      if (Number.isNaN(da) && Number.isNaN(db)) return 0;
+      if (Number.isNaN(da)) return 1;
+      if (Number.isNaN(db)) return -1;
+      return db - da;
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => {
+        const date = cellText(row, dateId);
+        const tier = cellText(row, tierId);
+        const summary = cellText(row, summaryId);
+        const response = cellText(row, responseId);
+        return (
+          <div key={row.rowKey} className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">{date || "—"}</div>
+              {tier ? (
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                  {tier}
+                </span>
+              ) : null}
+            </div>
+            {summary ? (
+              <p className="mt-1.5 whitespace-pre-wrap text-sm text-slate-700">{summary}</p>
+            ) : null}
+            {response ? (
+              <p className="mt-1.5 whitespace-pre-wrap text-xs text-slate-500">
+                <span className="font-medium text-slate-600">{labelOf(responseId)}: </span>{response}
+              </p>
+            ) : null}
+            {metaFields.length ? (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-400">
+                {metaFields.map((f) => {
+                  const v = cellText(row, f.id);
+                  if (!v) return null;
+                  return (
+                    <span key={f.id}>
+                      <span className="text-slate-500">{f.display?.label ?? f.expected}:</span> {v}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Per-entity block ─────────────────────────────────────────────────────────
 
 function EntityBlock({
@@ -153,7 +243,9 @@ function EntityBlock({
       body = entity.renderKind === "keyValueCard"
         ? <KeyValueCard entity={entity} cfgEntity={cfgEntity} />
         : entity.renderKind === "dataTable"
-          ? <DataTable entity={entity} cfgEntity={cfgEntity} />
+          ? (entity.section === "notes"
+              ? <NotesList entity={entity} cfgEntity={cfgEntity} />
+              : <DataTable entity={entity} cfgEntity={cfgEntity} />)
           : <StatusNote tone="slate">Open the Sheet view to see this section.</StatusNote>;
       break;
     default:
