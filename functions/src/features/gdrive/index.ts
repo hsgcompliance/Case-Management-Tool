@@ -13,5 +13,6 @@ export {
   attachCustomerWorkbookByUrl,
   listCustomerFolderWorkbookCandidates,
   attachCustomerWorkbookCandidate,
+  convertCustomerWorkbookXlsx,
   getWorkbookData,
 } from "./workbookHttp";

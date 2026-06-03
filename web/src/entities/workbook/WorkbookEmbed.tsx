@@ -101,6 +101,12 @@ export function WorkbookEmbed({
     `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
   const embedUrl = buildEmbedUrl(spreadsheetId, gid);
 
+  // A cross-origin iframe captures wheel events, which "freezes" page scroll
+  // when the cursor is over the sheet. Guard with a click-to-interact overlay:
+  // the page scrolls normally on hover, a click activates the sheet, and leaving
+  // the area re-arms the guard so scroll passes through again.
+  const [interactive, setInteractive] = React.useState(false);
+
   const retry = () => {
     setFailed(false);
     setLoaded(false);
@@ -118,31 +124,49 @@ export function WorkbookEmbed({
   return (
     <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
       {!loaded && <LoadingSkeleton />}
-      <iframe
-        key={iframeKey}
-        src={embedUrl}
-        className={[
-          "block w-full border-0 transition-opacity duration-200",
-          loaded ? "opacity-100" : "opacity-0 h-0",
-        ].join(" ")}
-        style={loaded ? { height: "70dvh", minHeight: 420 } : undefined}
-        onLoad={() => setLoaded(true)}
-        onError={() => setFailed(true)}
-        allow="clipboard-read; clipboard-write"
-        title={spreadsheetName}
-      />
+      <div
+        className="relative"
+        onMouseLeave={() => setInteractive(false)}
+      >
+        <iframe
+          key={iframeKey}
+          src={embedUrl}
+          className={[
+            "block w-full border-0 transition-opacity duration-200",
+            loaded ? "opacity-100" : "opacity-0 h-0",
+          ].join(" ")}
+          style={loaded ? { height: "70dvh", minHeight: 420 } : undefined}
+          onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
+          allow="clipboard-read; clipboard-write"
+          title={spreadsheetName}
+        />
+        {/* Scroll guard: visible only when loaded and not yet activated. */}
+        {loaded && !interactive && (
+          <button
+            type="button"
+            aria-label="Click to interact with the sheet"
+            className="group absolute inset-0 flex items-start justify-center bg-transparent"
+            onClick={() => setInteractive(true)}
+          >
+            <span className="mt-3 rounded-full bg-slate-900/70 px-3 py-1 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+              Click to interact · scroll the page anywhere else
+            </span>
+          </button>
+        )}
+      </div>
       {loaded && (
         <div className="flex items-center justify-between border-t border-slate-100 bg-white px-3 py-2">
           <span className="text-xs text-slate-400">
-            If the sheet doesn&apos;t load,{" "}
-            <button
-              type="button"
-              className="text-sky-600 underline hover:text-sky-800"
-              onClick={() => setFailed(true)}
-            >
-              switch to manual mode
-            </button>
+            {interactive ? "Sheet active — move your cursor out to scroll the page." : "Click the sheet to edit."}
           </span>
+          <button
+            type="button"
+            className="text-xs text-sky-600 underline hover:text-sky-800"
+            onClick={() => setFailed(true)}
+          >
+            Switch to manual mode
+          </button>
         </div>
       )}
     </div>

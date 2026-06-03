@@ -10,6 +10,7 @@ import {
   attachWorkbookByUrl,
   listFolderCandidates,
   attachWorkbookCandidate,
+  convertXlsxAndAttach,
 } from "./workbookService";
 import { ScopeMissingError } from "./service";
 import { extractWorkbook, WorkbookNotLinkedError, WorkbookNotConnectedError } from "./workbookExtractor";
@@ -165,6 +166,54 @@ export const attachCustomerWorkbookCandidate = secureHandler(
     secrets: SECRETS,
     memory: "256MiB",
     timeoutSeconds: 30,
+  },
+);
+
+// ── POST convertCustomerWorkbookXlsx ──────────────────────────────────────────
+// Converts an .xlsx/.xls file in the customer folder into a native Google Sheet
+// and links it as the TSS workbook. Folder-surface write (user OAuth preferred).
+
+const ConvertXlsxBody = z.object({
+  customerId: z.string().min(1),
+  fileId: z.string().min(1),
+  fileName: z.string().optional(),
+  enrollmentId: z.string().optional(),
+});
+
+export const convertCustomerWorkbookXlsx = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    requireOrg(caller);
+
+    try {
+      const body = ConvertXlsxBody.parse(req.body ?? {});
+      const result = await convertXlsxAndAttach({
+        customerId: body.customerId,
+        uid,
+        fileId: body.fileId,
+        fileName: body.fileName,
+        enrollmentId: body.enrollmentId,
+        googleAccessToken: readGoogleAccessToken(req),
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      const isZod = err?.name === "ZodError";
+      const msg = isZod ? "invalid_request" : String(err?.message || "workbook_convert_failed");
+      const code = isZod ? 400 : Number(err?.code);
+      res.status(isZod ? 400 : (Number.isFinite(code) && code >= 400 && code <= 599 ? code : 500)).json({
+        ok: false,
+        error: msg,
+      });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "256MiB",
+    timeoutSeconds: 60,
   },
 );
 

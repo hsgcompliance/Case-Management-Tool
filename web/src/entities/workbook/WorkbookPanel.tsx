@@ -18,7 +18,6 @@ import { useGoogleIntegrationStatus, useGoogleIntegrationConnect } from "@hooks/
 import { qk } from "@hooks/queryKeys";
 import {
   getGoogleDriveAccessToken,
-  getGoogleDriveTokenPersistence,
   setGoogleDriveTokenPersistence,
 } from "@lib/googleDriveAccessToken";
 import { toast } from "@lib/toast";
@@ -100,17 +99,26 @@ function StatusBar({
   serverConnected,
   serverStatus,
   tokenPresent,
-  tokenPersistence,
+  onConnect,
+  connecting,
 }: {
   folderId: string;
   hasWorkbook: boolean;
   serverConnected: boolean;
   serverStatus: string;
   tokenPresent: boolean;
-  tokenPersistence: string;
+  onConnect?: () => void;
+  connecting?: boolean;
 }) {
+  // Connection: server (per-user OAuth) → local (temp browser token) → none.
+  const connection: "server" | "local" | "none" | "loading" =
+    serverStatus === "loading" ? "loading"
+      : serverConnected ? "server"
+      : tokenPresent ? "local"
+      : "none";
+
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <StatusChip
         label={folderId ? "Folder linked" : "No folder"}
         tone={folderId ? "green" : "amber"}
@@ -119,14 +127,27 @@ function StatusBar({
         label={hasWorkbook ? "Workbook linked" : "No workbook"}
         tone={hasWorkbook ? "green" : "amber"}
       />
-      <StatusChip
-        label={tokenPresent ? `Temp access · ${tokenPersistence}` : "No temp access"}
-        tone={tokenPresent ? "blue" : "slate"}
-      />
-      <StatusChip
-        label={serverConnected ? "Drive connected" : `Drive: ${serverStatus}`}
-        tone={serverConnected ? "green" : serverStatus === "loading" ? "slate" : "amber"}
-      />
+      {connection === "server" ? (
+        <StatusChip label="Connection: Server" tone="green" />
+      ) : connection === "local" ? (
+        <StatusChip label="Connection: Local" tone="blue" />
+      ) : connection === "loading" ? (
+        <StatusChip label="Connection: …" tone="slate" />
+      ) : (
+        <span className="inline-flex items-center gap-1.5">
+          <StatusChip label="No connection" tone="amber" />
+          {onConnect ? (
+            <button
+              type="button"
+              className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+              disabled={connecting}
+              onClick={onConnect}
+            >
+              {connecting ? "Connecting…" : "Connect"}
+            </button>
+          ) : null}
+        </span>
+      )}
     </div>
   );
 }
@@ -193,7 +214,6 @@ export function WorkbookPanel({
   const driveStatus    = driveStatusQ.data as Record<string, unknown> | undefined;
   const serverConnected = !!(driveStatus?.permissionStatus === "connected" || driveStatus?.connected === true);
   const serverStatus    = driveStatusQ.isLoading ? "loading" : String(driveStatus?.permissionStatus ?? "disconnected");
-  const tokenPersistence = getGoogleDriveTokenPersistence();
 
   const openUrl = tssWorkbook?.spreadsheetUrl ||
     (tssWorkbook?.spreadsheetId
@@ -260,7 +280,8 @@ export function WorkbookPanel({
           serverConnected={serverConnected}
           serverStatus={serverStatus}
           tokenPresent={tokenPresent}
-          tokenPersistence={tokenPersistence}
+          onConnect={() => void driveConnect.mutateAsync().catch(() => null)}
+          connecting={driveConnect.isPending}
         />
 
         {authIssue && (
@@ -327,7 +348,8 @@ export function WorkbookPanel({
         serverConnected={serverConnected}
         serverStatus={serverStatus}
         tokenPresent={tokenPresent}
-        tokenPersistence={tokenPersistence}
+        onConnect={() => void driveConnect.mutateAsync().catch(() => null)}
+        connecting={driveConnect.isPending}
       />
 
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-4">
