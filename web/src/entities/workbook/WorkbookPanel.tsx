@@ -21,7 +21,7 @@ import {
   setGoogleDriveTokenPersistence,
 } from "@lib/googleDriveAccessToken";
 import { toast } from "@lib/toast";
-import { WorkbookEmbed } from "./WorkbookEmbed";
+import { WorkbookSheetModal } from "./WorkbookSheetModal";
 import { WorkbookLinkControls } from "./WorkbookLinkControls";
 import type { WorkbookLinkIssue } from "./WorkbookLinkControls";
 import { WorkbookStructuredView } from "./WorkbookStructuredView";
@@ -185,6 +185,7 @@ export function WorkbookPanel({
   const [authIssue,           setAuthIssue]            = React.useState<WorkbookLinkIssue | null>(null);
   // Sheet (iframe) is the default/trusted view; Structured is the native render.
   const [workbookView,        setWorkbookView]         = React.useState<WorkbookView>("sheet");
+  const [sheetModalOpen,      setSheetModalOpen]       = React.useState(false);
 
   const refreshToken = React.useCallback(() => setTokenPresent(!!getGoogleDriveAccessToken()), []);
 
@@ -308,12 +309,40 @@ export function WorkbookPanel({
             onOpenSheet={() => setWorkbookView("sheet")}
           />
         ) : (
-          <WorkbookEmbed
-            spreadsheetId={tssWorkbook!.spreadsheetId!}
-            gid={gid}
-            spreadsheetName={tssWorkbook!.spreadsheetName ?? "Workbook"}
-            spreadsheetUrl={openUrl}
-          />
+          <>
+            {/* Click-to-open card — opens the sheet in a frozen/detachable modal */}
+            <button
+              type="button"
+              onClick={() => setSheetModalOpen(true)}
+              className="group flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-left transition hover:border-sky-300 hover:bg-sky-50"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl" aria-hidden>📄</span>
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    {tssWorkbook!.spreadsheetName ?? "Open the workbook sheet"}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Click to open — full screen, with a detachable window.
+                  </div>
+                </div>
+              </div>
+              <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 group-hover:border-sky-300 group-hover:text-sky-700">
+                Open sheet →
+              </span>
+            </button>
+
+            {sheetModalOpen ? (
+              <WorkbookSheetModal
+                spreadsheetId={tssWorkbook!.spreadsheetId!}
+                gid={gid}
+                spreadsheetName={tssWorkbook!.spreadsheetName ?? "Workbook"}
+                openUrl={openUrl}
+                onClose={() => setSheetModalOpen(false)}
+                onSwitchToStructured={() => { setSheetModalOpen(false); setWorkbookView("structured"); }}
+              />
+            ) : null}
+          </>
         )}
       </div>
     );

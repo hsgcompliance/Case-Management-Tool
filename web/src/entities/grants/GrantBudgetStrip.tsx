@@ -4,6 +4,7 @@ import React from "react";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { useGrant } from "@hooks/useGrants";
 import { fmtCurrencyUSD } from "@lib/formatters";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 type Props = {
   grantId: string | null | undefined;
@@ -119,6 +120,8 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
 
   const totals = grant?.budget?.totals;
   const grantRecord = (grant || null) as Record<string, unknown> | null;
+  const financialCapabilities = getGrantFinancialCapabilities(grantRecord);
+  const drawsDownBudget = financialCapabilities.drawsDownBudget;
   const invoicing = grantRecord?.invoicing && typeof grantRecord.invoicing === "object"
     ? (grantRecord.invoicing as Record<string, unknown>)
     : {};
@@ -144,7 +147,7 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
     return (
       <>
         <div className={`rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 ${className ?? ""}`}>
-          {grantButton} <span className="text-slate-400">-</span> No budget totals available.
+          {grantButton} <span className="text-slate-400">-</span> No financial totals available.
         </div>
         {grantModal}
       </>
@@ -154,7 +157,8 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
   const projectedBalance =
     totals.projectedBalance ?? fromCents(toCents(totals.total) - toCents(totals.spent) - toCents(totals.projected));
   const adjustedBalance = fromCents(toCents(projectedBalance) - toCents(projectionDelta));
-  const isOverspend = adjustedBalance < 0;
+  const isOverspend = drawsDownBudget && adjustedBalance < 0;
+  const projectedActivity = fromCents(toCents(totals.spent) + toCents(totals.projected));
   const lineItems = Array.isArray(grant?.budget?.lineItems) ? grant.budget.lineItems : [];
   const visibleLineItemImpacts = Object.entries(lineItemDeltas || {})
     .filter(([, delta]) => Math.abs(Number(delta || 0)) >= 0.005)
@@ -172,7 +176,7 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
         label,
         delta: fromCents(toCents(delta)),
         after,
-        overBy: Math.max(0, fromCents(toCents(spent) + toCents(after) - toCents(cap))),
+        overBy: drawsDownBudget ? Math.max(0, fromCents(toCents(spent) + toCents(after) - toCents(cap))) : 0,
       };
     })
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
@@ -221,17 +225,23 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
         </div>
       ) : null}
       <div className="flex flex-wrap gap-x-8 gap-y-2 justify-evenly">
-        <Stat label="Budget" value={totals.total} />
-        <Stat label="Spent" value={totals.spent} />
+        <Stat label={drawsDownBudget ? "Budget" : "Reference"} value={totals.total} />
+        <Stat label={drawsDownBudget ? "Spent" : "Recorded"} value={totals.spent} />
         <Stat label="Projected" value={totals.projected} delta={projectionDelta} />
-        <Stat
-          label="Proj. Remaining"
-          value={projectedBalance}
-          delta={-projectionDelta}
-          warnNegative
-          bold
-        />
-        {totals.balance != null && <Stat label="Balance" value={totals.balance} />}
+        {drawsDownBudget ? (
+          <>
+            <Stat
+              label="Proj. Remaining"
+              value={projectedBalance}
+              delta={-projectionDelta}
+              warnNegative
+              bold
+            />
+            {totals.balance != null && <Stat label="Balance" value={totals.balance} />}
+          </>
+        ) : (
+          <Stat label="Activity Total" value={projectedActivity} delta={projectionDelta} bold />
+        )}
       </div>
       {visibleLineItemImpacts.length ? (
         <div className="mt-2 border-t border-slate-200 pt-2">

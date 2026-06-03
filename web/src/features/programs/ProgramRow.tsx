@@ -8,6 +8,7 @@ import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import type { TGrant as Grant } from "@types";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 const POP_KEYS = ["youth", "individual", "family"] as const;
 const POP_LABELS: Record<string, string> = { youth: "Youth", family: "Family", individual: "Individual" };
@@ -94,6 +95,14 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
   const embeddedCaseManagers = asObj(allMetrics.caseManagers);
   const isGrant = String(grantRecord.kind || "").toLowerCase() !== "program";
   const totalBudget = budgetTotal(grant);
+  const financialCapabilities = getGrantFinancialCapabilities(grantRecord);
+  const financeLabel = financialCapabilities.drawsDownBudget
+    ? `${fmtUsd(totalBudget)} budget`
+    : financialCapabilities.billingEnabled
+      ? "Billing"
+      : financialCapabilities.hasFinancialActivity
+        ? "Tracked"
+        : "Service";
 
   const enrollActive = gm?.enrollments?.active ?? embeddedCounts.active ?? "-";
   const enrollInactive = gm?.enrollments?.inactive ?? embeddedCounts.inactive ?? "-";
@@ -152,7 +161,7 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
             <span className="select-text truncate">ID: {String(grant.id || "-")}</span>
-            {isGrant ? <span className="select-text">{fmtUsd(totalBudget)} budget</span> : null}
+            <span className="select-text">{financeLabel}</span>
           </div>
         </div>
 
@@ -213,7 +222,7 @@ export function ProgramRow({ grant, labelOverride, onClick }: ProgramRowProps) {
         </div>
 
         <div className="hidden text-right text-xs font-semibold text-slate-600 dark:text-slate-300 md:col-span-2 md:block">
-          <span className="select-text">{isGrant ? fmtUsd(totalBudget) : "Program"}</span>
+          <span className="select-text">{financeLabel}</span>
         </div>
         {otherOpen ? (
           <div className="col-span-9 rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-12 dark:border-slate-700 dark:bg-slate-950/40">

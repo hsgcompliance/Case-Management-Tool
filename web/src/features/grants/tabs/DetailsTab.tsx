@@ -14,7 +14,7 @@ import {
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
-import { FINANCIAL_LINE_ITEM_PRESETS } from "../creation/grantProgramFlowModel";
+import { FINANCIAL_LINE_ITEM_PRESETS, TSS_COMPLIANCE_CONFIG } from "../creation/grantProgramFlowModel";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -99,6 +99,24 @@ const FINANCIAL_MODEL_COPY: Record<FinancialModel, { title: string; body: string
     title: "Service only",
     body: "No budget, billing, allocation, or ledger workspace for this record.",
   },
+};
+
+const LEGACY_COMPLIANCE_CONFIG = {
+  preset: "hmisCaseworthy",
+  active: [
+    { key: "caseworthyEntryComplete", label: "CW Entry", field: "compliance.caseworthyEntryComplete", type: "boolean" },
+    { key: "hmisEntryComplete", label: "HMIS Entry", field: "compliance.hmisEntryComplete", type: "boolean" },
+  ],
+  inactive: [
+    { key: "caseworthyExitComplete", label: "CW Exit", field: "compliance.caseworthyExitComplete", type: "boolean" },
+    { key: "hmisExitComplete", label: "HMIS Exit", field: "compliance.hmisExitComplete", type: "boolean" },
+  ],
+};
+
+const NO_COMPLIANCE_CONFIG = {
+  preset: "none",
+  active: [],
+  inactive: [],
 };
 
 function financialModelOf(model: Record<string, any>, grant: Grant | null): FinancialModel {
@@ -1041,6 +1059,11 @@ export function DetailsTab({
   const financialConfig = (model.financialConfig ?? grant?.financialConfig ?? FINANCIAL_MODEL_PRESETS[financialModel]) as Record<string, any>;
   const hasFinancialActivity = financialModel !== "serviceOnly";
   const showAuthorizationDefaults = kindVal === "program" || financialModel === "billable";
+  const complianceConfig = (model.complianceConfig ?? grant?.complianceConfig ?? LEGACY_COMPLIANCE_CONFIG) as Record<string, any>;
+  const complianceControls = [
+    ...(Array.isArray(complianceConfig.active) ? complianceConfig.active : []),
+    ...(Array.isArray(complianceConfig.inactive) ? complianceConfig.inactive : []),
+  ];
   const onFinancialModel = useCallback(
     (nextModel: FinancialModel) => {
       const financialConfig = FINANCIAL_MODEL_PRESETS[nextModel];
@@ -1327,6 +1350,7 @@ export function DetailsTab({
                       ...m,
                       ...(canEditKind ? { kind: "program" } : {}),
                       financialConfig: FINANCIAL_MODEL_PRESETS.billable,
+                      complianceConfig: TSS_COMPLIANCE_CONFIG,
                       enrollmentDefaults: {
                         ...((m as any)?.enrollmentDefaults ?? {}),
                         authorizationMonths: authorizationMonthsFrom((m as any)?.enrollmentDefaults) || 12,
@@ -1382,6 +1406,37 @@ export function DetailsTab({
             </div>
             </div>
           ) : null}
+
+          <div className="md:col-span-2 rounded-md border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Enrollment Controls</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  These controls appear on the customer enrollment tab and enrollment quick modal.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => ({ ...m, complianceConfig: LEGACY_COMPLIANCE_CONFIG }))}>
+                  CW/HMIS
+                </button>
+                <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => ({ ...m, complianceConfig: TSS_COMPLIANCE_CONFIG }))}>
+                  TSS Controls
+                </button>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => setModel((m) => ({ ...m, complianceConfig: NO_COMPLIANCE_CONFIG }))}>
+                  None
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {complianceControls.length ? complianceControls.map((control: any) => (
+                <span key={`${control.field || control.key}`} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                  {String(control.label || control.key)}
+                </span>
+              )) : (
+                <span className="text-xs text-slate-500">No enrollment controls configured.</span>
+              )}
+            </div>
+          </div>
 
           {isGrantKind ? (
             <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-2.5 py-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">

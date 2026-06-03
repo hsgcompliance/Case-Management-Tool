@@ -17,6 +17,15 @@ describe("grant program flow payload", () => {
       kind: "program",
       financialConfig: FINANCIAL_CONFIG_PRESETS.billable,
       enrollmentDefaults: { authorizationMonths: 12 },
+      complianceConfig: {
+        preset: "custom",
+        active: expect.arrayContaining([
+          expect.objectContaining({ field: "compliance.caseworthyEntryComplete", label: "CW Entry" }),
+          expect.objectContaining({ field: "compliance.hmisEntryComplete", label: "HMIS Entry" }),
+          expect.objectContaining({ field: "serviceStatus", label: "Service Active" }),
+          expect.objectContaining({ field: "medicaid.status", label: "Medicaid Active" }),
+        ]),
+      },
       budget: {
         total: 0,
         allocationEnabled: true,

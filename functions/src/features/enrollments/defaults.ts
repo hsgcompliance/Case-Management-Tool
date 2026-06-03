@@ -16,23 +16,53 @@ function hasOwn(obj: Record<string, any>, key: string): boolean {
 function applyComplianceDefaults(next: Record<string, any>, grant: Record<string, any>) {
   const config = normalizeGrantComplianceConfig(grant);
   const controls = [...(config.active || []), ...(config.inactive || [])];
-  const complianceKeys = controls
+  const fields = controls
     .map((control) => String(control.field || `compliance.${control.key}`).trim())
+    .filter(Boolean);
+  const complianceKeys = fields
     .filter((field) => field.startsWith("compliance."))
     .map((field) => field.slice("compliance.".length).trim())
     .filter(Boolean);
+  const actionKeys = fields
+    .filter((field) => field.startsWith("actions."))
+    .map((field) => field.slice("actions.".length).trim())
+    .filter(Boolean);
 
-  if (!complianceKeys.length) return;
-
-  const compliance = isPlainObject(next.compliance) ? { ...next.compliance } : {};
-  let changed = false;
-  for (const key of Array.from(new Set(complianceKeys))) {
-    if (hasOwn(compliance, key)) continue;
-    compliance[key] = false;
-    changed = true;
+  if (fields.includes("serviceStatus") && !next.serviceStatus) {
+    next.serviceStatus = "active";
   }
-  if (changed || !isPlainObject(next.compliance)) {
-    next.compliance = compliance;
+
+  if (
+    fields.includes("medicaid.status") &&
+    (!next.medicaid || typeof next.medicaid !== "object" || Array.isArray(next.medicaid))
+  ) {
+    next.medicaid = { status: "active" };
+  }
+
+  if (complianceKeys.length) {
+    const compliance = isPlainObject(next.compliance) ? { ...next.compliance } : {};
+    let changed = false;
+    for (const key of Array.from(new Set(complianceKeys))) {
+      if (hasOwn(compliance, key)) continue;
+      compliance[key] = false;
+      changed = true;
+    }
+    if (changed || !isPlainObject(next.compliance)) {
+      next.compliance = compliance;
+    }
+  }
+
+  if (actionKeys.length) {
+    const actions = isPlainObject(next.actions) ? { ...next.actions } : {};
+    let changed = false;
+    for (const key of Array.from(new Set(actionKeys))) {
+      if (hasOwn(actions, key)) continue;
+      actions[key] = false;
+      changed = true;
+    }
+    if (changed || !isPlainObject(next.actions)) {
+      next.actions = actions;
+    }
   }
 }
 
