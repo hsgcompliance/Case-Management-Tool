@@ -203,7 +203,7 @@ export default function SettingsPage() {
   const driveDisconnect = useGoogleIntegrationDisconnect("googleDrive");
   const profileSettings =
     profile && typeof profile.settings === "object" && profile.settings
-      ? (profile.settings as { textScale?: string; themeMode?: string; googleIntegrationModes?: Record<string, unknown> })
+      ? (profile.settings as { textScale?: string; themeMode?: string; googleIntegrationModes?: Record<string, unknown>; calendarPushDefault?: boolean })
       : undefined;
 
   const profileTaskMode: TTaskMode | null =
@@ -216,6 +216,7 @@ export default function SettingsPage() {
     parseThemeMode(profileSettings?.themeMode)
   );
   const [taskMode, setTaskMode] = React.useState<TTaskMode | null>(() => profileTaskMode);
+  const [calendarPushDefault, setCalendarPushDefault] = React.useState<boolean>(() => Boolean(profileSettings?.calendarPushDefault));
   const [calendarMode, setCalendarMode] = React.useState<GoogleIntegrationMode>(() =>
     integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar")
   );
@@ -230,7 +231,8 @@ export default function SettingsPage() {
     setThemeMode(parseThemeMode(profileSettings?.themeMode));
     setCalendarMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar"));
     setDriveMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleDrive"));
-  }, [profileSettings?.textScale, profileSettings?.themeMode, profileSettings?.googleIntegrationModes]);
+    setCalendarPushDefault(Boolean(profileSettings?.calendarPushDefault));
+  }, [profileSettings?.textScale, profileSettings?.themeMode, profileSettings?.googleIntegrationModes, profileSettings?.calendarPushDefault]);
 
   React.useEffect(() => {
     setTaskMode(profileTaskMode);
@@ -288,6 +290,7 @@ export default function SettingsPage() {
           textScale,
           themeMode,
           googleIntegrationModes: modes,
+          calendarPushDefault,
         },
         ...(taskMode != null
           ? { taskMode, taskModeSetAt: new Date().toISOString(), taskModeSetBy: "self" }
@@ -500,6 +503,22 @@ export default function SettingsPage() {
                 Temporary Drive tokens are stored in local browser storage on this device.
               </div>
             ) : null}
+
+            {/* Default for the per-note "Push to calendar" toggle on progress notes */}
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-sky-600"
+                checked={calendarPushDefault}
+                onChange={(e) => setCalendarPushDefault(e.target.checked)}
+              />
+              <span className="text-slate-700 dark:text-slate-300">
+                Push new progress notes to my Google Calendar by default
+                <span className="block text-xs text-slate-500 dark:text-slate-400">
+                  Pre-checks the “Push to calendar” option when adding a progress note. Requires Calendar connected above.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="flex justify-end" data-tour="settings-actions">

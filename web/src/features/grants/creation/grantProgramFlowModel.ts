@@ -1,9 +1,11 @@
 import {
   getGrantFinancialCapabilities,
   normalizeGrantFinancialConfig,
+  normalizeGrantComplianceConfig,
   type TGrantFinancialConfig,
   type TGrantFinancialModel,
   type TGrantKind,
+  type TGrantComplianceConfig,
 } from "@hdb/contracts";
 
 export type GrantProgramLifecycle = TGrantKind;
@@ -37,6 +39,7 @@ export type GrantProgramFlowDraft = {
   duration: string;
   lengthOfAssistance: string;
   authorizationMonths: string;
+  complianceConfig?: TGrantComplianceConfig | null;
   allocationEnabled: boolean;
   perCustomerCap: string;
   description: string;
@@ -99,6 +102,50 @@ export const TSS_PRESET = {
   kind: "program" as const,
   financialConfig: FINANCIAL_CONFIG_PRESETS.billable,
   enrollmentDefaults: { authorizationMonths: 12 },
+};
+
+export const TSS_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
+  preset: "custom",
+  active: [
+    {
+      key: "caseworthyEntryComplete",
+      label: "CW Entry",
+      field: "compliance.caseworthyEntryComplete",
+      type: "boolean",
+    },
+    {
+      key: "hmisEntryComplete",
+      label: "HMIS Entry",
+      field: "compliance.hmisEntryComplete",
+      type: "boolean",
+    },
+    {
+      key: "serviceStatus",
+      label: "Service Active",
+      field: "serviceStatus",
+      type: "boolean",
+    },
+    {
+      key: "medicaidStatus",
+      label: "Medicaid Active",
+      field: "medicaid.status",
+      type: "boolean",
+    },
+  ],
+  inactive: [
+    {
+      key: "caseworthyExitComplete",
+      label: "CW Exit",
+      field: "compliance.caseworthyExitComplete",
+      type: "boolean",
+    },
+    {
+      key: "hmisExitComplete",
+      label: "HMIS Exit",
+      field: "compliance.hmisExitComplete",
+      type: "boolean",
+    },
+  ],
 };
 
 export const DEFAULT_EXPENSE_CATEGORIES: FlowInvoiceOption[] = [
@@ -258,6 +305,7 @@ export function createInitialGrantProgramDraft(
     duration: text(source.duration) || "1 Year",
     lengthOfAssistance: text(source.lengthOfAssistance || source.maxLengthOfAssistance),
     authorizationMonths: text(enrollmentDefaults.authorizationMonths),
+    complianceConfig: isRecord(source.complianceConfig) ? normalizeGrantComplianceConfig(source) : null,
     allocationEnabled: normalizeGrantFinancialConfig(source).allocationEnabled,
     perCustomerCap: budget.perCustomerCap == null ? "" : text(budget.perCustomerCap),
     description: text(source.description),
@@ -299,6 +347,7 @@ export function applyTssPreset(draft: GrantProgramFlowDraft): GrantProgramFlowDr
     financialModel: "billable",
     allocationEnabled: true,
     authorizationMonths: draft.authorizationMonths || "12",
+    complianceConfig: TSS_COMPLIANCE_CONFIG,
     duration: draft.duration || "Ongoing",
   };
 }
@@ -371,6 +420,9 @@ export function buildGrantProgramPayload(draft: GrantProgramFlowDraft): Record<s
         ? Math.max(1, Math.min(120, Math.floor(asNumber(draft.authorizationMonths, 12))))
         : null,
     },
+    complianceConfig: draft.complianceConfig
+      ? normalizeGrantComplianceConfig({ complianceConfig: draft.complianceConfig })
+      : undefined,
     budget: capabilities.hasFinancialActivity
       ? {
           total: budgetTotal,
