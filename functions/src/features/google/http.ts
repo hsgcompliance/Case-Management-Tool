@@ -205,7 +205,7 @@ export const googleOAuthCallback = onRequest(
         const existing = await readToken(uid, service);
         if (!existing?.refreshToken) {
           logger.warn("OAuth callback: no refresh_token returned and no existing token", { uid, service });
-          res.redirect(`${settingsUrl}?calendar=error&msg=no_refresh_token`);
+          res.redirect(`${settingsUrl}?calendar=error&msg=no_refresh_token&service=${service}`);
           return;
         }
         // Patch access token only
@@ -262,7 +262,7 @@ export const googleOAuthCallback = onRequest(
       res.redirect(`${settingsUrl}?calendar=connected&service=${service}`);
     } catch (err) {
       logger.error("OAuth callback: token exchange failed", { uid, service, ...oauthErrorDetails(err) });
-      res.redirect(`${settingsUrl}?calendar=error&msg=exchange_failed`);
+      res.redirect(`${settingsUrl}?calendar=error&msg=exchange_failed&service=${service}`);
     }
   },
 );
