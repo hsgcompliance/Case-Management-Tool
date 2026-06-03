@@ -14,6 +14,19 @@ async function getGoogle() {
   return googleapisPromise;
 }
 
+// Trim OAuth credential values defensively. A trailing newline or stray
+// whitespace in a stored secret (a common result of how the value was entered
+// into Secret Manager) makes Google's token endpoint reject the exchange with
+// 401 invalid_client "The provided client secret is invalid." Trimming here
+// removes that failure mode regardless of how the secret was set.
+function oauthCreds(): { clientId: string; clientSecret: string; redirectUri: string } {
+  return {
+    clientId:     String(GOOGLE_OAUTH_CLIENT_ID.value() || "").trim(),
+    clientSecret: String(GOOGLE_OAUTH_CLIENT_SECRET.value() || "").trim(),
+    redirectUri:  String(GOOGLE_OAUTH_REDIRECT_URI.value() || "").trim(),
+  };
+}
+
 export type OAuthBuildResult =
   | { ok: true; auth: import("googleapis").Auth.OAuth2Client }
   | { ok: false; code: "not_connected" | "needs_reconnect" | "token_refresh_failed" };
@@ -34,11 +47,8 @@ export async function buildOAuthClient(
   if (record.status === "revoked") return { ok: false, code: "needs_reconnect" };
   if (!record.refreshToken) return { ok: false, code: "needs_reconnect" };
 
-  const oAuth2 = new google.auth.OAuth2(
-    GOOGLE_OAUTH_CLIENT_ID.value(),
-    GOOGLE_OAUTH_CLIENT_SECRET.value(),
-    GOOGLE_OAUTH_REDIRECT_URI.value(),
-  );
+  const { clientId, clientSecret, redirectUri } = oauthCreds();
+  const oAuth2 = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 
   oAuth2.setCredentials({
     refresh_token: record.refreshToken,
@@ -94,11 +104,8 @@ export async function exchangeCode(
   code: string,
 ): Promise<{ oAuth2: import("googleapis").Auth.OAuth2Client; tokens: import("googleapis").Auth.Credentials }> {
   const { google } = await getGoogle();
-  const oAuth2 = new google.auth.OAuth2(
-    GOOGLE_OAUTH_CLIENT_ID.value(),
-    GOOGLE_OAUTH_CLIENT_SECRET.value(),
-    GOOGLE_OAUTH_REDIRECT_URI.value(),
-  );
+  const { clientId, clientSecret, redirectUri } = oauthCreds();
+  const oAuth2 = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
   const { tokens } = await oAuth2.getToken(code);
   return { oAuth2, tokens };
 }
@@ -118,10 +125,8 @@ export async function getGoogleEmail(auth: import("googleapis").Auth.OAuth2Clien
  */
 export async function revokeToken(refreshToken: string): Promise<void> {
   const { google } = await getGoogle();
-  const oAuth2 = new google.auth.OAuth2(
-    GOOGLE_OAUTH_CLIENT_ID.value(),
-    GOOGLE_OAUTH_CLIENT_SECRET.value(),
-  );
+  const { clientId, clientSecret } = oauthCreds();
+  const oAuth2 = new google.auth.OAuth2(clientId, clientSecret);
   await oAuth2.revokeToken(refreshToken).catch(() => {
     // Revocation failure is non-fatal — token may already be invalid
   });
