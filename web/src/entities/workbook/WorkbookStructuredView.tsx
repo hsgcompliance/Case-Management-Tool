@@ -139,21 +139,32 @@ function NotesList({
   const labelOf = (id?: string) => fields.find((f) => f.id === id)?.display?.label
     ?? fields.find((f) => f.id === id)?.expected ?? "";
 
-  // Newest first when a date column exists.
-  const rows = [...(entity.rows ?? [])];
-  if (dateId) {
-    rows.sort((a, b) => {
-      const da = Date.parse(cellText(a, dateId)); const db = Date.parse(cellText(b, dateId));
-      if (Number.isNaN(da) && Number.isNaN(db)) return 0;
-      if (Number.isNaN(da)) return 1;
-      if (Number.isNaN(db)) return -1;
-      return db - da;
-    });
-  }
+  // Merge note rows + status-change banners, ordered by sheet row (rowKey),
+  // so stacked variant sections stay in order with their dividers inline.
+  const sheetRow = (rowKey: string) => Number(/row-(\d+)/.exec(rowKey)?.[1] ?? 0);
+  type Item =
+    | { kind: "note"; sortRow: number; row: TssNS.TssExtractedRow }
+    | { kind: "break"; sortRow: number; text: string; key: string };
+  const items: Item[] = [
+    ...(entity.rows ?? []).map((row) => ({ kind: "note" as const, sortRow: sheetRow(row.rowKey), row })),
+    ...(entity.sectionBreaks ?? []).map((b) => ({ kind: "break" as const, sortRow: sheetRow(b.rowKey), text: b.text, key: b.rowKey })),
+  ].sort((a, b) => a.sortRow - b.sortRow);
 
   return (
     <div className="space-y-2">
-      {rows.map((row) => {
+      {items.map((item) => {
+        if (item.kind === "break") {
+          return (
+            <div key={item.key} className="flex items-center gap-2 py-1">
+              <div className="h-px flex-1 bg-amber-200" />
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800">
+                {item.text}
+              </span>
+              <div className="h-px flex-1 bg-amber-200" />
+            </div>
+          );
+        }
+        const { row } = item;
         const date = cellText(row, dateId);
         const tier = cellText(row, tierId);
         const summary = cellText(row, summaryId);

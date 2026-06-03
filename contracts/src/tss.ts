@@ -329,6 +329,15 @@ export const TssExtractedRowSchema = z.object({
 }).passthrough();
 export type TssExtractedRow = z.infer<typeof TssExtractedRowSchema>;
 
+// A status-change banner row inside a stacked notes table (e.g. a TSS payer ↔
+// non-payer transition). rowKey ties it to its sheet row so the UI can place it
+// inline between the sections it separates.
+export const TssNoteSectionBreakSchema = z.object({
+  rowKey: z.string(),
+  text:   z.string(),
+}).passthrough();
+export type TssNoteSectionBreak = z.infer<typeof TssNoteSectionBreakSchema>;
+
 export const TssExtractedEntitySchema = z.object({
   entityId:   z.string(),
   renderKind: TssRenderKindSchema,
@@ -337,8 +346,11 @@ export const TssExtractedEntitySchema = z.object({
   status:     TssExtractedEntityStatusSchema,
   // keyValueCard / summaryBox — single record of fieldId → cell
   values:     z.record(z.string(), TssExtractedCellSchema).optional(),
-  // dataTable — ordered rows
+  // dataTable — ordered rows. For stacked multi-variant tables (progress notes),
+  // each row's values are mapped per ITS OWN section's column layout.
   rows:       z.array(TssExtractedRowSchema).optional(),
+  // Status-change banners separating stacked sections (progress notes).
+  sectionBreaks: z.array(TssNoteSectionBreakSchema).optional(),
   // budgetTable — structured later; left loose for now
   budget:     z.unknown().optional(),
   warnings:   z.array(TssExtractionWarningSchema).optional(),
