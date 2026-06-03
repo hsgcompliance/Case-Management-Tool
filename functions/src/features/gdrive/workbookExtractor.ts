@@ -364,6 +364,126 @@ function dataStartRow(range: RangeCfg, headerRow: number): number {
     : headerRow + (range.dataStartRowOffset ?? 1);
 }
 
+// ── Multi-section (stacked) notes support ────────────────────────────────────
+//
+// A Progress Notes tab can contain MULTIPLE stacked sections when a customer's
+// TSS status changes (payer ↔ non-payer). Each section has its own header row
+// and column layout, separated by a status-change banner row. We detect every
+// header row, map each section's columns from its OWN header, extract its data
+// rows, and capture the banner rows as section breaks.
+
+/** Every row that satisfies the table's required header ids (a section header). */
+function findHeaderRows(grid: Grid, range: RangeCfg): number[] {
+  const mustContain = range.headerScan?.mustContainHeaderIds ?? [];
+  if (!mustContain.length) return [];
+  const out: number[] = [];
+  for (let r = 0; r < MAX_SCAN_ROWS; r++) {
+    const ids = new Set((grid[r] ?? []).map((c) => tss.smartHeaderId(c)));
+    if (mustContain.every((id) => ids.has(id))) out.push(r);
+  }
+  return out;
+}
+
+/** Build fieldId → column index from a specific header row. */
+function buildColMapForRow(
+  grid: Grid,
+  headerRow: number,
+  fields: readonly TssNS.TssSmartHeaderConfig[],
+): Map<string, number> {
+  const headerCells = grid[headerRow] ?? [];
+  const colMap = new Map<string, number>();
+  for (const field of fields) {
+    const wantIds = fieldHeaderIds(field);
+    for (let c = 0; c < headerCells.length; c++) {
+      if (wantIds.has(tss.smartHeaderId(headerCells[c]))) { colMap.set(field.id, c); break; }
+    }
+  }
+  return colMap;
+}
+
+function looksLikeDate(v: string): boolean {
+  return !!v && !Number.isNaN(Date.parse(v));
+}
+
+/**
+ * Extract a stacked notes entity: walk every detected header section, map each
+ * to its own columns, emit data rows (mapped per that section), and capture
+ * status-change banners. Falls back to single-section drift resolution when no
+ * header rows are found by signature.
+ */
+function extractNotesEntity(
+  entity: TssNS.TssDisplayEntityConfig,
+  grid: Grid,
+  variant: TssNS.TssWorkbookVariant,
+): {
+  rows: TssNS.TssExtractedRow[];
+  sectionBreaks: TssNS.TssNoteSectionBreak[];
+  warnings: TssNS.TssExtractionWarning[];
+  status: TssNS.TssExtractedEntityStatus;
+} {
+  const range = effectiveRange(entity, variant);
+  const fields = entity.fields ?? [];
+  if (!range || !fields.length) {
+    return { rows: [], sectionBreaks: [], warnings: [], status: "missing_headers" };
+  }
+
+  let headerRows = findHeaderRows(grid, range);
+  if (!headerRows.length) {
+    // No header matched by signature — fall back to the drift-tolerant single resolver.
+    const layout = resolveTableLayout(grid, range, fields, entity.id);
+    if (!layout || !layout.colMap.size) {
+      return {
+        rows: [], sectionBreaks: [],
+        warnings: [{ code: "headers_not_found", message: `Could not locate the header row for "${entity.label}".`, entityId: entity.id, sheetId: range.sheetId, severity: "warning" }],
+        status: "missing_headers",
+      };
+    }
+    headerRows = [layout.headerRow];
+  }
+
+  const rows: TssNS.TssExtractedRow[] = [];
+  const sectionBreaks: TssNS.TssNoteSectionBreak[] = [];
+
+  for (let i = 0; i < headerRows.length; i++) {
+    const h = headerRows[i];
+    const sectionEnd = i + 1 < headerRows.length ? headerRows[i + 1] : MAX_SCAN_ROWS;
+    const colMap = buildColMapForRow(grid, h, fields);
+    if (!colMap.size) continue;
+
+    const dateField = fields.find((f) => f.dataType === "date" && colMap.has(f.id));
+    const dateCol = dateField ? colMap.get(dateField.id)! : undefined;
+    const summaryField = fields.find((f) => f.id === "summary" && colMap.has(f.id))
+      ?? fields.find((f) => f.dataType === "longText" && colMap.has(f.id));
+    const summaryCol = summaryField ? colMap.get(summaryField.id)! : undefined;
+    const firstCol = Math.min(...colMap.values());
+
+    for (let r = h + 1; r < sectionEnd; r++) {
+      const dateVal = dateCol != null ? gridCell(grid, r, dateCol) : "";
+      const summaryVal = summaryCol != null ? gridCell(grid, r, summaryCol) : "";
+      if (!dateVal && !summaryVal) continue; // template / blank row
+
+      // Banner: text in the lead column that isn't a date, with no summary.
+      if (!looksLikeDate(dateVal) && !summaryVal) {
+        const text = gridCell(grid, r, firstCol) || dateVal;
+        if (text) sectionBreaks.push({ rowKey: `row-${r + 1}`, text });
+        continue;
+      }
+
+      const values: Record<string, TssNS.TssExtractedCell> = {};
+      for (const field of fields) {
+        const col = colMap.get(field.id);
+        const raw = col != null ? gridCell(grid, r, col) : "";
+        values[field.id] = makeCell(raw, field.dataType);
+      }
+      rows.push({ rowKey: `row-${r + 1}`, values });
+    }
+  }
+
+  const status: TssNS.TssExtractedEntityStatus =
+    rows.length || sectionBreaks.length ? "extracted" : "empty";
+  return { rows, sectionBreaks, warnings: [], status };
+}
+
 function extractDataTable(
   entity: TssNS.TssDisplayEntityConfig,
   grid: Grid,
@@ -520,8 +640,16 @@ export async function extractWorkbook(args: {
       if (entity.renderKind === "keyValueCard") {
         const { values, warnings, status } = extractCover(entity, grid);
         entities.push({ ...base, status, values, ...(warnings.length ? { warnings } : {}) });
+      } else if (entity.section === "notes") {
+        // Stacked multi-variant notes table.
+        const { rows, sectionBreaks, warnings, status } = extractNotesEntity(entity, grid, variant);
+        entities.push({
+          ...base, status, rows,
+          ...(sectionBreaks.length ? { sectionBreaks } : {}),
+          ...(warnings.length ? { warnings } : {}),
+        });
       } else {
-        // dataTable
+        // Single-section dataTable.
         const { rows, warnings, status } = extractDataTable(entity, grid, variant);
         entities.push({ ...base, status, rows, ...(warnings.length ? { warnings } : {}) });
       }
@@ -618,15 +746,28 @@ export async function appendWorkbookRow(args: {
   if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
   const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
 
-  // 4. Resolve layout. Insert on the line AFTER the last content row, so the
-  //    new entry lands at the bottom of the existing notes (not in a mid-table
-  //    gap). Content is keyed off identity columns, so pre-formatted template
-  //    rows (Total Time "0:00:00", dropdown defaults) don't count as the "last
-  //    line" and the new entry can reuse the first such template row.
-  const layout = resolveTableLayout(grid, range, fields, entity.id);
-  if (!layout || !layout.colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
-  const { colMap } = layout;
-  const start = dataStartRow(range, layout.headerRow);
+  // 4. Resolve the layout to append into. For stacked notes, target the LAST
+  //    section (the current variant after any status change) and map columns
+  //    from its own header. For other tables, use the single drift resolver.
+  //    Insert on the line AFTER the last content row so the entry lands at the
+  //    bottom of the active section (reusing pre-formatted template rows).
+  let colMap: Map<string, number>;
+  let start: number;
+  if (entity.section === "notes") {
+    const headerRows = findHeaderRows(grid, range);
+    const lastHeader = headerRows.length
+      ? headerRows[headerRows.length - 1]
+      : resolveTableLayout(grid, range, fields, entity.id)?.headerRow ?? -1;
+    if (lastHeader < 0) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
+    colMap = buildColMapForRow(grid, lastHeader, fields);
+    start = lastHeader + 1;
+  } else {
+    const layout = resolveTableLayout(grid, range, fields, entity.id);
+    if (!layout || !layout.colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
+    colMap = layout.colMap;
+    start = dataStartRow(range, layout.headerRow);
+  }
+  if (!colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
   const contentCols = contentColumns(fields, colMap);
   const nextAnchorId = range.dataEnd?.nextAnchorText ? tss.smartHeaderId(range.dataEnd.nextAnchorText) : null;
 
