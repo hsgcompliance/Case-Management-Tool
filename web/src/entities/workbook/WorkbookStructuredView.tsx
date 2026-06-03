@@ -12,6 +12,7 @@ import { useWorkbookData } from "@hooks/useWorkbookData";
 import { useResolvedTssConfig } from "@hooks/useTssConfig";
 import { useGoogleIntegrationConnect } from "@hooks/useGoogleIntegrations";
 import { DriveAuthBanner } from "@entities/gdrive/DriveAuthBanner";
+import { AddRowForm } from "./AddRowForm";
 import type { tss as TssNS } from "@hdb/contracts";
 
 // ── Status pill ────────────────────────────────────────────────────────────────
@@ -110,10 +111,26 @@ function DataTable({
 function EntityBlock({
   entity,
   cfgEntity,
+  customerId,
+  config,
+  onSaved,
 }: {
   entity: TssNS.TssExtractedEntity;
   cfgEntity: TssNS.TssDisplayEntityConfig | undefined;
+  customerId: string;
+  config: TssNS.TssWorksheetConfig;
+  onSaved: () => void;
 }) {
+  const [adding, setAdding] = React.useState(false);
+
+  // Append is available for writable dataTable entities that resolved their
+  // layout (extracted or empty — both have a known table to append into).
+  const canAdd =
+    !!cfgEntity &&
+    cfgEntity.renderKind === "dataTable" &&
+    cfgEntity.direction !== "worksheetToApp" &&
+    (entity.status === "extracted" || entity.status === "empty");
+
   let body: React.ReactNode;
 
   switch (entity.status) {
@@ -145,8 +162,29 @@ function EntityBlock({
 
   return (
     <section className="space-y-2">
-      <h5 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{entity.label}</h5>
+      <div className="flex items-center justify-between gap-2">
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{entity.label}</h5>
+        {canAdd && !adding ? (
+          <button
+            type="button"
+            className="rounded-md px-2 py-0.5 text-xs font-medium text-sky-600 hover:bg-sky-50"
+            onClick={() => setAdding(true)}
+          >
+            + Add
+          </button>
+        ) : null}
+      </div>
       {body}
+      {canAdd && adding && cfgEntity ? (
+        <AddRowForm
+          customerId={customerId}
+          entityId={entity.entityId}
+          cfgEntity={cfgEntity}
+          config={config}
+          onSaved={() => { setAdding(false); onSaved(); }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -211,7 +249,14 @@ export function WorkbookStructuredView({
   return (
     <div className="space-y-5">
       {ordered.map((entity) => (
-        <EntityBlock key={entity.entityId} entity={entity} cfgEntity={cfgById.get(entity.entityId)} />
+        <EntityBlock
+          key={entity.entityId}
+          entity={entity}
+          cfgEntity={cfgById.get(entity.entityId)}
+          customerId={customerId}
+          config={config}
+          onSaved={() => void dataQ.refetch()}
+        />
       ))}
 
       <div className="flex items-center gap-3 border-t border-slate-100 pt-2 text-[11px] text-slate-400">

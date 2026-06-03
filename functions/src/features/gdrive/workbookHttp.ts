@@ -13,7 +13,13 @@ import {
   convertXlsxAndAttach,
 } from "./workbookService";
 import { ScopeMissingError } from "./service";
-import { extractWorkbook, WorkbookNotLinkedError, WorkbookNotConnectedError } from "./workbookExtractor";
+import {
+  extractWorkbook,
+  appendWorkbookRow,
+  WorkbookNotLinkedError,
+  WorkbookNotConnectedError,
+  WorkbookEntityNotWritableError,
+} from "./workbookExtractor";
 
 function buildScopeErrorResponse(err: ScopeMissingError) {
   const permissions = err.missingPermissions;
@@ -213,6 +219,61 @@ export const convertCustomerWorkbookXlsx = secureHandler(
     methods: ["POST", "OPTIONS"],
     secrets: SECRETS,
     memory: "256MiB",
+    timeoutSeconds: 60,
+  },
+);
+
+// ── POST appendWorkbookRow ────────────────────────────────────────────────────
+// Append a new row to a writable dataTable entity (Slice A: progress notes).
+// Strict per-user server OAuth (write attributed to the signed-in user). The
+// caller passes customerId + entityId + field values — never a spreadsheet id
+// or range. Append-only: writes into the first empty data row.
+
+const AppendRowBody = z.object({
+  customerId: z.string().min(1),
+  entityId: z.string().min(1),
+  values: z.record(z.string(), z.string()),
+});
+
+export const appendCustomerWorkbookRow = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+
+    try {
+      const body = AppendRowBody.parse(req.body ?? {});
+      const result = await appendWorkbookRow({
+        customerId: body.customerId,
+        uid,
+        orgId,
+        entityId: body.entityId,
+        values: body.values,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      if (err instanceof WorkbookNotConnectedError || String(err?.message) === "google_not_connected") {
+        res.status(409).json({ ok: false, error: "google_not_connected", category: "not_connected", reconnectService: "googleDrive" });
+        return;
+      }
+      if (err instanceof WorkbookNotLinkedError || String(err?.message) === "workbook_not_linked") {
+        res.status(404).json({ ok: false, error: "workbook_not_linked" });
+        return;
+      }
+      if (err instanceof WorkbookEntityNotWritableError) {
+        res.status(422).json({ ok: false, error: String(err?.message || "entity_not_writable") });
+        return;
+      }
+      const isZod = err?.name === "ZodError";
+      res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_append_failed") });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "512MiB",
     timeoutSeconds: 60,
   },
 );

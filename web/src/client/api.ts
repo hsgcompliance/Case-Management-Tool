@@ -334,6 +334,7 @@ export const endpointsLoose = {
   attachCustomerWorkbookCandidate:          { method: 'POST', path: 'attachCustomerWorkbookCandidate' },
   convertCustomerWorkbookXlsx:              { method: 'POST', path: 'convertCustomerWorkbookXlsx' },
   getWorkbookData:                          { method: 'GET',  path: 'getWorkbookData' },
+  appendCustomerWorkbookRow:                { method: 'POST', path: 'appendCustomerWorkbookRow' },
 
 
 } as const satisfies Record<string, EndpointDef>;
