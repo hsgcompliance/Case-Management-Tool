@@ -14,7 +14,7 @@ import { useCustomer, useUpsertCustomers, usePatchCustomers } from "@hooks/useCu
 import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
 import {
   useGDriveBuildCustomerFolder,
-  useSheetCustomerFolderIndex,
+  useGDriveCustomerFolderIndex,
   ACTIVE_PARENT_ID,
   EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
@@ -487,6 +487,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [flowError, setFlowError] = React.useState<string | null>(null);
   const [showDupeModal, setShowDupeModal] = React.useState(false);
   const [dupeDismissed, setDupeDismissed] = React.useState(false);
+  const lastAutoBuildFolderNameRef = React.useRef("");
 
   // Duplicate check
   const qc = useQueryClient();
@@ -505,7 +506,10 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const enrollmentsQ = useCustomerEnrollments(customerId || undefined, { enabled: !!customerId });
   const enrollments = React.useMemo(() => enrollmentsQ.data || [], [enrollmentsQ.data]);
 
-  const folderIndexQ = useSheetCustomerFolderIndex({ enabled: folderMode !== "none" });
+  const folderIndexQ = useGDriveCustomerFolderIndex(
+    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { enabled: folderMode !== "none" },
+  );
   const buildFolder = useGDriveBuildCustomerFolder(
     { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
   );
@@ -575,12 +579,17 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstName, lastName, dob, cwId]);
 
-  // Pre-fill folder name when customer details change
+  // Keep the generated folder name aligned until the operator edits it.
   React.useEffect(() => {
-    if (!buildFolderName && lastName.trim() && firstName.trim()) {
-      setBuildFolderName(buildFlowFolderName(lastName, firstName, cwId.trim() || null));
-    }
-  }, [buildFolderName, firstName, lastName, cwId]);
+    if (!lastName.trim() || !firstName.trim()) return;
+    const nextAutoName = buildFlowFolderName(lastName, firstName, cwId.trim() || null);
+    setBuildFolderName((current) => {
+      const previousAutoName = lastAutoBuildFolderNameRef.current;
+      if (current.trim() && current !== previousAutoName) return current;
+      lastAutoBuildFolderNameRef.current = nextAutoName;
+      return nextAutoName;
+    });
+  }, [firstName, lastName, cwId]);
 
   const builderEnrollments = React.useMemo(
     () =>
@@ -970,10 +979,14 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         });
         const builtFolder = (built as any)?.folder as { id: string; name: string } | undefined;
         if (builtFolder?.id) {
+          // Transitional folder-link write. Future writes should populate
+          // customerDrive.folderId as the primary pointer and keep these meta
+          // fields as legacy mirrors until migrated customers are normalized.
           await patchCustomer.mutateAsync({
             id: ensuredCustomerId,
             patch: {
               meta: {
+                ...((customerRecord as Record<string, unknown> | null)?.meta as Record<string, unknown> | undefined),
                 driveFolderId: builtFolder.id,
                 driveFolders: [{ id: builtFolder.id, name: builtFolder.name, alias: null }],
               },
@@ -986,10 +999,13 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         if (!parsedFolderId) {
           throw new Error("Enter a valid Google Drive folder URL or ID.");
         }
+        // Transitional folder-link write; keep aligned with the intended read
+        // order: customerDrive.folderId -> meta.driveFolderId -> meta.driveFolders[0].id.
         await patchCustomer.mutateAsync({
           id: ensuredCustomerId,
           patch: {
             meta: {
+              ...((customerRecord as Record<string, unknown> | null)?.meta as Record<string, unknown> | undefined),
               driveFolderId: parsedFolderId,
               driveFolders: [{ id: parsedFolderId, alias: folderAlias.trim() || null, name: folderAlias.trim() || folderUrl.trim() }],
             },
@@ -1004,6 +1020,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           id: ensuredCustomerId,
           patch: {
             meta: {
+              ...((customerRecord as Record<string, unknown> | null)?.meta as Record<string, unknown> | undefined),
               driveFolderId: parsedFolderId,
               driveFolders: [{ id: parsedFolderId, alias: folderAlias.trim() || null, name: folderAlias.trim() || folderUrl.trim() }],
             },
@@ -1026,6 +1043,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     buildSelectedTemplates,
     buildSubfolders,
     canFinish,
+    customerRecord,
     ensureCustomerExists,
     ensureEnrollmentsExist,
     firstName,

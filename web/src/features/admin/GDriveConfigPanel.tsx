@@ -2,6 +2,47 @@
 
 // features/admin/GDriveConfigPanel.tsx
 // Org-level Google Drive configuration: folder index, file templates, build settings.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// TODO (future agent): TSS Workbook Override Editor
+// ─────────────────────────────────────────────────────────────────────────────
+// This panel needs a new section that authors the per-org TSS worksheet override
+// (`worksheetConfig`), completing the "adjust baseline entity configs via org
+// config" loop. ALL the plumbing already exists — this is a UI-only task.
+//
+// Context docs (read first):
+//   docs/active-projects.local/google-integrations/WORKBOOK_SYSTEM.md  (config layer + override semantics table)
+//   docs/active-projects.local/org-config/current-state.local-only.md  (this panel's conventions)
+//
+// What to build — a section that edits `TssOrgConfigOverride` from @hdb/contracts:
+//   import { tss } from "@hdb/contracts";              // schema + resolver + baseline
+//   import { useResolvedTssConfig } from "@hooks/useTssConfig";  // effective (merged) config to preview
+//
+//   The baseline entities/fields come from tss.TSS_WORKSHEET_CONFIG.entities — render
+//   them as the editable surface, and let the admin author overrides on top:
+//     • disabledEntityIds        → checkbox per entity (enabled/disabled)
+//     • forceVariant             → select: auto | payer | nonPayer
+//     • entityLabelOverrides     → text input per entity label
+//     • entityEmptyStateOverrides→ text input per entity empty-state
+//     • sheetAliasExtensions     → tag input per sheet id (reuse <SubfolderTagInput/> pattern below)
+//     • fieldAliasExtensions     → tag input per entity→field
+//     • fieldDisplayOverrides    → label/width/badge/hideInCompact controls per entity→field
+//
+// Wiring (mirror the existing draft → handleSave → patch.mutateAsync flow):
+//   1. Add `worksheetConfig: TssOrgConfigOverride` to ConfigDraft + configToDraft()
+//      (read from `config?.worksheetConfig`).
+//   2. Add the section JSX where the placeholder comment is in the render below.
+//   3. In handleSave(), include `worksheetConfig: <sparse override or null to clear>`
+//      in the patch.mutateAsync({...}) call. Validate with
+//      tss.TssOrgConfigOverrideSchema.safeParse() before sending; send `null` to
+//      revert an org to the baseline.
+//   4. The backend (gdriveConfigPatch → patchOrgGDriveConfig) already validates,
+//      stores, and the resolver merges it — no backend work needed.
+//
+// Keep the override SPARSE: only emit keys the admin actually changed, so an
+// untouched org stays on the pure baseline. Show a live preview of the merged
+// result with useResolvedTssConfig() so admins see the effect before saving.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import React from "react";
 import { useGDriveConfig, useGDriveConfigPatch } from "@hooks/useGDrive";
@@ -488,6 +529,10 @@ export default function GDriveConfigPanel() {
           : {}),
         templates: draft.templates,
         buildSettings: draft.buildSettings,
+        // TODO (future agent): add `worksheetConfig: <sparse TssOrgConfigOverride>`
+        // here once the override editor section exists. Send `null` to clear an
+        // org back to the contracts baseline. Validate with
+        // tss.TssOrgConfigOverrideSchema.safeParse() before including it.
       } as any);
       toast("Drive configuration saved.", { type: "success" });
     } catch (e: any) {
@@ -806,6 +851,15 @@ export default function GDriveConfigPanel() {
           />
         </div>
       </section>
+
+      {/*
+        TODO (future agent): TSS Workbook Override Editor section goes HERE.
+        Render baseline entities from tss.TSS_WORKSHEET_CONFIG.entities and let the
+        admin author a sparse TssOrgConfigOverride on top (disable entities, force
+        variant, label/empty-state/alias/display overrides). See the directive
+        block at the top of this file for the full build plan and wiring steps.
+        Add `worksheetConfig` to ConfigDraft + handleSave's patch.mutateAsync call.
+      */}
 
       {/* Sticky save bar when dirty */}
       {isDirty && (

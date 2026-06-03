@@ -117,6 +117,22 @@ export const DEFAULT_DESCRIPTION_TEMPLATES: FlowInvoiceOption[] = [
   { id: "utility-assistance", label: "Utility Assistance", template: "J. Doe: March Util Assistance", enabled: false },
 ];
 
+export const FINANCIAL_LINE_ITEM_PRESETS: Record<"rentalAssistance" | "creditCard" | "tssBilling", FlowLineItem[]> = {
+  rentalAssistance: [
+    { id: "rental_assistance", label: "Rental Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
+    { id: "deposit_assistance", label: "Deposit Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
+    { id: "utility_assistance", label: "Utility Assistance", amount: 0, type: { id: "program-spending", label: "Program Spending" }, perCustomerCap: null, capEnabled: false },
+  ],
+  creditCard: [
+    { id: "credit_card", label: "Credit Card", amount: 0, type: { id: "program-spending", label: "Program Spending" }, perCustomerCap: null, capEnabled: false },
+  ],
+  tssBilling: [
+    { id: "tss_rental_assistance", label: "TSS Rental Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
+    { id: "tss_deposit_assistance", label: "TSS Deposit Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
+    { id: "tss_support_services", label: "TSS Support Services", amount: 0, type: { id: "customer-support-service", label: "Customer Support Service" }, perCustomerCap: null, capEnabled: false },
+  ],
+};
+
 export const DEFAULT_ELIGIBILITY: Record<string, string> = {
   "Housing Status": "Experiencing Category 1 Homelessness",
   "Sustainability Requirement": "Must demonstrate sustainability",

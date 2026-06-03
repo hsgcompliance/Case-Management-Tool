@@ -208,6 +208,8 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
 
     // Phase 2: Sync Drive folder via Apps Script index sheet.
     // Customer is already updated — a folder failure surfaces a retry toast, not a rollback.
+    // Compatibility resolver. Keep future changes aligned with Google integrations:
+    // customerDrive.folderId -> meta.driveFolderId -> meta.driveFolders[0].id.
     const folderId =
       (detail as any)?.meta?.driveFolderId ||
       (detail as any)?.driveFolderId ||

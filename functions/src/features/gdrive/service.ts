@@ -510,6 +510,45 @@ export async function getSheetsClient(opts?: {
   return google.sheets({ version: "v4", auth: authClient as any });
 }
 
+/**
+ * STRICT workbook-content Sheets client.
+ *
+ * Auth-mode policy (see docs/active-projects.local/google-integrations/WORKBOOK_SYSTEM.md):
+ *   TSS workbook CONTENT (reading cells, extracting entities, future write/append)
+ *   must use the signed-in user's own server-side Google OAuth ONLY, so every
+ *   read/write is attributable to that user. There is NO fallback to the shared
+ *   refresh token, the service account, or a temporary browser token — those are
+ *   reserved for the Drive *folder* surface, not workbook content.
+ *
+ * Fails closed:
+ *   - no stored user token        → throws "google_not_connected"
+ *   - token missing spreadsheets  → throws ScopeMissingError (caller → re-authorize banner)
+ * On failure the UI falls back to the iframe / open-in-Sheets path.
+ *
+ * Do NOT route folder-browsing or calendar calls through here — use getDriveClient
+ * (which keeps its fallback chain) for those.
+ */
+export async function getWorkbookSheetsClient(opts: {
+  userUid: string;
+  requiredScopes?: string[];
+}) {
+  const uid = String(opts.userUid || "").trim();
+  if (!uid) throw new Error("google_not_connected");
+  let context;
+  try {
+    context = await buildServerUserOAuthContext(uid, opts.requiredScopes ?? [SHEETS_SCOPE]);
+  } catch (err: any) {
+    // ScopeMissingError must propagate intact so the caller can surface the
+    // named-permission re-authorize banner.
+    if (err instanceof ScopeMissingError) throw err;
+    // Any other failure (no token, refresh failed) is "not connected" — fail
+    // closed; the UI falls back to the iframe.
+    throw new Error("google_not_connected");
+  }
+  const { google } = await getGoogle();
+  return google.sheets({ version: "v4", auth: context.authClient as any });
+}
+
 /** Like getDriveClient but also returns auth diagnostics — used by debug endpoints */
 export async function getDriveClientWithDiagnostics(opts?: { googleAccessToken?: string; userUid?: string }) {
   const context = await buildDriveContext({ ...opts, includeDiagnostics: true });

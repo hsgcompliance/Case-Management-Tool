@@ -25,7 +25,10 @@ import { toast } from "@lib/toast";
 import { WorkbookEmbed } from "./WorkbookEmbed";
 import { WorkbookLinkControls } from "./WorkbookLinkControls";
 import type { WorkbookLinkIssue } from "./WorkbookLinkControls";
+import { WorkbookStructuredView } from "./WorkbookStructuredView";
 import { DriveAuthBanner } from "@entities/gdrive/DriveAuthBanner";
+
+type WorkbookView = "sheet" | "structured";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,6 +56,9 @@ function resolveFolderAndWorkbook(model: Record<string, unknown>): {
     ? (meta?.driveFolders as Array<Record<string, unknown>>)
     : [];
 
+  // Keep this aligned with docs/active-projects.local/google-integrations:
+  // customerDrive.folderId is the current primary pointer, with legacy meta
+  // fields read only as fallbacks for migrated records.
   const folderId =
     String(cDrive?.folderId || "").trim() ||
     String(meta?.driveFolderId || "").trim() ||
@@ -156,6 +162,8 @@ export function WorkbookPanel({
   const [connectingTemporary, setConnectingTemporary] = React.useState(false);
   const [changingWorkbook,    setChangingWorkbook]     = React.useState(false);
   const [authIssue,           setAuthIssue]            = React.useState<WorkbookLinkIssue | null>(null);
+  // Sheet (iframe) is the default/trusted view; Structured is the native render.
+  const [workbookView,        setWorkbookView]         = React.useState<WorkbookView>("sheet");
 
   const refreshToken = React.useCallback(() => setTokenPresent(!!getGoogleDriveAccessToken()), []);
 
@@ -207,6 +215,23 @@ export function WorkbookPanel({
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {/* View toggle — Sheet (iframe, trusted default) ↔ Structured (native) */}
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs">
+              <button
+                type="button"
+                className={`rounded-md px-2.5 py-1 font-medium transition ${workbookView === "sheet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                onClick={() => setWorkbookView("sheet")}
+              >
+                Sheet
+              </button>
+              <button
+                type="button"
+                className={`rounded-md px-2.5 py-1 font-medium transition ${workbookView === "structured" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                onClick={() => setWorkbookView("structured")}
+              >
+                Structured
+              </button>
+            </div>
             {folderId ? (
               <a href={buildFolderUrl(folderId)} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
                 Folder ↗
@@ -251,12 +276,19 @@ export function WorkbookPanel({
           />
         )}
 
-        <WorkbookEmbed
-          spreadsheetId={tssWorkbook!.spreadsheetId!}
-          gid={gid}
-          spreadsheetName={tssWorkbook!.spreadsheetName ?? "Workbook"}
-          spreadsheetUrl={openUrl}
-        />
+        {workbookView === "structured" ? (
+          <WorkbookStructuredView
+            customerId={customerId}
+            onOpenSheet={() => setWorkbookView("sheet")}
+          />
+        ) : (
+          <WorkbookEmbed
+            spreadsheetId={tssWorkbook!.spreadsheetId!}
+            gid={gid}
+            spreadsheetName={tssWorkbook!.spreadsheetName ?? "Workbook"}
+            spreadsheetUrl={openUrl}
+          />
+        )}
       </div>
     );
   }

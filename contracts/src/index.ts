@@ -38,6 +38,7 @@ export * as tasks from "./tasks";
 export * as tours from "./tours";
 export * as users from "./users";
 export * as metrics from "./metrics";
+export * as tss from "./tss";
 export * as transactionWindows from "./transactionWindows";
 export * as cmActivities from "./cmActivities";
 

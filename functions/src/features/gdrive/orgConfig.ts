@@ -6,6 +6,8 @@ import {
   isDev,
   isSuperDev,
 } from "../../core";
+import { tss } from "@hdb/contracts";
+import type { tss as TssNS } from "@hdb/contracts";
 
 type DriveConfigClaims = Record<string, unknown>;
 
@@ -35,10 +37,14 @@ export type GDriveBuildSettings = {
   defaultTemplateKeys?: string[];
 };
 
+export type TssWorksheetOverride = TssNS.TssOrgConfigOverride;
+
 export type GDriveOrgConfig = {
   customerFolderIndex: GDriveCustomerFolderIndexConfig;
   templates?: GDriveTemplate[];
   buildSettings?: GDriveBuildSettings;
+  /** Per-org TSS workbook display config override (merged with the contracts baseline). */
+  worksheetConfig?: TssWorksheetOverride;
 };
 
 export type GDriveConfigPatchInput = {
@@ -47,6 +53,8 @@ export type GDriveConfigPatchInput = {
   customerIndexSheet?: string | null;
   templates?: GDriveTemplate[] | null;
   buildSettings?: GDriveBuildSettings | null;
+  /** null clears the override (revert to baseline); object replaces it. */
+  worksheetConfig?: TssWorksheetOverride | null;
 };
 
 type NormalizedDriveTarget = {
@@ -158,6 +166,16 @@ function normalizeTemplate(raw: unknown): GDriveTemplate | null {
   };
 }
 
+function normalizeWorksheetOverride(raw: unknown): TssWorksheetOverride | undefined {
+  if (raw == null) return undefined;
+  // Validate against the contracts schema; drop silently if malformed so a bad
+  // stored value never breaks config reads (extractor falls back to baseline).
+  const parsed = tss.TssOrgConfigOverrideSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  // Empty override object is equivalent to no override.
+  return Object.keys(parsed.data).length ? parsed.data : undefined;
+}
+
 function normalizeStoredGDriveConfig(raw: unknown): GDriveOrgConfig {
   const data = asRecord(raw);
   const templates: GDriveTemplate[] = Array.isArray(data.templates)
@@ -172,10 +190,12 @@ function normalizeStoredGDriveConfig(raw: unknown): GDriveOrgConfig {
       ? { defaultTemplateKeys: (buildRaw.defaultTemplateKeys as unknown[]).map(String).filter(Boolean) }
       : {}),
   };
+  const worksheetConfig = normalizeWorksheetOverride(data.worksheetConfig);
   return {
     customerFolderIndex: normalizeStoredCustomerFolderIndexConfig(data.customerFolderIndex),
     ...(templates.length ? { templates } : {}),
     ...(Object.keys(buildSettings).length ? { buildSettings } : {}),
+    ...(worksheetConfig ? { worksheetConfig } : {}),
   };
 }
 
@@ -281,10 +301,27 @@ export async function patchOrgGDriveConfig(args: {
     }
   }
 
+  // Worksheet override — full replace when provided; null clears (revert to baseline)
+  let nextWorksheetConfig: TssWorksheetOverride | undefined = currentDrive.worksheetConfig;
+  if (Object.prototype.hasOwnProperty.call(patch, "worksheetConfig")) {
+    if (patch.worksheetConfig == null) {
+      nextWorksheetConfig = undefined;
+    } else {
+      const parsed = tss.TssOrgConfigOverrideSchema.safeParse(patch.worksheetConfig);
+      if (!parsed.success) {
+        const err: any = new Error("invalid_worksheet_config");
+        err.code = 400;
+        throw err;
+      }
+      nextWorksheetConfig = Object.keys(parsed.data).length ? parsed.data : undefined;
+    }
+  }
+
   const nextDrive: GDriveOrgConfig = {
     customerFolderIndex: next,
     ...(nextTemplates?.length ? { templates: nextTemplates } : {}),
     ...(nextBuildSettings && Object.keys(nextBuildSettings).length ? { buildSettings: nextBuildSettings } : {}),
+    ...(nextWorksheetConfig ? { worksheetConfig: nextWorksheetConfig } : {}),
   };
 
   await ref.set(
@@ -303,4 +340,14 @@ export async function patchOrgGDriveConfig(args: {
     orgId,
     config: nextDrive,
   };
+}
+
+/**
+ * Resolves the effective TSS worksheet config for an org — the contracts
+ * baseline deep-merged with the org's stored override. This is the single
+ * entry point the Sheets extractor should use to obtain entity/field config.
+ */
+export async function getResolvedTssWorksheetConfig(orgId: string): Promise<TssNS.TssWorksheetConfig> {
+  const config = await getOrgGDriveConfig(orgId);
+  return tss.resolveTssWorksheetConfig(config.worksheetConfig ?? null);
 }

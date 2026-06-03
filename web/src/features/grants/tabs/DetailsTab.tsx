@@ -14,6 +14,7 @@ import {
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
+import { FINANCIAL_LINE_ITEM_PRESETS } from "../creation/grantProgramFlowModel";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -85,6 +86,21 @@ const FINANCIAL_MODEL_PRESETS = {
 
 type FinancialModel = keyof typeof FINANCIAL_MODEL_PRESETS;
 
+const FINANCIAL_MODEL_COPY: Record<FinancialModel, { title: string; body: string }> = {
+  budgeted: {
+    title: "Budgeted spend-down",
+    body: "Line-item amounts are real allocations and drive budget remaining math.",
+  },
+  billable: {
+    title: "Billable ledger",
+    body: "Line items are billing/allocation categories, not hard budget caps.",
+  },
+  serviceOnly: {
+    title: "Service only",
+    body: "No budget, billing, allocation, or ledger workspace for this record.",
+  },
+};
+
 function financialModelOf(model: Record<string, any>, grant: Grant | null): FinancialModel {
   const raw = String((model.financialConfig ?? grant?.financialConfig ?? {})?.model || "").trim();
   if (raw === "budgeted" || raw === "billable" || raw === "serviceOnly") return raw;
@@ -93,6 +109,22 @@ function financialModelOf(model: Record<string, any>, grant: Grant | null): Fina
 
 function emptyBudget() {
   return { total: 0, lineItems: [] };
+}
+
+function withLineItemPreset(
+  model: Record<string, any>,
+  preset: keyof typeof FINANCIAL_LINE_ITEM_PRESETS,
+) {
+  const budget = model.budget && typeof model.budget === "object" && !Array.isArray(model.budget)
+    ? model.budget
+    : emptyBudget();
+  return {
+    ...model,
+    budget: {
+      ...budget,
+      lineItems: FINANCIAL_LINE_ITEM_PRESETS[preset].map((item) => ({ ...item })),
+    },
+  };
 }
 
 function authorizationMonthsFrom(value: unknown): string {
@@ -1006,13 +1038,16 @@ export function DetailsTab({
   const kindVal = String(model?.kind || grant?.kind || "grant");
   const isGrantKind = kindVal !== "program";
   const financialModel = financialModelOf(model, grant);
+  const financialConfig = (model.financialConfig ?? grant?.financialConfig ?? FINANCIAL_MODEL_PRESETS[financialModel]) as Record<string, any>;
+  const hasFinancialActivity = financialModel !== "serviceOnly";
+  const showAuthorizationDefaults = kindVal === "program" || financialModel === "billable";
   const onFinancialModel = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const nextModel = e.currentTarget.value as FinancialModel;
+    (nextModel: FinancialModel) => {
       const financialConfig = FINANCIAL_MODEL_PRESETS[nextModel];
       setModel((m) => ({
         ...m,
         financialConfig,
+        ...(nextModel === "serviceOnly" ? { budget: { total: 0, lineItems: [] } } : {}),
         ...(nextModel === "serviceOnly" ? {} : { budget: m?.budget ?? grant?.budget ?? emptyBudget() }),
         ...(nextModel === "billable" && !authorizationMonthsFrom((m as any)?.enrollmentDefaults ?? (grant as any)?.enrollmentDefaults)
           ? { enrollmentDefaults: { ...((m as any)?.enrollmentDefaults ?? (grant as any)?.enrollmentDefaults ?? {}), authorizationMonths: 12 } }
@@ -1130,7 +1165,7 @@ export function DetailsTab({
             />
           </div>
 
-          {/* Start + End */}
+          {/* Lifecycle dates */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
             <div>
               <div className="text-slate-500 dark:text-slate-400">Start Date</div>
@@ -1147,7 +1182,9 @@ export function DetailsTab({
               />
             </div>
             <div>
-              <div className="text-slate-500 dark:text-slate-400">End Date (optional)</div>
+              <div className="text-slate-500 dark:text-slate-400">
+                {isGrantKind ? "End Date" : "End Date / Review Date"}
+              </div>
               <input
                 className="input pointer-events-auto"
                 type="date"
@@ -1161,7 +1198,33 @@ export function DetailsTab({
                 placeholder={iso10(startB.buf) ? (() => { const d = parseISO10(iso10(startB.buf)); return d ? toISODate(addDays(addYears(d, 1), -1)) : ""; })() : ""}
                 min={iso10(startB.buf) || undefined}
               />
+              <div className="mt-1 text-xs text-slate-500">
+                {isGrantKind
+                  ? "Funding grants usually use a close date."
+                  : "Programs can stay open; use this only for sunset, renewal, or review timing."}
+              </div>
             </div>
+          </div>
+
+          <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+            <label>
+              <div className="text-slate-500 dark:text-slate-400">Duration Label</div>
+              <input
+                className="input pointer-events-auto mt-1"
+                value={String(model.duration ?? grant?.duration ?? (isGrantKind ? "1 Year" : "Ongoing"))}
+                placeholder={isGrantKind ? "1 Year" : "Ongoing"}
+                onChange={(e) => setModel((m) => ({ ...m, duration: e.currentTarget.value }))}
+              />
+            </label>
+            <label>
+              <div className="text-slate-500 dark:text-slate-400">Max Length of Assistance</div>
+              <input
+                className="input pointer-events-auto mt-1"
+                value={String(model.lengthOfAssistance ?? grantMaxLengthFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ?? "")}
+                placeholder="Up to 24 months"
+                onChange={(e) => setModel((m) => ({ ...m, lengthOfAssistance: e.currentTarget.value }))}
+              />
+            </label>
           </div>
 
           {!!grant?.id && (
@@ -1207,11 +1270,24 @@ export function DetailsTab({
           <div className="md:col-span-2">
             <div className="text-slate-500 dark:text-slate-400">Financial Model</div>
             {editing ? (
-              <select className="select pointer-events-auto" value={financialModel} onChange={onFinancialModel}>
-                <option value="budgeted">Budgeted spend-down</option>
-                <option value="billable">Billable with ledger/allocation</option>
-                <option value="serviceOnly">Service only</option>
-              </select>
+              <div className="mt-1 grid gap-2 md:grid-cols-3">
+                {(["budgeted", "billable", "serviceOnly"] as FinancialModel[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={[
+                      "rounded-md border px-3 py-2 text-left transition",
+                      financialModel === option
+                        ? "border-sky-300 bg-sky-50 text-slate-950"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300",
+                    ].join(" ")}
+                    onClick={() => onFinancialModel(option)}
+                  >
+                    <span className="block text-sm font-semibold">{FINANCIAL_MODEL_COPY[option].title}</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-600">{FINANCIAL_MODEL_COPY[option].body}</span>
+                  </button>
+                ))}
+              </div>
             ) : (
               <div className="text-sm text-slate-700">
                 {financialModel === "budgeted"
@@ -1226,8 +1302,60 @@ export function DetailsTab({
             </div>
           </div>
 
-          <div className="md:col-span-2">
-            <div className="text-slate-500 dark:text-slate-400">Enrollment Defaults</div>
+          {hasFinancialActivity ? (
+            <div className="md:col-span-2 rounded-md border border-slate-200 bg-slate-50/70 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    {financialModel === "budgeted" ? "Budget Presets" : "Billing Category Presets"}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Applying a preset replaces current line items. Save will reconcile the record through the new financial shape.
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => withLineItemPreset(m, "rentalAssistance"))}>
+                    Rental Assistance
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => withLineItemPreset(m, "creditCard"))}>
+                    Credit Card
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => setModel((m) => withLineItemPreset({
+                      ...m,
+                      ...(canEditKind ? { kind: "program" } : {}),
+                      financialConfig: FINANCIAL_MODEL_PRESETS.billable,
+                      enrollmentDefaults: {
+                        ...((m as any)?.enrollmentDefaults ?? {}),
+                        authorizationMonths: authorizationMonthsFrom((m as any)?.enrollmentDefaults) || 12,
+                      },
+                    }, "tssBilling"))}
+                  >
+                    TSS Billing
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-4">
+                {[
+                  ["Budget", financialConfig.budgetEnabled === true ? "On" : "Off"],
+                  ["Billing", financialConfig.billingEnabled === true ? "On" : "Off"],
+                  ["Allocation", financialConfig.allocationEnabled === true ? "On" : "Off"],
+                  ["Ledger", String(financialConfig.ledgerMode || "none")],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded border border-slate-200 bg-white px-2.5 py-2">
+                    <div className="text-[11px] font-semibold uppercase text-slate-500">{label}</div>
+                    <div className="text-sm font-semibold text-slate-900">{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {showAuthorizationDefaults ? (
+            <div className="md:col-span-2">
+              <div className="text-slate-500 dark:text-slate-400">Enrollment Defaults</div>
             <label className="mt-1 block">
               <span className="text-xs text-slate-500">Authorization months</span>
               <input
@@ -1252,7 +1380,8 @@ export function DetailsTab({
             <div className="mt-1 text-xs text-slate-500">
               Leave blank for open-ended enrollments. TSS should use 12 months.
             </div>
-          </div>
+            </div>
+          ) : null}
 
           {isGrantKind ? (
             <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-2.5 py-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">

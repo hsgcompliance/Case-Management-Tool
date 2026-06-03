@@ -10,6 +10,7 @@ import {
 import { GDriveListQuery, GDriveCreateFolderBody, GDriveUploadBody, GDriveBuildCustomerFolderBody } from "./schemas";
 import { listInFolder, createFolder, uploadSmallFile, buildCustomerFolder, ScopeMissingError, type DriveListDiagnostics } from "./service";
 import { z } from "zod";
+import { tss } from "@hdb/contracts";
 import { getOrgGDriveConfig, patchOrgGDriveConfig } from "./orgConfig";
 
 // -- Scope error helper --------------------------------------------------------
@@ -307,6 +308,9 @@ const GDriveConfigPatchBody = z.object({
   orgId: z.string().optional(),
   templates: z.array(GDriveTemplateBody).optional(),
   buildSettings: GDriveBuildSettingsBody.optional(),
+  // null clears the override (revert to baseline); object is validated against
+  // the contracts schema inside patchOrgGDriveConfig.
+  worksheetConfig: z.union([tss.TssOrgConfigOverrideSchema, z.null()]).optional(),
 });
 
 export const gdriveConfigGet = secureHandler(
@@ -345,6 +349,9 @@ export const gdriveConfigPatch = secureHandler(
             : {}),
           ...(Object.prototype.hasOwnProperty.call(body, "buildSettings")
             ? { buildSettings: body.buildSettings as any }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(body, "worksheetConfig")
+            ? { worksheetConfig: body.worksheetConfig as any }
             : {}),
         },
       });

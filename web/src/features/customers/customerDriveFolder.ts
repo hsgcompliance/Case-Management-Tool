@@ -34,6 +34,9 @@ export function getCustomerDriveFolderLink(customer: unknown): { url: string; la
     ...(Array.isArray(meta.driveFolders) ? (meta.driveFolders as DriveFolderLike[]) : []),
     ...(Array.isArray(record.driveFolders) ? (record.driveFolders as DriveFolderLike[]) : []),
   ];
+  // Card/list display still favors the legacy folder list because it can carry
+  // alias/name labels. New resolver work should align to the Google integrations
+  // order: customerDrive.folderId -> meta.driveFolderId -> meta.driveFolders[0].id.
   const folder = folders.find((item) => folderUrl(item?.url) || folderUrl(item?.id));
   const url =
     folderUrl(folder?.url) ||

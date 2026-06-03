@@ -100,6 +100,7 @@ export const qk = {
       ["gdrive", "customerFolderIndex", stable(query || {})] as const,
     sheetFolderIndex: () => ["gdrive", "sheetFolderIndex"] as const,
     config: ["gdrive", "config"] as const,
+    workbookData: (customerId: string) => ["gdrive", "workbookData", customerId] as const,
   },
   google: {
     root: ["google"] as const,

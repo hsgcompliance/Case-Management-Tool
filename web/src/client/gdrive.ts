@@ -57,6 +57,10 @@ export const GDrive = {
     api.postWith('gdriveBuildCustomerFolder', body, driveHeaders()) as Promise<GDriveBuildCustomerFolderResp>,
   customerFolderSync: (body: TGDriveCustomerFolderSyncBody) =>
     api.postWith('gdriveCustomerFolderSync', body, driveHeaders()) as Promise<GDriveCustomerFolderSyncResp>,
+  // Workbook content (strict per-user server OAuth on the backend). No drive
+  // token header — this path is server-side OAuth only by policy.
+  workbookData: (customerId: string) =>
+    api.getWith('getWorkbookData', { customerId }) as Promise<unknown>,
 };
 
 export default GDrive;
