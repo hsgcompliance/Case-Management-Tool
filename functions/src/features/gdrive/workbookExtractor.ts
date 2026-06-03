@@ -261,11 +261,25 @@ function effectiveRange(
   return override ?? entity.source.range;
 }
 
-function isRowBlank(grid: Grid, rowIdx: number, colMap: Map<string, number>): boolean {
-  for (const col of colMap.values()) {
-    if (gridCell(grid, rowIdx, col)) return false;
-  }
-  return true;
+/**
+ * Columns that signal a row holds real content. Sheets often have pre-formatted
+ * template rows below the data with formula defaults (e.g. Total Time "0:00:00")
+ * or dropdown defaults but no actual entry — those must NOT count as data. We
+ * key "content" off the entity's required fields (e.g. Date + Summary for
+ * progress notes); if none are marked required, fall back to all mapped columns.
+ */
+function contentColumns(
+  fields: readonly TssNS.TssSmartHeaderConfig[],
+  colMap: Map<string, number>,
+): number[] {
+  const required = fields
+    .filter((f) => f.required && colMap.has(f.id))
+    .map((f) => colMap.get(f.id)!);
+  return required.length ? required : [...colMap.values()];
+}
+
+function rowHasContent(grid: Grid, rowIdx: number, contentCols: number[]): boolean {
+  return contentCols.some((c) => gridCell(grid, rowIdx, c) !== "");
 }
 
 type TableLayout = {
@@ -381,8 +395,11 @@ function extractDataTable(
   }
 
   const dataStart = dataStartRow(range, headerRow);
+  const contentCols = contentColumns(fields, colMap);
 
-  // 4. Read rows until dataEnd.
+  // 4. Read rows until dataEnd. A row counts as data only if it has content in
+  //    the identity columns — pre-formatted template rows (formula/dropdown
+  //    defaults but no real entry) are skipped, not rendered as empty rows.
   const rows: TssNS.TssExtractedRow[] = [];
   const dataEnd = range.dataEnd;
   const minBlank = dataEnd?.minConsecutiveBlankRows ?? 1;
@@ -396,11 +413,11 @@ function extractDataTable(
       if (rowHasAnchor) break;
     }
 
-    if (isRowBlank(grid, r, colMap)) {
+    if (!rowHasContent(grid, r, contentCols)) {
       consecutiveBlank++;
       if (dataEnd?.mode === "firstBlankRow" && consecutiveBlank >= minBlank) break;
       if (dataEnd?.mode === "untilNextAnchor" && consecutiveBlank >= Math.max(minBlank, 2) && !nextAnchorId) break;
-      continue; // skip blank rows (emptyRowPolicy: skip all-blank mapped rows)
+      continue; // skip non-content rows (template/formula-default rows)
     }
     consecutiveBlank = 0;
 
@@ -601,36 +618,45 @@ export async function appendWorkbookRow(args: {
   if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
   const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
 
-  // 4. Resolve layout + find the first empty data row to append into.
+  // 4. Resolve layout. Insert on the line AFTER the last content row, so the
+  //    new entry lands at the bottom of the existing notes (not in a mid-table
+  //    gap). Content is keyed off identity columns, so pre-formatted template
+  //    rows (Total Time "0:00:00", dropdown defaults) don't count as the "last
+  //    line" and the new entry can reuse the first such template row.
   const layout = resolveTableLayout(grid, range, fields, entity.id);
   if (!layout || !layout.colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
   const { colMap } = layout;
   const start = dataStartRow(range, layout.headerRow);
+  const contentCols = contentColumns(fields, colMap);
+  const nextAnchorId = range.dataEnd?.nextAnchorText ? tss.smartHeaderId(range.dataEnd.nextAnchorText) : null;
 
-  let insertRow = -1;
+  let lastContent = -1;
   for (let r = start; r < MAX_SCAN_ROWS; r++) {
-    if (isRowBlank(grid, r, colMap)) { insertRow = r; break; }
+    if (nextAnchorId && (grid[r] ?? []).some((c) => tss.smartHeaderId(c) === nextAnchorId)) break;
+    if (rowHasContent(grid, r, contentCols)) lastContent = r;
   }
-  if (insertRow < 0) throw new WorkbookEntityNotWritableError("table_full");
+  const insertRow = lastContent >= 0 ? lastContent + 1 : start;
+  if (insertRow >= MAX_SCAN_ROWS) throw new WorkbookEntityNotWritableError("table_full");
 
-  // 5. Build the row array spanning the mapped columns and write it.
-  const cols = [...colMap.values()];
-  const minCol = Math.min(...cols);
-  const maxCol = Math.max(...cols);
-  const rowArr: string[] = new Array(maxCol - minCol + 1).fill("");
+  // 5. Write ONLY the cells the user provided — one per mapped field — so we
+  //    never overwrite formula cells (e.g. Total Time) or unrelated columns
+  //    that sit between our fields. Per-cell batchUpdate, not a range fill.
+  const data: Array<{ range: string; values: string[][] }> = [];
   for (const field of fields) {
     const col = colMap.get(field.id);
     if (col == null) continue;
     const v = values[field.id];
-    if (v != null && String(v).length) rowArr[col - minCol] = String(v);
+    if (v == null || !String(v).length) continue;
+    data.push({
+      range: `${quoteTitle(sheetTitle)}!${idxToCol(col)}${insertRow + 1}`,
+      values: [[String(v)]],
+    });
   }
+  if (!data.length) throw new WorkbookEntityNotWritableError("no_values_provided");
 
-  const a1 = `${quoteTitle(sheetTitle)}!${idxToCol(minCol)}${insertRow + 1}:${idxToCol(maxCol)}${insertRow + 1}`;
-  await sheetsApi.spreadsheets.values.update({
+  await sheetsApi.spreadsheets.values.batchUpdate({
     spreadsheetId,
-    range: a1,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: [rowArr] },
+    requestBody: { valueInputOption: "USER_ENTERED", data },
   });
 
   return { rowKey: `row-${insertRow + 1}`, spreadsheetId };
