@@ -8,6 +8,7 @@ export interface MobilePrefs {
   timeFormat: "12h" | "24h";
   timeInterval: 5 | 15;
   calendarDefault: boolean;
+  workbookPushDefault: boolean;
   googleIntegrationModes: {
     googleCalendar: "permanent" | "temporary" | "off";
     googleDrive: "permanent" | "temporary" | "off";
@@ -18,6 +19,7 @@ const DEFAULTS: MobilePrefs = {
   timeFormat: "12h",
   timeInterval: 15,
   calendarDefault: false,
+  workbookPushDefault: false,
   googleIntegrationModes: { googleCalendar: "off", googleDrive: "off" },
 };
 
@@ -41,6 +43,7 @@ export function useUserPrefs(uid: string | undefined) {
           ? s.timeInterval
           : 15) as 5 | 15,
         calendarDefault: s.calendarDefault === true,
+        workbookPushDefault: s.workbookPushDefault === true,
         googleIntegrationModes: {
           googleCalendar: integrationMode((s.googleIntegrationModes as Record<string, unknown> | undefined)?.googleCalendar),
           googleDrive: integrationMode((s.googleIntegrationModes as Record<string, unknown> | undefined)?.googleDrive),

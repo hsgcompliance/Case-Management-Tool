@@ -39,5 +39,10 @@ export const GoogleIntegrations = {
 
   postCalendarEvent: (body: CalendarPostEventInput) =>
     callFunction<RespOf<"calendarPostEvent">>("calendarPostEvent", body),
+
+  // Append a progress-note row to the customer's linked TSS workbook (strict
+  // per-user server OAuth on the backend; caller sends customerId + values only).
+  pushWorkbookRow: (body: { customerId: string; entityId: string; values: Record<string, string> }) =>
+    callFunction<{ ok: boolean; error?: string; rowKey?: string }>("appendCustomerWorkbookRow", body),
 };
 

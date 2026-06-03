@@ -300,6 +300,11 @@ export function WorkbookPanel({
         {workbookView === "structured" ? (
           <WorkbookStructuredView
             customerId={customerId}
+            customerName={
+              String((model.name as string) || "").trim() ||
+              [model.firstName, model.lastName].filter(Boolean).join(" ").trim() ||
+              undefined
+            }
             onOpenSheet={() => setWorkbookView("sheet")}
           />
         ) : (
