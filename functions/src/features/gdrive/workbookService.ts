@@ -264,3 +264,102 @@ export async function attachWorkbookCandidate(args: {
 
   return { workbook };
 }
+
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+
+/** Strip a trailing .xlsx / .xls extension from a file name. */
+function stripSpreadsheetExt(name: string): string {
+  return name.replace(/\.(xlsx|xls)$/i, "").trim();
+}
+
+/**
+ * Converts an uploaded Excel file (.xlsx/.xls) in the customer folder into a
+ * native Google Sheet (Drive files.copy with a Sheets target mimeType), then
+ * links the resulting native sheet as the customer's TSS workbook.
+ *
+ * This is a Drive *folder-surface* write (creating a file), so it uses the
+ * standard writable Drive client (user OAuth preferred per GOOGLE_DRIVE_AUTH_MODE),
+ * NOT the strict workbook-content path. The original .xlsx is left untouched.
+ */
+export async function convertXlsxAndAttach(args: {
+  customerId: string;
+  uid: string;
+  fileId: string;
+  fileName?: string;
+  enrollmentId?: string;
+  googleAccessToken?: string;
+}): Promise<{ workbook: WorkbookMeta; converted: true }> {
+  const { customerId, uid, fileId, fileName, enrollmentId, googleAccessToken } = args;
+
+  // Writable Drive client (folder surface — fallback chain, user OAuth preferred).
+  const drive = await getDriveClient({
+    userUid: uid,
+    googleAccessToken,
+    requireWritable: true,
+    requiredScopes: [DRIVE_SCOPE],
+  });
+
+  // Resolve the source file: confirm it's an Excel file and find its folder.
+  const srcMeta = await drive.files.get({
+    fileId,
+    fields: "id,name,mimeType,parents",
+    supportsAllDrives: true,
+  });
+  const srcMime = String(srcMeta.data?.mimeType || "").trim();
+  if (srcMime !== XLSX_MIME && srcMime !== XLS_MIME) {
+    // Already native (or not a spreadsheet) — nothing to convert.
+    throw Object.assign(new Error("workbook_not_convertible"), { code: 400 });
+  }
+  const baseName = stripSpreadsheetExt(String(srcMeta.data?.name || fileName || "Workbook"));
+  const parents = Array.isArray(srcMeta.data?.parents) ? (srcMeta.data!.parents as string[]) : [];
+
+  // Copy with conversion to a native Google Sheet, into the same folder.
+  const copied = await drive.files.copy({
+    fileId,
+    requestBody: {
+      name: baseName,
+      mimeType: SPREADSHEET_MIME,
+      ...(parents.length ? { parents } : {}),
+    },
+    fields: "id,name,webViewLink",
+    supportsAllDrives: true,
+  });
+
+  const newId = String(copied.data?.id || "").trim();
+  if (!newId) throw Object.assign(new Error("workbook_convert_failed"), { code: 500 });
+
+  // Archive the original Excel file so it's clearly superseded by the native sheet.
+  // Non-fatal: a rename failure must not undo a successful conversion.
+  try {
+    const originalName = String(srcMeta.data?.name || `${baseName}.xlsx`);
+    if (!/^Archived_/i.test(originalName)) {
+      await drive.files.update({
+        fileId,
+        requestBody: { name: `Archived_${originalName}` },
+        supportsAllDrives: true,
+      });
+    }
+  } catch (e: any) {
+    logger.warn("workbook_xlsx_archive_rename_failed", { fileId, error: String(e?.message || e) });
+  }
+
+  const now = isoNow();
+  const workbook: WorkbookMeta = {
+    spreadsheetId: newId,
+    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${newId}/edit`,
+    spreadsheetName: String(copied.data?.name || baseName).trim() || baseName,
+    status: "linked",
+    linkedAt: now,
+    updatedAt: now,
+    linkedBy: uid,
+    ...(enrollmentId ? { linkedEnrollmentId: enrollmentId } : {}),
+  };
+
+  await admin
+    .firestore()
+    .collection("customers")
+    .doc(customerId)
+    .set({ customerDrive: { linkedWorkbooks: { tss: workbook } } }, { merge: true });
+
+  return { workbook, converted: true };
+}

@@ -99,7 +99,29 @@ function fieldHeaderIds(field: { expected?: string; aliases?: readonly string[] 
 
 type SheetMeta = { title: string; sheetId: number };
 
-/** Resolve the actual workbook sheet title for a config sheet id. */
+// Normalized form that KEEPS digits — used for variant detection, where the
+// leading number is the whole signal ("6. Progress Notes" payer vs
+// "Progress Notes" nonPayer).  "6. Progress Notes" → "6 progress notes".
+function normKeepNum(name: string): string {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// Normalized form that STRIPS a leading section number — used to *find* a sheet
+// regardless of whether it carries a "N. " prefix.  "6. Progress Notes" and
+// "Progress Notes" both → "progress notes".
+function normSheet(name: string): string {
+  return normKeepNum(String(name || "").trim().replace(/^\s*\d+\s*[.)\-:]?\s+/, ""));
+}
+
+/**
+ * Resolve the actual workbook sheet title for a config sheet id, tolerant of
+ * section-number prefixes, whitespace, and punctuation. Tries normalized
+ * equality first, then a normalized contains match (handles extra/edited words).
+ */
 function resolveSheetTitle(
   cfg: TssNS.TssWorksheetConfig,
   sheetId: string,
@@ -108,12 +130,18 @@ function resolveSheetTitle(
   const sheetCfg = cfg.sheets[sheetId];
   if (!sheetCfg) return null;
   const wanted = [...(sheetCfg.expectedNames ?? []), ...(sheetCfg.aliases ?? [])]
-    .map((s) => s.trim().toLowerCase())
+    .map(normSheet)
     .filter(Boolean);
-  const byTitle = new Map(sheets.map((s) => [s.title.trim().toLowerCase(), s.title]));
-  for (const name of wanted) {
-    const hit = byTitle.get(name);
-    if (hit) return hit;
+  if (!wanted.length) return null;
+
+  // 1. Exact normalized match.
+  for (const s of sheets) {
+    if (wanted.includes(normSheet(s.title))) return s.title;
+  }
+  // 2. Contains match either direction (tolerant of edited titles).
+  for (const s of sheets) {
+    const t = normSheet(s.title);
+    if (t && wanted.some((w) => w === t || t.includes(w) || w.includes(t))) return s.title;
   }
   return null;
 }
@@ -124,11 +152,10 @@ function detectVariant(
   cfg: TssNS.TssWorksheetConfig,
   sheets: SheetMeta[],
 ): TssNS.TssWorkbookVariant {
-  const titles = new Set(sheets.map((s) => s.title.trim().toLowerCase()));
+  // Keep digits here: the variant signal IS the leading number.
+  const titles = new Set(sheets.map((s) => normKeepNum(s.title)));
   for (const rule of cfg.variantRules) {
-    if (titles.has(String(rule.ifSheetExists).trim().toLowerCase())) {
-      return rule.variant;
-    }
+    if (titles.has(normKeepNum(String(rule.ifSheetExists)))) return rule.variant;
   }
   return "unknown";
 }
@@ -253,24 +280,45 @@ function extractDataTable(
     return { rows: [], warnings, status: "missing_headers" };
   }
 
-  // 1. Determine the header row.
+  // 1. Determine the header row — drift-tolerant.
+  //
+  // Build candidate rows in priority order: the variant's fixed headerRow, the
+  // configured candidates, the scan window, then a broad fallback over the first
+  // 30 rows. We VERIFY each candidate actually contains the required headers
+  // rather than trusting a fixed row blindly (sheets drift), and fall back to a
+  // relaxed score match if nothing satisfies the strict requirement.
+  const mustContain = range.headerScan?.mustContainHeaderIds ?? [];
+  const scoreIds = range.headerScan?.scoreHeaderIds ?? mustContain;
+  const rowIdsAt = (rowIdx: number) => new Set((grid[rowIdx] ?? []).map((c) => tss.smartHeaderId(c)));
+  const rowScore = (rowIdx: number) => {
+    const ids = rowIdsAt(rowIdx);
+    return scoreIds.reduce((acc, id) => acc + (ids.has(id) ? 1 : 0), 0);
+  };
+
+  const candidateRows: number[] = [];
+  if (typeof range.headerRow === "number") candidateRows.push(range.headerRow - 1);
+  for (const n of range.headerRowCandidates ?? []) candidateRows.push(n - 1);
+  if (range.headerScan) {
+    for (let r = range.headerScan.minRow - 1; r <= range.headerScan.maxRow - 1; r++) candidateRows.push(r);
+  }
+  for (let r = 0; r < Math.min(30, MAX_SCAN_ROWS); r++) candidateRows.push(r); // broad fallback
+  const seenRows = new Set<number>();
+  const orderedRows = candidateRows.filter((r) => r >= 0 && !seenRows.has(r) && (seenRows.add(r), true));
+
   let headerRow = -1;
-  if (typeof range.headerRow === "number") {
-    headerRow = range.headerRow - 1; // config is 1-based
-  } else {
-    const candidates = range.headerRowCandidates?.map((n) => n - 1)
-      ?? (range.headerScan
-        ? Array.from({ length: range.headerScan.maxRow - range.headerScan.minRow + 1 }, (_, i) => range.headerScan!.minRow - 1 + i)
-        : []);
-    const mustContain = (range.headerScan?.mustContainHeaderIds ?? []).map((s) => s);
-    let bestScore = -1;
-    for (const cand of candidates) {
-      const rowIds = new Set((grid[cand] ?? []).map((c) => tss.smartHeaderId(c)));
-      const hasAllRequired = mustContain.every((id) => rowIds.has(id));
-      if (!hasAllRequired) continue;
-      const scoreIds = range.headerScan?.scoreHeaderIds ?? mustContain;
-      const score = scoreIds.reduce((acc, id) => acc + (rowIds.has(id) ? 1 : 0), 0);
-      if (score > bestScore) { bestScore = score; headerRow = cand; }
+  let bestScore = -1;
+  // Strict pass: must contain all required header ids; pick the best-scoring row.
+  for (const r of orderedRows) {
+    if (mustContain.length && !mustContain.every((id) => rowIdsAt(r).has(id))) continue;
+    const sc = rowScore(r);
+    if (sc > bestScore) { bestScore = sc; headerRow = r; }
+  }
+  // Relaxed pass: nothing met the strict requirement — accept the row with the
+  // most scored-header matches, if it's a confident match (>= 2 columns).
+  if (headerRow < 0) {
+    for (const r of orderedRows) {
+      const sc = rowScore(r);
+      if (sc >= 2 && sc > bestScore) { bestScore = sc; headerRow = r; }
     }
   }
 
@@ -309,8 +357,11 @@ function extractDataTable(
     return { rows: [], warnings, status: "missing_headers" };
   }
 
-  // 3. Determine data start row.
-  const dataStart = typeof range.dataStartRow === "number"
+  // 3. Determine data start row. Only trust the configured fixed dataStartRow
+  //    when we actually landed on the configured fixed headerRow; otherwise the
+  //    sheet drifted and we derive it from the header row we found.
+  const usedFixedHeader = typeof range.headerRow === "number" && headerRow === range.headerRow - 1;
+  const dataStart = (usedFixedHeader && typeof range.dataStartRow === "number")
     ? range.dataStartRow - 1
     : headerRow + (range.dataStartRowOffset ?? 1);
 

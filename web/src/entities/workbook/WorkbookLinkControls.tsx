@@ -17,6 +17,9 @@ import type { ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XLS_MIME  = "application/vnd.ms-excel";
+
 type CandidateItem = {
   id: string;
   name: string;
@@ -25,6 +28,7 @@ type CandidateItem = {
   modifiedTime?: string | null;
   isFolder: boolean;
   isSpreadsheet: boolean;
+  isExcel: boolean;
 };
 
 export type WorkbookLinkIssue = {
@@ -57,9 +61,10 @@ function parseCandidates(resp: unknown): CandidateItem[] {
         modifiedTime: f.modifiedTime ? String(f.modifiedTime) : null,
         isFolder:     mime === FOLDER_MIME,
         isSpreadsheet: mime === SHEETS_MIME,
+        isExcel:      mime === XLSX_MIME || mime === XLS_MIME,
       };
     })
-    .filter((c) => c.id && (c.isFolder || c.isSpreadsheet))
+    .filter((c) => c.id && (c.isFolder || c.isSpreadsheet || c.isExcel))
     .sort((a, b) => {
       if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
       return a.name.localeCompare(b.name);
@@ -136,16 +141,20 @@ function CandidateList({
   loading,
   error,
   attachingId,
+  convertingId,
   isViewer,
   onAttach,
+  onConvert,
   onRetry,
 }: {
   candidates: CandidateItem[] | null;
   loading: boolean;
   error?: WorkbookLinkIssue | null;
   attachingId: string | null;
+  convertingId: string | null;
   isViewer: boolean;
   onAttach: (item: CandidateItem) => void;
+  onConvert: (item: CandidateItem) => void;
   onRetry: () => void;
 }) {
   if (loading) {
@@ -173,7 +182,7 @@ function CandidateList({
 
   if (candidates !== null && candidates.length === 0) {
     return (
-      <div className="text-xs text-slate-400">No Google Sheets found in this folder.</div>
+      <div className="text-xs text-slate-400">No Google Sheets or Excel files found in this folder.</div>
     );
   }
 
@@ -192,16 +201,28 @@ function CandidateList({
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium text-slate-900">{item.name}</div>
                 {item.modifiedTime && (
-                  <div className="text-[11px] text-slate-400">Modified {fmtDate(item.modifiedTime)}</div>
+                  <div className="text-[11px] text-slate-400">
+                    {item.isExcel ? "Excel file · " : ""}Modified {fmtDate(item.modifiedTime)}
+                  </div>
                 )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {item.isSpreadsheet && !isViewer ? (
+              {item.isExcel && !isViewer ? (
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  disabled={!!attachingId}
+                  disabled={!!convertingId || !!attachingId}
+                  title="Save a Google Sheets copy of this Excel file and link it"
+                  onClick={() => onConvert(item)}
+                >
+                  {convertingId === item.id ? "Converting…" : "Convert"}
+                </button>
+              ) : item.isSpreadsheet && !isViewer ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={!!attachingId || !!convertingId}
                   onClick={() => onAttach(item)}
                 >
                   {attachingId === item.id ? "Linking…" : "Link"}
@@ -252,6 +273,7 @@ export function WorkbookLinkControls({
   const [candidatesLoading, setCandidatesLoading] = React.useState(false);
   const [candidatesError,   setCandidatesError]   = React.useState<WorkbookLinkIssue | null>(null);
   const [attachingId,       setAttachingId]       = React.useState<string | null>(null);
+  const [convertingId,      setConvertingId]      = React.useState<string | null>(null);
 
   const loadCandidates = React.useCallback(async () => {
     if (!folderId) return;
@@ -328,6 +350,29 @@ export function WorkbookLinkControls({
     }
   };
 
+  const convertCandidate = async (item: CandidateItem) => {
+    setConvertingId(item.id);
+    setCandidatesError(null);
+    try {
+      const resp = (await (api as any).postWith(
+        "convertCustomerWorkbookXlsx",
+        { customerId, fileId: item.id, fileName: item.name, ...(enrollmentId ? { enrollmentId } : {}) },
+        driveHeaders(),
+      )) as Record<string, unknown>;
+      if (resp?.ok) {
+        onLinked();
+      } else {
+        const issue = apiIssue(resp, "Failed to convert workbook");
+        setCandidatesError(issue);
+        if (isScopeError(issue) && onAuthIssue) onAuthIssue(issue as ScopeErrorPayload);
+      }
+    } catch (e: unknown) {
+      setCandidatesError(apiIssue(e, String((e as Error)?.message || "Failed to convert workbook")));
+    } finally {
+      setConvertingId(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {!isViewer && (
@@ -345,8 +390,10 @@ export function WorkbookLinkControls({
           loading={candidatesLoading}
           error={candidatesError}
           attachingId={attachingId}
+          convertingId={convertingId}
           isViewer={isViewer}
           onAttach={(item) => void linkCandidate(item)}
+          onConvert={(item) => void convertCandidate(item)}
           onRetry={() => { setCandidates(null); void loadCandidates(); }}
         />
       )}
