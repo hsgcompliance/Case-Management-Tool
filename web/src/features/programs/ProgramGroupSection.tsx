@@ -45,7 +45,7 @@ export function ProgramGroupSection({
         <div className="hidden text-right md:block md:col-span-1">{renderHeader("clients", "Clients", "desc", "right")}</div>
         <div className="hidden md:block md:col-span-2">{renderHeader("population", "Population")}</div>
         <div className="hidden text-right md:block md:col-span-1">{renderHeader("cms", "CMs", "desc", "right")}</div>
-        <div className="hidden text-right md:block md:col-span-1">{renderHeader("budget", "Budget", "desc", "right")}</div>
+        <div className="hidden text-right md:block md:col-span-1">{renderHeader("budget", "Finance", "desc", "right")}</div>
         <div className="col-span-3 md:col-span-1" />
       </div>
 

@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { Enrollment, TCustomerEntity } from "@types";
-import { useCustomerEnrollments, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
+import { useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
 import { currentMonthKey } from "@hooks/useMetrics";
 import { useGrant, useGrants } from "@hooks/useGrants";
@@ -20,6 +20,14 @@ import { normalizePayments, currency, todayISO, nextRentCertDue } from "./paymen
 import { customerContactRoleForUid } from "../contactCaseManagers";
 import { getCustomerDriveFolderLink } from "../customerDriveFolder";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
+import {
+  enrollmentControlActionBody,
+  enrollmentControlDone,
+  enrollmentControlPatch,
+  enrollmentControlStatusLabel,
+  enrollmentControlsForGrant,
+  type EnrollmentControlDescriptor,
+} from "@features/enrollments/enrollmentControls";
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const CARD_TASKS_LIMIT = 1000;
@@ -500,6 +508,7 @@ function EnrollmentQuickModal({
   const editable = roleMode !== "viewer";
   const admin = roleMode === "admin";
   const patch = useEnrollmentsPatch();
+  const applyAction = useEnrollmentActionsApply();
   const deleteEnrollment = useEnrollmentsDelete();
   const grantId = String(enrollment?.grantId || "");
   const { data: grant = null } = useGrant(grantId, { enabled: open && !!grantId });
@@ -539,7 +548,6 @@ function EnrollmentQuickModal({
 
   const enrollmentId = String(enrollment?.id || "");
   const status = String(enrollment?.status || (enrollment?.active === false ? "closed" : "active")).toLowerCase();
-  const compliance = (enrollment?.compliance || {}) as Record<string, unknown>;
   const enrollmentLabel = formatEnrollmentLabel(enrollment as unknown as Record<string, unknown>, { fallback: enrollmentId || "Enrollment" });
   const grantName = String(grant?.name || enrollment?.grantName || "").trim();
   const grantDescription = String(grant?.description || grant?.summary || "").trim();
@@ -549,7 +557,7 @@ function EnrollmentQuickModal({
       : status === "closed" || status === "inactive"
         ? "border-slate-200 bg-slate-100 text-slate-600"
         : "border-amber-200 bg-amber-50 text-amber-700";
-  const busy = patch.isPending || deleteEnrollment.isPending;
+  const busy = patch.isPending || applyAction.isPending || deleteEnrollment.isPending;
 
   const patchEnrollment = async (patchData: Record<string, unknown>) => {
     if (!enrollmentId) return;
@@ -579,14 +587,37 @@ function EnrollmentQuickModal({
     });
   };
 
-  const markEntryComplete = () => {
-    void patchEnrollment({
-      compliance: {
-        ...compliance,
-        caseworthyEntryComplete: true,
-        hmisEntryComplete: true,
-      },
-    });
+  const controlDescriptors = React.useMemo(
+    () => enrollmentControlsForGrant(grant as Record<string, unknown> | null, status === "closed" || status === "inactive"),
+    [grant, status],
+  );
+
+  const toggleEnrollmentControl = async (descriptor: EnrollmentControlDescriptor) => {
+    if (!enrollmentId || !enrollment) return;
+    try {
+      const next = !enrollmentControlDone(enrollment as Record<string, unknown>, descriptor);
+      const patchData = enrollmentControlPatch(enrollment as Record<string, unknown>, descriptor, next);
+      if (patchData) {
+        await patch.mutateAsync({ id: enrollmentId, patch: patchData });
+      } else {
+        const actionBody = enrollmentControlActionBody(enrollmentId, descriptor, next);
+        if (!actionBody) return;
+        await applyAction.mutateAsync(actionBody as any);
+      }
+      toast("Enrollment updated.", { type: "success" });
+      onChanged();
+    } catch (error: unknown) {
+      toast(toApiError(error).error || "Failed to update enrollment control.", { type: "error" });
+    }
+  };
+
+  const markDisplayedControlsComplete = () => {
+    void (async () => {
+      for (const descriptor of controlDescriptors) {
+        if (enrollmentControlDone(enrollment as Record<string, unknown>, descriptor)) continue;
+        await toggleEnrollmentControl(descriptor);
+      }
+    })();
   };
 
   const cleanupEnrollment = async (opts: EnrollmentCleanupOptions) => {
@@ -660,14 +691,28 @@ function EnrollmentQuickModal({
           </section>
 
           <div className="grid gap-2 text-sm md:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">CaseWorthy Entry</div>
-              <div className="mt-1 font-semibold text-slate-800">{compliance.caseworthyEntryComplete ? "Complete" : "Pending"}</div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">HMIS Entry</div>
-              <div className="mt-1 font-semibold text-slate-800">{compliance.hmisEntryComplete ? "Complete" : "Pending"}</div>
-            </div>
+            {controlDescriptors.length ? controlDescriptors.map((descriptor) => {
+              const done = enrollmentControlDone(enrollment as Record<string, unknown>, descriptor);
+              return (
+                <button
+                  key={`${descriptor.kind}_${descriptor.key}`}
+                  type="button"
+                  className={[
+                    "rounded-lg border px-4 py-3 text-left transition disabled:opacity-60",
+                    done ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50",
+                  ].join(" ")}
+                  onClick={() => void toggleEnrollmentControl(descriptor)}
+                  disabled={!editable || busy}
+                >
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{descriptor.control.label}</div>
+                  <div className="mt-1 font-semibold text-slate-800">{enrollmentControlStatusLabel(done, descriptor)}</div>
+                </button>
+              );
+            }) : (
+              <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 md:col-span-2">
+                No enrollment controls configured for this grant/program.
+              </div>
+            )}
           </div>
 
           {editable && manageOpen ? (
@@ -719,11 +764,11 @@ function EnrollmentQuickModal({
                 <button
                   type="button"
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50"
-                  onClick={markEntryComplete}
-                  disabled={busy || (compliance.caseworthyEntryComplete === true && compliance.hmisEntryComplete === true)}
+                  onClick={markDisplayedControlsComplete}
+                  disabled={busy || !controlDescriptors.length || controlDescriptors.every((descriptor) => enrollmentControlDone(enrollment as Record<string, unknown>, descriptor))}
                 >
-                  <span className="block font-semibold text-slate-900">Mark CW + HMIS complete</span>
-                  <span className="block text-xs text-slate-500">Update both entry checks.</span>
+                  <span className="block font-semibold text-slate-900">Mark controls complete</span>
+                  <span className="block text-xs text-slate-500">Complete all displayed controls for this enrollment.</span>
                 </button>
                 <button
                   type="button"

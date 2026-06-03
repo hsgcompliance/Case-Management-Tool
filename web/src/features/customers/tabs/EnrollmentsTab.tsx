@@ -12,6 +12,7 @@ import { useTasksDelete, useTasksUpdateStatus } from "@hooks/useTasks";
 import {
   useCustomerEnrollments,
   useEnrollCustomer,
+  useEnrollmentActionsApply,
   useEnrollmentsAdminDelete,
   useEnrollmentsDelete,
   useEnrollmentsPatch,
@@ -25,7 +26,14 @@ import { RowStateBadge } from "@entities/ui/rowState";
 import { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
 import type { EnrollmentsPatchReq } from "@types";
-import { normalizeGrantComplianceConfig, type TGrantComplianceControl } from "@hdb/contracts";
+import {
+  enrollmentControlActionBody,
+  enrollmentControlDone,
+  enrollmentControlPatch,
+  enrollmentControlStatusLabel,
+  enrollmentControlsForGrant,
+  type EnrollmentControlDescriptor,
+} from "@features/enrollments/enrollmentControls";
 
 function isoToday(): string {
   return toISODate(new Date());
@@ -62,20 +70,6 @@ function toOpenClosed(row: Enrollment): "open" | "closed" {
 
 function isInactiveEnrollment(row: Enrollment): boolean {
   return toOpenClosed(row) === "closed";
-}
-
-function complianceFieldKey(control: TGrantComplianceControl): string | null {
-  const field = String(control.field || `compliance.${control.key}`).trim();
-  if (!field.startsWith("compliance.")) return null;
-  const key = field.slice("compliance.".length).trim();
-  return key || null;
-}
-
-function complianceFlag(row: Enrollment, control: TGrantComplianceControl): boolean {
-  const key = complianceFieldKey(control);
-  if (!key) return false;
-  const c = row.compliance as Record<string, unknown> | null | undefined;
-  return Boolean(c?.[key]);
 }
 
 function badgeClasses(done: boolean): string {
@@ -117,6 +111,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
 
   const enroll = useEnrollCustomer();
   const patch = useEnrollmentsPatch();
+  const applyAction = useEnrollmentActionsApply();
   const softDelete = useEnrollmentsDelete();
   const adminDelete = useEnrollmentsAdminDelete();
   const voidProjections = useEnrollmentsVoidProjections();
@@ -155,7 +150,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     paymentsSpend.isPending ||
     paymentsDeleteRows.isPending ||
     tasksUpdateStatus.isPending ||
-    tasksDelete.isPending;
+    tasksDelete.isPending ||
+    applyAction.isPending;
 
   const today = React.useMemo(() => isoToday(), []);
   const selectedGrantEndDate = grantId ? grantEndDateById.get(String(grantId)) || "" : "";
@@ -291,21 +287,20 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     await patch.mutateAsync(body);
   };
 
-  const toggleCompliance = async (row: Enrollment, control: TGrantComplianceControl) => {
-    const key = complianceFieldKey(control);
-    if (!key) return;
+  const toggleEnrollmentControl = async (row: Enrollment, descriptor: EnrollmentControlDescriptor) => {
     setError(null);
     try {
-      const next = !complianceFlag(row, control);
-      const currentCompliance = (row.compliance || {}) as Record<string, unknown>;
-      await patchEnrollment(row.id, {
-        compliance: {
-          ...currentCompliance,
-          [key]: next,
-        },
-      });
+      const next = !enrollmentControlDone(row, descriptor);
+      const patchData = enrollmentControlPatch(row, descriptor, next);
+      if (patchData) {
+        await patchEnrollment(row.id, patchData);
+      } else {
+        const actionBody = enrollmentControlActionBody(row.id, descriptor, next);
+        if (!actionBody) return;
+        await applyAction.mutateAsync(actionBody as any);
+      }
     } catch (e: unknown) {
-      const msg = toApiError(e).error || "Failed to update compliance.";
+      const msg = toApiError(e).error || "Failed to update enrollment control.";
       setError(msg);
       toast(msg, { type: "error" });
     }
@@ -448,9 +443,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
 
   const renderComplianceButtons = (row: Enrollment) => {
     const grant = grantById.get(String(row.grantId || "")) || {};
-    const config = normalizeGrantComplianceConfig(grant as Record<string, unknown>);
-    const controls = (isInactiveEnrollment(row) ? config.inactive || [] : config.active || [])
-      .filter((control) => complianceFieldKey(control));
+    const controls = enrollmentControlsForGrant(grant as Record<string, unknown>, isInactiveEnrollment(row));
 
     if (!controls.length) {
       return <span className="text-xs text-slate-400">None</span>;
@@ -458,17 +451,17 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
 
     return (
       <div className="flex flex-wrap gap-2">
-        {controls.map((control) => {
-          const done = complianceFlag(row, control);
+        {controls.map((descriptor) => {
+          const done = enrollmentControlDone(row, descriptor);
           return (
             <button
-              key={control.key}
+              key={`${descriptor.kind}_${descriptor.key}`}
               type="button"
               className={["rounded-full border px-2 py-1 text-xs font-medium", badgeClasses(done)].join(" ")}
-              onClick={() => void toggleCompliance(row, control)}
+              onClick={() => void toggleEnrollmentControl(row, descriptor)}
               disabled={busy}
             >
-              {control.label} {done ? "Done" : "Pending"}
+              {descriptor.control.label} {enrollmentControlStatusLabel(done, descriptor)}
             </button>
           );
         })}

@@ -31,6 +31,7 @@ import { isCaseManagerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
 import { DuplicateChecker, type DupCheckState } from "./DuplicateChecker";
 import type { DupMatch } from "@lib/duplicateScore";
+import { enrollmentControlsForGrant } from "@features/enrollments/enrollmentControls";
 
 type FlowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type Population = "Youth" | "Individual" | "Family" | "";
@@ -46,6 +47,8 @@ type GrantOption = {
   status?: string | null;
   endDate?: string | null;
   kind?: string | null;
+  complianceConfig?: Record<string, unknown> | null;
+  enrollmentDefaults?: Record<string, unknown> | null;
 };
 type EnrollmentDraft = {
   grantId: string;
@@ -434,6 +437,12 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         status: grant.status ? String(grant.status) : null,
         endDate: grant.endDate ? String(grant.endDate).slice(0, 10) : null,
         kind: grant.kind ? String(grant.kind) : null,
+        complianceConfig: grant.complianceConfig && typeof grant.complianceConfig === "object"
+          ? (grant.complianceConfig as Record<string, unknown>)
+          : null,
+        enrollmentDefaults: grant.enrollmentDefaults && typeof grant.enrollmentDefaults === "object"
+          ? (grant.enrollmentDefaults as Record<string, unknown>)
+          : null,
       }))
       .filter((grant) => !!grant.id)
       .sort((a, b) => a.label.localeCompare(b.label));
@@ -1064,6 +1073,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const renderEnrollmentCard = (grant: GrantOption) => {
     const draft = selectedEnrollmentDrafts.find((entry) => entry.grantId === grant.id) || null;
     const selected = !!draft;
+    const controlDescriptors = enrollmentControlsForGrant(grant as Record<string, unknown>, false);
+    const authorizationMonths = Number(grant.enrollmentDefaults?.authorizationMonths);
     return (
       <div
         key={grant.id}
@@ -1093,6 +1104,25 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             {selected
               ? `Start ${draft?.startDate || isoToday()} | End ${draft?.endDate || "No end date"}`
               : "Adds a dated enrollment draft"}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {Number.isFinite(authorizationMonths) && authorizationMonths > 0 ? (
+              <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                {Math.floor(authorizationMonths)} mo authorization
+              </span>
+            ) : null}
+            {controlDescriptors.length ? controlDescriptors.map((descriptor) => (
+              <span
+                key={`${grant.id}_${descriptor.kind}_${descriptor.key}`}
+                className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+              >
+                {descriptor.control.label}
+              </span>
+            )) : (
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-400">
+                No controls
+              </span>
+            )}
           </div>
         </button>
         {draft ? (

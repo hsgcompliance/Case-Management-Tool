@@ -18,6 +18,7 @@ import {
   DEFAULT_ELIGIBILITY,
   DEFAULT_LEVEL_OF_ASSISTANCE,
   FINANCIAL_LINE_ITEM_PRESETS,
+  TSS_COMPLIANCE_CONFIG,
   type FlowInvoiceOption,
   type FlowLineItem,
   type GrantProgramFinancialModel,
@@ -297,6 +298,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
       ...prev,
       lineItems: FINANCIAL_LINE_ITEM_PRESETS[preset].map((item) => ({ ...item })),
       allocationEnabled: prev.financialModel === "billable" ? true : prev.allocationEnabled,
+      ...(preset === "tssBilling" ? { complianceConfig: TSS_COMPLIANCE_CONFIG, authorizationMonths: prev.authorizationMonths || "12" } : {}),
     }));
   };
 
