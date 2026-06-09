@@ -119,6 +119,35 @@ export type PaymentQueueVoidReq = {
   reason?: string;
 };
 
+export type PaymentQueueAdminSyncReq = {
+  /** Defaults to the caller's org claim. */
+  orgId?: string;
+  /** Count only, write nothing. */
+  dryRun?: boolean;
+  /** Page size for scans (1–500). */
+  pageSize?: number;
+  /** Re-run active pipelines over existing pending+unassigned items. Default true. */
+  reallocate?: boolean;
+};
+
+export type PaymentQueueAdminSyncResp = {
+  ok: true;
+  dryRun: boolean;
+  reallocate: boolean;
+  orgId: string;
+  at: string;
+  enrollmentsScanned: number;
+  enrollmentsWithPayments: number;
+  projectionsWritten: number;
+  jotformScanned: number;
+  jotformProcessed: number;
+  jotformItemsWritten: number;
+  reallocScanned: number;
+  reallocMatched: number;
+  reallocPipelinesActive: number;
+  errors: string[];
+};
+
 const PaymentQueue = {
   list: (query: PaymentQueueListReq = {}) =>
     api.get("paymentQueueList", query) as Promise<{
@@ -170,6 +199,11 @@ const PaymentQueue = {
       body,
       idempotencyKey: idemKey({ scope: "paymentQueue", op: "recomputeGrantAllocations", body }),
     }) as Promise<{ ok: true; grantId: string; customers: number; ledgerRows: number; totals: Record<string, number>; dryRun: boolean }>,
+
+  // Admin: re-extract spending submissions (repopulates transactionFields on stale
+  // queue rows) and re-run active pipelines over the existing pending backlog.
+  adminSync: (body: PaymentQueueAdminSyncReq = {}) =>
+    api.call("paymentQueueAdminSync", { body }) as Promise<PaymentQueueAdminSyncResp>,
 };
 
 export default PaymentQueue;

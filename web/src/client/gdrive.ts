@@ -3,9 +3,11 @@ import api from './api';
 import { getGoogleDriveAccessToken } from '@lib/googleDriveAccessToken';
 import type {
   TGDriveCreateFolderBody, TGDriveUploadBody, TGDriveBuildCustomerFolderBody,
+  TGDriveCopyGrantTemplatesBody,
   TGDriveCustomerFolderSyncBody,
   GDriveCreateFolderResp, GDriveUploadResp, GDriveListResp,
   GDriveCustomerFolderIndexResp, GDriveBuildCustomerFolderResp,
+  GDriveCopyGrantTemplatesResp,
   GDriveConfigGetResp, GDriveConfigPatchResp, GDriveCustomerFolderSyncResp,
 } from '@types';
 import type { ReqOf } from '@types';
@@ -55,6 +57,8 @@ export const GDrive = {
     api.postWith('gdriveConfigPatch', body, driveHeaders()) as Promise<GDriveConfigPatchResp>,
   buildCustomerFolder: (body: TGDriveBuildCustomerFolderBody) =>
     api.postWith('gdriveBuildCustomerFolder', body, driveHeaders()) as Promise<GDriveBuildCustomerFolderResp>,
+  copyGrantTemplates: (body: TGDriveCopyGrantTemplatesBody) =>
+    api.postWith('gdriveCopyGrantTemplates', body, driveHeaders()) as Promise<GDriveCopyGrantTemplatesResp>,
   customerFolderSync: (body: TGDriveCustomerFolderSyncBody) =>
     api.postWith('gdriveCustomerFolderSync', body, driveHeaders()) as Promise<GDriveCustomerFolderSyncResp>,
   // Workbook content (strict per-user server OAuth on the backend). No drive

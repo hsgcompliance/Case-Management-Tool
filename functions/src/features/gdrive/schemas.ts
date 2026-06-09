@@ -5,10 +5,12 @@ import { z, gdrive as C } from "@hdb/contracts";
 export const GDriveListQuery = C.GDriveListQuery;
 export const GDriveCreateFolderBody = C.GDriveCreateFolderBody;
 export const GDriveUploadBody = C.GDriveUploadBody;
+export const GDriveCopyGrantTemplatesBody = C.GDriveCopyGrantTemplatesBody;
 
 export type TGDriveListQuery = GDriveNS.TGDriveListQuery;
 export type TGDriveCreateFolderBody = GDriveNS.TGDriveCreateFolderBody;
 export type TGDriveUploadBody = GDriveNS.TGDriveUploadBody;
+export type TGDriveCopyGrantTemplatesBody = GDriveNS.TGDriveCopyGrantTemplatesBody;
 
 // Defined locally (not yet in compiled vendor) — keep in sync with contracts/src/gdrive.ts
 export const GDriveBuildCustomerFolderBody = z.object({

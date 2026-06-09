@@ -10,10 +10,16 @@ import {
   type TPipelineFormSchema,
   type TPipelineOperator,
   type TPipelineRuleNode,
+  type TBudgetPipelineRollupResult,
+  type TBudgetPipelineRollupRow,
 } from './schemas';
 
 const COLLECTION = 'budgetPipelines';
 const QUEUE_COLLECTION = 'paymentQueue';
+
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
 
 // ─── Field extraction ─────────────────────────────────────────────────────────
 
@@ -474,6 +480,104 @@ export async function previewBudgetPipeline(
     perItem,
     conflicts,
   };
+}
+
+// ─── Rollup ─────────────────────────────────────────────────────────────────
+
+/**
+ * Per-pipeline budget rollup. Attribution comes from `pipelineId` stamped on
+ * paymentQueue items by the allocator/re-allocator:
+ *   - pending queue rows  → this pipeline's projected contribution
+ *   - posted queue rows   → this pipeline's spent contribution (the posted doc
+ *     retains pipelineId + amount, so no ledger join is needed)
+ * The grant's authoritative line-item projected/spent (ALL sources) is included
+ * alongside so the UI can reconcile the pipeline slice against the whole.
+ */
+export async function rollupBudgetPipelines(
+  orgId: string,
+  opts: {pipelineId?: string},
+): Promise<TBudgetPipelineRollupResult> {
+  const empty: TBudgetPipelineRollupResult = {
+    rows: [],
+    totals: {pendingAmount: 0, postedAmount: 0, pendingCount: 0, postedCount: 0},
+  };
+
+  // 1. Resolve the pipeline set (single or all-in-org).
+  let pipelines: TBudgetPipeline[];
+  if (opts.pipelineId) {
+    const doc = await db.collection(COLLECTION).doc(opts.pipelineId).get();
+    if (!doc.exists) return empty;
+    const p = doc.data() as TBudgetPipeline;
+    if (p.orgId !== orgId) return empty;
+    pipelines = [{...p, id: doc.id}];
+  } else {
+    const snap = await db.collection(COLLECTION).where('orgId', '==', orgId).get();
+    pipelines = snap.docs.map((d) => ({...(d.data() as TBudgetPipeline), id: d.id}));
+  }
+  if (pipelines.length === 0) return empty;
+
+  // 2. Batch-load referenced grants for authoritative line-item totals.
+  const grantIds = Array.from(new Set(pipelines.map((p) => p.grantId).filter(Boolean) as string[]));
+  const grantMap = new Map<string, Record<string, unknown>>();
+  if (grantIds.length) {
+    const snaps = await db.getAll(...grantIds.map((id) => db.collection('grants').doc(id)));
+    for (const s of snaps) if (s.exists) grantMap.set(s.id, s.data() as Record<string, unknown>);
+  }
+
+  // 3. Aggregate pending + posted queue rows per pipeline (equality-only queries
+  //    need no composite index).
+  const sumAmount = (snap: FirebaseFirestore.QuerySnapshot) =>
+    snap.docs.reduce((s, d) => s + Number((d.data() as Record<string, unknown>).amount ?? 0), 0);
+
+  const rows: TBudgetPipelineRollupRow[] = await Promise.all(
+    pipelines.map(async (p) => {
+      const base = db
+        .collection(QUEUE_COLLECTION)
+        .where('orgId', '==', orgId)
+        .where('pipelineId', '==', p.id);
+      const [pendingSnap, postedSnap] = await Promise.all([
+        base.where('queueStatus', '==', 'pending').get(),
+        base.where('queueStatus', '==', 'posted').get(),
+      ]);
+
+      const grant = p.grantId ? grantMap.get(p.grantId) : null;
+      const lineItems: Array<Record<string, unknown>> = Array.isArray((grant as any)?.budget?.lineItems)
+        ? (grant as any).budget.lineItems
+        : [];
+      const li = p.lineItemId ? lineItems.find((x) => String(x?.id || '') === p.lineItemId) : null;
+
+      return {
+        pipelineId: p.id,
+        name: p.name,
+        status: p.status,
+        grantId: p.grantId ?? null,
+        grantName: (grant as any)?.name ? String((grant as any).name) : null,
+        lineItemId: p.lineItemId ?? null,
+        lineItemLabel: (li as any)?.label ? String((li as any).label) : null,
+        lineItemBudget: round2(Number((li as any)?.amount ?? 0)),
+        lineItemProjected: round2(Number((li as any)?.projected ?? 0)),
+        lineItemSpent: round2(Number((li as any)?.spent ?? 0)),
+        pendingCount: pendingSnap.size,
+        pendingAmount: round2(sumAmount(pendingSnap)),
+        postedCount: postedSnap.size,
+        postedAmount: round2(sumAmount(postedSnap)),
+      } satisfies TBudgetPipelineRollupRow;
+    }),
+  );
+
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      pendingAmount: round2(acc.pendingAmount + r.pendingAmount),
+      postedAmount: round2(acc.postedAmount + r.postedAmount),
+      pendingCount: acc.pendingCount + r.pendingCount,
+      postedCount: acc.postedCount + r.postedCount,
+    }),
+    {pendingAmount: 0, postedAmount: 0, pendingCount: 0, postedCount: 0},
+  );
+
+  return {rows, totals};
 }
 
 // ─── Trigger helper ───────────────────────────────────────────────────────────

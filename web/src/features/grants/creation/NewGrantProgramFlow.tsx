@@ -11,14 +11,11 @@ import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import type { TGrant as Grant } from "@types";
 import {
-  applyTssPreset,
   buildGrantProgramPayload,
   copyGrantProgramToDraft,
   createInitialGrantProgramDraft,
   DEFAULT_ELIGIBILITY,
   DEFAULT_LEVEL_OF_ASSISTANCE,
-  FINANCIAL_LINE_ITEM_PRESETS,
-  TSS_COMPLIANCE_CONFIG,
   type FlowInvoiceOption,
   type FlowLineItem,
   type GrantProgramFinancialModel,
@@ -86,6 +83,10 @@ function nextLineItem(): FlowLineItem {
   };
 }
 
+function toCurrency(value: number) {
+  return fmtCurrencyUSD(Number.isFinite(value) ? value : 0);
+}
+
 function optionClass(active: boolean) {
   return [
     "rounded-xl border px-4 py-3 text-left transition",
@@ -132,7 +133,7 @@ function TextListEditor({
   return (
     <div className="space-y-2">
       {rows.map((item, index) => (
-        <div key={`${index}:${item}`} className="grid grid-cols-[1fr_auto] gap-2">
+        <div key={index} className="grid grid-cols-[1fr_auto] gap-2">
           <input
             className="input"
             value={item}
@@ -272,6 +273,8 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
   const [draft, setDraft] = React.useState<GrantProgramFlowDraft>(() =>
     createInitialGrantProgramDraft({ status: "draft", startDate: isoToday(), ...(initialCreateData || {}) }),
   );
+  const [showDescriptionSection, setShowDescriptionSection] = React.useState(() => true);
+  const [showServicesSection, setShowServicesSection] = React.useState(() => true);
   const [copying, setCopying] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
@@ -287,18 +290,8 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
       ...prev,
       financialModel: model,
       allocationEnabled: model === "billable" ? true : model === "serviceOnly" ? false : prev.allocationEnabled,
-      authorizationMonths: model === "billable" && !prev.authorizationMonths ? "12" : prev.authorizationMonths,
       budgetTotal: model === "serviceOnly" ? "" : prev.budgetTotal,
       lineItems: model === "serviceOnly" ? [] : prev.lineItems,
-    }));
-  };
-
-  const applyLineItemPreset = (preset: keyof typeof FINANCIAL_LINE_ITEM_PRESETS) => {
-    setDraft((prev) => ({
-      ...prev,
-      lineItems: FINANCIAL_LINE_ITEM_PRESETS[preset].map((item) => ({ ...item })),
-      allocationEnabled: prev.financialModel === "billable" ? true : prev.allocationEnabled,
-      ...(preset === "tssBilling" ? { complianceConfig: TSS_COMPLIANCE_CONFIG, authorizationMonths: prev.authorizationMonths || "12" } : {}),
     }));
   };
 
@@ -351,74 +344,75 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
     <StepFrame
       eyebrow="Page 1"
       title="Start the grant or program"
-      description="Lifecycle identity and financial behavior are separate. Choose what the record is, then choose how money and activity should behave."
+      description="Set the record name, lifecycle, and finance model before adding operational details."
     >
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <label className="field">
-              <span className="label">Copy from existing</span>
-              <select
-                className="select"
-                disabled={copying}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  void onCopy(value);
-                }}
-              >
-                <option value="">Start blank</option>
-                {allGrants.map((grant) => (
-                  <option key={String(grant.id)} value={String(grant.id)}>
-                    {String(grant.name || grant.id)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+      <div className="space-y-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <label className="field">
+            <span className="label">Copy from existing</span>
+            <select
+              className="select"
+              disabled={copying}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                void onCopy(value);
+              }}
+            >
+              <option value="">Start blank</option>
+              {allGrants.map((grant) => (
+                <option key={String(grant.id)} value={String(grant.id)}>
+                  {String(grant.name || grant.id)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="field md:col-span-2">
-              <span className="label">Grant / program name</span>
-              <input
-                className={["input", missingName ? "border-red-300 bg-red-50/40" : ""].join(" ")}
-                value={draft.name}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, name: value }));
-                }}
-              />
-              {missingName ? <span className="text-xs text-red-700">Name is required before you can continue.</span> : null}
-            </label>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="field md:col-span-2">
+            <span className="label">Grant / program name</span>
+            <input
+              className={["input", missingName ? "border-red-300 bg-red-50/40" : ""].join(" ")}
+              value={draft.name}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((prev) => ({ ...prev, name: value }));
+              }}
+            />
+            {missingName ? <span className="text-xs text-red-700">Name is required before you can continue.</span> : null}
+          </label>
+          <label className="field">
+            <span className="label">Start date</span>
+            <input
+              className={["input", missingStartDate ? "border-red-300 bg-red-50/40" : ""].join(" ")}
+              type="date"
+              value={draft.startDate}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((prev) => ({ ...prev, startDate: value }));
+              }}
+            />
+            {missingStartDate ? <span className="text-xs text-red-700">Start date is required before you can continue.</span> : null}
+          </label>
+          {draft.kind === "grant" ? (
             <label className="field">
-              <span className="label">Start date</span>
+              <span className="label">Close / end date encouraged</span>
               <input
-                className={["input", missingStartDate ? "border-red-300 bg-red-50/40" : ""].join(" ")}
+                className="input"
                 type="date"
-                value={draft.startDate}
+                min={draft.startDate || undefined}
+                value={draft.endDate}
                 onChange={(e) => {
                   const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, startDate: value }));
+                  setDraft((prev) => ({ ...prev, endDate: value }));
                 }}
               />
-              {missingStartDate ? <span className="text-xs text-red-700">Start date is required before you can continue.</span> : null}
             </label>
-            {draft.kind === "grant" ? (
-              <label className="field">
-                <span className="label">Close / end date encouraged</span>
-                <input
-                  className="input"
-                  type="date"
-                  min={draft.startDate || undefined}
-                  value={draft.endDate}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setDraft((prev) => ({ ...prev, endDate: value }));
-                  }}
-                />
-              </label>
-            ) : null}
-          </div>
+          ) : null}
+        </div>
 
+        <div className="space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Lifecycle</div>
           <div className="grid gap-3 md:grid-cols-2">
             <button type="button" className={optionClass(draft.kind === "grant")} onClick={() => setDraft((prev) => ({ ...prev, kind: "grant" }))}>
               <div className="text-sm font-semibold">Funding Grant</div>
@@ -429,7 +423,10 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
               <div className="mt-1 text-xs leading-5 text-slate-600">A service container that may continue across funding cycles. It can still be billable or budgeted.</div>
             </button>
           </div>
+        </div>
 
+        <div className="space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Budget Model</div>
           <div className="grid gap-3 md:grid-cols-3">
             {(["budgeted", "billable", "serviceOnly"] as GrantProgramFinancialModel[]).map((model) => (
               <button key={model} type="button" className={optionClass(draft.financialModel === model)} onClick={() => setFinancialModel(model)}>
@@ -444,13 +441,6 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
               </button>
             ))}
           </div>
-        </div>
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-          <div className="font-semibold">TSS preset</div>
-          <p className="text-xs leading-5">Applies an ongoing billable program setup with allocation tracking and a one-year authorization window.</p>
-          <button type="button" className="btn btn-sm w-full" onClick={() => setDraft((prev) => applyTssPreset(prev))}>
-            Apply TSS Billable Program
-          </button>
         </div>
       </div>
       {draft.kind === "grant" && !draft.endDate ? (
@@ -484,7 +474,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
           <input
             className="input"
             value={draft.duration}
-            placeholder="1 Year"
+            placeholder={draft.kind === "program" ? "" : "1 Year"}
             onChange={(e) => {
               const value = e.currentTarget.value;
               setDraft((prev) => ({ ...prev, duration: value }));
@@ -496,24 +486,10 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
           <input
             className="input"
             value={draft.lengthOfAssistance}
-            placeholder="Up to 24 months"
+            placeholder=""
             onChange={(e) => {
               const value = e.currentTarget.value;
               setDraft((prev) => ({ ...prev, lengthOfAssistance: value }));
-            }}
-          />
-        </label>
-        <label className="field">
-          <span className="label">Authorization months</span>
-          <input
-            className="input"
-            type="number"
-            min={1}
-            max={120}
-            value={draft.authorizationMonths}
-            onChange={(e) => {
-              const value = e.currentTarget.value;
-              setDraft((prev) => ({ ...prev, authorizationMonths: value }));
             }}
           />
         </label>
@@ -558,21 +534,44 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
       description="Capture the staff-facing service definition, eligibility rules, and prioritization or assistance levels."
     >
       <div className="space-y-5">
-        <label className="field">
-          <span className="label">Description</span>
-          <textarea
-            className="input min-h-28"
-            value={draft.description}
-            onChange={(e) => {
-              const value = e.currentTarget.value;
-              setDraft((prev) => ({ ...prev, description: value }));
-            }}
-          />
-        </label>
+        {showDescriptionSection ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">Description</div>
+              <button type="button" className="btn btn-ghost btn-xs" onClick={() => {
+                setDraft((prev) => ({ ...prev, description: "" }));
+                setShowDescriptionSection(false);
+              }}>Remove section</button>
+            </div>
+            <textarea
+              className="input min-h-28"
+              value={draft.description}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setDraft((prev) => ({ ...prev, description: value }));
+              }}
+            />
+          </div>
+        ) : (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowDescriptionSection(true)}>Add Description</button>
+        )}
+        {showServicesSection ? (
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-2 text-sm font-semibold text-slate-900">Services offered</div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-slate-900">Services offered</div>
+            <button type="button" className="btn btn-ghost btn-xs" onClick={() => {
+              setDraft((prev) => ({ ...prev, servicesOffered: [] }));
+              setShowServicesSection(false);
+            }}>Remove section</button>
+          </div>
           <TextListEditor value={draft.servicesOffered} placeholder="Rental assistance, case management..." onChange={(servicesOffered) => setDraft((prev) => ({ ...prev, servicesOffered }))} />
         </div>
+        ) : (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+            setDraft((prev) => ({ ...prev, servicesOffered: prev.servicesOffered.length ? prev.servicesOffered : [""] }));
+            setShowServicesSection(true);
+          }}>Add Services</button>
+        )}
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-2 text-sm font-semibold text-slate-900">Eligibility criteria</div>
           <KeyValueEditor value={draft.eligibility} defaults={DEFAULT_ELIGIBILITY} onChange={(eligibility) => setDraft((prev) => ({ ...prev, eligibility }))} />
@@ -594,130 +593,157 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
       ) : (
         <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-3">
-            <button type="button" className={optionClass(false)} onClick={() => applyLineItemPreset("rentalAssistance")}>
-              <div className="text-sm font-semibold">Rental assistance</div>
-              <div className="mt-1 text-xs leading-5 text-slate-600">Rent, deposit, and utility categories for assistance workflows.</div>
-            </button>
-            <button type="button" className={optionClass(false)} onClick={() => applyLineItemPreset("creditCard")}>
-              <div className="text-sm font-semibold">Credit card</div>
-              <div className="mt-1 text-xs leading-5 text-slate-600">Single card/category setup for payment tracking.</div>
-            </button>
-            <button type="button" className={optionClass(draft.financialModel === "billable")} onClick={() => applyLineItemPreset("tssBilling")}>
-              <div className="text-sm font-semibold">TSS billing</div>
-              <div className="mt-1 text-xs leading-5 text-slate-600">TSS billing/allocation categories with support services.</div>
-            </button>
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">{draft.financialModel === "budgeted" ? "Total Budget" : "Reference Total"}</div>
+              {draft.financialModel === "budgeted" ? (
+                <input
+                  className="input mt-2"
+                  type="number"
+                  min={0}
+                  value={draft.budgetTotal}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setDraft((prev) => ({ ...prev, budgetTotal: value }));
+                  }}
+                />
+              ) : (
+                <div className="mt-2 text-2xl font-bold text-slate-900">{toCurrency(0)}</div>
+              )}
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Line Items</div>
+              <div className="mt-2 text-2xl font-bold text-slate-900">{draft.lineItems.length}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Amount Semantics</div>
+              <div className="mt-2 text-sm font-semibold text-slate-900">
+                {draft.financialModel === "budgeted" ? "Spend-down allocation" : "Billing category"}
+              </div>
+            </div>
           </div>
 
-          {draft.financialModel === "budgeted" ? (
-            <label className="field max-w-xs">
-              <span className="label">Total budget</span>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                value={draft.budgetTotal}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, budgetTotal: value }));
-                }}
-              />
-            </label>
-          ) : (
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">Billable line items are categories. Reference amounts can be adjusted later in the editor without making them hard spend-down caps.</div>
-          )}
-
-          <div className="space-y-3">
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-slate-900">Line items</div>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft((prev) => ({ ...prev, lineItems: [...prev.lineItems, nextLineItem()] }))}>Add Line Item</button>
             </div>
             {draft.lineItems.length === 0 ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No line items yet.</div> : null}
-            {draft.lineItems.map((item, index) => (
-              <div key={item.id || index} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-[1fr_220px_160px_auto]">
-                <input
-                  className="input"
-                  value={item.label}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    updateLineItem(index, { label: value });
-                  }}
-                />
-                <select
-                  className="select"
-                  value={item.type?.id || ""}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    const hit = LINE_ITEM_TYPES.find((type) => type.id === value);
-                    updateLineItem(index, { type: hit || null });
-                  }}
-                >
-                  <option value="">No category</option>
-                  {LINE_ITEM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
-                </select>
-                <input
-                  className="input"
-                  type="number"
-                  min={0}
-                  disabled={draft.financialModel === "billable"}
-                  value={draft.financialModel === "billable" ? 0 : item.amount}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    updateLineItem(index, { amount: toNumber(value) });
-                  }}
-                />
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft((prev) => ({ ...prev, lineItems: prev.lineItems.filter((_, i) => i !== index) }))}>Remove</button>
+            {draft.lineItems.length ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="py-2 text-left font-semibold">Name</th>
+                      <th className="py-2 text-left font-semibold">Category</th>
+                      <th className="py-2 text-right font-semibold">{draft.financialModel === "budgeted" ? "Budget" : "Reference"}</th>
+                      <th className="py-2 text-right font-semibold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {draft.lineItems.map((item, index) => (
+                      <tr key={item.id || index}>
+                        <td className="py-2 pr-3">
+                          <input
+                            className="input h-9"
+                            value={item.label}
+                            onChange={(e) => {
+                              const value = e.currentTarget.value;
+                              updateLineItem(index, { label: value });
+                            }}
+                          />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <select
+                            className="select h-9"
+                            value={item.type?.id || ""}
+                            onChange={(e) => {
+                              const value = e.currentTarget.value;
+                              const hit = LINE_ITEM_TYPES.find((type) => type.id === value);
+                              updateLineItem(index, { type: hit || null });
+                            }}
+                          >
+                            <option value="">No category</option>
+                            {LINE_ITEM_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
+                          </select>
+                        </td>
+                        <td className="py-2 pr-3 text-right">
+                          <input
+                            className="input h-9 w-32 text-right"
+                            type="number"
+                            min={0}
+                            disabled={draft.financialModel === "billable"}
+                            value={draft.financialModel === "billable" ? 0 : item.amount}
+                            onChange={(e) => {
+                              const value = e.currentTarget.value;
+                              updateLineItem(index, { amount: toNumber(value) });
+                            }}
+                          />
+                        </td>
+                        <td className="py-2 text-right">
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft((prev) => ({ ...prev, lineItems: prev.lineItems.filter((_, i) => i !== index) }))}>Remove</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
+            ) : null}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="field">
-              <span className="label">Functional group</span>
-              <input
-                className="input"
-                value={draft.invoicing.functionalGroup}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, functionalGroup: value } }));
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="label">Grant code</span>
-              <input
-                className="input"
-                value={draft.invoicing.grantCode}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, grantCode: value } }));
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="label">FE / program code</span>
-              <input
-                className="input"
-                value={draft.invoicing.programCode}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, programCode: value } }));
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="label">HMIS code</span>
-              <input
-                className="input"
-                value={draft.invoicing.hmisCode}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, hmisCode: value } }));
-                }}
-              />
-            </label>
+          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Invoicing details</div>
+              <div className="mt-1 text-xs text-slate-500">Optional codes and invoice helper lists used by billing and payment workflows.</div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="field">
+                <span className="label">Functional group</span>
+                <input
+                  className="input"
+                  value={draft.invoicing.functionalGroup}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, functionalGroup: value } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span className="label">Grant code</span>
+                <input
+                  className="input"
+                  value={draft.invoicing.grantCode}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, grantCode: value } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span className="label">FE / program code</span>
+                <input
+                  className="input"
+                  value={draft.invoicing.programCode}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, programCode: value } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span className="label">HMIS code</span>
+                <input
+                  className="input"
+                  value={draft.invoicing.hmisCode}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, hmisCode: value } }));
+                  }}
+                />
+              </label>
+            </div>
+            <InvoiceOptionsEditor title="Allowed expense categories" codeLabel="Code" options={draft.invoicing.expenseCategories} onChange={(expenseCategories) => setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, expenseCategories } }))} />
+            <InvoiceOptionsEditor title="Description examples" codeLabel="Example" options={draft.invoicing.descriptionTemplates} onChange={(descriptionTemplates) => setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, descriptionTemplates } }))} />
           </div>
-          <InvoiceOptionsEditor title="Allowed expense categories" codeLabel="Code" options={draft.invoicing.expenseCategories} onChange={(expenseCategories) => setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, expenseCategories } }))} />
-          <InvoiceOptionsEditor title="Description examples" codeLabel="Example" options={draft.invoicing.descriptionTemplates} onChange={(descriptionTemplates) => setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, descriptionTemplates } }))} />
         </div>
       )}
     </StepFrame>

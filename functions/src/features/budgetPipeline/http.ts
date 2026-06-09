@@ -5,6 +5,7 @@ import {
   BudgetPipelineListQuery,
   BudgetPipelineDeleteBody,
   BudgetPipelinePreviewBody,
+  BudgetPipelineRollupBody,
 } from './schemas';
 import {
   listBudgetPipelines,
@@ -12,6 +13,7 @@ import {
   upsertBudgetPipeline,
   deleteBudgetPipeline,
   previewBudgetPipeline,
+  rollupBudgetPipelines,
 } from './service';
 
 function resolveOrgId(req: any): string {
@@ -117,3 +119,19 @@ export const budgetPipelinePreview = secureHandler(async (req, res): Promise<voi
   const result = await previewBudgetPipeline(orgId, parsed.data);
   res.json({ok: true, ...result});
 }, {auth: 'viewer', methods: ['POST', 'OPTIONS'], memory: '512MiB'});
+
+/* ============================================================================
+   GET|POST /budgetPipelineRollup — per-pipeline pending/posted vs line-item budget
+============================================================================ */
+
+export const budgetPipelineRollup = secureHandler(async (req, res): Promise<void> => {
+  const src = req.method === 'GET' ? req.query : (req.body || {});
+  const parsed = BudgetPipelineRollupBody.safeParse(src);
+  if (!parsed.success) {
+    res.status(400).json({ok: false, error: 'invalid_query', issues: parsed.error.issues});
+    return;
+  }
+  const orgId = resolveOrgId(req);
+  const result = await rollupBudgetPipelines(orgId, {pipelineId: parsed.data.pipelineId});
+  res.json({ok: true, ...result});
+}, {auth: 'viewer', methods: ['GET', 'POST', 'OPTIONS']});

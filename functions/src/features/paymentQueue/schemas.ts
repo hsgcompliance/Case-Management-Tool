@@ -128,6 +128,8 @@ export const PaymentQueueItem = z.object({
   // All nullable: CC/invoice items may be program-level (no customer, no enrollment).
   grantId: z.string().nullable(),
   lineItemId: z.string().nullable(),
+  /** Budget pipeline that auto-classified this item (attribution for rollups). */
+  pipelineId: z.string().nullable().optional(),
   customerId: z.string().nullable(),
   enrollmentId: z.string().nullable(),
   creditCardId: z.string().nullable(),

@@ -314,16 +314,37 @@ export async function convertXlsxAndAttach(args: {
   const parents = Array.isArray(srcMeta.data?.parents) ? (srcMeta.data!.parents as string[]) : [];
 
   // Copy with conversion to a native Google Sheet, into the same folder.
-  const copied = await drive.files.copy({
-    fileId,
-    requestBody: {
-      name: baseName,
-      mimeType: SPREADSHEET_MIME,
-      ...(parents.length ? { parents } : {}),
-    },
-    fields: "id,name,webViewLink",
-    supportsAllDrives: true,
-  });
+  // Drive converts an Office file when the copy's target mimeType is a Google
+  // Workspace type. Capture the real API error so failures aren't opaque 500s.
+  let copied;
+  try {
+    copied = await drive.files.copy({
+      fileId,
+      requestBody: {
+        name: baseName,
+        mimeType: SPREADSHEET_MIME,
+        ...(parents.length ? { parents } : {}),
+      },
+      fields: "id,name,webViewLink",
+      supportsAllDrives: true,
+    });
+  } catch (err: any) {
+    const httpStatus = Number(err?.response?.status ?? err?.code);
+    const apiMessage =
+      err?.response?.data?.error?.message ||
+      err?.errors?.[0]?.message ||
+      err?.message ||
+      "copy_failed";
+    const reasons = Array.isArray(err?.response?.data?.error?.errors)
+      ? err.response.data.error.errors.map((e: any) => String(e?.reason || "")).filter(Boolean)
+      : [];
+    logger.error("workbook_xlsx_convert_copy_failed", {
+      fileId, srcMime, parents, status: err?.response?.status, code: err?.code, apiMessage, reasons,
+    });
+    throw Object.assign(new Error(`workbook_convert_failed: ${apiMessage}`), {
+      code: Number.isFinite(httpStatus) && httpStatus >= 400 && httpStatus <= 599 ? httpStatus : 502,
+    });
+  }
 
   const newId = String(copied.data?.id || "").trim();
   if (!newId) throw Object.assign(new Error("workbook_convert_failed"), { code: 500 });

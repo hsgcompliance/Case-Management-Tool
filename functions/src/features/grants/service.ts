@@ -25,6 +25,7 @@ import {
   TGrantBudget,
   normalizeGrantFinancialConfig,
   normalizeGrantComplianceConfig,
+  normalizeGrantDriveTemplates,
   shouldRetainGrantBudget,
   toArray,
 } from "./schemas";
@@ -232,6 +233,7 @@ const KNOWN_GRANT_FIELDS = new Set<string>([
   "taskTypes",
   "tasks",
   "complianceConfig",
+  "driveTemplates",
   "conditionalTaskRules",
   "pins",
   "invoicing",
@@ -323,6 +325,9 @@ function sanitizeGrantPatch(patch: Partial<TGrant>): Partial<TGrant> {
   if ("updatedAt" in out) delete out.updatedAt;
 
   if (out.tasks !== undefined) out.tasks = cleanGrantTasks(out.tasks);
+  if (out.driveTemplates !== undefined) {
+    out.driveTemplates = normalizeGrantDriveTemplates(out.driveTemplates) as Partial<TGrant>["driveTemplates"];
+  }
   if (out.meta !== undefined) out.meta = cleanExtras(out.meta);
   if (
     out.budget !== undefined &&
@@ -359,6 +364,7 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
   const kind = canonicalKind({}, parsed);
   const financialConfig = normalizeGrantFinancialConfig({ ...parsed, kind });
   const complianceConfig = normalizeGrantComplianceConfig(parsed as Record<string, unknown>);
+  const driveTemplates = normalizeGrantDriveTemplates((parsed as Record<string, unknown>).driveTemplates);
 
   const budget = shouldRetainGrantBudget({ ...parsed, kind, financialConfig })
     ? normalizeBudget(parsed.budget ?? { total: 0, lineItems: [] })
@@ -388,6 +394,7 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
     budget,
     taskTypes: parsed.taskTypes ?? null,
     complianceConfig,
+    driveTemplates,
     conditionalTaskRules: parsed.conditionalTaskRules ?? null,
     pins: parsed.pins ?? null,
     invoicing: parsed.invoicing ?? null,

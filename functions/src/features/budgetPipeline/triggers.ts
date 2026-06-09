@@ -44,7 +44,7 @@ export const onPaymentQueueItemCreate = onDocumentCreated(
 
       if (!matchesPipeline(item, pipeline)) continue;
 
-      // First match — patch grantId / lineItemId
+      // First match — patch grantId / lineItemId + pipeline attribution
       const patch: Record<string, unknown> = {
         updatedAtISO: isoNow(),
         'system.lastWriter': `${FN}:pipeline:${pDoc.id}`,
@@ -54,6 +54,7 @@ export const onPaymentQueueItemCreate = onDocumentCreated(
       if (pipeline.lineItemId) patch.lineItemId = pipeline.lineItemId;
 
       if (patch.grantId || patch.lineItemId) {
+        patch.pipelineId = pDoc.id;
         await e.data!.ref.update(patch);
         logger.info(`${FN}: allocated ${itemId} → grant=${pipeline.grantId ?? '—'} lineItem=${pipeline.lineItemId ?? '—'} via pipeline ${pDoc.id}`);
       }

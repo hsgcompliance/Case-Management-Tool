@@ -14,7 +14,9 @@ import {
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
-import { FINANCIAL_LINE_ITEM_PRESETS, TSS_COMPLIANCE_CONFIG } from "../creation/grantProgramFlowModel";
+import { TSS_COMPLIANCE_CONFIG } from "../creation/grantProgramFlowModel";
+import type { TGrantComplianceConfig } from "@hdb/contracts";
+import { grantDriveTemplates, inferDriveTemplateType, parseDriveFileId } from "../driveTemplates";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -101,7 +103,7 @@ const FINANCIAL_MODEL_COPY: Record<FinancialModel, { title: string; body: string
   },
 };
 
-const LEGACY_COMPLIANCE_CONFIG = {
+const LEGACY_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
   preset: "hmisCaseworthy",
   active: [
     { key: "caseworthyEntryComplete", label: "CW Entry", field: "compliance.caseworthyEntryComplete", type: "boolean" },
@@ -113,7 +115,7 @@ const LEGACY_COMPLIANCE_CONFIG = {
   ],
 };
 
-const NO_COMPLIANCE_CONFIG = {
+const NO_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
   preset: "none",
   active: [],
   inactive: [],
@@ -123,31 +125,6 @@ function financialModelOf(model: Record<string, any>, grant: Grant | null): Fina
   const raw = String((model.financialConfig ?? grant?.financialConfig ?? {})?.model || "").trim();
   if (raw === "budgeted" || raw === "billable" || raw === "serviceOnly") return raw;
   return String(model.kind ?? grant?.kind ?? "grant") === "program" ? "serviceOnly" : "budgeted";
-}
-
-function emptyBudget() {
-  return { total: 0, lineItems: [] };
-}
-
-function withLineItemPreset(
-  model: Record<string, any>,
-  preset: keyof typeof FINANCIAL_LINE_ITEM_PRESETS,
-) {
-  const budget = model.budget && typeof model.budget === "object" && !Array.isArray(model.budget)
-    ? model.budget
-    : emptyBudget();
-  return {
-    ...model,
-    budget: {
-      ...budget,
-      lineItems: FINANCIAL_LINE_ITEM_PRESETS[preset].map((item) => ({ ...item })),
-    },
-  };
-}
-
-function authorizationMonthsFrom(value: unknown): string {
-  const n = Number((value as any)?.authorizationMonths);
-  return Number.isFinite(n) && n > 0 ? String(Math.floor(n)) : "";
 }
 
 // ── Pin system ────────────────────────────────────────────────────────────────
@@ -834,10 +811,12 @@ function RecommendedGrantInfoEditor({
   setModel: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   grant: Record<string, any> | null;
 }) {
+  const kind = String(model.kind ?? grant?.kind ?? "grant");
+  const isGrant = kind !== "program";
   const eligibility = eligibilityDraftObject(model.eligibility ?? grant?.eligibility);
   const level = levelOfAssistanceFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
   const invoiceDocuments = invoiceDocumentsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
-  const duration = String(model.duration ?? grant?.duration ?? "1 Year");
+  const duration = String(model.duration ?? grant?.duration ?? "");
   const maxLength = String(
     model.lengthOfAssistance ??
     grantMaxLengthFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ??
@@ -852,7 +831,7 @@ function RecommendedGrantInfoEditor({
           <input
             className="input w-full"
             value={duration}
-            placeholder="1 Year"
+            placeholder={isGrant ? "1 Year" : ""}
             onChange={(e) => setModel((m) => ({ ...m, duration: e.currentTarget.value }))}
           />
         </label>
@@ -861,7 +840,7 @@ function RecommendedGrantInfoEditor({
           <input
             className="input w-full"
             value={maxLength}
-            placeholder="Up to 24 Months, Internal Policy of 6 currently"
+            placeholder={isGrant ? "Up to 24 Months, Internal Policy of 6 currently" : ""}
             onChange={(e) => setModel((m) => ({ ...m, lengthOfAssistance: e.currentTarget.value }))}
           />
         </label>
@@ -1058,12 +1037,36 @@ export function DetailsTab({
   const financialModel = financialModelOf(model, grant);
   const financialConfig = (model.financialConfig ?? grant?.financialConfig ?? FINANCIAL_MODEL_PRESETS[financialModel]) as Record<string, any>;
   const hasFinancialActivity = financialModel !== "serviceOnly";
-  const showAuthorizationDefaults = kindVal === "program" || financialModel === "billable";
   const complianceConfig = (model.complianceConfig ?? grant?.complianceConfig ?? LEGACY_COMPLIANCE_CONFIG) as Record<string, any>;
   const complianceControls = [
     ...(Array.isArray(complianceConfig.active) ? complianceConfig.active : []),
     ...(Array.isArray(complianceConfig.inactive) ? complianceConfig.inactive : []),
   ];
+  const driveTemplates = grantDriveTemplates((model ?? grant) as Record<string, unknown>);
+  const updateDriveTemplate = (index: number, patch: Record<string, unknown>) => {
+    setModel((m) => {
+      const rows = grantDriveTemplates((m ?? grant) as Record<string, unknown>).map((row) => ({ ...row }));
+      rows[index] = { ...rows[index], ...patch } as any;
+      const normalized = rows
+        .map((row, idx) => {
+          const fileUrl = String(row.fileUrl || "").trim();
+          const fileId = String(row.fileId || parseDriveFileId(fileUrl)).trim();
+          const label = String(row.label || "").trim();
+          if (!fileId && !fileUrl && !label) return null;
+          return {
+            ...row,
+            key: String(row.key || fileId || `template_${idx + 1}`).trim(),
+            label: label || `Template ${idx + 1}`,
+            fileId,
+            fileUrl: fileUrl || null,
+            type: inferDriveTemplateType(fileUrl || row.type),
+            defaultChecked: row.defaultChecked !== false,
+          };
+        })
+        .filter(Boolean);
+      return { ...m, driveTemplates: normalized };
+    });
+  };
   const onFinancialModel = useCallback(
     (nextModel: FinancialModel) => {
       const financialConfig = FINANCIAL_MODEL_PRESETS[nextModel];
@@ -1072,9 +1075,6 @@ export function DetailsTab({
         financialConfig,
         ...(nextModel === "serviceOnly" ? { budget: { total: 0, lineItems: [] } } : {}),
         ...(nextModel === "serviceOnly" ? {} : { budget: m?.budget ?? grant?.budget ?? emptyBudget() }),
-        ...(nextModel === "billable" && !authorizationMonthsFrom((m as any)?.enrollmentDefaults ?? (grant as any)?.enrollmentDefaults)
-          ? { enrollmentDefaults: { ...((m as any)?.enrollmentDefaults ?? (grant as any)?.enrollmentDefaults ?? {}), authorizationMonths: 12 } }
-          : {}),
       }));
     },
     [grant, setModel],
@@ -1098,15 +1098,15 @@ export function DetailsTab({
       if (!invoiceDocumentsFrom(next).length && !invoiceDocumentsFrom(grant as any).length) {
         next.invoiceDocuments = DEFAULT_INVOICE_DOCUMENTS;
       }
-      if (!String(next.duration ?? grant?.duration ?? "").trim()) {
+      if (isGrantKind && !String(next.duration ?? grant?.duration ?? "").trim()) {
         next.duration = "1 Year";
       }
-      if (!grantMaxLengthFrom(next) && !grantMaxLengthFrom(grant as any)) {
+      if (isGrantKind && !grantMaxLengthFrom(next) && !grantMaxLengthFrom(grant as any)) {
         next.lengthOfAssistance = "Up to 24 Months, Internal Policy of 6 currently";
       }
       return next;
     });
-  }, [editing, grant, setModel]);
+  }, [editing, grant, isGrantKind, setModel]);
 
   const STATUS_CHIP: Record<string, string> = {
     active: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300",
@@ -1188,6 +1188,10 @@ export function DetailsTab({
             />
           </div>
 
+          <div className="md:col-span-2 border-t border-slate-200 pt-4">
+            <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Lifecycle</div>
+          </div>
+
           {/* Lifecycle dates */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
             <div>
@@ -1234,8 +1238,8 @@ export function DetailsTab({
               <div className="text-slate-500 dark:text-slate-400">Duration Label</div>
               <input
                 className="input pointer-events-auto mt-1"
-                value={String(model.duration ?? grant?.duration ?? (isGrantKind ? "1 Year" : "Ongoing"))}
-                placeholder={isGrantKind ? "1 Year" : "Ongoing"}
+                value={String(model.duration ?? grant?.duration ?? "")}
+                placeholder={isGrantKind ? "1 Year" : ""}
                 onChange={(e) => setModel((m) => ({ ...m, duration: e.currentTarget.value }))}
               />
             </label>
@@ -1290,6 +1294,10 @@ export function DetailsTab({
             </div>
           </div>
 
+          <div className="md:col-span-2 border-t border-slate-200 pt-4">
+            <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">Budget Model</div>
+          </div>
+
           <div className="md:col-span-2">
             <div className="text-slate-500 dark:text-slate-400">Financial Model</div>
             {editing ? (
@@ -1330,35 +1338,11 @@ export function DetailsTab({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">
-                    {financialModel === "budgeted" ? "Budget Presets" : "Billing Category Presets"}
+                    {financialModel === "budgeted" ? "Budget behavior" : "Billing behavior"}
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    Applying a preset replaces current line items. Save will reconcile the record through the new financial shape.
+                    Line items are edited in the Budget & Activity tab. Save will reconcile the record through the selected financial shape.
                   </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => withLineItemPreset(m, "rentalAssistance"))}>
-                    Rental Assistance
-                  </button>
-                  <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => withLineItemPreset(m, "creditCard"))}>
-                    Credit Card
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-xs"
-                    onClick={() => setModel((m) => withLineItemPreset({
-                      ...m,
-                      ...(canEditKind ? { kind: "program" } : {}),
-                      financialConfig: FINANCIAL_MODEL_PRESETS.billable,
-                      complianceConfig: TSS_COMPLIANCE_CONFIG,
-                      enrollmentDefaults: {
-                        ...((m as any)?.enrollmentDefaults ?? {}),
-                        authorizationMonths: authorizationMonthsFrom((m as any)?.enrollmentDefaults) || 12,
-                      },
-                    }, "tssBilling"))}
-                  >
-                    TSS Billing
-                  </button>
                 </div>
               </div>
               <div className="mt-3 grid gap-2 md:grid-cols-4">
@@ -1374,36 +1358,6 @@ export function DetailsTab({
                   </div>
                 ))}
               </div>
-            </div>
-          ) : null}
-
-          {showAuthorizationDefaults ? (
-            <div className="md:col-span-2">
-              <div className="text-slate-500 dark:text-slate-400">Enrollment Defaults</div>
-            <label className="mt-1 block">
-              <span className="text-xs text-slate-500">Authorization months</span>
-              <input
-                className="input pointer-events-auto mt-1"
-                type="number"
-                min={1}
-                max={120}
-                value={authorizationMonthsFrom((model as any).enrollmentDefaults ?? (grant as any)?.enrollmentDefaults)}
-                onChange={(e) => {
-                  const raw = e.currentTarget.value;
-                  const months = raw ? Math.max(1, Math.min(120, Math.floor(Number(raw)))) : null;
-                  setModel((m) => ({
-                    ...m,
-                    enrollmentDefaults: {
-                      ...((m as any)?.enrollmentDefaults ?? {}),
-                      authorizationMonths: months,
-                    },
-                  }));
-                }}
-              />
-            </label>
-            <div className="mt-1 text-xs text-slate-500">
-              Leave blank for open-ended enrollments. TSS should use 12 months.
-            </div>
             </div>
           ) : null}
 
@@ -1434,6 +1388,87 @@ export function DetailsTab({
                 </span>
               )) : (
                 <span className="text-xs text-slate-500">No enrollment controls configured.</span>
+              )}
+            </div>
+          </div>
+
+          <div className="md:col-span-2 rounded-md border border-slate-200 bg-white p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Drive Templates</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Google Doc, Sheet, or file templates copied into a customer enrollment folder.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={() => setModel((m) => ({
+                  ...m,
+                  driveTemplates: [
+                    ...grantDriveTemplates((m ?? grant) as Record<string, unknown>),
+                    {
+                      key: `template_${Date.now()}`,
+                      label: "New Template",
+                      fileId: "",
+                      fileUrl: "",
+                      type: "other",
+                      defaultChecked: true,
+                    },
+                  ],
+                }))}
+              >
+                Add template
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {driveTemplates.length ? driveTemplates.map((template, index) => (
+                <div key={`${template.key}_${index}`} className="grid gap-2 rounded border border-slate-200 bg-slate-50 p-2 md:grid-cols-[minmax(140px,220px)_1fr_auto_auto]">
+                  <label className="field">
+                    <span className="label">Label</span>
+                    <input
+                      className="input input-sm"
+                      value={template.label}
+                      onChange={(e) => updateDriveTemplate(index, { label: e.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="label">Google file URL or ID</span>
+                    <input
+                      className="input input-sm"
+                      value={String(template.fileUrl || template.fileId || "")}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        updateDriveTemplate(index, {
+                          fileUrl: value,
+                          fileId: parseDriveFileId(value) || value.trim(),
+                          type: inferDriveTemplateType(value),
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="mt-5 flex items-center gap-2 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-sm"
+                      checked={template.defaultChecked !== false}
+                      onChange={(e) => updateDriveTemplate(index, { defaultChecked: e.currentTarget.checked })}
+                    />
+                    Default
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs mt-5"
+                    onClick={() => setModel((m) => ({
+                      ...m,
+                      driveTemplates: grantDriveTemplates((m ?? grant) as Record<string, unknown>).filter((_, i) => i !== index),
+                    }))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )) : (
+                <div className="text-xs text-slate-500">No Drive templates configured.</div>
               )}
             </div>
           </div>

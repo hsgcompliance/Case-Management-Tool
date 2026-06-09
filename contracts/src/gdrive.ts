@@ -112,18 +112,50 @@ export const GDriveBuildCustomerFolderBody = z.object({
   name: z.string().min(1).max(255),
   parentId: z.string().min(3),
   templates: z
-    .array(z.object({ fileId: z.string().min(3), name: z.string().min(1).max(255) }))
+    .array(z.object({
+      fileId: z.string().min(3),
+      name: z.string().min(1).max(255),
+      // "tssWorkbook" flags the TSS workbook template so the build can return
+      // the created file for auto-linking as the customer's workbook.
+      role: z.string().max(40).optional(),
+    }))
     .optional()
     .default([]),
   subfolders: z.array(z.string().min(1).max(255)).optional().default([]),
 });
 export type TGDriveBuildCustomerFolderBody = z.infer<typeof GDriveBuildCustomerFolderBody>;
 
+export const GDriveCopyGrantTemplatesBody = z.object({
+  customerId: z.string().trim().min(1),
+  grantId: z.string().trim().min(1),
+  enrollmentId: z.string().trim().optional(),
+  startDate: z.string().trim().optional(),
+  templateKeys: z.array(z.string().trim().min(1)).optional(),
+  createCustomerFolderIfMissing: z.boolean().optional().default(false),
+  parentId: z.string().trim().min(3).optional(),
+});
+export type TGDriveCopyGrantTemplatesBody = z.infer<typeof GDriveCopyGrantTemplatesBody>;
+
 export type TGDriveCustomerFolderBuildWarning = {
   phase: "template" | "subfolder";
   name: string;
   fileId?: string;
   error: string;
+};
+
+export type TGDriveGrantTemplateCopyResult = {
+  folder: {
+    id: string;
+    name: string;
+    url: string;
+  };
+  copied: Array<{
+    key: string;
+    name: string;
+    fileId: string;
+    url?: string;
+  }>;
+  warnings?: TGDriveCustomerFolderBuildWarning[];
 };
 
 export const GDriveCustomerFolderSyncBody = z.object({

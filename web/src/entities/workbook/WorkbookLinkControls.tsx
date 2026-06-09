@@ -155,6 +155,7 @@ function CandidateList({
   isViewer: boolean;
   onAttach: (item: CandidateItem) => void;
   onConvert: (item: CandidateItem) => void;
+  onNavigate: (item: CandidateItem) => void;
   onRetry: () => void;
 }) {
   if (loading) {
@@ -199,7 +200,18 @@ function CandidateList({
             <div className="flex min-w-0 items-center gap-2">
               <FileTypeIcon mime={item.mimeType} />
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-slate-900">{item.name}</div>
+                {item.isFolder ? (
+                  <button
+                    type="button"
+                    className="truncate text-left text-sm font-medium text-slate-900 hover:text-sky-700"
+                    onClick={() => onNavigate(item)}
+                    title={`Open ${item.name}`}
+                  >
+                    {item.name}
+                  </button>
+                ) : (
+                  <div className="truncate text-sm font-medium text-slate-900">{item.name}</div>
+                )}
                 {item.modifiedTime && (
                   <div className="text-[11px] text-slate-400">
                     {item.isExcel ? "Excel file · " : ""}Modified {fmtDate(item.modifiedTime)}
@@ -208,6 +220,15 @@ function CandidateList({
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {item.isFolder ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => onNavigate(item)}
+                >
+                  Open →
+                </button>
+              ) : null}
               {item.isExcel && !isViewer ? (
                 <button
                   type="button"
@@ -274,13 +295,18 @@ export function WorkbookLinkControls({
   const [candidatesError,   setCandidatesError]   = React.useState<WorkbookLinkIssue | null>(null);
   const [attachingId,       setAttachingId]       = React.useState<string | null>(null);
   const [convertingId,      setConvertingId]      = React.useState<string | null>(null);
+  // In-app folder navigation within the candidate picker.
+  const [subfolderStack,    setSubfolderStack]    = React.useState<Array<{ id: string; name: string }>>([]);
+  const currentFolderId = subfolderStack.length > 0
+    ? subfolderStack[subfolderStack.length - 1].id
+    : folderId;
 
   const loadCandidates = React.useCallback(async () => {
-    if (!folderId) return;
+    if (!currentFolderId) return;
     setCandidatesLoading(true);
     setCandidatesError(null);
     try {
-      const resp = await GDrive.list({ folderId });
+      const resp = await GDrive.list({ folderId: currentFolderId });
       if ((resp as Record<string, unknown>)?.ok) {
         setCandidates(parseCandidates(resp));
       } else {
@@ -294,12 +320,15 @@ export function WorkbookLinkControls({
     } finally {
       setCandidatesLoading(false);
     }
-  }, [folderId, onAuthIssue]);
+  }, [currentFolderId, onAuthIssue]);
 
-  // Auto-load candidates when a folder is present
+  // Reset navigation when the root folder changes.
+  React.useEffect(() => { setSubfolderStack([]); }, [folderId]);
+
+  // (Re)load candidates whenever the current folder changes (incl. navigation).
   React.useEffect(() => {
-    if (folderId && candidates === null) void loadCandidates();
-  }, [folderId, candidates, loadCandidates]);
+    if (currentFolderId) void loadCandidates();
+  }, [currentFolderId, loadCandidates]);
 
   const linkByUrl = async () => {
     const url = urlInput.trim();
@@ -385,17 +414,41 @@ export function WorkbookLinkControls({
         />
       )}
       {folderId && (
-        <CandidateList
-          candidates={candidates}
-          loading={candidatesLoading}
-          error={candidatesError}
-          attachingId={attachingId}
-          convertingId={convertingId}
-          isViewer={isViewer}
-          onAttach={(item) => void linkCandidate(item)}
-          onConvert={(item) => void convertCandidate(item)}
-          onRetry={() => { setCandidates(null); void loadCandidates(); }}
-        />
+        <div className="space-y-1.5">
+          {subfolderStack.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
+              <button type="button" className="font-medium text-sky-600 hover:text-sky-800" onClick={() => setSubfolderStack([])}>
+                Folder
+              </button>
+              {subfolderStack.map((seg, idx) => (
+                <React.Fragment key={seg.id}>
+                  <span className="text-slate-300">/</span>
+                  <button
+                    type="button"
+                    className={idx < subfolderStack.length - 1 ? "text-sky-600 hover:text-sky-800" : "text-slate-900 font-medium cursor-default"}
+                    disabled={idx === subfolderStack.length - 1}
+                    onClick={() => setSubfolderStack((prev) => prev.slice(0, idx + 1))}
+                    title={seg.name}
+                  >
+                    {seg.name}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          ) : null}
+          <CandidateList
+            candidates={candidates}
+            loading={candidatesLoading}
+            error={candidatesError}
+            attachingId={attachingId}
+            convertingId={convertingId}
+            isViewer={isViewer}
+            onAttach={(item) => void linkCandidate(item)}
+            onConvert={(item) => void convertCandidate(item)}
+            onNavigate={(item) => setSubfolderStack((prev) => [...prev, { id: item.id, name: item.name }])}
+            onRetry={() => { setCandidates(null); void loadCandidates(); }}
+          />
+        </div>
       )}
     </div>
   );

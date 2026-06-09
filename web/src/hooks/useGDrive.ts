@@ -2,7 +2,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMutation } from '@tanstack/react-query';
 import { GDrive } from '@client/gdrive';
-import type { TCustomerFolder, TGDriveBuildCustomerFolderBody, TGDriveOrgConfig, TGDriveConfigPatchBody, GDriveConfigGetResp } from '@types';
+import type {
+  TCustomerFolder,
+  TGDriveBuildCustomerFolderBody,
+  TGDriveCopyGrantTemplatesBody,
+  TGDriveConfigPatchBody,
+  GDriveConfigGetResp,
+} from '@types';
 import { qk } from './queryKeys';
 import { RQ_DEFAULTS } from './base';
 import { useInvalidateMutation } from './optimistic';
@@ -122,6 +128,18 @@ export function useGDriveUpload() {
     onSuccess: (_r, body) => {
       const folderId = (body as any)?.parentId;
       if (folderId) qc.invalidateQueries({ queryKey: qk.gdrive.list({ folderId }) });
+    },
+  });
+}
+
+export function useGDriveCopyGrantTemplates() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.gdrive.root],
+    mutationFn: (body: TGDriveCopyGrantTemplatesBody) => GDrive.copyGrantTemplates(body),
+    onSuccess: (_r, body) => {
+      qc.invalidateQueries({ queryKey: qk.customers.detail(body.customerId) });
     },
   });
 }

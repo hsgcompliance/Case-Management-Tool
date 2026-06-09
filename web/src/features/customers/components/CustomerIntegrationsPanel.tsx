@@ -4,7 +4,7 @@
 import React from "react";
 import Link from "next/link";
 import { createPortal } from "react-dom";
-import { toApiError } from "@client/api";
+import api, { toApiError } from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
 import { useCustomer, usePatchCustomers } from "@hooks/useCustomers";
 import {
@@ -38,6 +38,7 @@ import { appCheck } from "@lib/firebase";
 import { getToken as getAppCheckToken } from "firebase/app-check";
 import { toast } from "@lib/toast";
 import { BuildFolderDialog, LinkFolderDialog } from "./CustomerFilesPanel";
+import { FileTypeIcon, FOLDER_MIME } from "@entities/gdrive/FileTypeIcon";
 import type { TCustomerFolder } from "@types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ type LinkedSubmissionRef = {
 type DriveFile = {
   id?: string;
   name?: string;
+  mimeType?: string;
   size?: number | string;
   modifiedTime?: string;
   webViewLink?: string;
@@ -464,9 +466,16 @@ function GDriveBlock({ customerId }: { customerId: string }) {
     : String(driveStatus?.permissionStatus || "disconnected");
   const tokenPersistence = getGoogleDriveTokenPersistence();
 
+  // In-app folder navigation: stack of { id, name } subfolders below the root.
+  const [subfolderStack, setSubfolderStack] = React.useState<Array<{ id: string; name: string }>>([]);
+  React.useEffect(() => { setSubfolderStack([]); }, [firstFolder?.id]);
+  const listFolderId = subfolderStack.length > 0
+    ? subfolderStack[subfolderStack.length - 1].id
+    : firstFolder?.id;
+
   const filesQ = useGDriveList(
-    { folderId: firstFolder?.id },
-    { enabled: open && !!firstFolder?.id && hasDriveToken, staleTime: 10_000 },
+    { folderId: listFolderId },
+    { enabled: open && !!listFolderId && hasDriveToken, staleTime: 10_000 },
   );
   const files = readFiles(filesQ.data);
 
@@ -500,7 +509,25 @@ function GDriveBlock({ customerId }: { customerId: string }) {
         const next = [...folders, { id: folder.id, name: folder.name, alias: null }];
         await saveLinkedFolders(next);
         setBuildingName(null);
-        toast(`Folder "${folder.name}" is ready.`, { type: "success" });
+
+        // Auto-link the TSS workbook the build created (Medicaid/non-Medicaid
+        // variant). The build returns the copied Sheet; link it as the workbook.
+        const wb = (folder as { workbook?: { spreadsheetId?: string; name?: string } }).workbook;
+        if (wb?.spreadsheetId) {
+          try {
+            const tok = getGoogleDriveAccessToken();
+            await (api as any).postWith(
+              "attachCustomerWorkbookCandidate",
+              { customerId, spreadsheetId: wb.spreadsheetId, spreadsheetName: wb.name },
+              tok ? { "x-drive-access-token": tok } : undefined,
+            );
+            toast(`Folder "${folder.name}" is ready — workbook linked.`, { type: "success" });
+          } catch {
+            toast(`Folder "${folder.name}" is ready. Couldn't auto-link the workbook — link it manually.`, { type: "warning" });
+          }
+        } else {
+          toast(`Folder "${folder.name}" is ready.`, { type: "success" });
+        }
       },
     },
   );
@@ -508,7 +535,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
   const onBuildConfirm = (args: {
     name: string;
     parentId: string;
-    templates: Array<{ fileId: string; name: string }>;
+    templates: Array<{ fileId: string; name: string; role?: string }>;
     subfolders: string[];
   }) => {
     setShowBuildDialog(false);
@@ -1019,7 +1046,34 @@ function GDriveBlock({ customerId }: { customerId: string }) {
               ))}
             </div>
 
-            {/* File table (first folder) */}
+            {/* Breadcrumb — shown when navigated into a subfolder */}
+            {subfolderStack.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                <button
+                  type="button"
+                  className="font-medium text-sky-600 hover:text-sky-800"
+                  onClick={() => setSubfolderStack([])}
+                >
+                  {firstFolder?.alias || firstFolder?.name || "Folder"}
+                </button>
+                {subfolderStack.map((seg, idx) => (
+                  <React.Fragment key={seg.id}>
+                    <span className="text-slate-300">/</span>
+                    <button
+                      type="button"
+                      className={idx < subfolderStack.length - 1 ? "text-sky-600 hover:text-sky-800" : "text-slate-900 font-medium cursor-default"}
+                      disabled={idx === subfolderStack.length - 1}
+                      onClick={() => setSubfolderStack((prev) => prev.slice(0, idx + 1))}
+                      title={seg.name}
+                    >
+                      {seg.name}
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : null}
+
+            {/* File table (current folder) */}
             {filesQ.isLoading || filesQ.isFetching ? (
               <div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm text-slate-400">
                 <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-sky-500" />
@@ -1056,22 +1110,36 @@ function GDriveBlock({ customerId }: { customerId: string }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {files.map((f, idx) => (
-                      <tr key={`${f.id || f.name || "file"}:${idx}`} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-3 py-2.5">
-                          {f.webViewLink ? (
-                            <a href={f.webViewLink} target="_blank" rel="noreferrer"
-                              className="font-medium text-sky-700 hover:text-sky-900 hover:underline">
-                              {f.name || "(untitled)"}
-                            </a>
-                          ) : (
-                            <span className="font-medium text-slate-700">{f.name || "(untitled)"}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-slate-400">{fmtDateOrDash(f.modifiedTime)}</td>
-                        <td className="px-3 py-2.5 text-right text-slate-400">{fmtBytes(f.size)}</td>
-                      </tr>
-                    ))}
+                    {files.map((f, idx) => {
+                      const isFolder = f.mimeType === FOLDER_MIME;
+                      return (
+                        <tr key={`${f.id || f.name || "file"}:${idx}`} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <FileTypeIcon mime={f.mimeType} className="h-4 w-4 shrink-0" />
+                              {isFolder ? (
+                                <button
+                                  type="button"
+                                  className="font-medium text-slate-800 hover:text-sky-700 hover:underline text-left"
+                                  onClick={() => f.id && setSubfolderStack((prev) => [...prev, { id: f.id!, name: f.name || "Folder" }])}
+                                >
+                                  {f.name || "(untitled)"}
+                                </button>
+                              ) : f.webViewLink ? (
+                                <a href={f.webViewLink} target="_blank" rel="noreferrer"
+                                  className="font-medium text-sky-700 hover:text-sky-900 hover:underline">
+                                  {f.name || "(untitled)"}
+                                </a>
+                              ) : (
+                                <span className="font-medium text-slate-700">{f.name || "(untitled)"}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-400">{fmtDateOrDash(f.modifiedTime)}</td>
+                          <td className="px-3 py-2.5 text-right text-slate-400">{isFolder ? "—" : fmtBytes(f.size)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -369,6 +369,8 @@ export async function patchPaymentQueueItem(
   if (patch.cardBucket !== undefined) mark('cardBucket', patch.cardBucket);
   if (patch.grantId !== undefined) mark('grantId', patch.grantId);
   if (patch.lineItemId !== undefined) mark('lineItemId', patch.lineItemId);
+  // Manual re-classification supersedes pipeline auto-attribution.
+  if (patch.grantId !== undefined || patch.lineItemId !== undefined) update.pipelineId = null;
   if (patch.customerId !== undefined) mark('customerId', patch.customerId);
   if (patch.enrollmentId !== undefined) mark('enrollmentId', patch.enrollmentId);
   if (patch.creditCardId !== undefined) mark('creditCardId', patch.creditCardId);
@@ -960,6 +962,7 @@ export async function upsertPaymentQueueItems(
         grantId: prev.grantId ?? null,
         dueDate: prev.dueDate ?? null,
         lineItemId: prev.lineItemId ?? null,
+        pipelineId: prev.pipelineId ?? null,
         customerId: prev.customerId ?? null,
         enrollmentId: prev.enrollmentId ?? null,
         creditCardId: prev.creditCardId ?? extracted.creditCardId ?? null,
@@ -983,7 +986,7 @@ export async function upsertPaymentQueueItems(
         createdAtISO: prev.createdAtISO ?? now,
       } :
       {
-        paymentId: null, grantId: null, dueDate: null, lineItemId: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
+        paymentId: null, grantId: null, dueDate: null, lineItemId: null, pipelineId: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
         invoiceStatus: null, invoicedAt: null, invoicedBy: null, invoiceRef: null,
         okUnassigned: false, okUnassignedAt: null, okUnassignedBy: null,
         queueStatus: 'pending' as const,

@@ -14,6 +14,7 @@ import { useCustomer, useUpsertCustomers, usePatchCustomers } from "@hooks/useCu
 import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
 import {
   useGDriveBuildCustomerFolder,
+  useGDriveCopyGrantTemplates,
   useGDriveCustomerFolderIndex,
   ACTIVE_PARENT_ID,
   EXITED_PARENT_ID,
@@ -32,6 +33,7 @@ import { toast } from "@lib/toast";
 import { DuplicateChecker, type DupCheckState } from "./DuplicateChecker";
 import type { DupMatch } from "@lib/duplicateScore";
 import { enrollmentControlsForGrant } from "@features/enrollments/enrollmentControls";
+import { defaultGrantDriveTemplateKeys, grantDriveTemplates } from "@features/grants/driveTemplates";
 
 type FlowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type Population = "Youth" | "Individual" | "Family" | "";
@@ -49,12 +51,14 @@ type GrantOption = {
   kind?: string | null;
   complianceConfig?: Record<string, unknown> | null;
   enrollmentDefaults?: Record<string, unknown> | null;
+  driveTemplates?: Array<Record<string, unknown>> | null;
 };
 type EnrollmentDraft = {
   grantId: string;
   startDate: string;
   endDate: string;
   endDateManuallyEdited: boolean;
+  copyTemplates: boolean;
 };
 type FlowMilestoneState = "done" | "active" | "pending" | "skipped";
 
@@ -99,6 +103,7 @@ function createEnrollmentDraft(
     startDate,
     endDate,
     endDateManuallyEdited: Boolean(seed?.endDateManuallyEdited),
+    copyTemplates: true,
   };
 }
 
@@ -405,6 +410,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const upsertCustomer = useUpsertCustomers();
   const patchCustomer = usePatchCustomers();
   const enrollCustomer = useEnrollCustomer();
+  const copyGrantTemplates = useGDriveCopyGrantTemplates();
   const buildPayments = usePaymentsBuildSchedule();
   const generateTasks = useTasksGenerateScheduleWrite();
 
@@ -442,6 +448,9 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           : null,
         enrollmentDefaults: grant.enrollmentDefaults && typeof grant.enrollmentDefaults === "object"
           ? (grant.enrollmentDefaults as Record<string, unknown>)
+          : null,
+        driveTemplates: Array.isArray(grant.driveTemplates)
+          ? (grant.driveTemplates as Array<Record<string, unknown>>)
           : null,
       }))
       .filter((grant) => !!grant.id)
@@ -944,6 +953,35 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     [buildPayments, enrollmentsQ],
   );
 
+  const copySelectedGrantTemplates = React.useCallback(
+    async (targetCustomerId: string) => {
+      const drafts = selectedEnrollmentDrafts.filter((draft) => draft.copyTemplates);
+      if (!drafts.length) return;
+      const latest = await enrollmentsQ.refetch();
+      const latestEnrollments = Array.isArray(latest.data) ? latest.data : enrollments;
+      for (const draft of drafts) {
+        const grant = grantOptions.find((option) => option.id === draft.grantId);
+        if (!grant) continue;
+        const templates = grantDriveTemplates(grant as Record<string, unknown>);
+        if (!templates.length) continue;
+        const defaultKeys = defaultGrantDriveTemplateKeys(grant as Record<string, unknown>);
+        const enrollment = latestEnrollments.find((row) => String(row.grantId || "") === draft.grantId);
+        try {
+          await copyGrantTemplates.mutateAsync({
+            customerId: targetCustomerId,
+            grantId: draft.grantId,
+            enrollmentId: enrollment?.id ? String(enrollment.id) : undefined,
+            startDate: draft.startDate || isoToday(),
+            templateKeys: defaultKeys.length ? defaultKeys : templates.map((template) => template.key),
+          });
+        } catch (error: unknown) {
+          toast(toApiError(error).error || `Templates were not copied for ${grant.label}.`, { type: "warning" });
+        }
+      }
+    },
+    [copyGrantTemplates, enrollments, enrollmentsQ, grantOptions, selectedEnrollmentDrafts],
+  );
+
   const finishFlow = React.useCallback(async () => {
     if (!canFinish) return;
     setFlowError(null);
@@ -1037,6 +1075,15 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         } as unknown as Parameters<typeof patchCustomer.mutateAsync>[0]);
       }
 
+      const templateTargetReady =
+        folderMode === "build" ||
+        ((folderMode === "link" || wantsFolderLink) && !!folderUrl.trim());
+      if (templateTargetReady) {
+        setWorkingLabel("Copying grant templates...");
+        failureTitle = "Error copying grant templates";
+        await copySelectedGrantTemplates(ensuredCustomerId);
+      }
+
       toast("Customer setup complete.", { type: "success" });
       openCustomerRecord(ensuredCustomerId);
     } catch (error: unknown) {
@@ -1052,6 +1099,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     buildSelectedTemplates,
     buildSubfolders,
     canFinish,
+    copySelectedGrantTemplates,
     customerRecord,
     ensureCustomerExists,
     ensureEnrollmentsExist,
@@ -1074,6 +1122,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     const draft = selectedEnrollmentDrafts.find((entry) => entry.grantId === grant.id) || null;
     const selected = !!draft;
     const controlDescriptors = enrollmentControlsForGrant(grant as Record<string, unknown>, false);
+    const templates = grantDriveTemplates(grant as Record<string, unknown>);
     const authorizationMonths = Number(grant.enrollmentDefaults?.authorizationMonths);
     return (
       <div
@@ -1176,6 +1225,23 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                 }}
               />
             </label>
+            {templates.length ? (
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-sm"
+                  checked={draft.copyTemplates}
+                  disabled={programsLocked}
+                  onChange={(e) => {
+                    const checked = e.currentTarget.checked;
+                    setSelectedEnrollmentDrafts((current) =>
+                      current.map((entry) => entry.grantId === grant.id ? { ...entry, copyTemplates: checked } : entry),
+                    );
+                  }}
+                />
+                Copy {templates.length} Drive template{templates.length === 1 ? "" : "s"} into the customer folder
+              </label>
+            ) : null}
           </div>
         ) : null}
       </div>

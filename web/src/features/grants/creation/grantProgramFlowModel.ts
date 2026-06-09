@@ -98,12 +98,6 @@ export const FINANCIAL_CONFIG_PRESETS: Record<GrantProgramFinancialModel, TGrant
   },
 };
 
-export const TSS_PRESET = {
-  kind: "program" as const,
-  financialConfig: FINANCIAL_CONFIG_PRESETS.billable,
-  enrollmentDefaults: { authorizationMonths: 12 },
-};
-
 export const TSS_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
   preset: "custom",
   active: [
@@ -163,22 +157,6 @@ export const DEFAULT_DESCRIPTION_TEMPLATES: FlowInvoiceOption[] = [
   { id: "deposit-assistance", label: "Deposit Assistance", template: "J. Doe: DA", enabled: false },
   { id: "utility-assistance", label: "Utility Assistance", template: "J. Doe: March Util Assistance", enabled: false },
 ];
-
-export const FINANCIAL_LINE_ITEM_PRESETS: Record<"rentalAssistance" | "creditCard" | "tssBilling", FlowLineItem[]> = {
-  rentalAssistance: [
-    { id: "rental_assistance", label: "Rental Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
-    { id: "deposit_assistance", label: "Deposit Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
-    { id: "utility_assistance", label: "Utility Assistance", amount: 0, type: { id: "program-spending", label: "Program Spending" }, perCustomerCap: null, capEnabled: false },
-  ],
-  creditCard: [
-    { id: "credit_card", label: "Credit Card", amount: 0, type: { id: "program-spending", label: "Program Spending" }, perCustomerCap: null, capEnabled: false },
-  ],
-  tssBilling: [
-    { id: "tss_rental_assistance", label: "TSS Rental Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
-    { id: "tss_deposit_assistance", label: "TSS Deposit Assistance", amount: 0, type: { id: "rental-assistance", label: "Rental Assistance" }, perCustomerCap: null, capEnabled: false },
-    { id: "tss_support_services", label: "TSS Support Services", amount: 0, type: { id: "customer-support-service", label: "Customer Support Service" }, perCustomerCap: null, capEnabled: false },
-  ],
-};
 
 export const DEFAULT_ELIGIBILITY: Record<string, string> = {
   "Housing Status": "Experiencing Category 1 Homelessness",
@@ -302,7 +280,7 @@ export function createInitialGrantProgramDraft(
     financialModel,
     startDate: text(source.startDate).slice(0, 10),
     endDate: text(source.endDate).slice(0, 10),
-    duration: text(source.duration) || "1 Year",
+    duration: text(source.duration) || (kind === "grant" ? "1 Year" : ""),
     lengthOfAssistance: text(source.lengthOfAssistance || source.maxLengthOfAssistance),
     authorizationMonths: text(enrollmentDefaults.authorizationMonths),
     complianceConfig: isRecord(source.complianceConfig) ? normalizeGrantComplianceConfig(source) : null,
@@ -315,7 +293,7 @@ export function createInitialGrantProgramDraft(
     lineItems: lineItemsFromBudget(source.budget),
     budgetTotal: text(budget.total || budget.startAmount),
     invoicing: {
-      functionalGroup: text(invoicing.functionalGroup) || "Housing",
+      functionalGroup: text(invoicing.functionalGroup),
       grantCode: text(invoicing.grantCode),
       programCode: text(invoicing.programCode),
       hmisCode: text(isRecord(invoicing.meta) ? invoicing.meta.hmisCode : ""),
@@ -337,18 +315,6 @@ export function createInitialGrantProgramDraft(
       importantColor: text(important.color) || "amber",
       importantNote: text(important.note),
     },
-  };
-}
-
-export function applyTssPreset(draft: GrantProgramFlowDraft): GrantProgramFlowDraft {
-  return {
-    ...draft,
-    kind: "program",
-    financialModel: "billable",
-    allocationEnabled: true,
-    authorizationMonths: draft.authorizationMonths || "12",
-    complianceConfig: TSS_COMPLIANCE_CONFIG,
-    duration: draft.duration || "Ongoing",
   };
 }
 

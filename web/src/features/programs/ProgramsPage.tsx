@@ -23,11 +23,14 @@ import {
 import { qk } from "@hooks/queryKeys";
 import type { TGrant as Grant } from "@types";
 import { ProgramGroupSection } from "./ProgramGroupSection";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 type FilterMode = "active" | "inactive";
 type KindFilter = "all" | "program" | "grant";
 type FocusFilter = "all" | "active" | "empty" | "uncased";
 type PopulationFilter = "all" | "youth" | "family" | "individual";
+type LifecycleFilter = "all" | "grant" | "program";
+type BudgetModelFilter = "all" | "budgeted" | "billable" | "serviceOnly";
 
 const isVisible = (g?: Partial<Grant> | null) =>
   !!g && g.status !== "deleted" && g.deleted !== true;
@@ -101,10 +104,28 @@ function isGrantKind(g: Grant) {
   return String(asObj(g).kind || "").toLowerCase() !== "program";
 }
 
+function lifecycleValue(g: Grant): LifecycleFilter {
+  return isGrantKind(g) ? "grant" : "program";
+}
+
+function budgetModelValue(g: Grant): BudgetModelFilter {
+  const model = String(asObj(g.financialConfig).model || "").trim();
+  if (model === "budgeted" || model === "billable" || model === "serviceOnly") return model;
+  return isGrantKind(g) ? "budgeted" : "serviceOnly";
+}
+
 function budgetTotal(g: Grant) {
   const budget = asObj(asObj(g).budget);
   const totals = asObj(budget.totals);
   return asNum(totals.total ?? budget.total);
+}
+
+function financeExportValue(g: Grant) {
+  const capabilities = getGrantFinancialCapabilities(asObj(g));
+  if (capabilities.drawsDownBudget) return budgetTotal(g);
+  if (capabilities.billingEnabled) return "Billing";
+  if (capabilities.hasFinancialActivity) return "Tracked";
+  return "Service";
 }
 
 function csvCell(value: unknown) {
@@ -146,6 +167,8 @@ function getProgramColumnValue(g: Grant, col: string) {
   const counts = enrollmentCounts(g);
   if (col === "name") return String(g.name || g.id || "");
   if (col === "kind") return isGrantKind(g) ? "Grant" : "Program";
+  if (col === "lifecycle") return lifecycleValue(g);
+  if (col === "financialModel") return budgetModelValue(g);
   if (col === "active") return counts.active;
   if (col === "inactive") return counts.inactive;
   if (col === "clients") return counts.unique;
@@ -169,6 +192,8 @@ export function ProgramsPage() {
   const [kindFilter, setKindFilter] = useState<KindFilter>("program");
   const [focusFilter, setFocusFilter] = useState<FocusFilter>("all");
   const [populationFilter, setPopulationFilter] = useState<PopulationFilter>("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
+  const [budgetModelFilter, setBudgetModelFilter] = useState<BudgetModelFilter>("all");
   const [search, setSearch] = useState("");
   const [selectedGrantId, setSelectedGrantId] = useState<string | null>(null);
   const [creatingProgram, setCreatingProgram] = useState(false);
@@ -209,9 +234,15 @@ export function ProgramsPage() {
       const populationPass =
         populationFilter === "all" ? true
         : counts[populationFilter] > 0;
-      return kindPass && focusPass && populationPass;
+      const lifecyclePass =
+        lifecycleFilter === "all" ? true
+        : lifecycleValue(g) === lifecycleFilter;
+      const budgetModelPass =
+        budgetModelFilter === "all" ? true
+        : budgetModelValue(g) === budgetModelFilter;
+      return kindPass && focusPass && populationPass && lifecyclePass && budgetModelPass;
     });
-  }, [baseFiltered, focusFilter, kindFilter, populationFilter]);
+  }, [baseFiltered, budgetModelFilter, focusFilter, kindFilter, lifecycleFilter, populationFilter]);
 
   const filtered = useMemo(
     () => filterRows(quickFiltered, columnFilters, getProgramColumnValue),
@@ -288,7 +319,7 @@ export function ProgramsPage() {
         counts.family,
         counts.individual,
         counts.caseManagers,
-        budgetTotal(g),
+        financeExportValue(g),
       ];
     });
 
@@ -305,7 +336,7 @@ export function ProgramsPage() {
         "Family",
         "Individual",
         "Case Managers",
-        "Budget",
+        "Finance",
       ],
       ...rows,
     ]);
@@ -404,47 +435,70 @@ export function ProgramsPage() {
               ) : undefined
             }
           >
-            <FilterToggleGroup
-              label="Status"
-              value={filter}
-              options={[
-                { value: "active", label: "Active" },
-                { value: "inactive", label: "Inactive" },
-              ]}
-              onChange={setFilter}
-            />
-            <FilterToggleGroup
-              label="Type"
-              value={kindFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "program", label: "Programs" },
-                { value: "grant", label: "Grants" },
-              ]}
-              onChange={setKindFilter}
-            />
-            <FilterToggleGroup
-              label="Focus"
-              value={focusFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "active", label: "Has Active" },
-                { value: "empty", label: "No Active" },
-                { value: "uncased", label: "No CM" },
-              ]}
-              onChange={setFocusFilter}
-            />
-            <FilterToggleGroup
-              label="Population"
-              value={populationFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "youth", label: "Youth" },
-                { value: "family", label: "Family" },
-                { value: "individual", label: "Individual" },
-              ]}
-              onChange={setPopulationFilter}
-            />
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+              <FilterToggleGroup
+                label="Status"
+                value={filter}
+                options={[
+                  { value: "active", label: "Active" },
+                  { value: "inactive", label: "Inactive" },
+                ]}
+                onChange={setFilter}
+              />
+              <FilterToggleGroup
+                label="Type"
+                value={kindFilter}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "program", label: "Programs" },
+                  { value: "grant", label: "Grants" },
+                ]}
+                onChange={setKindFilter}
+              />
+              <FilterToggleGroup
+                label="Lifecycle"
+                value={lifecycleFilter}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "program", label: "Programs" },
+                  { value: "grant", label: "Grants" },
+                ]}
+                onChange={setLifecycleFilter}
+              />
+              <FilterToggleGroup
+                label="Budget Model"
+                value={budgetModelFilter}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "budgeted", label: "Budgeted" },
+                  { value: "billable", label: "Billable" },
+                  { value: "serviceOnly", label: "Service" },
+                ]}
+                onChange={setBudgetModelFilter}
+              />
+              <FilterToggleGroup
+                label="Focus"
+                value={focusFilter}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "active", label: "Has Active" },
+                  { value: "empty", label: "No Active" },
+                  { value: "uncased", label: "No CM" },
+                ]}
+                onChange={setFocusFilter}
+              />
+              <FilterToggleGroup
+                label="Population"
+                value={populationFilter}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "youth", label: "Youth" },
+                  { value: "family", label: "Family" },
+                  { value: "individual", label: "Individual" },
+                ]}
+                onChange={setPopulationFilter}
+              />
+            </div>
           </PageFilterBar>
 
           {/* Content */}

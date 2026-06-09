@@ -220,7 +220,7 @@ export function BuildFolderDialog({
   onBuild: (args: {
     name: string;
     parentId: string;
-    templates: Array<{ fileId: string; name: string }>;
+    templates: Array<{ fileId: string; name: string; role?: string }>;
     subfolders: string[];
   }) => void;
   onCancel: () => void;
@@ -257,17 +257,20 @@ export function BuildFolderDialog({
     setSubfolderInput("");
   };
 
-  const buildTemplatePayload = (): Array<{ fileId: string; name: string }> => {
+  const buildTemplatePayload = (): Array<{ fileId: string; name: string; role?: string }> => {
     return FOLDER_TEMPLATES.flatMap((tmpl) => {
       if (!selectedTemplates.has(tmpl.key)) return [];
       const docName = renderDocName(tmpl.docNameTpl, customerFirst, customerLast);
+      // The TSS Workbook template gets flagged so the build returns its created
+      // file for auto-linking as the customer's TSS workbook.
+      const role = tmpl.key === "tss_workbook" ? "tssWorkbook" : undefined;
       if ("variants" in tmpl) {
         const fileId = medicaid === "yes" ? tmpl.variants.payer : tmpl.variants.nonpayer;
         if (fileId.length < 3) return [];
-        return [{ fileId, name: docName }];
+        return [{ fileId, name: docName, ...(role ? { role } : {}) }];
       }
       if (tmpl.id.length < 3) return [];
-      return [{ fileId: tmpl.id, name: docName }];
+      return [{ fileId: tmpl.id, name: docName, ...(role ? { role } : {}) }];
     });
   };
 
@@ -762,7 +765,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   const onBuildConfirm = (args: {
     name: string;
     parentId: string;
-    templates: Array<{ fileId: string; name: string }>;
+    templates: Array<{ fileId: string; name: string; role?: string }>;
     subfolders: string[];
   }) => {
     setShowBuildDialog(false);
