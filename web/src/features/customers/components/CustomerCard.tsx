@@ -18,7 +18,8 @@ import { toast } from "@lib/toast";
 import { toApiError } from "@client/api";
 import { normalizePayments, currency, todayISO, nextRentCertDue } from "./paymentScheduleUtils";
 import { customerContactRoleForUid } from "../contactCaseManagers";
-import { getCustomerDriveFolderLink } from "../customerDriveFolder";
+import { getCustomerDriveFolderLink, getCustomerWorkbookRef } from "../customerDriveFolder";
+import { WorkbookSheetModal } from "@entities/workbook/WorkbookSheetModal";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import {
   enrollmentControlActionBody,
@@ -951,6 +952,8 @@ function CustomerCardInner({
   const caseManagerName = String(customer.caseManagerName || customer.caseManagerId || "Unassigned").trim();
   const viewerRelationship = customerContactRoleForUid(customer as Record<string, unknown>, viewerId);
   const driveFolderLink = getCustomerDriveFolderLink(customer);
+  const workbookRef = getCustomerWorkbookRef(customer);
+  const [workbookModalOpen, setWorkbookModalOpen] = React.useState(false);
   const [hoveredEnrollmentSection, setHoveredEnrollmentSection] = React.useState(false);
   const [shouldLoadEnrollments, setShouldLoadEnrollments] = React.useState(false);
   const enrollmentsQuery = useCustomerEnrollments(customer.id, {
@@ -1245,7 +1248,7 @@ function CustomerCardInner({
               target="_blank"
               rel="noreferrer"
               className={[
-                "ml-3 inline-flex min-h-7 items-center rounded-md px-1.5 text-xs font-semibold lowercase tracking-normal underline underline-offset-2 transition",
+                "ml-3 inline-flex min-h-7 items-center rounded-md px-1.5 text-xs font-semibold tracking-normal underline underline-offset-2 transition",
                 inactiveCustomer ? "text-slate-500 hover:text-slate-700" : "text-sky-700 hover:text-sky-900",
               ].join(" ")}
               title={driveFolderLink.label}
@@ -1253,10 +1256,34 @@ function CustomerCardInner({
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
             >
-              google
+              Folder
             </a>
           ) : null}
+          {workbookRef ? (
+            <button
+              type="button"
+              className={[
+                "ml-2 inline-flex min-h-7 items-center rounded-md px-1.5 text-xs font-semibold tracking-normal underline underline-offset-2 transition",
+                inactiveCustomer ? "text-slate-500 hover:text-slate-700" : "text-sky-700 hover:text-sky-900",
+              ].join(" ")}
+              title={`Open ${workbookRef.name}`}
+              aria-label={`Open ${workbookRef.name}`}
+              onClick={(event) => { event.stopPropagation(); setWorkbookModalOpen(true); }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              Workbook
+            </button>
+          ) : null}
         </div>
+        {workbookRef && workbookModalOpen ? (
+          <WorkbookSheetModal
+            spreadsheetId={workbookRef.spreadsheetId}
+            gid={workbookRef.gid}
+            spreadsheetName={workbookRef.name}
+            openUrl={workbookRef.url}
+            onClose={() => setWorkbookModalOpen(false)}
+          />
+        ) : null}
       </div>
 
       {/* ── Below-banner: Payments (left) + Enrollments (right) ── */}

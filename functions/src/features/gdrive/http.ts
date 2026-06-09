@@ -6,9 +6,19 @@ import {
   GOOGLE_OAUTH_REFRESH_TOKEN,
   DRIVE_SANDBOX_FOLDER_ID,
   requireOrg,
+  db,
+  FieldValue,
 } from "../../core";
-import { GDriveListQuery, GDriveCreateFolderBody, GDriveUploadBody, GDriveBuildCustomerFolderBody } from "./schemas";
-import { listInFolder, createFolder, uploadSmallFile, buildCustomerFolder, ScopeMissingError, type DriveListDiagnostics } from "./service";
+import { GDriveListQuery, GDriveCreateFolderBody, GDriveUploadBody, GDriveBuildCustomerFolderBody, GDriveCopyGrantTemplatesBody } from "./schemas";
+import {
+  listInFolder,
+  createFolder,
+  uploadSmallFile,
+  buildCustomerFolder,
+  copyTemplatesIntoFolder,
+  ScopeMissingError,
+  type DriveListDiagnostics,
+} from "./service";
 import { z } from "zod";
 import { tss } from "@hdb/contracts";
 import { getOrgGDriveConfig, patchOrgGDriveConfig } from "./orgConfig";
@@ -41,6 +51,74 @@ function queryFlag(v: unknown): boolean {
 
 function readGoogleAccessToken(req: { header(name: string): string | undefined }) {
   return String(req.header("x-drive-access-token") || "").trim() || undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function displayName(record: Record<string, unknown>): string {
+  return (
+    String(record.name || "").trim() ||
+    [record.firstName, record.lastName].map((part) => String(part || "").trim()).filter(Boolean).join(" ") ||
+    "Customer"
+  );
+}
+
+function folderIdFromCustomer(customer: Record<string, unknown>): string {
+  const customerDrive = asRecord(customer.customerDrive);
+  const meta = asRecord(customer.meta);
+  const metaFolders = Array.isArray(meta.driveFolders) ? meta.driveFolders : [];
+  const firstMetaFolder = asRecord(metaFolders[0]);
+  return (
+    String(customerDrive.folderId || "").trim() ||
+    String(meta.driveFolderId || "").trim() ||
+    String(firstMetaFolder.id || "").trim()
+  );
+}
+
+function folderPatch(folder: { id: string; name: string; url?: string }, existingMeta: Record<string, unknown>) {
+  return {
+    customerDrive: {
+      folderId: folder.id,
+      folderUrl: folder.url || `https://drive.google.com/drive/folders/${folder.id}`,
+      folderName: folder.name,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    meta: {
+      ...existingMeta,
+      driveFolderId: folder.id,
+      driveFolders: [{ id: folder.id, name: folder.name, alias: null }],
+    },
+  };
+}
+
+function cleanFolderPart(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .slice(0, 120);
+}
+
+function enrollmentFolderName(grantName: string, startDate?: string) {
+  const parts = [cleanFolderPart(grantName) || "Grant", String(startDate || "").slice(0, 10)].filter(Boolean);
+  return parts.join(" ").slice(0, 255);
+}
+
+function grantDriveTemplates(grant: Record<string, unknown>) {
+  const rows = Array.isArray(grant.driveTemplates) ? grant.driveTemplates : [];
+  return rows
+    .map((raw) => {
+      const row = asRecord(raw);
+      const key = String(row.key || row.fileId || "").trim();
+      const fileId = String(row.fileId || "").trim();
+      const label = String(row.label || row.name || key || "Template").trim();
+      return key && fileId && label ? { key, fileId, name: label, defaultChecked: row.defaultChecked !== false } : null;
+    })
+    .filter((row): row is { key: string; fileId: string; name: string; defaultChecked: boolean } => !!row);
 }
 
 function inferStatusCode(message: string, diagnostics?: DriveListDiagnostics): number {
@@ -238,6 +316,109 @@ export const gdriveBuildCustomerFolder = secureHandler(
           ? {
               category: "auth_mode_read_only",
               hint: "Shared OAuth is read-only. Connect Google Drive permanently or use temporary browser access before building customer folders.",
+            }
+          : {}),
+      });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+);
+
+export const gdriveCopyGrantTemplates = secureHandler(
+  async (req, res) => {
+    try {
+      const body = GDriveCopyGrantTemplatesBody.parse(req.body ?? {});
+      const user = (req as any).user || {};
+      const orgId = requireOrg(user);
+      const [customerSnap, grantSnap] = await Promise.all([
+        db.collection("customers").doc(body.customerId).get(),
+        db.collection("grants").doc(body.grantId).get(),
+      ]);
+      if (!customerSnap.exists) {
+        res.status(404).json({ ok: false, error: "customer_not_found" });
+        return;
+      }
+      if (!grantSnap.exists) {
+        res.status(404).json({ ok: false, error: "grant_not_found" });
+        return;
+      }
+
+      const customer = customerSnap.data() || {};
+      const grant = grantSnap.data() || {};
+      if (String(customer.orgId || "") !== orgId || String(grant.orgId || "") !== orgId) {
+        res.status(403).json({ ok: false, error: "forbidden_org" });
+        return;
+      }
+
+      const allTemplates = grantDriveTemplates(grant);
+      const selectedKeys = new Set((body.templateKeys?.length ? body.templateKeys : allTemplates.filter((t) => t.defaultChecked).map((t) => t.key)).map(String));
+      const templates = allTemplates.filter((tmpl) => selectedKeys.has(tmpl.key));
+      if (!templates.length) {
+        res.status(400).json({ ok: false, error: "no_grant_templates_selected" });
+        return;
+      }
+
+      const access = {
+        googleAccessToken: readGoogleAccessToken(req),
+        userUid: String(user.uid || ""),
+      };
+      let rootFolderId = folderIdFromCustomer(customer);
+      let rootFolderName = String(asRecord(customer.customerDrive).folderName || asRecord(customer.meta).driveFolderName || "").trim();
+
+      if (!rootFolderId) {
+        if (!body.createCustomerFolderIfMissing || !body.parentId) {
+          res.status(400).json({ ok: false, error: "customer_folder_missing" });
+          return;
+        }
+        const built = await createFolder(body.parentId, displayName(customer), access);
+        rootFolderId = String(built.id || "").trim();
+        rootFolderName = String(built.name || displayName(customer));
+        await customerSnap.ref.set(folderPatch({ id: rootFolderId, name: rootFolderName, url: built.webViewLink || "" }, asRecord(customer.meta)), { merge: true });
+      }
+
+      const grantName = String(grant.name || body.grantId);
+      const startDate = body.startDate || (body.enrollmentId
+        ? String((await db.collection("customerEnrollments").doc(body.enrollmentId).get()).data()?.startDate || "")
+        : "");
+      const subfolderName = enrollmentFolderName(grantName, startDate);
+      const subfolder = await createFolder(rootFolderId, subfolderName, access);
+      const subfolderId = String(subfolder.id || "").trim();
+      if (!subfolderId) throw new Error("enrollment_template_folder_create_no_id");
+
+      const copied = await copyTemplatesIntoFolder({
+        folderId: subfolderId,
+        customerName: displayName(customer),
+        templates,
+        ...access,
+      });
+
+      res.status(200).json({
+        ok: true,
+        folder: {
+          id: subfolderId,
+          name: String(subfolder.name || subfolderName),
+          url: subfolder.webViewLink || `https://drive.google.com/drive/folders/${subfolderId}`,
+        },
+        copied: copied.copied,
+        ...(copied.warnings ? { warnings: copied.warnings } : {}),
+      });
+    } catch (e: any) {
+      if (e instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(e)); return; }
+      const msg = String(e?.message || e || "gdrive_copy_grant_templates_failed");
+      const readOnly = msg.includes("shared_oauth_read_only");
+      res.status(readOnly ? 403 : 500).json({
+        ok: false,
+        error: msg,
+        ...(readOnly
+          ? {
+              category: "auth_mode_read_only",
+              hint: "Shared OAuth is read-only. Connect Google Drive permanently or use temporary browser access before copying grant templates.",
             }
           : {}),
       });

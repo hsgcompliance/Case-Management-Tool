@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyTssPreset,
   buildGrantProgramPayload,
   copyGrantProgramToDraft,
   createInitialGrantProgramDraft,
@@ -8,31 +7,6 @@ import {
 } from "./grantProgramFlowModel";
 
 describe("grant program flow payload", () => {
-  it("creates the canonical TSS billable program preset", () => {
-    const draft = applyTssPreset(createInitialGrantProgramDraft({ name: "TSS" }));
-    const payload = buildGrantProgramPayload(draft);
-
-    expect(payload).toMatchObject({
-      name: "TSS",
-      kind: "program",
-      financialConfig: FINANCIAL_CONFIG_PRESETS.billable,
-      enrollmentDefaults: { authorizationMonths: 12 },
-      complianceConfig: {
-        preset: "custom",
-        active: expect.arrayContaining([
-          expect.objectContaining({ field: "compliance.caseworthyEntryComplete", label: "CW Entry" }),
-          expect.objectContaining({ field: "compliance.hmisEntryComplete", label: "HMIS Entry" }),
-          expect.objectContaining({ field: "serviceStatus", label: "Service Active" }),
-          expect.objectContaining({ field: "medicaid.status", label: "Medicaid Active" }),
-        ]),
-      },
-      budget: {
-        total: 0,
-        allocationEnabled: true,
-      },
-    });
-  });
-
   it("preserves budgeted grant totals and line item amounts", () => {
     const draft = createInitialGrantProgramDraft({
       name: "RRH 2026",

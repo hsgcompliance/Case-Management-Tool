@@ -127,3 +127,38 @@ export const BudgetPipelinePreviewBody = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 export type TBudgetPipelinePreviewBody = z.infer<typeof BudgetPipelinePreviewBody>;
+
+// ─── Rollup ─────────────────────────────────────────────────────────────────
+
+export const BudgetPipelineRollupBody = z.object({
+  orgId: z.string().optional(),
+  pipelineId: z.string().optional(),
+});
+export type TBudgetPipelineRollupBody = z.infer<typeof BudgetPipelineRollupBody>;
+
+export type TBudgetPipelineRollupRow = {
+  pipelineId: string;
+  name: string;
+  status: TPipelineStatus;
+  grantId: string | null;
+  grantName: string | null;
+  lineItemId: string | null;
+  lineItemLabel: string | null;
+  /** Budgeted amount on the target line item. */
+  lineItemBudget: number;
+  /** Authoritative line-item projected (ALL sources, not just this pipeline). */
+  lineItemProjected: number;
+  /** Authoritative line-item spent (ALL sources). */
+  lineItemSpent: number;
+  /** This pipeline's pending (projected) queue contribution. */
+  pendingCount: number;
+  pendingAmount: number;
+  /** This pipeline's posted (spent) queue contribution. */
+  postedCount: number;
+  postedAmount: number;
+};
+
+export type TBudgetPipelineRollupResult = {
+  rows: TBudgetPipelineRollupRow[];
+  totals: { pendingAmount: number; postedAmount: number; pendingCount: number; postedCount: number };
+};

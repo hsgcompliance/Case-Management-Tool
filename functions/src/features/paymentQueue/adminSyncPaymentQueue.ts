@@ -5,11 +5,16 @@
 // on import, so paymentQueue is empty even when enrollments and jotformSubmissions exist).
 //
 // POST body:
-//   { orgId?: string, dryRun?: boolean, pageSize?: number }
+//   { orgId?: string, dryRun?: boolean, pageSize?: number, reallocate?: boolean }
 //
-// Processes two sources:
+// Processes three phases:
 //   1. customerEnrollments  → projection queue items (unpaid payments)
-//   2. jotformSubmissions   → CC / invoice queue items (known spending forms)
+//   2. jotformSubmissions   → CC / invoice queue items (known spending forms);
+//      re-extraction repopulates transactionFields on stale rows.
+//   3. reallocate (default true) → re-run active pipelines over existing
+//      pending+unassigned items, classifying them onto grant + line item.
+//      The auto-allocator trigger is create-only, so a re-extraction (update)
+//      does not re-fire it for the existing backlog.
 
 import type { Request, Response } from "express";
 import { db, rolesFromClaims, orgIdFromClaims, isoNow } from "../../core";
@@ -17,8 +22,107 @@ import { syncEnrollmentProjectionQueueItems, upsertPaymentQueueItems } from "./s
 import { inferTransactionWindowModel, type TransactionWindowModel } from "@hdb/contracts";
 import { getJotformFormQuestions } from "../jotform/service";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
+import { matchesPipeline } from "../budgetPipeline/service";
+import type { TBudgetPipeline } from "../budgetPipeline/schemas";
 
 const PAGE = 200;
+const FN = "adminSyncPaymentQueue";
+
+type SyncResults = {
+  enrollmentsScanned: number;
+  enrollmentsWithPayments: number;
+  projectionsWritten: number;
+  jotformScanned: number;
+  jotformProcessed: number;
+  jotformItemsWritten: number;
+  reallocScanned: number;
+  reallocMatched: number;
+  reallocPipelinesActive: number;
+  errors: string[];
+};
+
+/**
+ * Re-run active pipelines over existing pending + unassigned queue items.
+ *
+ * The live auto-allocator (`onPaymentQueueItemCreate`) fires only on document
+ * CREATE. A re-extraction backfill writes existing docs via set/merge=false,
+ * which is an UPDATE, so allocation never re-fires for the existing backlog.
+ * This mirrors the trigger's logic (oldest active pipeline wins) so that rows
+ * whose `transactionFields` were just repopulated actually get classified onto
+ * their grant + line item.
+ *
+ * Honors dryRun: counts matches without writing.
+ */
+async function reallocatePendingItems(
+  orgId: string,
+  dryRun: boolean,
+  pageSize: number,
+  results: SyncResults,
+): Promise<void> {
+  const pSnap = await db
+    .collection("budgetPipelines")
+    .where("orgId", "==", orgId)
+    .where("status", "==", "active")
+    .orderBy("createdAt", "asc")
+    .get();
+
+  results.reallocPipelinesActive = pSnap.size;
+  if (pSnap.empty) return;
+
+  const pipelines: TBudgetPipeline[] = pSnap.docs.map(
+    (d) => ({ ...(d.data() as TBudgetPipeline), id: d.id }),
+  );
+
+  let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+  let done = false;
+
+  while (!done) {
+    // Equality-only filters (no orderBy) need no composite index; paginate by
+    // implicit __name__ order via startAfter(snapshot).
+    let q: FirebaseFirestore.Query = db
+      .collection("paymentQueue")
+      .where("orgId", "==", orgId)
+      .where("queueStatus", "==", "pending")
+      .where("grantId", "==", null)
+      .limit(pageSize);
+
+    if (cursor) q = q.startAfter(cursor);
+
+    const snap = await q.get();
+    if (snap.empty) break;
+    cursor = snap.docs[snap.docs.length - 1];
+    done = snap.docs.length < pageSize;
+
+    for (const doc of snap.docs) {
+      results.reallocScanned++;
+      const item = { ...(doc.data() as Record<string, unknown>), id: doc.id };
+
+      for (const pipeline of pipelines) {
+        if (!matchesPipeline(item, pipeline)) continue;
+
+        const patch: Record<string, unknown> = {};
+        if (pipeline.grantId) patch.grantId = pipeline.grantId;
+        if (pipeline.lineItemId) patch.lineItemId = pipeline.lineItemId;
+        if (!patch.grantId && !patch.lineItemId) break; // matched but nothing to set
+        patch.pipelineId = pipeline.id;
+
+        results.reallocMatched++;
+        if (!dryRun) {
+          const now = isoNow();
+          patch.updatedAtISO = now;
+          patch["system.lastWriter"] = `${FN}:reallocate:pipeline:${pipeline.id}`;
+          patch["system.lastWriteAt"] = now;
+          try {
+            await doc.ref.update(patch);
+          } catch (e: unknown) {
+            results.errors.push(`realloc:${doc.id}: ${String((e as any)?.message || e)}`);
+          }
+        }
+        break; // first match wins
+      }
+    }
+  }
+}
 
 export async function adminSyncPaymentQueueHandler(
   req: Request,
@@ -35,6 +139,9 @@ export async function adminSyncPaymentQueueHandler(
   const callerOrg = orgIdFromClaims(caller);
   const orgId = String(body.orgId || callerOrg || "").trim();
   const dryRun = body.dryRun === true;
+  // Re-run active pipelines over the existing pending backlog after re-extraction.
+  // Defaults on; pass reallocate:false to skip (extraction-only backfill).
+  const reallocate = body.reallocate !== false;
   const pageSize = Math.max(1, Math.min(500, Number(body.pageSize ?? PAGE)));
 
   if (!orgId) {
@@ -42,14 +149,17 @@ export async function adminSyncPaymentQueueHandler(
     return;
   }
 
-  const results = {
+  const results: SyncResults = {
     enrollmentsScanned: 0,
     enrollmentsWithPayments: 0,
     projectionsWritten: 0,
     jotformScanned: 0,
     jotformProcessed: 0,
     jotformItemsWritten: 0,
-    errors: [] as string[],
+    reallocScanned: 0,
+    reallocMatched: 0,
+    reallocPipelinesActive: 0,
+    errors: [],
   };
 
   // ── 1. Enrollments → projection queue items ──────────────────────────────
@@ -165,9 +275,21 @@ export async function adminSyncPaymentQueueHandler(
     }
   }
 
+  // ── 3. Re-allocate existing pending + unassigned items via active pipelines ──
+  // The auto-allocator trigger is create-only, so re-extraction (an update) does
+  // not re-fire it. Run pipelines over the existing backlog here.
+  if (reallocate) {
+    try {
+      await reallocatePendingItems(orgId, dryRun, pageSize, results);
+    } catch (e: unknown) {
+      results.errors.push(`reallocate: ${String((e as any)?.message || e)}`);
+    }
+  }
+
   res.json({
     ok: true,
     dryRun,
+    reallocate,
     orgId,
     at: isoNow(),
     ...results,

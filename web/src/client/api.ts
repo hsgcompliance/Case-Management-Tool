@@ -221,6 +221,7 @@ export const endpointsStrict = {
   gdriveCreateFolder:            { method: 'POST', path: 'gdriveCreateFolder' },
   gdriveUpload:                  { method: 'POST', path: 'gdriveUpload' },
   gdriveBuildCustomerFolder:     { method: 'POST', path: 'gdriveBuildCustomerFolder' },
+  gdriveCopyGrantTemplates:      { method: 'POST', path: 'gdriveCopyGrantTemplates' },
   gdriveConfigGet:               { method: 'GET',  path: 'gdriveConfigGet' },
   gdriveConfigPatch:             { method: 'POST', path: 'gdriveConfigPatch' },
   calendarConnectStart:          { method: 'POST', path: 'calendarConnectStart' },
@@ -324,6 +325,13 @@ export const endpointsLoose = {
   paymentQueueReopen:           { method: 'POST',  path: 'paymentQueueReopen' },
   paymentQueueVoid:             { method: 'POST',  path: 'paymentQueueVoid' },
   paymentQueueRecomputeGrantAllocations: { method: 'POST', path: 'paymentQueueRecomputeGrantAllocations' },
+  paymentQueueAdminSync:        { method: 'POST',  path: 'paymentQueueAdminSync' },
+
+  // BUDGET PIPELINE (runtime endpoints not promoted into contracts yet)
+  budgetPipelineRollup:         { method: 'GET',   path: 'budgetPipelineRollup' },
+  // Loose alias for the (drifted, non-contracted) recalc endpoint, used to
+  // reconcile a grant's projected/spent from the pipeline manager.
+  budgetPipelineReconcileGrant: { method: 'POST',  path: 'paymentsRecalcGrantProjected' },
 
   // DRIVE (runtime admin tooling)
   gdriveCustomerFolderSync:     { method: 'POST',  path: 'gdriveCustomerFolderSync' },
@@ -505,6 +513,7 @@ const ENDPOINT_ERROR_TITLES: Record<string, string> = {
   customersPatch: "Error saving Customer",
   enrollmentsEnrollCustomer: "Error enrolling Customer",
   gdriveBuildCustomerFolder: "Error building Customer folder",
+  gdriveCopyGrantTemplates: "Error copying grant templates",
   gdriveCreateFolder: "Error creating Drive folder",
   gdriveUpload: "Error uploading Drive file",
   gdriveCustomerFolderIndex: "Error loading Customer folders",

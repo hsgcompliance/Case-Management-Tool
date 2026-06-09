@@ -51,3 +51,22 @@ export function usePipelinePreview() {
     mutationFn: (body: TBudgetPipelinePreviewBody) => BudgetPipeline.preview(body),
   });
 }
+
+export function usePipelineRollup(pipelineId?: string) {
+  return useQuery({
+    queryKey: [...qk.pipeline.root, "rollup", pipelineId ?? "all"],
+    queryFn: () => BudgetPipeline.rollup(pipelineId ? { pipelineId } : {}),
+    staleTime: 30_000,
+    select: (data) => ({ rows: data?.rows ?? [], totals: data?.totals }),
+  });
+}
+
+export function useReconcileGrant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (grantId: string) => BudgetPipeline.reconcileGrant(grantId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.pipeline.root });
+    },
+  });
+}

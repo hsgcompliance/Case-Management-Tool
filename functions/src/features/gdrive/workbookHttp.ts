@@ -218,7 +218,9 @@ export const convertCustomerWorkbookXlsx = secureHandler(
     auth: "user",
     methods: ["POST", "OPTIONS"],
     secrets: SECRETS,
-    memory: "256MiB",
+    // 256MiB OOMs (googleapis client + copy peaks ~265MiB) → opaque 500s. 512 is
+    // the floor the other workbook endpoints use.
+    memory: "512MiB",
     timeoutSeconds: 60,
   },
 );

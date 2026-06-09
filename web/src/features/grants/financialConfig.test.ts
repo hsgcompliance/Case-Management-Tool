@@ -206,6 +206,36 @@ describe("normalizeGrantFinancialConfig", () => {
     if (parsed.success) expect(Array.isArray(parsed.data.tasks)).toBe(true);
   });
 
+  it("normalizes grant Drive template ids from URLs or raw ids", () => {
+    const parsed = grants.GrantInputSchema.parse({
+      name: "TSS Client",
+      driveTemplates: [
+        {
+          key: "doc",
+          label: "Doc",
+          fileUrl: "https://docs.google.com/document/d/docTemplate123456789012345/edit",
+        },
+        {
+          key: "sheet",
+          label: "Sheet",
+          fileId: "https://docs.google.com/spreadsheets/d/sheetTemplate1234567890123/edit#gid=0",
+        },
+        {
+          key: "raw",
+          label: "Raw",
+          fileId: "rawTemplate123456789012345",
+        },
+      ],
+    });
+
+    expect(parsed.driveTemplates?.map((template) => template.fileId)).toEqual([
+      "docTemplate123456789012345",
+      "sheetTemplate1234567890123",
+      "rawTemplate123456789012345",
+    ]);
+    expect(parsed.driveTemplates?.map((template) => template.type)).toEqual(["doc", "sheet", "other"]);
+  });
+
   it("retains budget objects only for records with financial activity", () => {
     expect(shouldRetainGrantBudget({ kind: "grant" })).toBe(true);
     expect(shouldRetainGrantBudget({ kind: "program" })).toBe(false);

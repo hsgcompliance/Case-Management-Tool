@@ -4,6 +4,7 @@ export {
   gdriveCreateFolder,
   gdriveUpload,
   gdriveBuildCustomerFolder,
+  gdriveCopyGrantTemplates,
   gdriveConfigGet,
   gdriveConfigPatch,
 } from "./http";

@@ -646,6 +646,8 @@ import type {
   TGDriveOrgConfig,
   TCustomerFolder,
   TGDriveBuildCustomerFolderBody,
+  TGDriveCopyGrantTemplatesBody,
+  TGDriveGrantTemplateCopyResult,
   TGDriveCustomerFolderBuildWarning,
   TGDriveCustomerFolderSyncBody,
   TGDriveSyncReconcileItem,
@@ -691,6 +693,8 @@ export type CalendarPostEventResp =
 export type {
   TCustomerFolder,
   TGDriveBuildCustomerFolderBody,
+  TGDriveCopyGrantTemplatesBody,
+  TGDriveGrantTemplateCopyResult,
   TGDriveCustomerFolderBuildWarning,
   TGDriveOrgConfig,
   TGDriveCustomerFolderIndexConfig,
@@ -735,6 +739,7 @@ export type GDriveBuildCustomerFolderResp = Ok<{
     warnings?: TGDriveCustomerFolderBuildWarning[];
   };
 }> | GDriveEndpointError;
+export type GDriveCopyGrantTemplatesResp = Ok<TGDriveGrantTemplateCopyResult> | GDriveEndpointError;
 export type GDriveCustomerFolderIndexResp = Ok<{ folders: TCustomerFolder[]; warnings?: Array<Record<string, unknown>> }> | GDriveEndpointError;
 export type GDriveConfigGetResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
 export type GDriveConfigPatchResp = Ok<{ orgId: string; config: TGDriveOrgConfig }>;
@@ -1134,6 +1139,7 @@ export interface EndpointMap {
   gdriveUpload: { req: TGDriveUploadBody; resp: GDriveUploadResp };
   gdriveCustomerFolderIndex: { req: TGDriveCustomerFolderIndexQuery; resp: GDriveCustomerFolderIndexResp };
   gdriveBuildCustomerFolder: { req: TGDriveBuildCustomerFolderBody; resp: GDriveBuildCustomerFolderResp };
+  gdriveCopyGrantTemplates: { req: TGDriveCopyGrantTemplatesBody; resp: GDriveCopyGrantTemplatesResp };
   gdriveConfigGet: { req: void; resp: GDriveConfigGetResp };
   gdriveConfigPatch: { req: TGDriveConfigPatchBody; resp: GDriveConfigPatchResp };
   gdriveCustomerFolderSync: { req: TGDriveCustomerFolderSyncBody; resp: GDriveCustomerFolderSyncResp };

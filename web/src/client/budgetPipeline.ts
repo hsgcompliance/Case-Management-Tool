@@ -15,6 +15,30 @@ type UpsertResult = { ok: true; id: string; pipeline: TBudgetPipeline };
 type DeleteResult = { ok: true; deleted: string };
 type PreviewResult = { ok: true } & TBudgetPipelinePreviewResult;
 
+// Loose endpoint — types mirror functions/src/features/budgetPipeline/schemas.ts
+export type BudgetPipelineRollupRow = {
+  pipelineId: string;
+  name: string;
+  status: TBudgetPipeline["status"];
+  grantId: string | null;
+  grantName: string | null;
+  lineItemId: string | null;
+  lineItemLabel: string | null;
+  lineItemBudget: number;
+  lineItemProjected: number;
+  lineItemSpent: number;
+  pendingCount: number;
+  pendingAmount: number;
+  postedCount: number;
+  postedAmount: number;
+};
+export type BudgetPipelineRollupResult = {
+  ok: true;
+  rows: BudgetPipelineRollupRow[];
+  totals: { pendingAmount: number; postedAmount: number; pendingCount: number; postedCount: number };
+};
+type ReconcileGrantResult = { ok: true; totals: Record<string, unknown>; warnings: string[] };
+
 export const BudgetPipeline = {
   list: (query: Partial<TBudgetPipelineListQuery> = {}): Promise<ListResult> =>
     api.get("budgetPipelineList", query) as Promise<ListResult>,
@@ -38,6 +62,13 @@ export const BudgetPipeline = {
 
   preview: (body: TBudgetPipelinePreviewBody): Promise<PreviewResult> =>
     api.call("budgetPipelinePreview", { body }) as Promise<PreviewResult>,
+
+  rollup: (query: { pipelineId?: string } = {}): Promise<BudgetPipelineRollupResult> =>
+    api.get("budgetPipelineRollup", query) as Promise<BudgetPipelineRollupResult>,
+
+  // Reconcile a grant's authoritative projected/spent from queue + ledger.
+  reconcileGrant: (grantId: string): Promise<ReconcileGrantResult> =>
+    api.call("budgetPipelineReconcileGrant", { body: { grantId } }) as Promise<ReconcileGrantResult>,
 };
 
 export default BudgetPipeline;

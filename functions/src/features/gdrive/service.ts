@@ -73,6 +73,7 @@ type DriveContext = {
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const TEMPLATE_NAME_WORDS_RE = /\b(?:make\s+a?\s*copy|copy\s+of|make\s+copy|template|sample|example)\b/gi;
 
 /**
  * Thrown when the user's stored OAuth token exists but is missing a required
@@ -674,7 +675,10 @@ export async function createFolder(
 export async function buildCustomerFolder(args: {
   name: string;
   parentId: string;
-  templates: Array<{ fileId: string; name: string }>;
+  // `role: "tssWorkbook"` marks the TSS workbook template (Medicaid/non-Medicaid
+  // variant chosen client-side). Its copied file is returned as `workbook` so the
+  // caller can auto-link it as the customer's TSS workbook.
+  templates: Array<{ fileId: string; name: string; role?: string }>;
   subfolders: string[];
   googleAccessToken?: string;
   userUid?: string;
@@ -730,6 +734,30 @@ export async function buildCustomerFolder(args: {
     });
   });
 
+  // Capture the copied TSS workbook (if a template was flagged) so the caller
+  // can auto-link it. The copied native Sheet's id is the new spreadsheetId.
+  let workbook: { spreadsheetId: string; url: string; name: string } | undefined;
+  const wbIndex = args.templates.findIndex((t) => t.role === "tssWorkbook");
+  if (wbIndex >= 0) {
+    const wbResult = templateResults[wbIndex];
+    if (wbResult?.status === "fulfilled") {
+      const wbId = String(wbResult.value.data?.id || "").trim();
+      if (wbId) {
+        workbook = {
+          spreadsheetId: wbId,
+          url: `https://docs.google.com/spreadsheets/d/${wbId}/edit`,
+          name: String(wbResult.value.data?.name || args.templates[wbIndex]?.name || "Customer Workbook"),
+        };
+      }
+    } else {
+      warnings.push({
+        phase: "template",
+        name: "TSS Workbook",
+        error: "tss_workbook_copy_failed — could not auto-link workbook",
+      });
+    }
+  }
+
   // Create subfolders sequentially (cheap, low risk). Keep going so one bad
   // label does not turn a finished folder into a 500.
   for (const sub of args.subfolders) {
@@ -765,6 +793,81 @@ export async function buildCustomerFolder(args: {
     id: folderId,
     name: String(folderResult.data?.name || args.name),
     url: `https://drive.google.com/drive/folders/${folderId}`,
+    ...(workbook ? { workbook } : {}),
+    ...(warnings.length ? { warnings } : {}),
+  };
+}
+
+function compactName(value: string): string {
+  return value
+    .replace(TEMPLATE_NAME_WORDS_RE, "")
+    .replace(/\s*[-–—_:|]\s*$/g, "")
+    .replace(/^\s*[-–—_:|]\s*/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+export function buildCustomerTemplateCopyName(args: {
+  customerName: string;
+  templateName: string;
+}) {
+  const customerName = compactName(String(args.customerName || "")) || "Customer";
+  const templateName = compactName(String(args.templateName || "")) || "Document";
+  return `${customerName} - ${templateName}`.slice(0, 255);
+}
+
+export async function copyTemplatesIntoFolder(args: {
+  folderId: string;
+  customerName: string;
+  templates: Array<{ key: string; fileId: string; name: string }>;
+  googleAccessToken?: string;
+  userUid?: string;
+}) {
+  const drive = await getDriveClient({
+    googleAccessToken: args.googleAccessToken,
+    userUid: args.userUid,
+    requireWritable: true,
+    requiredScopes: [DRIVE_SCOPE],
+  });
+
+  const copied: Array<{ key: string; name: string; fileId: string; url?: string }> = [];
+  const warnings: Array<{
+    phase: "template" | "subfolder";
+    name: string;
+    fileId?: string;
+    error: string;
+  }> = [];
+
+  for (const tmpl of args.templates) {
+    const name = buildCustomerTemplateCopyName({
+      customerName: args.customerName,
+      templateName: tmpl.name,
+    });
+    try {
+      const result = await drive.files.copy({
+        fileId: tmpl.fileId,
+        requestBody: { name, parents: [args.folderId] },
+        fields: "id,name,webViewLink",
+        supportsAllDrives: true,
+      });
+      copied.push({
+        key: tmpl.key,
+        name: String(result.data?.name || name),
+        fileId: String(result.data?.id || ""),
+        ...(result.data?.webViewLink ? { url: String(result.data.webViewLink) } : {}),
+      });
+    } catch (err: any) {
+      warnings.push({
+        phase: "template",
+        name,
+        fileId: tmpl.fileId,
+        error: shortErrorMessage(err, "template_copy_failed"),
+      });
+    }
+  }
+
+  return {
+    copied,
     ...(warnings.length ? { warnings } : {}),
   };
 }

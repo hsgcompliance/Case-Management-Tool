@@ -34,6 +34,8 @@ import {
   enrollmentControlsForGrant,
   type EnrollmentControlDescriptor,
 } from "@features/enrollments/enrollmentControls";
+import { defaultGrantDriveTemplateKeys, grantDriveTemplates } from "@features/grants/driveTemplates";
+import { useGDriveCopyGrantTemplates } from "@hooks/useGDrive";
 
 function isoToday(): string {
   return toISODate(new Date());
@@ -115,6 +117,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const softDelete = useEnrollmentsDelete();
   const adminDelete = useEnrollmentsAdminDelete();
   const voidProjections = useEnrollmentsVoidProjections();
+  const copyGrantTemplates = useGDriveCopyGrantTemplates();
   const paymentsSpend = usePaymentsSpend();
   const paymentsDeleteRows = usePaymentsDeleteRows();
   const tasksUpdateStatus = useTasksUpdateStatus();
@@ -125,6 +128,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const [endDate, setEndDate] = React.useState<string>("");
   const [endDateTouched, setEndDateTouched] = React.useState<boolean>(false);
   const [generateTaskSchedule, setGenerateTaskSchedule] = React.useState<boolean>(true);
+  const [copyTemplates, setCopyTemplates] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
 
   const [editing, setEditing] = React.useState<Enrollment | null>(null);
@@ -151,12 +155,21 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     paymentsDeleteRows.isPending ||
     tasksUpdateStatus.isPending ||
     tasksDelete.isPending ||
-    applyAction.isPending;
+    applyAction.isPending ||
+    copyGrantTemplates.isPending;
 
   const today = React.useMemo(() => isoToday(), []);
   const selectedGrantEndDate = grantId ? grantEndDateById.get(String(grantId)) || "" : "";
   const selectedGrant = grantId ? grantById.get(String(grantId)) : null;
   const selectedAuthorizationMonths = Number((selectedGrant as any)?.enrollmentDefaults?.authorizationMonths);
+  const selectedDriveTemplates = React.useMemo(
+    () => grantDriveTemplates(selectedGrant as Record<string, unknown> | null),
+    [selectedGrant],
+  );
+  const selectedDefaultTemplateKeys = React.useMemo(
+    () => defaultGrantDriveTemplateKeys(selectedGrant as Record<string, unknown> | null),
+    [selectedGrant],
+  );
 
   React.useEffect(() => {
     if (endDateTouched) {
@@ -170,6 +183,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
       selectedAuthorizationMonths,
     ));
   }, [endDateTouched, selectedAuthorizationMonths, selectedGrantEndDate, startDate]);
+
+  React.useEffect(() => {
+    setCopyTemplates(selectedDriveTemplates.length > 0);
+  }, [grantId, selectedDriveTemplates.length]);
 
   const closeTargetPayments = React.useMemo(() => {
     const payments = Array.isArray((closeTarget as any)?.payments) ? ((closeTarget as any).payments as any[]) : [];
@@ -248,7 +265,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     if (!gid) return;
     setError(null);
     try {
-      await enroll.mutateAsync({
+      const created = await enroll.mutateAsync({
         customerId,
         grantId: gid,
         extra: {
@@ -261,11 +278,30 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             : {}),
         },
       });
+      const enrollmentId = String((created as any)?.id || "").trim();
+      const templateKeysToCopy = selectedDefaultTemplateKeys.length
+        ? selectedDefaultTemplateKeys
+        : selectedDriveTemplates.map((template) => template.key);
+      if (copyTemplates && templateKeysToCopy.length > 0) {
+        try {
+          await copyGrantTemplates.mutateAsync({
+            customerId,
+            grantId: gid,
+            enrollmentId: enrollmentId || undefined,
+            startDate,
+            templateKeys: templateKeysToCopy,
+          });
+          toast("Grant templates copied.", { type: "success" });
+        } catch (copyError: unknown) {
+          toast(toApiError(copyError).error || "Enrollment created, but templates were not copied.", { type: "warning" });
+        }
+      }
       setGrantId(null);
       setStartDate(isoToday());
       setEndDate(defaultEnrollmentEndDateForGrant(isoToday()));
       setEndDateTouched(false);
       setGenerateTaskSchedule(true);
+      setCopyTemplates(true);
       toast("Enrollment created.", { type: "success" });
     } catch (e: unknown) {
       const msg = toApiError(e).error || "Failed to create enrollment.";
@@ -617,6 +653,21 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             <span className="text-xs text-amber-600 font-medium">(no tasks will be created)</span>
           )}
         </div>
+        {selectedDriveTemplates.length > 0 ? (
+          <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              className="checkbox checkbox-sm"
+              checked={copyTemplates}
+              onChange={(e) => setCopyTemplates(e.currentTarget.checked)}
+              disabled={busy}
+            />
+            <span>
+              Copy {selectedDefaultTemplateKeys.length || selectedDriveTemplates.length} grant template
+              {(selectedDefaultTemplateKeys.length || selectedDriveTemplates.length) === 1 ? "" : "s"} into the customer folder
+            </span>
+          </label>
+        ) : null}
         <div className="mt-0.5 text-xs text-slate-400">
           Default start date is today. End date is optional — leave blank for open-ended enrollments. If the grant has an end date, the enrollment cannot extend past it.
         </div>

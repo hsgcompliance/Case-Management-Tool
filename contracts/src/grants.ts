@@ -39,6 +39,72 @@ export const GrantComplianceConfig = z
   .passthrough();
 export type TGrantComplianceConfig = z.infer<typeof GrantComplianceConfig>;
 
+export const GrantDriveTemplateType = z.enum(["doc", "sheet", "pdf", "other"]);
+export type TGrantDriveTemplateType = z.infer<typeof GrantDriveTemplateType>;
+
+const DIRECT_DRIVE_ID_RE = /^[-\w]{20,}$/;
+
+export function extractGoogleDriveFileId(input: unknown): string {
+  const text = String(input || "").trim();
+  if (!text) return "";
+  const byDoc = text.match(/\/document\/d\/([-\w]{20,})/i)?.[1];
+  const bySheet = text.match(/\/spreadsheets\/d\/([-\w]{20,})/i)?.[1];
+  const byFile = text.match(/\/file\/d\/([-\w]{20,})/i)?.[1];
+  const byPresentation = text.match(/\/presentation\/d\/([-\w]{20,})/i)?.[1];
+  const byOpen = text.match(/[?&]id=([-\w]{20,})/i)?.[1];
+  if (byDoc || bySheet || byFile || byPresentation || byOpen) {
+    return byDoc || bySheet || byFile || byPresentation || byOpen || "";
+  }
+  return DIRECT_DRIVE_ID_RE.test(text) ? text : "";
+}
+
+function inferDriveTemplateType(input: unknown): TGrantDriveTemplateType {
+  const text = String(input || "").toLowerCase();
+  if (text.includes("/document/")) return "doc";
+  if (text.includes("/spreadsheets/")) return "sheet";
+  if (text.includes(".pdf") || text.includes("application/pdf")) return "pdf";
+  return "other";
+}
+
+function normalizeGrantDriveTemplateInput(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  const fileUrl = String(raw.fileUrl || raw.url || "").trim();
+  const rawFileId = String(raw.fileId || raw.id || "").trim();
+  const fileId = extractGoogleDriveFileId(rawFileId) || extractGoogleDriveFileId(fileUrl);
+  return {
+    ...raw,
+    key: String(raw.key || fileId || rawFileId || raw.label || "").trim(),
+    label: String(raw.label || raw.name || raw.key || "Template").trim(),
+    fileId,
+    fileUrl: fileUrl || (rawFileId && rawFileId !== fileId ? rawFileId : raw.fileUrl),
+    type: raw.type || inferDriveTemplateType(fileUrl || rawFileId),
+  };
+}
+
+export const GrantDriveTemplate = z.preprocess(
+  normalizeGrantDriveTemplateInput,
+  z.object({
+    key: z.string().trim().min(1).max(100),
+    label: z.string().trim().min(1).max(200),
+    fileId: z.string().trim().min(3).max(300),
+    fileUrl: z.string().trim().max(800).nullish(),
+    type: GrantDriveTemplateType.optional().default("other"),
+    description: z.string().trim().max(500).nullish(),
+    defaultChecked: z.boolean().optional().default(true),
+  })
+  .passthrough(),
+);
+export type TGrantDriveTemplate = z.infer<typeof GrantDriveTemplate>;
+
+export function normalizeGrantDriveTemplates(input: unknown): TGrantDriveTemplate[] {
+  const rows = Array.isArray(input) ? input : [];
+  return rows
+    .map((row) => GrantDriveTemplate.safeParse(row))
+    .filter((result): result is { success: true; data: TGrantDriveTemplate } => result.success)
+    .map((result) => result.data);
+}
+
 export const GrantFinancialConfig = z
   .object({
     model: GrantFinancialModel,
@@ -672,6 +738,7 @@ export const GrantInputSchema = z
     taskTypes: z.array(z.string().trim()).nullish(),
     tasks: GrantTaskDefinitions.nullish(),
     complianceConfig: GrantComplianceConfig.nullish(),
+    driveTemplates: z.array(GrantDriveTemplate).nullish(),
 
     /** Conditional task rules evaluated on each new enrollment. */
     conditionalTaskRules: z.array(ConditionalTaskRule).nullish(),
