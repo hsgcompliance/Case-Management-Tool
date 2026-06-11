@@ -403,6 +403,26 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
     </div>
   );
 
+  const customerActive = isCustomerActive(model, detail);
+  const statusToggleBusy =
+    setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending;
+  const statusToggleButton = canEditDetails ? (
+    <button
+      type="button"
+      className={[
+        "inline-flex items-center rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50",
+        customerActive
+          ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+          : "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+      ].join(" ")}
+      onClick={onToggleActive}
+      disabled={statusToggleBusy}
+      title={customerActive ? "Mark inactive" : "Mark active"}
+    >
+      {statusToggleBusy ? "Updating…" : customerActive ? "Active" : "Inactive"}
+    </button>
+  ) : null;
+
   const modalFooter = (
     <>
       <div className="mr-auto">
@@ -424,6 +444,8 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
       >
         Close
       </button>
+
+      {statusToggleButton}
 
       {canEditDetails && !editing ? (
         <button className="btn btn-sm" onClick={onToggleEdit} disabled={detailsBusy}>
@@ -471,6 +493,7 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {statusToggleButton}
               {canEditDetails && onDelete ? (
                 <button
                   type="button"
@@ -542,8 +565,6 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
                 editing={editing}
                 model={model}
                 setModel={setModel}
-                onToggleActive={onToggleActive}
-                statusBusy={setCustomerActive.isPending || archiveClient.isPending || unarchiveClient.isPending}
                 customerId={!creating ? customerIdStr || undefined : undefined}
                 isViewer={isViewer}
               />

@@ -55,8 +55,6 @@ export function DetailsTab({
   editing,
   model,
   setModel,
-  onToggleActive,
-  statusBusy = false,
   customerId,
   isViewer = false,
 }: {
@@ -64,8 +62,6 @@ export function DetailsTab({
   editing: boolean;
   model: AnyRecord;
   setModel: (updater: any) => void;
-  onToggleActive?: () => void;
-  statusBusy?: boolean;
   customerId?: string;
   isViewer?: boolean;
 }) {
@@ -111,11 +107,7 @@ export function DetailsTab({
   };
 
   const statusIsActive = status === "active";
-  const statusChipClass = statusIsActive
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-    : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100";
   const statusChipLabel = statusIsActive ? "Active" : "Inactive";
-  const statusChipTitle = statusIsActive ? "Mark inactive" : "Mark active";
   const detailsTitle = creating ? "New customer details" : "General";
 
   const editForm = (
@@ -209,6 +201,24 @@ export function DetailsTab({
           </select>
         </label>
       </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <label className="field">
+          <span className="label">Tier</span>
+          <select
+            className="select"
+            value={model?.tier == null ? "" : String(model.tier)}
+            onChange={(e) =>
+              setField("tier", e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+            }
+          >
+            <option value="">No tier</option>
+            <option value="1">Tier 1</option>
+            <option value="2">Tier 2</option>
+            <option value="3">Tier 3</option>
+          </select>
+        </label>
+      </div>
     </>
   );
 
@@ -225,6 +235,9 @@ export function DetailsTab({
         <ViewField label="HMIS ID" value={model?.hmisId} />
         <ViewField label="Alias" value={model?.alias} />
         <ViewField label="Status" value={statusChipLabel} />
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <ViewField label="Tier" value={model?.tier == null ? "-" : `Tier ${model.tier}`} />
       </div>
     </>
   );
@@ -247,26 +260,6 @@ export function DetailsTab({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                className={[
-                  "inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-semibold transition",
-                  statusChipClass,
-                  statusBusy ? "cursor-wait opacity-70" : "",
-                ].join(" ")}
-                onClick={() => {
-                  if (statusBusy) return;
-                  if (onToggleActive) {
-                    onToggleActive();
-                    return;
-                  }
-                  onStatusChange(statusIsActive ? "inactive" : "active");
-                }}
-                title={statusChipTitle}
-                disabled={statusBusy}
-              >
-                {statusBusy ? "Updating..." : statusChipLabel}
-              </button>
               <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
                 <span className="text-slate-500">Age</span>
                 <span className="font-medium">{age === null ? "-" : String(age)}</span>

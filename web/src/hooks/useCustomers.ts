@@ -552,6 +552,52 @@ export function useSetCustomerActive() {
   );
 }
 
+/** Set acuity tier (1–3 or null) — optimistic detail + list caches */
+export function useSetCustomerTier() {
+  const qc = useQueryClient();
+
+  return useOptimisticMutation(
+    ({ id, tier }: { id: string; tier: number | null }) =>
+      CustomersAPI.patch({ id, patch: { tier } as Record<string, unknown> }),
+    {
+      makePatches: ({ id, tier }, qc) => {
+        const rowPatch = { tier };
+
+        const detail = {
+          key: qk.customers.detail(id),
+          update: (prev: any) => (prev ? { ...prev, ...rowPatch } : prev),
+        };
+
+        // Tier does not affect list membership (filters only key off active/deleted),
+        // so we patch the row in place wherever it already lives.
+        const lists = getAllCustomerListKeys(qc).map((key) => ({
+          key,
+          update: (prev: any) => {
+            const arr = Array.isArray(prev)
+              ? prev
+              : Array.isArray(prev?.items)
+                ? prev.items
+                : null;
+            if (!arr) return prev;
+
+            const idx = arr.findIndex((c: any) => c?.id === id);
+            if (idx < 0) return prev;
+
+            const nextArr = arr.map((c: any) =>
+              c?.id === id ? { ...(c || {}), ...rowPatch } : c,
+            );
+            return Array.isArray(prev) ? nextArr : { ...prev, items: nextArr };
+          },
+        }));
+
+        return [detail, ...lists];
+      },
+      revalidateAfterMs: 0,
+    },
+    { meta: { queryClient: qc } }
+  );
+}
+
 /** Convenience: customers scoped to a single CM, lazy-loadable. */
 export function useCmCustomers(cmUid: string, opts?: { enabled?: boolean }) {
   return useCustomers(

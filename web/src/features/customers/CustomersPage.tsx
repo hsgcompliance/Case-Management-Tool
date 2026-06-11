@@ -50,6 +50,7 @@ type PersistedFilters = {
   scopeMode: ScopeMode;
   cmFilter: string;
   populationFilter: PopulationFilter;
+  tierFilter: TierFilter;
   sortMode: CustomerSortMode;
   cardPoolMode: CardPoolMode;
   grantFilter: string;
@@ -76,6 +77,7 @@ type DeletedMode = "exclude" | "include" | "only";
 type CustomersPageMode = "legacy" | "new";
 type ScopeMode = "all" | "my" | "primary" | "secondary";
 type PopulationFilter = "all" | "Youth" | "Individual" | "Family" | "unknown";
+type TierFilter = "all" | "1" | "2" | "3";
 type CustomerSortMode =
   | "alphabetical"
   | "first-added"
@@ -196,6 +198,12 @@ function matchesPopulationFilter(customer: TCustomerEntity, filter: PopulationFi
   return population === filter;
 }
 
+function matchesTierFilter(customer: TCustomerEntity, filter: TierFilter): boolean {
+  if (filter === "all") return true;
+  const tier = (customer as { tier?: unknown }).tier;
+  return tier != null && String(tier) === filter;
+}
+
 function sortCustomerRows(rows: TCustomerEntity[], mode: CustomerSortMode): TCustomerEntity[] {
   const compareName = (a: TCustomerEntity, b: TCustomerEntity) => displayName(a).localeCompare(displayName(b));
 
@@ -260,6 +268,9 @@ export function CustomersPage() {
   const [search, setSearch] = React.useState<string>("");
   const [populationFilter, _setPopulationFilter] = React.useState<PopulationFilter>(persisted.current.populationFilter ?? "all");
   const setPopulationFilter = React.useCallback((v: PopulationFilter) => { _setPopulationFilter(v); writePersistedFilters({ populationFilter: v }); }, []);
+
+  const [tierFilter, _setTierFilter] = React.useState<TierFilter>(persisted.current.tierFilter ?? "all");
+  const setTierFilter = React.useCallback((v: TierFilter) => { _setTierFilter(v); writePersistedFilters({ tierFilter: v }); }, []);
 
   const [sortMode, _setSortMode] = React.useState<CustomerSortMode>(persisted.current.sortMode ?? "alphabetical");
   const setSortMode = React.useCallback((v: CustomerSortMode) => { _setSortMode(v); writePersistedFilters({ sortMode: v }); }, []);
@@ -448,7 +459,8 @@ export function CustomersPage() {
     const effectiveDeletedMode: DeletedMode = searchActive ? "exclude" : (isAdminUser ? deletedMode : "exclude");
     let rows = scopedRows
       .filter((customer) => matchesDeletedFilter(customer, effectiveDeletedMode))
-      .filter((customer) => matchesPopulationFilter(customer, populationFilter));
+      .filter((customer) => matchesPopulationFilter(customer, populationFilter))
+      .filter((customer) => matchesTierFilter(customer, tierFilter));
 
     // Enrollment filter: show only customers enrolled in the selected grant (with status filter)
     if (grantFilterActive && enrollmentMap) {
@@ -474,6 +486,7 @@ export function CustomersPage() {
     grantFilterActive,
     isAdminUser,
     populationFilter,
+    tierFilter,
     scopedRows,
     searchActive,
   ]);
@@ -606,6 +619,7 @@ export function CustomersPage() {
     setCmFilter(isCM && myUid ? myUid : "all");
     setSearch("");
     setPopulationFilter("all");
+    setTierFilter("all");
     setSortMode("alphabetical");
     setGrantFilter("all");
     setEnrollmentStatuses(["active", "closed", "deleted"]);
@@ -852,6 +866,7 @@ export function CustomersPage() {
             cmFilter={cmFilter}
             search={search}
             populationFilter={populationFilter}
+            tierFilter={tierFilter}
             sortMode={sortMode}
             grantFilter={grantFilter}
             enrollmentStatuses={enrollmentStatuses}
@@ -862,6 +877,7 @@ export function CustomersPage() {
             onCmFilterChange={handleCmFilterChange}
             onSearchChange={handleSearchChange}
             onPopulationFilterChange={setPopulationFilter}
+            onTierFilterChange={setTierFilter}
             onSortModeChange={setSortMode}
             onGrantFilterChange={setGrantFilter}
             onEnrollmentStatusesChange={setEnrollmentStatuses}

@@ -126,6 +126,10 @@ export const CustomerInputSchema = z
     acuityScore: z.number().nullish(),
     acuity: CustomerAcuity,
 
+    // Simple single-select acuity tier (1–3). Kept top-level (not nested under
+    // acuity) so Firestore single-field indexes make it directly queryable.
+    tier: z.number().int().min(1).max(3).nullish(),
+
     // Drive folders + misc metadata. Drive fields here are compatibility
     // fallbacks; new structured Drive state belongs under customerDrive.
     meta: CustomerMeta,
