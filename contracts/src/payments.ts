@@ -16,7 +16,7 @@ const ISO10ish = z.preprocess((v) => {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }, ISO10);
 
-const PaymentType = z.enum(["monthly", "deposit", "prorated", "service"]);
+const PaymentType = z.enum(["monthly", "deposit", "prorated", "service", "arrears"]);
 
 /* ============================================================================
    Payment schemas

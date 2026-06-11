@@ -11,7 +11,8 @@ export type SSRowTypeKey =
   | "monthly-utility"
   | "prorated"
   | "deposit"
-  | "service";
+  | "service"
+  | "arrears";
 
 export type SSRow = {
   id: string;
@@ -32,6 +33,7 @@ export const SS_TYPE_OPTIONS: { value: SSRowTypeKey; label: string }[] = [
   { value: "prorated", label: "Prorated Rent" },
   { value: "deposit", label: "Security Deposit" },
   { value: "service", label: "Service" },
+  { value: "arrears", label: "Arrears" },
 ];
 
 // ─── local helpers ────────────────────────────────────────────────────────────

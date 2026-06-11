@@ -24,3 +24,5 @@ export {
   onJotformSubmissionUpdate,
   onJotformSubmissionDelete,
 } from "./triggers";
+
+export { jotformDailyPull } from "./dailyPull";

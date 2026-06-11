@@ -17,7 +17,7 @@
 //      does not re-fire it for the existing backlog.
 
 import type { Request, Response } from "express";
-import { db, rolesFromClaims, orgIdFromClaims, isoNow } from "../../core";
+import { db, hasLevel, orgIdFromClaims, isoNow } from "../../core";
 import { syncEnrollmentProjectionQueueItems, upsertPaymentQueueItems } from "./service";
 import { inferTransactionWindowModel, type TransactionWindowModel } from "@hdb/contracts";
 import { getJotformFormQuestions } from "../jotform/service";
@@ -129,8 +129,9 @@ export async function adminSyncPaymentQueueHandler(
   res: Response
 ): Promise<void> {
   const caller = (req as any).user || {};
-  const roles = rolesFromClaims(caller);
-  if (!roles.includes("admin")) {
+  // Level-based: admin OR higher (dev/org_dev/super_dev). rolesFromClaims must
+  // not be used for authz — it returns [topRole, ...tags], so a dev lacks "admin".
+  if (!hasLevel(caller, "admin")) {
     res.status(403).json({ ok: false, error: "forbidden" });
     return;
   }

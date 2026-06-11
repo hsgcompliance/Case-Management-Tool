@@ -14,6 +14,7 @@ import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
 import { FileTypeIcon, SHEETS_MIME, FOLDER_MIME } from "@entities/gdrive/FileTypeIcon";
 import { isScopeError } from "@entities/ui/PermissionErrorBanner";
 import type { ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
+import { isGoogleReauthError, GOOGLE_REAUTH_ISSUE } from "@lib/googleAuthError";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,7 @@ function CandidateList({
   isViewer,
   onAttach,
   onConvert,
+  onNavigate,
   onRetry,
 }: {
   candidates: CandidateItem[] | null;
@@ -301,6 +303,22 @@ export function WorkbookLinkControls({
     ? subfolderStack[subfolderStack.length - 1].id
     : folderId;
 
+  // Route auth-class issues (expired Google token, missing scope) up to the
+  // parent so it can render the DriveAuthBanner (Reconnect + Settings). Returns
+  // true when surfaced as a banner, so callers can skip the inline raw message.
+  const surfaceAuthIssue = React.useCallback((issue: WorkbookLinkIssue): boolean => {
+    if (!onAuthIssue) return false;
+    if (isGoogleReauthError(issue.error)) {
+      onAuthIssue({ ...GOOGLE_REAUTH_ISSUE });
+      return true;
+    }
+    if (isScopeError(issue)) {
+      onAuthIssue(issue as ScopeErrorPayload);
+      return true;
+    }
+    return false;
+  }, [onAuthIssue]);
+
   const loadCandidates = React.useCallback(async () => {
     if (!currentFolderId) return;
     setCandidatesLoading(true);
@@ -311,16 +329,15 @@ export function WorkbookLinkControls({
         setCandidates(parseCandidates(resp));
       } else {
         const issue = apiIssue(resp, "Failed to load folder contents");
-        setCandidatesError(issue);
-        if (isScopeError(issue) && onAuthIssue) onAuthIssue(issue as ScopeErrorPayload);
+        setCandidatesError(surfaceAuthIssue(issue) ? null : issue);
       }
     } catch (e: unknown) {
       const issue = apiIssue(e, String((e as Error)?.message || "Failed to load folder"));
-      setCandidatesError(issue);
+      setCandidatesError(surfaceAuthIssue(issue) ? null : issue);
     } finally {
       setCandidatesLoading(false);
     }
-  }, [currentFolderId, onAuthIssue]);
+  }, [currentFolderId, surfaceAuthIssue]);
 
   // Reset navigation when the root folder changes.
   React.useEffect(() => { setSubfolderStack([]); }, [folderId]);
@@ -346,11 +363,11 @@ export function WorkbookLinkControls({
         onLinked();
       } else {
         const issue = apiIssue(resp, "Failed to link workbook");
-        setUrlError(issue);
-        if (isScopeError(issue) && onAuthIssue) onAuthIssue(issue as ScopeErrorPayload);
+        setUrlError(surfaceAuthIssue(issue) ? null : issue);
       }
     } catch (e: unknown) {
-      setUrlError(apiIssue(e, String((e as Error)?.message || "Failed to link workbook")));
+      const issue = apiIssue(e, String((e as Error)?.message || "Failed to link workbook"));
+      setUrlError(surfaceAuthIssue(issue) ? null : issue);
     } finally {
       setUrlSaving(false);
     }
@@ -369,11 +386,11 @@ export function WorkbookLinkControls({
         onLinked();
       } else {
         const issue = apiIssue(resp, "Failed to link workbook");
-        setCandidatesError(issue);
-        if (isScopeError(issue) && onAuthIssue) onAuthIssue(issue as ScopeErrorPayload);
+        setCandidatesError(surfaceAuthIssue(issue) ? null : issue);
       }
     } catch (e: unknown) {
-      setCandidatesError(apiIssue(e, String((e as Error)?.message || "Failed to link workbook")));
+      const issue = apiIssue(e, String((e as Error)?.message || "Failed to link workbook"));
+      setCandidatesError(surfaceAuthIssue(issue) ? null : issue);
     } finally {
       setAttachingId(null);
     }
@@ -392,11 +409,11 @@ export function WorkbookLinkControls({
         onLinked();
       } else {
         const issue = apiIssue(resp, "Failed to convert workbook");
-        setCandidatesError(issue);
-        if (isScopeError(issue) && onAuthIssue) onAuthIssue(issue as ScopeErrorPayload);
+        setCandidatesError(surfaceAuthIssue(issue) ? null : issue);
       }
     } catch (e: unknown) {
-      setCandidatesError(apiIssue(e, String((e as Error)?.message || "Failed to convert workbook")));
+      const issue = apiIssue(e, String((e as Error)?.message || "Failed to convert workbook"));
+      setCandidatesError(surfaceAuthIssue(issue) ? null : issue);
     } finally {
       setConvertingId(null);
     }

@@ -137,7 +137,12 @@ export type PaymentScheduleBuildInput = {
     note?: string | string[];
     vendor?: string;
     comment?: string;
+    paid?: boolean;
+    paidAt?: string | null;
+    paidFromGrant?: boolean;
+    compliance?: TPayment["compliance"];
   }>;
+  previewFlags?: Record<string, { paid?: boolean; hmisComplete?: boolean; caseworthyComplete?: boolean }>;
   options?: {
     updateGrantBudgets?: boolean;
     recalcGrantProjected?: boolean;
@@ -152,6 +157,37 @@ export type PaymentScheduleBuildInput = {
     docs?: string[];
   };
 };
+
+function paymentBuildKey(row: {
+  type?: unknown;
+  dueDate?: unknown;
+  lineItemId?: unknown;
+  amount?: unknown;
+  note?: unknown;
+}): string {
+  const note = Array.isArray(row.note) ? row.note.join("|") : String(row.note ?? "");
+  const cents = Math.round(Number(row.amount || 0) * 100);
+  return [
+    String(row.type || "").toLowerCase(),
+    toISO10(row.dueDate),
+    String(row.lineItemId || "").trim(),
+    String(cents),
+    note.trim().toLowerCase(),
+  ].join("|");
+}
+
+function flagsToProjectionPatch(flags?: { paid?: boolean; hmisComplete?: boolean; caseworthyComplete?: boolean }) {
+  if (!flags) return {};
+  const paid = flags.paid === true;
+  const hmisComplete = flags.hmisComplete === true;
+  const caseworthyComplete = flags.caseworthyComplete === true;
+  return {
+    ...(paid ? { paid: true, paidAt: toISODate(new Date()), paidFromGrant: true } : {}),
+    ...(hmisComplete || caseworthyComplete
+      ? { compliance: { hmisComplete, caseworthyComplete } }
+      : {}),
+  };
+}
 
 function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<string, unknown> {
   const monthlyPlans = Array.isArray(input.monthlyPlans) ? input.monthlyPlans : [];
@@ -177,10 +213,11 @@ function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<s
       ...(p.comment ? { comment: String(p.comment) } : {}),
     }));
 
-  const findSingle = (type: "deposit" | "prorated") =>
+  const findSingle = (type: "deposit" | "prorated" | "arrears") =>
     additions.find((a) => String(a?.type || "").toLowerCase() === type);
   const deposit = findSingle("deposit");
   const prorated = findSingle("prorated");
+  const arrears = findSingle("arrears");
   const services = additions
     .filter((a) => String(a?.type || "").toLowerCase() === "service")
     .map((a, idx) => ({
@@ -191,6 +228,9 @@ function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<s
       lineItemId: String(a.lineItemId || ""),
       ...(a.vendor ? { vendor: String(a.vendor) } : {}),
       ...(a.comment ? { comment: String(a.comment) } : {}),
+      ...(a.paid ? { paid: true } : {}),
+      ...(a.compliance?.hmisComplete ? { hmisComplete: true } : {}),
+      ...(a.compliance?.caseworthyComplete ? { caseworthyComplete: true } : {}),
     }));
 
   return {
@@ -206,6 +246,9 @@ function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<s
             lineItemId: String(deposit.lineItemId || ""),
             ...(deposit.vendor ? { vendor: String(deposit.vendor) } : {}),
             ...(deposit.comment ? { comment: String(deposit.comment) } : {}),
+            ...(deposit.paid ? { paid: true } : {}),
+            ...(deposit.compliance?.hmisComplete ? { hmisComplete: true } : {}),
+            ...(deposit.compliance?.caseworthyComplete ? { caseworthyComplete: true } : {}),
           },
         }
       : {}),
@@ -218,6 +261,24 @@ function paymentBuilderMetaFromInput(input: PaymentScheduleBuildInput): Record<s
             lineItemId: String(prorated.lineItemId || ""),
             ...(prorated.vendor ? { vendor: String(prorated.vendor) } : {}),
             ...(prorated.comment ? { comment: String(prorated.comment) } : {}),
+            ...(prorated.paid ? { paid: true } : {}),
+            ...(prorated.compliance?.hmisComplete ? { hmisComplete: true } : {}),
+            ...(prorated.compliance?.caseworthyComplete ? { caseworthyComplete: true } : {}),
+          },
+        }
+      : {}),
+    ...(arrears
+      ? {
+          arrears: {
+            enabled: true,
+            date: toISO10(arrears.dueDate),
+            amount: String(Number(arrears.amount || 0)),
+            lineItemId: String(arrears.lineItemId || ""),
+            ...(arrears.vendor ? { vendor: String(arrears.vendor) } : {}),
+            ...(arrears.comment ? { comment: String(arrears.comment) } : {}),
+            ...(arrears.paid ? { paid: true } : {}),
+            ...(arrears.compliance?.hmisComplete ? { hmisComplete: true } : {}),
+            ...(arrears.compliance?.caseworthyComplete ? { caseworthyComplete: true } : {}),
           },
         }
       : {}),
@@ -1069,6 +1130,14 @@ export function usePaymentsBuildSchedule() {
               type === "monthly"
                 ? [plan.kind === "utility" ? "utility" : "rent"]
                 : item.note ?? undefined;
+            const dueDate = toISO10(item?.dueDate || (item as Record<string, unknown>)?.date || "");
+            const flags = input.previewFlags?.[paymentBuildKey({
+              type: item?.type,
+              dueDate,
+              lineItemId,
+              amount: item?.amount,
+              note,
+            })];
             generatedItems.push(
               withProjectionMeta(item, lineItemId, {
                 note,
@@ -1076,6 +1145,7 @@ export function usePaymentsBuildSchedule() {
                 ...(plan.comment ? { comment: plan.comment } : {}),
               }),
             );
+            Object.assign(generatedItems[generatedItems.length - 1], flagsToProjectionPatch(flags));
           }
         }
 
@@ -1093,9 +1163,10 @@ export function usePaymentsBuildSchedule() {
             note: add.note ?? null,
             vendor: add.vendor ?? null,
             comment: add.comment ?? null,
-            paid: false,
-            paidAt: null,
-            paidFromGrant: false,
+            paid: add.paid === true,
+            paidAt: add.paid === true ? add.paidAt ?? toISODate(new Date()) : null,
+            paidFromGrant: add.paid === true ? add.paidFromGrant ?? true : false,
+            compliance: add.compliance ?? null,
           } as TPaymentProjectionInput);
         }
       } else {

@@ -1,5 +1,5 @@
 // functions/src/features/paymentQueue/http.ts
-import {secureHandler, orgIdFromClaims, requireUid, isDev} from '../../core';
+import {secureHandler, orgIdFromClaims, requireUid, isDev, JOTFORM_API_KEY_SECRET} from '../../core';
 import {adminSyncPaymentQueueHandler} from './adminSyncPaymentQueue';
 import {
   PaymentQueueListBody,
@@ -158,7 +158,15 @@ export const paymentQueueVoid = secureHandler(async (req, res): Promise<void> =>
 
 export const paymentQueueAdminSync = secureHandler(async (req, res): Promise<void> => {
   await adminSyncPaymentQueueHandler(req as any, res as any);
-}, {auth: 'admin', methods: ['POST', 'OPTIONS']});
+}, {
+  auth: 'admin',
+  methods: ['POST', 'OPTIONS'],
+  // Re-extraction calls getJotformFormQuestions (live Jotform API) and scans all
+  // submissions/enrollments/queue rows — needs the key + headroom + time.
+  secrets: [JOTFORM_API_KEY_SECRET],
+  memory: '1GiB',
+  timeoutSeconds: 540,
+});
 
 /* ============================================================================
    POST /paymentQueueRecomputeGrantAllocations  (admin: rebuild paid allocation)

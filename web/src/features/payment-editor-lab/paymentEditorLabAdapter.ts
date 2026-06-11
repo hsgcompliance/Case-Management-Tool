@@ -1,7 +1,7 @@
 import type { TEnrollment, TGrant, TPayment } from "@types";
 import type { PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
 
-export type PaymentEditorTypeKey = "monthly-rent" | "monthly-utility" | "deposit" | "prorated" | "service";
+export type PaymentEditorTypeKey = "monthly-rent" | "monthly-utility" | "deposit" | "prorated" | "service" | "arrears";
 export type PaymentEditorLedgerStatus = "projected" | "invoice-submitted";
 export type PaymentEditorComplianceStatus = "hmis-only" | "caseworthy-only" | "data-entry-complete";
 
@@ -91,6 +91,7 @@ const TYPE_TO_PAYMENT_TYPE: Record<PaymentEditorTypeKey, TPayment["type"]> = {
   deposit: "deposit",
   prorated: "prorated",
   service: "service",
+  arrears: "arrears",
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -146,6 +147,7 @@ function paymentTypeKey(payment: Record<string, unknown>): PaymentEditorTypeKey 
   if (type === "deposit") return "deposit";
   if (type === "prorated") return "prorated";
   if (type === "service") return "service";
+  if (type === "arrears") return "arrears";
   const note = notesText(payment.note).toLowerCase();
   if (note.includes("utility")) return "monthly-utility";
   return "monthly-rent";
@@ -189,6 +191,7 @@ export function inferPaymentEditorLineItemId(typeKey: PaymentEditorTypeKey | "",
     deposit: ["deposit", "security"],
     prorated: ["prorated", "prorate"],
     service: ["service", "support"],
+    arrears: ["arrears", "past due"],
   };
   const wanted = typeKey ? terms[typeKey] : [];
   const found = options.find((item) => {

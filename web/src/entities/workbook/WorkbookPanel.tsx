@@ -292,6 +292,7 @@ export function WorkbookPanel({
             serverStatus={serverStatus}
             temporaryTokenPresent={tokenPresent}
             onReauthorize={() => void driveConnect.mutateAsync().catch(() => null)}
+            onConnectPermanent={() => void driveConnect.mutateAsync().catch(() => null)}
             onConnectTemporary={() => void connectTemporary()}
             reauthorizing={driveConnect.isPending}
             connectingTemporary={connectingTemporary}
@@ -394,6 +395,7 @@ export function WorkbookPanel({
             serverStatus={serverStatus}
             temporaryTokenPresent={tokenPresent}
             onReauthorize={() => void driveConnect.mutateAsync().catch(() => null)}
+            onConnectPermanent={() => void driveConnect.mutateAsync().catch(() => null)}
             onConnectTemporary={() => void connectTemporary()}
             reauthorizing={driveConnect.isPending}
             connectingTemporary={connectingTemporary}

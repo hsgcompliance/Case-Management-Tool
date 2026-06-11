@@ -146,7 +146,7 @@ type PaymentRecord = TPayment & {
   paid?: boolean | null;
 };
 
-const PAYMENT_TYPES: TPayment["type"][] = ["monthly", "deposit", "prorated", "service"];
+const PAYMENT_TYPES: TPayment["type"][] = ["monthly", "deposit", "prorated", "service", "arrears"];
 
 
 function paymentDueDate(payment: PaymentRecord | null | undefined, fallback = ""): string {

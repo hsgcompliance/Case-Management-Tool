@@ -29,7 +29,7 @@ type AddRow = {
   dueDate: string;
   amount: string;
   lineItemId: string;
-  kind: "monthlyRent" | "monthlyUtility" | "deposit" | "prorated" | "service";
+  kind: "monthlyRent" | "monthlyUtility" | "deposit" | "prorated" | "service" | "arrears";
   comment: string;
 };
 
@@ -918,6 +918,7 @@ export default function PaymentsProjectionsAdjustDialog({
                         <option value="deposit">Deposit</option>
                         <option value="prorated">Prorated</option>
                         <option value="service">Service</option>
+                        <option value="arrears">Arrears</option>
                       </select>
                     </td>
                     <td className="px-3 py-2 text-right">

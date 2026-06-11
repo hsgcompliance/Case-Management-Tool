@@ -296,6 +296,17 @@
       ]
     },
 
+    // ── jotformSubmissions — daily-pull high-water mark (latest createdAt per form) ──
+    {
+      "collectionGroup": "jotformSubmissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId", "order": "ASCENDING" },
+        { "fieldPath": "formId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
     // ── ledger — paid spend query by grantId ──────────────────────────────────
     {
       "collectionGroup": "ledger",

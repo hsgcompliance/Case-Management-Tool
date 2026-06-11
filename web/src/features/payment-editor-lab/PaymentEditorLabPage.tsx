@@ -31,6 +31,7 @@ const TYPE_OPTIONS: Array<{ value: PaymentEditorTypeKey; label: string }> = [
   { value: "deposit", label: "Security Deposit" },
   { value: "prorated", label: "Prorated Rent" },
   { value: "service", label: "Supportive Service" },
+  { value: "arrears", label: "Arrears" },
 ];
 
 const COMPLIANCE_OPTIONS: Array<{ value: PaymentEditorComplianceStatus; label: string }> = [

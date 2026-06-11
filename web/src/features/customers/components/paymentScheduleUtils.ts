@@ -109,7 +109,7 @@ export function displayTypeLabel(p: Payment): string {
 
 export function makePaymentId(
   coreType: Payment["type"],
-  sub: "rent" | "utility" | "deposit" | "prorated" | "service",
+  sub: "rent" | "utility" | "deposit" | "prorated" | "service" | "arrears",
   due: string,
   li: string,
   amt: number,
@@ -124,7 +124,7 @@ export function normalizePayments(
   opts?: { requireLineItemId?: boolean }
 ): Payment[] {
   const requireLI = !!opts?.requireLineItemId;
-  const allowed = new Set<Payment["type"]>(["monthly", "deposit", "prorated", "service"]);
+  const allowed = new Set<Payment["type"]>(["monthly", "deposit", "prorated", "service", "arrears"]);
   return (Array.isArray(list) ? list : [])
     .map((raw, i) => {
       const p: any = raw || {};
