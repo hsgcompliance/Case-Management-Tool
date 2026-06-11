@@ -491,11 +491,17 @@ function extractCreditCard(
     const supportiveProgram = asText(getAns(answers, tx.supportiveProgram));
     const programOperations = asText(getAns(answers, tx.programOperations));
     const tssCategory = asText(getAns(answers, tx.tssCategory));
+    const wioaCategory = asText(getAns(answers, tx.wioaCategory));
+    const pathCategory = asText(getAns(answers, tx.pathCategory));
+    const specifier = [tssCategory, wioaCategory, pathCategory].find(Boolean) || "";
     const customer = asText(getAns(answers, tx.customerName));
     const notes = asText(getAns(answers, tx.notes));
     const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
-    const txnFiles = getFiles(answers, tx.files || []);
-    const program = programOperations || tssCategory || supportiveProgram;
+    const receiptFiles = getFiles(answers, tx.files || []);
+    const additionalFileIds: readonly string[] = [];
+    const additionalFiles = getFiles(answers, additionalFileIds);
+    const txnFiles = Array.from(new Set([...receiptFiles, ...additionalFiles]));
+    const program = programOperations || specifier || supportiveProgram;
     anyFlex = anyFlex || isFlexTxn;
 
     items.push({
@@ -524,10 +530,13 @@ function extractCreditCard(
           expenseType: tx.expenseType,
           supportiveProgram: tx.supportiveProgram,
           tssCategory: tx.tssCategory,
+          wioaCategory: tx.wioaCategory,
+          pathCategory: tx.pathCategory,
           programOperations: tx.programOperations,
           customerName: tx.customerName,
           purpose: tx.purpose,
           cost: tx.cost,
+          additionalFiles: additionalFileIds[0] ?? null,
           notes: tx.notes,
         },
       },
@@ -554,7 +563,7 @@ function extractCreditCard(
       files: txnFiles,
       files_txn: txnFiles,
       files_uploadAll: [],
-      files_typed: emptyTypedFiles(),
+      files_typed: { ...emptyTypedFiles(), receipt: receiptFiles, required: additionalFiles },
       notes,
       note: "",
       rawStatus,
@@ -592,19 +601,25 @@ function extractCreditCard(
     const purpose = asText(getAns(answers, tx.purpose));
     const supportiveProgram = asText(getAns(answers, tx.supportiveProgram));
     const programOperations = asText(getAns(answers, tx.programOperations ?? null));
+    const tssCategory = asText(getAns(answers, tx.tssCategory));
+    const wioaCategory = asText(getAns(answers, tx.wioaCategory));
+    const pathCategory = asText(getAns(answers, tx.pathCategory));
+    const specifier = [tssCategory, wioaCategory, pathCategory].find(Boolean) || "";
     const customer = asText(getAns(answers, tx.customerName));
     const notes = tx.notes ? asText(getAns(answers, tx.notes)) : "";
     const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
-    const txnFiles = getFiles(answers, tx.files || []);
+    const receiptFiles = getFiles(answers, tx.files || []);
+    const additionalFiles = getFiles(answers, tx.additionalFiles || []);
+    const txnFiles = Array.from(new Set([...receiptFiles, ...additionalFiles]));
     const uploadAllForTxn = i === 0 ? uploadAll : [];
     const files = Array.from(new Set([...txnFiles, ...uploadAllForTxn]));
 
     // Determine program: customer expense → supportiveProgram, otherwise programOperations
     const expLower = expenseType.toLowerCase();
     const programPrimary = expLower.includes("customer")
-      ? supportiveProgram
+      ? supportiveProgram || specifier
       : programOperations;
-    const program = programPrimary || supportiveProgram || programOperations;
+    const program = programPrimary || specifier || supportiveProgram || programOperations;
 
     // Skip truly empty transaction slots (uploadAll alone doesn't create a txn)
     const hasCore = merchant || expenseType || supportiveProgram || programOperations || purpose || amount !== 0 || txnFiles.length > 0;
@@ -637,9 +652,13 @@ function extractCreditCard(
           expenseType: tx.expenseType,
           supportiveProgram: tx.supportiveProgram,
           programOperations: tx.programOperations ?? null,
+          tssCategory: tx.tssCategory,
+          wioaCategory: tx.wioaCategory,
+          pathCategory: tx.pathCategory,
           customerName: tx.customerName,
           purpose: tx.purpose,
           cost: tx.cost,
+          additionalFiles: tx.additionalFiles?.[0] ?? null,
           notes: tx.notes ?? null,
         },
       },
@@ -666,7 +685,7 @@ function extractCreditCard(
       files,
       files_txn: txnFiles,
       files_uploadAll: uploadAllForTxn,
-      files_typed: emptyTypedFiles(),
+      files_typed: { ...emptyTypedFiles(), receipt: receiptFiles, required: additionalFiles },
       notes,
       note: "",
       rawStatus,
@@ -685,7 +704,9 @@ function extractCreditCard(
     const amountAbs = Math.abs(parseMoney(getAns(answers, tx0.cost), errors, tx0.cost));
     const amount = amountAbs;
     const isFlexTxn = parseYes(getAns(answers, tx0.flexToggle));
-    const txnFiles = getFiles(answers, tx0.files || []);
+    const receiptFiles = getFiles(answers, tx0.files || []);
+    const additionalFiles = getFiles(answers, tx0.additionalFiles || []);
+    const txnFiles = Array.from(new Set([...receiptFiles, ...additionalFiles]));
     const files = Array.from(new Set([...txnFiles, ...uploadAll]));
     const customer = asText(getAns(answers, tx0.customerName));
     anyFlex = anyFlex || isFlexTxn;
@@ -744,7 +765,7 @@ function extractCreditCard(
       files,
       files_txn: txnFiles,
       files_uploadAll: uploadAll,
-      files_typed: emptyTypedFiles(),
+      files_typed: { ...emptyTypedFiles(), receipt: receiptFiles, required: additionalFiles },
       notes: tx0.notes ? asText(getAns(answers, tx0.notes)) : "",
       note: "",
       rawStatus,
