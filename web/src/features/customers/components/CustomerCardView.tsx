@@ -163,6 +163,7 @@ type ActiveMode = "all" | "active" | "inactive";
 type DeletedMode = "exclude" | "include" | "only";
 type ScopeMode = "all" | "my" | "primary" | "secondary";
 type PopulationFilter = "all" | "Youth" | "Individual" | "Family" | "unknown";
+type TierFilter = "all" | "1" | "2" | "3";
 type CustomerSortMode =
   | "alphabetical"
   | "first-added"
@@ -185,6 +186,7 @@ type CustomerCardViewProps = {
   cmFilter: string;
   search: string;
   populationFilter: PopulationFilter;
+  tierFilter: TierFilter;
   sortMode: CustomerSortMode;
   grantFilter: string;
   enrollmentStatuses: EnrollmentStatusBucket[];
@@ -195,6 +197,7 @@ type CustomerCardViewProps = {
   onCmFilterChange: (value: string) => void;
   onSearchChange: (value: string) => void;
   onPopulationFilterChange: (value: PopulationFilter) => void;
+  onTierFilterChange: (value: TierFilter) => void;
   onSortModeChange: (value: CustomerSortMode) => void;
   onGrantFilterChange: (value: string) => void;
   onEnrollmentStatusesChange: (value: EnrollmentStatusBucket[]) => void;
@@ -225,6 +228,7 @@ export function CustomerCardView({
   cmFilter,
   search,
   populationFilter,
+  tierFilter,
   sortMode,
   grantFilter,
   enrollmentStatuses,
@@ -235,6 +239,7 @@ export function CustomerCardView({
   onCmFilterChange,
   onSearchChange,
   onPopulationFilterChange,
+  onTierFilterChange,
   onSortModeChange,
   onGrantFilterChange,
   onEnrollmentStatusesChange,
@@ -307,6 +312,16 @@ export function CustomerCardView({
       { value: "Individual", label: "Individual" },
       { value: "Family", label: "Family" },
       { value: "unknown", label: "Unknown" },
+    ],
+    [],
+  );
+
+  const tierOptions: Array<FilterOption<TierFilter>> = React.useMemo(
+    () => [
+      { value: "all", label: "All" },
+      { value: "1", label: "Tier 1" },
+      { value: "2", label: "Tier 2" },
+      { value: "3", label: "Tier 3" },
     ],
     [],
   );
@@ -545,6 +560,12 @@ export function CustomerCardView({
             value={populationFilter}
             options={populationOptions}
             onChange={onPopulationFilterChange}
+          />
+          <FilterToggleGroup
+            label="Tier"
+            value={tierFilter}
+            options={tierOptions}
+            onChange={onTierFilterChange}
           />
           <FilterToggleGroup
             label="Scope"

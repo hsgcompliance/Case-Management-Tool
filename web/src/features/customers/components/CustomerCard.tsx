@@ -3,6 +3,7 @@
 import React from "react";
 import type { Enrollment, TCustomerEntity } from "@types";
 import { useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
+import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
 import { currentMonthKey } from "@hooks/useMetrics";
 import { useGrant, useGrants } from "@hooks/useGrants";
@@ -32,6 +33,13 @@ import {
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const CARD_TASKS_LIMIT = 1000;
+
+// Selected-state colors for the Tier 1/2/3 mini-cards (low → high).
+const TIER_SELECTED_CLASS: Record<number, string> = {
+  1: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
+  2: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200",
+  3: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-200",
+};
 
 type CustomerCardProps = {
   customer: TCustomerEntity & { id: string };
@@ -914,12 +922,15 @@ function CustomerCardInner({
   const { profile } = useAuth();
   const canManageEnrollments = !isViewerLike(profile as any);
   const patchEnrollment = useEnrollmentsPatch();
+  const setCustomerActive = useSetCustomerActive();
+  const setCustomerTier = useSetCustomerTier();
   const [colSpan, setColSpan] = React.useState(1);
   const dragRef = React.useRef<{ startX: number; startSpan: number } | null>(null);
   const showEnrollmentSections = colSpan > 1;
   const [paymentPopupEnrollmentId, setPaymentPopupEnrollmentId] = React.useState<string | null>(null);
   const [enrollmentPopupId, setEnrollmentPopupId] = React.useState<string | null>(null);
   const [contextMenu, setContextMenu] = React.useState<CustomerCardContextMenu | null>(null);
+  const [actionBar, setActionBar] = React.useState<{ x: number; y: number } | null>(null);
 
   const handleResizeMouseDown = React.useCallback(
     (event: React.MouseEvent) => {
@@ -947,6 +958,31 @@ function CustomerCardInner({
 
   const age = calcAge((customer as { dob?: string | null }).dob || null);
   const inactiveCustomer = isInactiveCustomer(customer);
+  const customerTier = (customer as { tier?: number | null }).tier ?? null;
+
+  const onSelectTier = React.useCallback(
+    async (t: number) => {
+      if (!canManageEnrollments || setCustomerTier.isPending) return;
+      const next = customerTier === t ? null : t;
+      try {
+        await setCustomerTier.mutateAsync({ id: customer.id, tier: next });
+      } catch (error: unknown) {
+        toast(toApiError(error).error || "Failed to update tier.", { type: "error" });
+      }
+    },
+    [canManageEnrollments, customerTier, customer.id, setCustomerTier],
+  );
+
+  const onToggleCustomerActive = React.useCallback(async () => {
+    if (!canManageEnrollments || setCustomerActive.isPending) return;
+    try {
+      await setCustomerActive.mutateAsync({ id: customer.id, active: inactiveCustomer });
+      toast(inactiveCustomer ? "Customer marked active." : "Customer marked inactive.", { type: "success" });
+    } catch (error: unknown) {
+      toast(toApiError(error).error || "Failed to update status.", { type: "error" });
+    }
+  }, [canManageEnrollments, customer.id, inactiveCustomer, setCustomerActive]);
+
   const viewerId = String(viewerUid || "").trim();
   const selectedCmId = String(selectedCmUid || "").trim();
   const caseManagerName = String(customer.caseManagerName || customer.caseManagerId || "Unassigned").trim();
@@ -1007,6 +1043,22 @@ function CustomerCardInner({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [contextMenu]);
+
+  React.useEffect(() => {
+    if (!actionBar) return undefined;
+    const close = () => setActionBar(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [actionBar]);
 
   const closeEnrollmentToday = React.useCallback(
     async (enrollmentId: string) => {
@@ -1123,6 +1175,13 @@ function CustomerCardInner({
           }
           onOpen(customer.id);
         }
+      }}
+      onContextMenu={(event) => {
+        if ((event.target as HTMLElement | null)?.closest(".modal-overlay")) return;
+        if (hasSelectedTextWithin(event.currentTarget)) return;
+        event.preventDefault();
+        setContextMenu(null);
+        setActionBar({ x: event.clientX, y: event.clientY });
       }}
       role="button"
       tabIndex={0}
@@ -1274,6 +1333,35 @@ function CustomerCardInner({
               Workbook
             </button>
           ) : null}
+        </div>
+        <div
+          className="mt-3 grid grid-cols-3 gap-2"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          {[1, 2, 3].map((t) => {
+            const selected = customerTier === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onSelectTier(t);
+                }}
+                disabled={!canManageEnrollments || setCustomerTier.isPending}
+                title={selected ? `Tier ${t} — click to clear` : `Set Tier ${t}`}
+                className={[
+                  "rounded-lg border px-2 py-1.5 text-center text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50",
+                  selected
+                    ? TIER_SELECTED_CLASS[t]
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+                ].join(" ")}
+              >
+                Tier {t}
+              </button>
+            );
+          })}
         </div>
         {workbookRef && workbookModalOpen ? (
           <WorkbookSheetModal
@@ -1697,6 +1785,71 @@ function CustomerCardInner({
               Open enrollment details
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {actionBar ? (
+        <div
+          className="fixed z-[12000] w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-2 text-sm shadow-xl dark:border-slate-700 dark:bg-slate-900"
+          style={{ left: actionBar.x, top: actionBar.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          role="menu"
+        >
+          <div className="border-b border-slate-100 px-3 pb-2 dark:border-slate-800">
+            <div className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+              {displayName(customer)}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              {inactiveCustomer ? "Inactive" : "Active"}
+              {customerTier ? ` · Tier ${customerTier}` : ""}
+            </div>
+          </div>
+          {canManageEnrollments ? (
+            <button
+              type="button"
+              className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+              onClick={() => {
+                setActionBar(null);
+                void onToggleCustomerActive();
+              }}
+              disabled={setCustomerActive.isPending}
+              role="menuitem"
+            >
+              {inactiveCustomer ? "Mark active" : "Mark inactive"}
+            </button>
+          ) : null}
+          <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            Tier
+          </div>
+          <div className="grid grid-cols-3 gap-1 px-3 pb-2">
+            {[1, 2, 3].map((t) => {
+              const selected = customerTier === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    setActionBar(null);
+                    void onSelectTier(t);
+                  }}
+                  disabled={!canManageEnrollments || setCustomerTier.isPending}
+                  title={selected ? `Tier ${t} — click to clear` : `Set Tier ${t}`}
+                  className={[
+                    "rounded-md border px-1.5 py-1 text-center text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50",
+                    selected
+                      ? TIER_SELECTED_CLASS[t]
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
+                  ].join(" ")}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 

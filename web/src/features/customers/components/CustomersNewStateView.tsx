@@ -12,6 +12,7 @@ type ActiveMode = "all" | "active" | "inactive";
 type DeletedMode = "exclude" | "include" | "only";
 type ScopeMode = "all" | "my" | "primary" | "secondary";
 type PopulationFilter = "all" | "Youth" | "Individual" | "Family" | "unknown";
+type TierFilter = "all" | "1" | "2" | "3";
 type CustomerSortMode =
   | "alphabetical"
   | "first-added"
@@ -34,6 +35,7 @@ type CustomersNewStateViewProps = {
   cmFilter: string;
   search: string;
   populationFilter: PopulationFilter;
+  tierFilter: TierFilter;
   sortMode: CustomerSortMode;
   grantFilter: string;
   enrollmentStatuses: EnrollmentStatusBucket[];
@@ -44,6 +46,7 @@ type CustomersNewStateViewProps = {
   onCmFilterChange: (value: string) => void;
   onSearchChange: (value: string) => void;
   onPopulationFilterChange: (value: PopulationFilter) => void;
+  onTierFilterChange: (value: TierFilter) => void;
   onSortModeChange: (value: CustomerSortMode) => void;
   onGrantFilterChange: (value: string) => void;
   onEnrollmentStatusesChange: (value: EnrollmentStatusBucket[]) => void;
@@ -66,6 +69,7 @@ export function CustomersNewStateView({
   cmFilter,
   search,
   populationFilter,
+  tierFilter,
   sortMode,
   grantFilter,
   enrollmentStatuses,
@@ -76,6 +80,7 @@ export function CustomersNewStateView({
   onCmFilterChange,
   onSearchChange,
   onPopulationFilterChange,
+  onTierFilterChange,
   onSortModeChange,
   onGrantFilterChange,
   onEnrollmentStatusesChange,
@@ -99,6 +104,7 @@ export function CustomersNewStateView({
         cmFilter={cmFilter}
         search={search}
         populationFilter={populationFilter}
+        tierFilter={tierFilter}
         sortMode={sortMode}
         grantFilter={grantFilter}
         enrollmentStatuses={enrollmentStatuses}
@@ -109,6 +115,7 @@ export function CustomersNewStateView({
         onCmFilterChange={onCmFilterChange}
         onSearchChange={onSearchChange}
         onPopulationFilterChange={onPopulationFilterChange}
+        onTierFilterChange={onTierFilterChange}
         onSortModeChange={onSortModeChange}
         onGrantFilterChange={onGrantFilterChange}
         onEnrollmentStatusesChange={onEnrollmentStatusesChange}
