@@ -241,13 +241,18 @@ function queueFieldOrder(item: Record<string, unknown> | null | undefined, field
 }
 
 function queueFiles(item: Record<string, unknown> | null | undefined): string[] {
-  const direct = item?.files_txn || item?.files || item?.files_uploadAll;
-  if (Array.isArray(direct)) return direct.map(displayText).filter(Boolean);
+  const out: string[] = [];
+  for (const value of [item?.files_txn, item?.files, item?.files_uploadAll]) {
+    if (Array.isArray(value)) out.push(...value.map(displayText).filter(Boolean));
+  }
   const typed = asObject(item?.files_typed);
-  return Object.values(typed)
-    .flatMap((value) => (Array.isArray(value) ? value : []))
-    .map(displayText)
-    .filter(Boolean);
+  out.push(
+    ...Object.values(typed)
+      .flatMap((value) => (Array.isArray(value) ? value : []))
+      .map(displayText)
+      .filter(Boolean),
+  );
+  return Array.from(new Set(out));
 }
 
 function isUsefulFreeText(value: unknown): boolean {

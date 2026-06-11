@@ -131,11 +131,11 @@ const CC_SCHEMA = {
     uploadAllTxn1: "70",
   },
   transactions: [
-    { merchant: "82", expenseType: "84", purpose: "85", cost: "86", supportiveProgram: "169", programOperations: "174", customerName: "156", notes: "151", files: ["70"], flexToggle: "204" },
-    { merchant: "182", expenseType: "183", purpose: "106", cost: "107", supportiveProgram: "184", programOperations: "186", customerName: "185", notes: "143", files: ["109"], flexToggle: "205" },
-    { merchant: "187", expenseType: "188", purpose: "114", cost: "115", supportiveProgram: "189", programOperations: "191", customerName: "190", notes: "147", files: ["117"], flexToggle: "206" },
-    { merchant: "192", expenseType: "193", purpose: "122", cost: "123", supportiveProgram: "194", programOperations: "196", customerName: "195", notes: null, files: ["125"], flexToggle: "207" },
-    { merchant: "197", expenseType: "198", purpose: "130", cost: "131", supportiveProgram: "199", programOperations: "201", customerName: "200", notes: null, files: ["133"], flexToggle: "208" },
+    { merchant: "82", expenseType: "84", purpose: "85", cost: "86", supportiveProgram: "169", programOperations: "174", tssCategory: "296", wioaCategory: "311", pathCategory: "304", customerName: "156", notes: "151", files: ["70"], additionalFiles: ["317"], flexToggle: "204" },
+    { merchant: "182", expenseType: "183", purpose: "106", cost: "107", supportiveProgram: "184", programOperations: "186", tssCategory: "297", wioaCategory: "312", pathCategory: "305", customerName: "185", notes: "143", files: ["109"], additionalFiles: ["318"], flexToggle: "205" },
+    { merchant: "187", expenseType: "188", purpose: "114", cost: "115", supportiveProgram: "189", programOperations: "191", tssCategory: "298", wioaCategory: "313", pathCategory: "306", customerName: "190", notes: "147", files: ["117"], additionalFiles: ["319"], flexToggle: "206" },
+    { merchant: "192", expenseType: "193", purpose: "122", cost: "123", supportiveProgram: "194", programOperations: "196", tssCategory: "299", wioaCategory: "314", pathCategory: "307", customerName: "195", notes: null, files: ["125"], additionalFiles: ["320"], flexToggle: "207" },
+    { merchant: "197", expenseType: "198", purpose: "130", cost: "131", supportiveProgram: "199", programOperations: "201", tssCategory: "302", wioaCategory: "315", pathCategory: "308", customerName: "200", notes: null, files: ["133"], additionalFiles: ["321"], flexToggle: "208" },
   ],
   returnRecord: {
     cardUsed: "281",
@@ -143,6 +143,8 @@ const CC_SCHEMA = {
     expenseType: "285",
     supportiveProgram: "286",
     tssCategory: "303",
+    wioaCategory: "316",
+    pathCategory: "309",
     flexToggle: "287",
     customerName: "288",
     programOperations: "289",
@@ -156,12 +158,12 @@ const CC_SCHEMA = {
 
 const CC_FIELD_ORDER: Record<string, number> = {
   "219": 11,
-  "82": 14, "84": 15, "169": 16, "296": 17, "204": 18, "156": 19, "174": 20, "85": 21, "86": 22, "70": 24, "151": 25,
-  "182": 31, "183": 32, "184": 33, "205": 35, "185": 36, "186": 37, "106": 38, "107": 39, "109": 40, "143": 41,
-  "187": 46, "188": 47, "189": 48, "206": 50, "190": 51, "191": 52, "114": 53, "115": 54, "117": 55,
-  "192": 61, "193": 62, "194": 63, "207": 65, "195": 66, "196": 67, "122": 68, "123": 69, "125": 70, "147": 71,
-  "197": 75, "198": 76, "199": 77, "208": 79, "200": 80, "201": 81, "130": 82, "131": 83, "133": 84,
-  "281": 96, "284": 98, "285": 99, "286": 100, "303": 101, "287": 102, "288": 103, "289": 104, "290": 105, "291": 106, "293": 108, "294": 109, "295": 111,
+  "82": 14, "84": 15, "169": 16, "174": 17, "296": 18, "204": 19, "311": 20, "304": 21, "156": 22, "85": 23, "86": 24, "317": 25, "70": 26, "151": 27,
+  "182": 32, "183": 34, "184": 35, "186": 36, "297": 37, "205": 38, "312": 39, "305": 40, "185": 41, "106": 42, "107": 43, "318": 44, "109": 45, "143": 46,
+  "187": 50, "188": 52, "189": 53, "191": 54, "298": 55, "206": 56, "313": 57, "306": 58, "190": 59, "114": 60, "115": 61, "319": 62, "117": 63,
+  "192": 67, "193": 70, "194": 71, "196": 72, "299": 73, "207": 74, "314": 75, "307": 76, "195": 77, "122": 78, "123": 79, "320": 80, "125": 81, "147": 82,
+  "197": 84, "198": 87, "199": 88, "201": 89, "302": 90, "208": 91, "315": 92, "308": 93, "200": 94, "130": 95, "131": 96, "321": 97, "133": 98,
+  "281": 109, "284": 111, "285": 112, "286": 113, "289": 114, "303": 115, "287": 116, "316": 117, "309": 118, "288": 119, "290": 120, "291": 121, "293": 123, "294": 124, "295": 126,
 };
 
 const INVOICE_SCHEMA = {
@@ -274,6 +276,29 @@ function transactionValues(
 
 function txText(values: Record<string, unknown>, label: string): string {
   return asText(values[transactionFieldKey(label)]);
+}
+
+function txSpecifierText(values: Record<string, unknown>): string {
+  const excluded = new Set([
+    transactionFieldKey("Expense Type"),
+    transactionFieldKey("Supportive Services Program"),
+    transactionFieldKey("Program Operations for:"),
+    transactionFieldKey("Customer Name"),
+    transactionFieldKey("Merchant"),
+    transactionFieldKey("Purpose"),
+    transactionFieldKey("Cost"),
+    transactionFieldKey("Notes (optional)"),
+    transactionFieldKey("Is this YHDP Flex Funds?"),
+  ]);
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(values)) {
+    if (excluded.has(key)) continue;
+    const slug = key.replace(/^tx:/, "");
+    if (!/(^|[-_])(category|specifier|scope|funding|fund)([-_]|$)/i.test(slug)) continue;
+    const text = asText(value);
+    if (text) parts.push(text);
+  }
+  return Array.from(new Set(parts)).join(", ");
 }
 
 function txRawId(window: LogicalTransactionWindow, label: string): string | null {
@@ -485,23 +510,32 @@ function extractCreditCard(
     const supportiveProgram = asText(getAns(answers, tx.supportiveProgram));
     const programOperations = asText(getAns(answers, tx.programOperations));
     const tssCategory = asText(getAns(answers, tx.tssCategory));
+    const wioaCategory = asText(getAns(answers, tx.wioaCategory));
+    const pathCategory = asText(getAns(answers, tx.pathCategory));
+    const specifier = [tssCategory, wioaCategory, pathCategory].find(Boolean) || "";
     const customer = asText(getAns(answers, tx.customerName));
     const notes = asText(getAns(answers, tx.notes));
     const isFlexTxn = parseYes(getAns(answers, tx.flexToggle));
-    const txnFiles = getFiles(answers, tx.files);
-    const program = programOperations || tssCategory || supportiveProgram;
+    const receiptFiles = getFiles(answers, tx.files);
+    const additionalFileIds: readonly string[] = [];
+    const additionalFiles = getFiles(answers, additionalFileIds);
+    const txnFiles = Array.from(new Set([...receiptFiles, ...additionalFiles]));
+    const program = programOperations || specifier || supportiveProgram;
     const returnFieldIds = {
       cardUsed: tx.cardUsed,
       merchant: tx.merchant,
       expenseType: tx.expenseType,
       supportiveProgram: tx.supportiveProgram,
       tssCategory: tx.tssCategory,
+      wioaCategory: tx.wioaCategory,
+      pathCategory: tx.pathCategory,
       flexToggle: tx.flexToggle,
       programOperations: tx.programOperations,
       customerName: tx.customerName,
       purpose: tx.purpose,
       cost: tx.cost,
       files: tx.files[0] ?? null,
+      additionalFiles: additionalFileIds[0] ?? null,
       notes: tx.notes,
       email: tx.email,
     };
@@ -531,7 +565,7 @@ function extractCreditCard(
       paymentMethod: "", serviceType: "", otherService: "", serviceScope: "", wex: "", descriptor: "",
       customer, customerKey: makeCustomerKey(customer), purchaser, email,
       files: txnFiles, files_txn: txnFiles, files_uploadAll: [],
-      files_typed: emptyTypedFiles(),
+      files_typed: { ...emptyTypedFiles(), receipt: receiptFiles, required: additionalFiles },
       notes, note: "", rawStatus,
       transactionFields: {},
       rawAnswers: answers, rawMeta: buildRawMeta(sub),
@@ -561,18 +595,21 @@ function extractCreditCard(
     const purpose = txText(values, "Purpose");
     const supportiveProgram = txText(values, "Supportive Services Program");
     const tssCategory = txText(values, "TSS Spend Category");
+    const specifier = txSpecifierText(values) || tssCategory;
     const programOperations = txText(values, "Program Operations for:");
     const customer = txText(values, "Customer Name");
     const notes = txText(values, "Notes (optional)");
     const isFlexTxn = parseYes(txText(values, "Is this YHDP Flex Funds?"));
-    const txnFiles = getFiles(answers, CC_SCHEMA.transactions[i]?.files ?? []);
+    const receiptFiles = getFiles(answers, CC_SCHEMA.transactions[i]?.files ?? []);
+    const additionalFiles = getFiles(answers, CC_SCHEMA.transactions[i]?.additionalFiles ?? []);
+    const txnFiles = Array.from(new Set([...receiptFiles, ...additionalFiles]));
     const uploadAllForTxn = i === 0 ? uploadAll : [];
     const files = Array.from(new Set([...txnFiles, ...uploadAllForTxn]));
     const txFieldIds = windowFieldIds(window);
 
     const program = expenseType.toLowerCase().includes("customer")
-      ? supportiveProgram || tssCategory
-      : programOperations || tssCategory || supportiveProgram;
+      ? supportiveProgram || specifier
+      : programOperations || specifier || supportiveProgram;
 
     const hasCore = merchant || expenseType || supportiveProgram || programOperations || purpose || amount !== 0 || txnFiles.length > 0;
     if (!hasCore) continue;
@@ -602,7 +639,7 @@ function extractCreditCard(
       paymentMethod: "", serviceType: "", otherService: "", serviceScope: "", wex: "", descriptor: "",
       customer, customerKey: makeCustomerKey(customer), purchaser, email,
       files, files_txn: txnFiles, files_uploadAll: uploadAllForTxn,
-      files_typed: emptyTypedFiles(),
+      files_typed: { ...emptyTypedFiles(), receipt: receiptFiles, required: additionalFiles },
       notes, note: "", rawStatus,
       transactionFields: values,
       rawAnswers: answers, rawMeta: buildRawMeta(sub),
@@ -620,7 +657,9 @@ function extractCreditCard(
     const amountAbs = Math.abs(parseMoney(txText(values, "Cost"), errors, amountFieldId ?? undefined));
     const amount = amountAbs;
     const isFlexTxn = parseYes(txText(values, "Is this YHDP Flex Funds?"));
-    const txnFiles = getFiles(answers, CC_SCHEMA.transactions[0]?.files ?? []);
+    const receiptFiles = getFiles(answers, CC_SCHEMA.transactions[0]?.files ?? []);
+    const additionalFiles = getFiles(answers, CC_SCHEMA.transactions[0]?.additionalFiles ?? []);
+    const txnFiles = Array.from(new Set([...receiptFiles, ...additionalFiles]));
     const files = Array.from(new Set([...txnFiles, ...uploadAll]));
     const customer = txText(values, "Customer Name");
     const fallbackFieldIds = windowFieldIds(window);
@@ -649,7 +688,7 @@ function extractCreditCard(
       paymentMethod: "", serviceType: "", otherService: "", serviceScope: "", wex: "", descriptor: "",
       customer, customerKey: makeCustomerKey(customer), purchaser, email,
       files, files_txn: txnFiles, files_uploadAll: uploadAll,
-      files_typed: emptyTypedFiles(),
+      files_typed: { ...emptyTypedFiles(), receipt: receiptFiles, required: additionalFiles },
       notes: txText(values, "Notes (optional)"),
       transactionFields: values,
       note: "", rawStatus, rawAnswers: answers, rawMeta: buildRawMeta(sub),
