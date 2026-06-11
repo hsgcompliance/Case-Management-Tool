@@ -235,6 +235,7 @@ export function WorkbookStructuredView({
         <DriveAuthBanner
           issue={issue}
           onReauthorize={() => void driveConnect.mutateAsync().catch(() => null)}
+          onConnectPermanent={() => void driveConnect.mutateAsync().catch(() => null)}
           reauthorizing={driveConnect.isPending}
         />
         {onOpenSheet ? (

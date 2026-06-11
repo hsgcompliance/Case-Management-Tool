@@ -12,6 +12,7 @@ import { toast } from "@lib/toast";
 import type { TBudgetPipeline } from "@types";
 import { HelpButton } from "@entities/help/HelpButton";
 import { useAuth } from "@app/auth/AuthProvider";
+import { isAdminLike } from "@lib/roles";
 import PaymentQueue, { type PaymentQueueAdminSyncResp } from "@client/paymentQueue";
 import type { BudgetPipelineRollupRow } from "@client/budgetPipeline";
 
@@ -84,7 +85,7 @@ function schemaRuleSummary(p: TBudgetPipeline): string {
 
 function QueueSyncPanel() {
   const { profile } = useAuth();
-  const isAdmin = (profile?.roles ?? []).includes("admin");
+  const isAdmin = isAdminLike(profile);
   const qc = useQueryClient();
   const [busy, setBusy] = useState<null | "dry" | "apply">(null);
   const [result, setResult] = useState<(PaymentQueueAdminSyncResp & { mode: "dry" | "apply" }) | null>(null);

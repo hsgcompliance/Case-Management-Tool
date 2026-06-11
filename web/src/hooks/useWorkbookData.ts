@@ -11,6 +11,7 @@ import { tss } from "@hdb/contracts";
 import type { tss as TssNS } from "@hdb/contracts";
 import { qk } from "./queryKeys";
 import { RQ_DEFAULTS } from "./base";
+import { isGoogleReauthError, GOOGLE_REAUTH_ISSUE } from "@lib/googleAuthError";
 
 export type WorkbookDataError = {
   error: string;
@@ -32,6 +33,11 @@ function parseResponse(resp: unknown): WorkbookDataResult {
     const parsed = tss.TssWorkbookExtractSchema.safeParse(row.extract);
     if (parsed.success) return { extract: parsed.data, issue: null };
     return { extract: null, issue: { error: "invalid_extract_shape" } };
+  }
+  // Expired/invalid Google token → normalize to a clean "reconnect" issue so the
+  // banner shows Reconnect + Settings instead of the raw Google error string.
+  if (isGoogleReauthError(row)) {
+    return { extract: null, issue: { ...GOOGLE_REAUTH_ISSUE } };
   }
   // Non-ok → structured issue (google_not_connected, oauth_scope, workbook_not_linked, …)
   return {

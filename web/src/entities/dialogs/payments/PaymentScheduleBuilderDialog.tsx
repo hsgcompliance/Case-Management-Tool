@@ -54,6 +54,7 @@ type MonthlyPlan = {
   lineItemId: string;
   comment: string;
   advancedOpen?: boolean;
+  collapsed?: boolean;
 };
 
 type SinglePlan = {
@@ -62,7 +63,11 @@ type SinglePlan = {
   lineItemId: string;
   vendor: string;
   comment: string;
+  paid?: boolean;
+  hmisComplete?: boolean;
+  caseworthyComplete?: boolean;
   advancedOpen?: boolean;
+  collapsed?: boolean;
 };
 
 type ServicePlan = {
@@ -73,6 +78,10 @@ type ServicePlan = {
   lineItemId: string;
   vendor: string;
   comment: string;
+  paid?: boolean;
+  hmisComplete?: boolean;
+  caseworthyComplete?: boolean;
+  collapsed?: boolean;
 };
 
 type CertTaskPlan = {
@@ -86,18 +95,24 @@ type CertTaskPlan = {
 
 type CertPreviewRow = { dueDate: string; targetDate: string; label: string };
 
+type PaymentCoreType = TPayment["type"];
+type PreviewFlags = { paid?: boolean; hmisComplete?: boolean; caseworthyComplete?: boolean };
+
 type PreviewRow = {
   dueDate: string;
-  type: "monthly" | "deposit" | "prorated" | "service";
+  type: PaymentCoreType;
   amount: number;
   lineItemId: string;
   note?: string;
   comment?: string;
+  paid?: boolean;
+  hmisComplete?: boolean;
+  caseworthyComplete?: boolean;
 };
 
 type PreviewTableRow =
-  | { key: string; dueDate: string; status: "paid" | "remove"; type: string; note: string; comment: string; lineItemId: string; amount: number }
-  | { key: string; dueDate: string; status: "new"; type: PreviewRow["type"]; note: string; comment: string; lineItemId: string; amount: number };
+  | { key: string; dueDate: string; status: "paid" | "remove"; type: string; note: string; comment: string; lineItemId: string; amount: number; flags?: PreviewFlags }
+  | { key: string; dueDate: string; status: "new"; type: PreviewRow["type"]; note: string; comment: string; lineItemId: string; amount: number; flags?: PreviewFlags };
 
 type CompletionState = "empty" | "partial" | "complete";
 
@@ -122,6 +137,38 @@ function rowId(prefix: string): string {
 }
 
 function cleanText(value: string): string { return String(value || "").trim(); }
+
+function paymentBuildKey(row: Pick<PreviewRow, "type" | "dueDate" | "lineItemId" | "amount"> & { note?: unknown }): string {
+  const note = Array.isArray(row.note) ? row.note.join("|") : String(row.note ?? "");
+  const cents = Math.round(Number(row.amount || 0) * 100);
+  return [
+    String(row.type || "").toLowerCase(),
+    String(row.dueDate || "").slice(0, 10),
+    String(row.lineItemId || "").trim(),
+    String(cents),
+    note.trim().toLowerCase(),
+  ].join("|");
+}
+
+function flagsFromPlan(plan: Pick<SinglePlan, "paid" | "hmisComplete" | "caseworthyComplete">): PreviewFlags {
+  return {
+    paid: plan.paid === true,
+    hmisComplete: plan.hmisComplete === true,
+    caseworthyComplete: plan.caseworthyComplete === true,
+  };
+}
+
+function paymentPatchFromFlags(flags?: PreviewFlags): Pick<TPayment, "paid" | "paidAt" | "paidFromGrant" | "compliance"> {
+  const paid = flags?.paid === true;
+  const hmisComplete = flags?.hmisComplete === true;
+  const caseworthyComplete = flags?.caseworthyComplete === true;
+  return {
+    paid,
+    paidAt: paid ? todayISO() : null,
+    paidFromGrant: paid,
+    compliance: hmisComplete || caseworthyComplete ? { hmisComplete, caseworthyComplete, items: [] } : null,
+  };
+}
 
 function listFromUnknown(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
@@ -220,6 +267,7 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
         lineItemId: String(r.lineItemId || fallbackLineItemId || ""),
         comment: String(r.comment || ""),
         advancedOpen: false,
+        collapsed: false,
       };
     });
   const mapSingle = (raw: unknown): SinglePlan => {
@@ -230,7 +278,11 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
       lineItemId: String(r.lineItemId || fallbackLineItemId || ""),
       vendor: String(r.vendor || ""),
       comment: String(r.comment || ""),
+      paid: r.paid === true,
+      hmisComplete: r.hmisComplete === true,
+      caseworthyComplete: r.caseworthyComplete === true,
       advancedOpen: false,
+      collapsed: false,
     };
   };
   const mapServices = (rows: unknown): ServicePlan[] =>
@@ -244,6 +296,10 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
         lineItemId: String(r.lineItemId || fallbackLineItemId || ""),
         vendor: String(r.vendor || ""),
         comment: String(r.comment || ""),
+        paid: r.paid === true,
+        hmisComplete: r.hmisComplete === true,
+        caseworthyComplete: r.caseworthyComplete === true,
+        collapsed: false,
       };
     });
   return {
@@ -251,6 +307,7 @@ function savedMetaSeed(meta: unknown, fallbackLineItemId: string, seedDate: stri
     utilityPlans: mapMonthly(m.utilPlans, "utility"),
     deposit: mapSingle(m.deposit),
     prorated: mapSingle(m.prorated),
+    arrears: mapSingle(m.arrears),
     services: mapServices(m.services),
   };
 }
@@ -290,6 +347,39 @@ function RentRow({
 
   return (
     <div className={`rounded-lg border p-3 transition-colors ${stateClasses(state)}`}>
+      {plan.collapsed ? (
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            className="min-w-0 flex-1 text-left text-sm font-medium text-slate-700 hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
+            onClick={() => onChange({ collapsed: false })}
+          >
+            {plan.kind === "utility" ? "Utility" : "Rent"}
+            <span className="ml-2 text-xs font-normal text-slate-400">
+              {plan.monthlyAmount ? `${money(asPositiveNumber(plan.monthlyAmount))}/mo` : "Not filled"}{plan.firstDue ? ` · ${plan.firstDue}` : ""}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            title="Expand"
+            onClick={() => onChange({ collapsed: false })}
+          >
+            <ChevronIcon open={false} />
+          </button>
+        </div>
+      ) : (
+      <>
+      <div className="mb-2 flex justify-end">
+        <button
+          type="button"
+          className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+          title="Collapse"
+          onClick={() => onChange({ collapsed: true })}
+        >
+          X
+        </button>
+      </div>
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-sm" style={{ minWidth: 140 }}>
           <div className="mb-1 text-xs text-slate-500">Start Date</div>
@@ -357,6 +447,8 @@ function RentRow({
           </label>
         </div>
       )}
+      </>
+      )}
     </div>
   );
 }
@@ -387,7 +479,18 @@ function SinglePlanCard({
   return (
     <div className={`rounded-lg border transition-colors ${stateClasses(state)}`}>
       <div className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left">
-        <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{label}</span>
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left text-sm font-medium text-slate-800 hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
+          onClick={() => plan.collapsed && onChange({ collapsed: false })}
+        >
+          <span>{label}</span>
+          {plan.collapsed && (
+            <span className="ml-2 text-xs font-normal text-slate-400">
+              {plan.amount ? money(asPositiveNumber(plan.amount)) : "Not filled"}{plan.date ? ` · ${plan.date}` : ""}
+            </span>
+          )}
+        </button>
         <div className="flex items-center gap-2">
           {state !== "empty" && (
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
@@ -396,9 +499,17 @@ function SinglePlanCard({
               {state === "complete" ? "Ready" : "Incomplete"}
             </span>
           )}
+          <button
+            type="button"
+            className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            title={plan.collapsed ? "Expand" : "Collapse"}
+            onClick={() => onChange({ collapsed: !plan.collapsed })}
+          >
+            {plan.collapsed ? <ChevronIcon open={false} /> : "X"}
+          </button>
         </div>
       </div>
-      <div className="border-t border-slate-100 px-3 pb-3 pt-3 dark:border-slate-800">
+      {!plan.collapsed && <div className="border-t border-slate-100 px-3 pb-3 pt-3 dark:border-slate-800">
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm" style={{ minWidth: 140 }}>
               <div className="mb-1 text-xs text-slate-500">Date</div>
@@ -427,6 +538,20 @@ function SinglePlanCard({
                 {plan.advancedOpen ? "Less ▲" : "Advanced ▼"}
               </button>
             </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
+            <label className="inline-flex items-center gap-1.5">
+              <input type="checkbox" checked={plan.paid === true} onChange={(e) => onChange({ paid: e.currentTarget.checked })} />
+              Mark paid
+            </label>
+            <label className="inline-flex items-center gap-1.5">
+              <input type="checkbox" checked={plan.hmisComplete === true} onChange={(e) => onChange({ hmisComplete: e.currentTarget.checked })} />
+              HMIS complete
+            </label>
+            <label className="inline-flex items-center gap-1.5">
+              <input type="checkbox" checked={plan.caseworthyComplete === true} onChange={(e) => onChange({ caseworthyComplete: e.currentTarget.checked })} />
+              CW complete
+            </label>
           </div>
           {plan.advancedOpen && (
             <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 dark:border-slate-800 md:grid-cols-3">
@@ -461,7 +586,7 @@ function SinglePlanCard({
               </label>
             </div>
           )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -508,6 +633,7 @@ function DraftPreviewModal({
   replaceUnpaid, setReplaceUnpaid,
   updateGrantBudgets, setUpdateGrantBudgets,
   recalcGrantProjected, setRecalcGrantProjected,
+  previewFlags, setPreviewFlags,
 }: {
   open: boolean;
   onCancel: () => void;
@@ -526,6 +652,8 @@ function DraftPreviewModal({
   setUpdateGrantBudgets: (v: boolean) => void;
   recalcGrantProjected: boolean;
   setRecalcGrantProjected: (v: boolean) => void;
+  previewFlags: Record<string, PreviewFlags>;
+  setPreviewFlags: React.Dispatch<React.SetStateAction<Record<string, PreviewFlags>>>;
 }) {
   const newTotal = previewRows.reduce((s, r) => s + r.amount, 0);
 
@@ -574,7 +702,7 @@ function DraftPreviewModal({
       ...paidRows.map((p, idx) => fromPayment(p, "paid", idx)),
       ...(replaceUnpaid ? unpaidRows.map((p, idx) => fromPayment(p, "remove", idx)) : []),
       ...previewRows.map((row, idx): PreviewTableRow => ({
-        key: `new:${row.type}:${row.dueDate}:${row.lineItemId}:${idx}`,
+        key: paymentBuildKey(row),
         dueDate: row.dueDate,
         status: "new",
         type: row.type,
@@ -582,9 +710,32 @@ function DraftPreviewModal({
         comment: row.comment || "",
         lineItemId: row.lineItemId,
         amount: row.amount,
+        flags: previewFlags[paymentBuildKey(row)] ?? {
+          paid: row.paid === true,
+          hmisComplete: row.hmisComplete === true,
+          caseworthyComplete: row.caseworthyComplete === true,
+        },
       })),
     ].sort((a, b) => `${a.dueDate}|${a.status}|${a.type}`.localeCompare(`${b.dueDate}|${b.status}|${b.type}`));
-  }, [paidRows, previewRows, replaceUnpaid, unpaidRows]);
+  }, [paidRows, previewFlags, previewRows, replaceUnpaid, unpaidRows]);
+
+  React.useEffect(() => {
+    setPreviewFlags((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of previewRows) {
+        const key = paymentBuildKey(row);
+        if (next[key]) continue;
+        next[key] = {
+          paid: row.paid === true,
+          hmisComplete: row.hmisComplete === true,
+          caseworthyComplete: row.caseworthyComplete === true,
+        };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [previewRows, setPreviewFlags]);
 
   const statusPill = (status: PreviewTableRow["status"]) => {
     const cls =
@@ -651,6 +802,9 @@ function DraftPreviewModal({
                   <th className="px-2 py-1.5 text-left">Comment</th>
                   <th className="px-2 py-1.5 text-left">Line Item</th>
                   <th className="px-2 py-1.5 text-right">Amount</th>
+                  <th className="px-2 py-1.5 text-center">Paid</th>
+                  <th className="px-2 py-1.5 text-center">HMIS</th>
+                  <th className="px-2 py-1.5 text-center">CW</th>
                   {hasCert && <th className="px-2 py-1.5 text-center" title="Rent Cert Due">Cert</th>}
                 </tr>
               </thead>
@@ -672,6 +826,26 @@ function DraftPreviewModal({
                       <td className="px-2 py-1">{row.comment || "-"}</td>
                       <td className="px-2 py-1 font-mono text-[11px]">{row.lineItemId}</td>
                       <td className="px-2 py-1 text-right"><span className={removed ? "line-through" : ""}>{money(row.amount)}</span></td>
+                      {(["paid", "hmisComplete", "caseworthyComplete"] as const).map((field) => (
+                        <td key={field} className="px-2 py-1 text-center">
+                          {row.status === "new" ? (
+                            <input
+                              type="checkbox"
+                              checked={row.flags?.[field] === true}
+                              onChange={(e) => {
+                                const checked = e.currentTarget.checked;
+                                setPreviewFlags((prev) => ({
+                                  ...prev,
+                                  [row.key]: { ...(prev[row.key] || row.flags || {}), [field]: checked },
+                                }));
+                              }}
+                              aria-label={`${field} for ${row.dueDate}`}
+                            />
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-600">-</span>
+                          )}
+                        </td>
+                      ))}
                       {hasCert && (
                         <td className="px-2 py-1 text-center">
                           {certVal > 0 && <TripleToggle value={certVal} readOnly />}
@@ -683,20 +857,20 @@ function DraftPreviewModal({
 
                 {/* Unpaid rows being replaced */}
                 <tr className="border-t border-slate-200 bg-slate-50 font-semibold dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                  <td className="px-2 py-1.5 text-right" colSpan={colSpanBase}>New rows subtotal</td>
+                  <td className="px-2 py-1.5 text-right" colSpan={colSpanBase + 3}>New rows subtotal</td>
                   <td className="px-2 py-1.5 text-right">{money(newTotal)}</td>
                   {hasCert && <td className="px-2 py-1.5" />}
                 </tr>
                 {replaceUnpaid && removedTotal > 0 ? (
                   <tr className="border-t border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
-                    <td className="px-2 py-1 text-right text-amber-600 dark:text-amber-400" colSpan={colSpanBase}>Removed subtotal</td>
+                    <td className="px-2 py-1 text-right text-amber-600 dark:text-amber-400" colSpan={colSpanBase + 3}>Removed subtotal</td>
                     <td className="px-2 py-1 text-right font-medium text-amber-600 dark:text-amber-400">{money(removedTotal)}</td>
                     {hasCert && <td className="px-2 py-1" />}
                   </tr>
                 ) : null}
                 {paidTotal > 0 ? (
                   <tr className="border-t border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
-                    <td className="px-2 py-1 text-right text-slate-500 dark:text-slate-500" colSpan={colSpanBase}>Paid subtotal</td>
+                    <td className="px-2 py-1 text-right text-slate-500 dark:text-slate-500" colSpan={colSpanBase + 3}>Paid subtotal</td>
                     <td className="px-2 py-1 text-right font-medium text-slate-500 dark:text-slate-500">{money(paidTotal)}</td>
                     {hasCert && <td className="px-2 py-1" />}
                   </tr>
@@ -705,7 +879,7 @@ function DraftPreviewModal({
                 {/* Grand total after build */}
                 {isRebuild && (
                   <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100">
-                    <td className="px-2 py-2 text-right" colSpan={colSpanBase}>
+                    <td className="px-2 py-2 text-right" colSpan={colSpanBase + 3}>
                       Total after build
                       <span className="ml-2 font-normal text-slate-400 dark:text-slate-400">
                         ({paidRows.length} paid + {previewRows.length} new)
@@ -761,7 +935,9 @@ export default function PaymentScheduleBuilderDialog({
   const [utilityPlans, setUtilityPlans] = React.useState<MonthlyPlan[]>([]);
   const [deposit, setDeposit] = React.useState<SinglePlan>(defaultSinglePlan());
   const [prorated, setProrated] = React.useState<SinglePlan>(defaultSinglePlan());
+  const [arrears, setArrears] = React.useState<SinglePlan>(defaultSinglePlan());
   const [services, setServices] = React.useState<ServicePlan[]>([]);
+  const [previewFlags, setPreviewFlags] = React.useState<Record<string, PreviewFlags>>({});
   const [viewMode, setViewMode] = React.useState<"builder" | "spreadsheet">("builder");
   const [ssRows, setSsRows] = React.useState<SSRow[]>(() => [newSSRow()]);
   const [error, setError] = React.useState<string | null>(null);
@@ -793,7 +969,9 @@ export default function PaymentScheduleBuilderDialog({
     setUtilityPlans(saved?.utilityPlans || []);
     setDeposit(saved?.deposit || defaultSinglePlan(firstLineItem));
     setProrated(saved?.prorated || defaultSinglePlan(firstLineItem));
+    setArrears(saved?.arrears || defaultSinglePlan(firstLineItem));
     setServices(saved?.services || []);
+    setPreviewFlags({});
     setServicesOpen(false);
     setUtilitiesOpen(false);
     setShowPreview(false);
@@ -859,6 +1037,7 @@ export default function PaymentScheduleBuilderDialog({
 
   const resolvedDepositLI = cleanText(deposit.lineItemId) || globalLineItemId;
   const resolvedProratedLI = cleanText(prorated.lineItemId) || globalLineItemId;
+  const resolvedArrearsLI = cleanText(arrears.lineItemId) || globalLineItemId;
 
   const previewRows = React.useMemo<PreviewRow[]>(() => {
     const rows: PreviewRow[] = [];
@@ -889,25 +1068,30 @@ export default function PaymentScheduleBuilderDialog({
 
     const depositAmt = asPositiveNumber(deposit.amount);
     if (depositAmt && isISO(deposit.date) && resolvedDepositLI) {
-      rows.push({ dueDate: deposit.date, type: "deposit", amount: depositAmt, lineItemId: resolvedDepositLI, note: "Security Deposit", comment: deposit.comment || "" });
+      rows.push({ dueDate: deposit.date, type: "deposit", amount: depositAmt, lineItemId: resolvedDepositLI, note: "Security Deposit", comment: deposit.comment || "", ...flagsFromPlan(deposit) });
     }
 
     const proratedAmt = asPositiveNumber(prorated.amount);
     if (proratedAmt && isISO(prorated.date) && resolvedProratedLI) {
-      rows.push({ dueDate: prorated.date, type: "prorated", amount: proratedAmt, lineItemId: resolvedProratedLI, note: "Prorated Rent", comment: prorated.comment || "" });
+      rows.push({ dueDate: prorated.date, type: "prorated", amount: proratedAmt, lineItemId: resolvedProratedLI, note: "Prorated Rent", comment: prorated.comment || "", ...flagsFromPlan(prorated) });
+    }
+
+    const arrearsAmt = asPositiveNumber(arrears.amount);
+    if (arrearsAmt && isISO(arrears.date) && resolvedArrearsLI) {
+      rows.push({ dueDate: arrears.date, type: "arrears", amount: arrearsAmt, lineItemId: resolvedArrearsLI, note: "Arrears", comment: arrears.comment || "", ...flagsFromPlan(arrears) });
     }
 
     for (const svc of services) {
       const amt = asPositiveNumber(svc.amount);
       const li = cleanText(svc.lineItemId) || globalLineItemId;
       if (amt && isISO(svc.date) && li && cleanText(svc.note)) {
-        rows.push({ dueDate: svc.date, type: "service", amount: amt, lineItemId: li, note: cleanText(svc.note), comment: svc.comment || "" });
+        rows.push({ dueDate: svc.date, type: "service", amount: amt, lineItemId: li, note: cleanText(svc.note), comment: svc.comment || "", ...flagsFromPlan(svc) });
       }
     }
 
     rows.sort((a, b) => `${a.dueDate}|${a.type}`.localeCompare(`${b.dueDate}|${b.type}`));
     return rows;
-  }, [rentPlans, utilityPlans, deposit, prorated, services, globalLineItemId, resolvedDepositLI, resolvedProratedLI]);
+  }, [rentPlans, utilityPlans, deposit, prorated, arrears, services, globalLineItemId, resolvedDepositLI, resolvedProratedLI, resolvedArrearsLI]);
 
   const certCutoffDate = React.useMemo(
     () => {
@@ -1007,10 +1191,10 @@ export default function PaymentScheduleBuilderDialog({
           ...(note ? { comment: note } : {}),
         });
       } else {
-        const defaultNote: Record<string, string> = { prorated: "Prorated Rent", deposit: "Security Deposit" };
+        const defaultNote: Record<string, string> = { prorated: "Prorated Rent", deposit: "Security Deposit", arrears: "Arrears" };
         additions.push({
           amount: amt, dueDate: r.date, lineItemId: r.lineItemId,
-          type: r.typeKey as "prorated" | "deposit" | "service",
+          type: r.typeKey as "prorated" | "deposit" | "service" | "arrears",
           note: note || defaultNote[r.typeKey] || r.typeKey,
           ...(vendor ? { vendor } : {}),
         });
@@ -1034,6 +1218,9 @@ export default function PaymentScheduleBuilderDialog({
     if (singlePlanHasAny(prorated) && (!isISO(prorated.date) || asPositiveNumber(prorated.amount) <= 0)) {
       return "Prorated rent needs both a date and an amount.";
     }
+    if (singlePlanHasAny(arrears) && (!isISO(arrears.date) || asPositiveNumber(arrears.amount) <= 0)) {
+      return "Arrears needs both a date and an amount.";
+    }
     if (services.some((s) => s.date && !isISO(s.date))) return "Service dates must be YYYY-MM-DD.";
     return null;
   };
@@ -1051,22 +1238,39 @@ export default function PaymentScheduleBuilderDialog({
     const depositAmt = asPositiveNumber(deposit.amount);
     const depositLi = resolvedDepositLI;
     if (depositAmt && depositLi && isISO(deposit.date)) {
+      const flags = previewFlags[paymentBuildKey({ type: "deposit", dueDate: deposit.date, lineItemId: depositLi, amount: depositAmt, note: "Security Deposit" })] ?? flagsFromPlan(deposit);
       additions.push({
         amount: depositAmt, dueDate: deposit.date, lineItemId: depositLi, type: "deposit",
         note: ["Security Deposit"],
         ...(cleanText(deposit.vendor || globalVendor) ? { vendor: cleanText(deposit.vendor || globalVendor) } : {}),
         ...(cleanText(deposit.comment) ? { comment: cleanText(deposit.comment) } : {}),
+        ...paymentPatchFromFlags(flags),
       });
     }
 
     const proratedAmt = asPositiveNumber(prorated.amount);
     const proratedLi = resolvedProratedLI;
     if (proratedAmt && proratedLi && isISO(prorated.date)) {
+      const flags = previewFlags[paymentBuildKey({ type: "prorated", dueDate: prorated.date, lineItemId: proratedLi, amount: proratedAmt, note: "Prorated Rent" })] ?? flagsFromPlan(prorated);
       additions.push({
         amount: proratedAmt, dueDate: prorated.date, lineItemId: proratedLi, type: "prorated",
         note: ["Prorated Rent"],
         ...(cleanText(prorated.vendor || globalVendor) ? { vendor: cleanText(prorated.vendor || globalVendor) } : {}),
         ...(cleanText(prorated.comment) ? { comment: cleanText(prorated.comment) } : {}),
+        ...paymentPatchFromFlags(flags),
+      });
+    }
+
+    const arrearsAmt = asPositiveNumber(arrears.amount);
+    const arrearsLi = resolvedArrearsLI;
+    if (arrearsAmt && arrearsLi && isISO(arrears.date)) {
+      const flags = previewFlags[paymentBuildKey({ type: "arrears", dueDate: arrears.date, lineItemId: arrearsLi, amount: arrearsAmt, note: "Arrears" })] ?? flagsFromPlan(arrears);
+      additions.push({
+        amount: arrearsAmt, dueDate: arrears.date, lineItemId: arrearsLi, type: "arrears",
+        note: ["Arrears"],
+        ...(cleanText(arrears.vendor || globalVendor) ? { vendor: cleanText(arrears.vendor || globalVendor) } : {}),
+        ...(cleanText(arrears.comment) ? { comment: cleanText(arrears.comment) } : {}),
+        ...paymentPatchFromFlags(flags),
       });
     }
 
@@ -1075,10 +1279,12 @@ export default function PaymentScheduleBuilderDialog({
       const li = cleanText(svc.lineItemId) || globalLineItemId;
       const note = cleanText(svc.note);
       if (!amt || !li || !note || !isISO(svc.date)) continue;
+      const flags = previewFlags[paymentBuildKey({ type: "service", dueDate: svc.date, lineItemId: li, amount: amt, note })] ?? flagsFromPlan(svc);
       additions.push({
         amount: amt, dueDate: svc.date, lineItemId: li, type: "service", note,
         ...(cleanText(svc.vendor || globalVendor) ? { vendor: cleanText(svc.vendor || globalVendor) } : {}),
         ...(cleanText(svc.comment) ? { comment: cleanText(svc.comment) } : {}),
+        ...paymentPatchFromFlags(flags),
       });
     }
 
@@ -1146,6 +1352,7 @@ export default function PaymentScheduleBuilderDialog({
       ],
       additions,
       options: { updateGrantBudgets, recalcGrantProjected, activeOnly: true },
+      previewFlags,
       invoiceDocsTask: { enabled: false, dueDate: invoiceDocsTask.dueDate, bucket: invoiceDocsTask.bucket, docs: invoiceDocs },
       taskDefs,
       replaceTaskDefPrefixes: ["payment_rent_cert_", "payment_invoice_docs_", "pay_cert_"],
@@ -1292,6 +1499,16 @@ export default function PaymentScheduleBuilderDialog({
                 label="Prorated Rent"
                 plan={prorated}
                 onChange={(patch) => setProrated((prev) => ({ ...prev, ...patch }))}
+                grantId={selectedEnrollment?.grantId}
+                fallbackLineItemIds={fallbackLineItemIds}
+                globalLineItemId={globalLineItemId}
+                globalVendor={globalVendor}
+              />
+
+              <SinglePlanCard
+                label="Arrears"
+                plan={arrears}
+                onChange={(patch) => setArrears((prev) => ({ ...prev, ...patch }))}
                 grantId={selectedEnrollment?.grantId}
                 fallbackLineItemIds={fallbackLineItemIds}
                 globalLineItemId={globalLineItemId}
@@ -1447,6 +1664,39 @@ export default function PaymentScheduleBuilderDialog({
                     );
                     return (
                       <div key={svc.id} className={`rounded-lg border p-3 transition-colors ${stateClasses(svcState)}`}>
+                        {svc.collapsed ? (
+                          <div className="flex items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 text-left text-sm font-medium text-slate-700 hover:text-slate-950 dark:text-slate-200 dark:hover:text-white"
+                              onClick={() => setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, collapsed: false } : s))}
+                            >
+                              Support Service
+                              <span className="ml-2 text-xs font-normal text-slate-400">
+                                {svc.note || "Not filled"}{svc.amount ? ` · ${money(asPositiveNumber(svc.amount))}` : ""}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              title="Expand"
+                              className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                              onClick={() => setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, collapsed: false } : s))}
+                            >
+                              <ChevronIcon open={false} />
+                            </button>
+                          </div>
+                        ) : (
+                        <>
+                        <div className="mb-2 flex justify-end">
+                          <button
+                            type="button"
+                            title="Collapse"
+                            className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            onClick={() => setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, collapsed: true } : s))}
+                          >
+                            X
+                          </button>
+                        </div>
                         <div className="flex flex-wrap items-end gap-3">
                           <label className="flex-1 text-sm" style={{ minWidth: 140 }}>
                             <div className="mb-1 text-xs text-slate-500">Service Note</div>
@@ -1485,6 +1735,20 @@ export default function PaymentScheduleBuilderDialog({
                             </button>
                           </div>
                         </div>
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
+                          <label className="inline-flex items-center gap-1.5">
+                            <input type="checkbox" checked={svc.paid === true} onChange={(e) => { const checked = e.currentTarget.checked; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, paid: checked } : s)); }} />
+                            Mark paid
+                          </label>
+                          <label className="inline-flex items-center gap-1.5">
+                            <input type="checkbox" checked={svc.hmisComplete === true} onChange={(e) => { const checked = e.currentTarget.checked; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, hmisComplete: checked } : s)); }} />
+                            HMIS complete
+                          </label>
+                          <label className="inline-flex items-center gap-1.5">
+                            <input type="checkbox" checked={svc.caseworthyComplete === true} onChange={(e) => { const checked = e.currentTarget.checked; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, caseworthyComplete: checked } : s)); }} />
+                            CW complete
+                          </label>
+                        </div>
                         <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
                           <label className="text-sm">
                             <div className="mb-1 text-xs text-slate-500">Line Item</div>
@@ -1514,6 +1778,8 @@ export default function PaymentScheduleBuilderDialog({
                             />
                           </label>
                         </div>
+                        </>
+                        )}
                       </div>
                     );
                   })}
@@ -1549,6 +1815,8 @@ export default function PaymentScheduleBuilderDialog({
         setUpdateGrantBudgets={setUpdateGrantBudgets}
         recalcGrantProjected={recalcGrantProjected}
         setRecalcGrantProjected={setRecalcGrantProjected}
+        previewFlags={previewFlags}
+        setPreviewFlags={setPreviewFlags}
       />
     </>
   );

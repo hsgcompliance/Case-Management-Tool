@@ -83,9 +83,9 @@ function asMaybeString(v: unknown): string | null {
   return s ? s : null;
 }
 
-function asPaymentType(v: unknown): "monthly" | "deposit" | "prorated" | "service" | null {
+function asPaymentType(v: unknown): "monthly" | "deposit" | "prorated" | "service" | "arrears" | null {
   const s = String(v || "").trim().toLowerCase();
-  return s === "monthly" || s === "deposit" || s === "prorated" || s === "service" ? s : null;
+  return s === "monthly" || s === "deposit" || s === "prorated" || s === "service" || s === "arrears" ? s : null;
 }
 
 function toMillis(v: any): number {

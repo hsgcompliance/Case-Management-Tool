@@ -155,7 +155,10 @@ export const ledgerAutoAssign = secureHandler(
 
 export const ledgerGetById = secureHandler(
   async (req, res): Promise<void> => {
-    const { entryId } = LedgerGetByIdParams.parse(req.params || {});
+    const { entryId } = LedgerGetByIdParams.parse({
+      ...((req.query || {}) as Record<string, unknown>),
+      ...((req.params || {}) as Record<string, unknown>),
+    });
     const caller = (req as any).user || {};
     const callerOrg = orgIdFromClaims(caller);
 
@@ -209,7 +212,11 @@ export const ledgerBalance = secureHandler(
 
 export const ledgerDelete = secureHandler(
   async (req, res): Promise<void> => {
-    const { entryId } = LedgerGetByIdParams.parse(req.params || {});
+    const { entryId } = LedgerGetByIdParams.parse({
+      ...((req.body || {}) as Record<string, unknown>),
+      ...((req.query || {}) as Record<string, unknown>),
+      ...((req.params || {}) as Record<string, unknown>),
+    });
     const caller = (req as any).user || {};
     const callerOrg = orgIdFromClaims(caller);
 

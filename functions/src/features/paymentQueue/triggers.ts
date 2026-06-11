@@ -12,7 +12,7 @@ import {
 } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import { inferTransactionWindowModel } from "@hdb/contracts";
-import { RUNTIME } from "../../core";
+import { RUNTIME, JOTFORM_API_KEY_SECRET } from "../../core";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
 import { upsertPaymentQueueItems, voidPaymentQueueItems } from "./service";
 import { recalcGrantProjectedForGrant } from "../payments/recalcGrantProjected";
@@ -73,7 +73,7 @@ async function syncSubmission(id: string, sub: any): Promise<void> {
  * On new jotform submission → extract and write to paymentQueue.
  */
 export const onPaymentQueueSyncCreate = onDocumentCreated(
-  { region: RUNTIME.region, document: "jotformSubmissions/{id}" },
+  { region: RUNTIME.region, document: "jotformSubmissions/{id}", secrets: [JOTFORM_API_KEY_SECRET], memory: "512MiB" },
   async (event) => {
     const id = String(event.params.id);
     const sub = (event.data?.data() as any) || {};
@@ -90,7 +90,7 @@ export const onPaymentQueueSyncCreate = onDocumentCreated(
  * while preserving downstream linking (grantId, customerId, etc.).
  */
 export const onPaymentQueueSyncUpdate = onDocumentUpdated(
-  { region: RUNTIME.region, document: "jotformSubmissions/{id}" },
+  { region: RUNTIME.region, document: "jotformSubmissions/{id}", secrets: [JOTFORM_API_KEY_SECRET], memory: "512MiB" },
   async (event) => {
     const id = String(event.params.id);
     const sub = (event.data?.after?.data() as any) || {};

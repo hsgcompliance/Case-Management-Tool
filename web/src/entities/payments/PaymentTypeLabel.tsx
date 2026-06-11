@@ -21,13 +21,14 @@ function resolveSubtype(note: unknown): "rent" | "utility" {
     : "rent";
 }
 
-export type UserPaymentType = "rent" | "utility" | "deposit" | "prorated" | "service";
+export type UserPaymentType = "rent" | "utility" | "deposit" | "prorated" | "service" | "arrears";
 
 export function resolvePaymentType(payment: PaymentLike): UserPaymentType {
   const type = String(payment?.type ?? "monthly").toLowerCase();
   if (type === "deposit") return "deposit";
   if (type === "prorated") return "prorated";
   if (type === "service") return "service";
+  if (type === "arrears") return "arrears";
   return resolveSubtype(payment?.note);
 }
 
@@ -38,10 +39,11 @@ export function paymentTypeLabel(payment: PaymentLike): string {
     case "deposit":  return "Deposit";
     case "prorated": return "Pro-Rated";
     case "service":  return "Support Service";
+    case "arrears":  return "Arrears";
   }
 }
 
-export const RENTAL_ASSISTANCE_TYPES = new Set<UserPaymentType>(["rent", "deposit", "prorated"]);
+export const RENTAL_ASSISTANCE_TYPES = new Set<UserPaymentType>(["rent", "deposit", "prorated", "arrears"]);
 
 export function isRentalAssistance(payment: PaymentLike): boolean {
   return RENTAL_ASSISTANCE_TYPES.has(resolvePaymentType(payment));
@@ -53,6 +55,7 @@ const TYPE_COLORS: Record<UserPaymentType, { chip: string; dot: string }> = {
   deposit:  { chip: "bg-violet-50 text-violet-700 border-violet-200",   dot: "bg-violet-500" },
   prorated: { chip: "bg-sky-50 text-sky-700 border-sky-200",            dot: "bg-sky-500" },
   service:  { chip: "bg-emerald-50 text-emerald-700 border-emerald-200",dot: "bg-emerald-500" },
+  arrears:  { chip: "bg-rose-50 text-rose-700 border-rose-200",          dot: "bg-rose-500" },
 };
 
 /** Pill badge — for detail cards and prominent display */

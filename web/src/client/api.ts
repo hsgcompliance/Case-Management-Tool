@@ -32,6 +32,7 @@
 import { auth, appCheck } from '@lib/firebase';
 import { getToken as getAppCheckTokenMod, type AppCheckTokenResult } from 'firebase/app-check';
 import { toast } from '@lib/toast';
+import { isGoogleReauthError, GOOGLE_REAUTH_TOAST } from '@lib/googleAuthError';
 import { noUndefined } from '@lib/safeData';
 import { pending } from '@lib/pending';
 import { stableStringify } from '@lib/stable';
@@ -540,6 +541,9 @@ function buildApiErrorToast(e: any): string {
   const title = ENDPOINT_ERROR_TITLES[fn] || (fn ? `[${fn}] Request failed` : "Request failed");
   const msg = extractBackendErrorMessage(e?.meta?.response) || extractBackendErrorMessage(e);
 
+  // Expired/invalid Google OAuth token (Drive/Sheets/Calendar). Surface a clean
+  // "reconnect Google" nudge instead of the raw Google credential error string.
+  if (isGoogleReauthError(msg) || isGoogleReauthError(e)) return GOOGLE_REAUTH_TOAST;
   if (msg === "appcheck_failed") return `${title}: Security check failed. Refresh and try again.`;
   if (isNoisyBackendMessage(String(msg || ""))) return title;
   if (s === 401) return `${title}: ${msg || "Session expired. Please sign in."}`;
@@ -583,8 +587,9 @@ export function createApi({
   backoffMs = 300,
   getCacheTtlMs,
   onError = (e: any) => {
-    toast(buildApiErrorToast(e), { type: 'error' });
-    console.warn('[api]', e);
+    const reauth = isGoogleReauthError(e);
+    toast(buildApiErrorToast(e), { type: reauth ? 'warning' : 'error' });
+    console.warn(reauth ? '[google] session expired — reconnect in Settings' : '[api]', e);
   },
   isHeavy = (name: EndpointName) => HEAVY_WRITE_ENDPOINTS.has(name),
 }: CreateApiOptions = {}): Api {
@@ -1032,8 +1037,9 @@ export const api: Api = createApi({
   },
   getCacheTtlMs: () => 0,
   onError: (e: any) => {
-    toast(buildApiErrorToast(e), { type: 'error' });
-    console.warn('[api]', e);
+    const reauth = isGoogleReauthError(e);
+    toast(buildApiErrorToast(e), { type: reauth ? 'warning' : 'error' });
+    console.warn(reauth ? '[google] session expired — reconnect in Settings' : '[api]', e);
   },
 });
 
