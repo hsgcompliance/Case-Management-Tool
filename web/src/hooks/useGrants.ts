@@ -119,6 +119,11 @@ export function usePatchGrants() {
               const patch = r.patch || {};
               const prevObj = prev as Record<string, unknown>;
               const next: Record<string, unknown> = { ...prevObj, ...patch };
+              if (Array.isArray((r as { unset?: unknown }).unset)) {
+                for (const key of (r as { unset: unknown[] }).unset) {
+                  delete next[String(key)];
+                }
+              }
               if ("status" in patch) {
                 next.active = patch.status === "active";
                 next.deleted = patch.status === "deleted";

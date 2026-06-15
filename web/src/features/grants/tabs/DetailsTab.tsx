@@ -625,14 +625,7 @@ function FieldBlock({
   empty: boolean;
   children?: React.ReactNode;
 }) {
-  if (empty) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-slate-400 py-0.5">
-        <span className="font-medium text-slate-500 min-w-[120px]">{label}</span>
-        <span>—</span>
-      </div>
-    );
-  }
+  if (empty) return null;
   return (
     <div className="space-y-1">
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
@@ -688,7 +681,7 @@ function KeyValueRecommendedEditor({
   defaults: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
 }) {
-  const rows = Object.entries(Object.keys(value).length ? value : defaults);
+  const rows = Object.entries(value);
   const commit = (next: Record<string, string>) => {
     const cleaned = Object.entries(next).reduce((acc: Record<string, string>, [key, raw]) => {
       const k = String(key || "").trim();
@@ -701,15 +694,14 @@ function KeyValueRecommendedEditor({
   const addRow = () => {
     let idx = rows.length + 1;
     let key = `Item ${idx}`;
-    while ((value[key] ?? defaults[key]) != null) {
+    while (value[key] != null) {
       idx += 1;
       key = `Item ${idx}`;
     }
-    commit({ ...(Object.keys(value).length ? value : defaults), [key]: "" });
+    commit({ ...value, [key]: "" });
   };
   const remove = (key: string) => {
-    const base = Object.keys(value).length ? value : defaults;
-    const next = { ...base };
+    const next = { ...value };
     delete next[key];
     commit(next);
   };
@@ -719,8 +711,9 @@ function KeyValueRecommendedEditor({
         <div className="text-sm font-semibold text-slate-800">{title}</div>
         {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
       </div>
-      <div className="space-y-2">
-        {rows.map(([key, val]) => (
+      {rows.length ? (
+        <div className="space-y-2">
+          {rows.map(([key, val]) => (
           <div key={key} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(180px,240px)_1fr_auto]">
             <input
               className="input"
@@ -728,8 +721,7 @@ function KeyValueRecommendedEditor({
               onBlur={(e) => {
                 const nextKey = e.currentTarget.value.trim();
                 if (!nextKey || nextKey === key) return;
-                const base = Object.keys(value).length ? value : defaults;
-                const next = { ...base };
+                const next = { ...value };
                 next[nextKey] = next[key] ?? "";
                 delete next[key];
                 commit(next);
@@ -739,19 +731,30 @@ function KeyValueRecommendedEditor({
               className="input"
               value={val}
               onChange={(e) => {
-                const base = Object.keys(value).length ? value : defaults;
-                commit({ ...base, [key]: e.currentTarget.value });
+                commit({ ...value, [key]: e.currentTarget.value });
               }}
             />
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(key)}>
               Remove
             </button>
           </div>
-        ))}
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
+          No rows configured.
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={addRow}>
+          Add Row
+        </button>
+        {Object.keys(defaults).length ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => commit(defaults)}>
+            Use Defaults
+          </button>
+        ) : null}
       </div>
-      <button type="button" className="btn btn-secondary btn-sm" onClick={addRow}>
-        Add Row
-      </button>
     </div>
   );
 }
@@ -769,7 +772,7 @@ function ListRecommendedEditor({
   defaults: string[];
   onChange: (next: string[]) => void;
 }) {
-  const rows = value.length ? value : defaults;
+  const rows = value;
   const commit = (next: string[]) => onChange(next.map((item) => String(item || "").trim()).filter(Boolean));
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -777,8 +780,9 @@ function ListRecommendedEditor({
         <div className="text-sm font-semibold text-slate-800">{title}</div>
         {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
       </div>
-      <div className="space-y-2">
-        {rows.map((doc, index) => (
+      {rows.length ? (
+        <div className="space-y-2">
+          {rows.map((doc, index) => (
           <div key={`${doc}:${index}`} className="grid grid-cols-[1fr_auto] gap-2">
             <input
               className="input"
@@ -793,11 +797,23 @@ function ListRecommendedEditor({
               Remove
             </button>
           </div>
-        ))}
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
+          No documents configured.
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => commit([...rows, ""])}>
+          Add Document
+        </button>
+        {defaults.length ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => commit(defaults)}>
+            Use Defaults
+          </button>
+        ) : null}
       </div>
-      <button type="button" className="btn btn-secondary btn-sm" onClick={() => commit([...rows, ""])}>
-        Add Document
-      </button>
     </div>
   );
 }
@@ -848,7 +864,7 @@ function RecommendedGrantInfoEditor({
 
       <KeyValueRecommendedEditor
         title="Eligibility Criteria"
-        description="Prefilled from the ESG RRH pattern; edit or remove rows for this grant."
+        description="Optional criteria for this grant. Add rows or apply defaults when needed."
         value={eligibility}
         defaults={DEFAULT_ELIGIBILITY}
         onChange={(next) => setModel((m) => ({ ...m, eligibility: next }))}
@@ -856,7 +872,7 @@ function RecommendedGrantInfoEditor({
 
       <KeyValueRecommendedEditor
         title="Level of Assistance"
-        description="Internal guidance for what assistance level is expected."
+        description="Optional internal guidance for what assistance level is expected."
         value={level}
         defaults={DEFAULT_LEVEL_OF_ASSISTANCE}
         onChange={(next) => setModel((m) => ({ ...m, levelOfAssistance: next }))}
@@ -1089,15 +1105,6 @@ export function DetailsTab({
     seededRecommendedRef.current = true;
     setModel((m) => {
       const next = { ...(m || {}) };
-      if (!Object.keys(eligibilityDraftObject(next.eligibility ?? grant?.eligibility)).length) {
-        next.eligibility = DEFAULT_ELIGIBILITY;
-      }
-      if (!Object.keys(levelOfAssistanceFrom(next)).length && !Object.keys(levelOfAssistanceFrom(grant as any)).length) {
-        next.levelOfAssistance = DEFAULT_LEVEL_OF_ASSISTANCE;
-      }
-      if (!invoiceDocumentsFrom(next).length && !invoiceDocumentsFrom(grant as any).length) {
-        next.invoiceDocuments = DEFAULT_INVOICE_DOCUMENTS;
-      }
       if (isGrantKind && !String(next.duration ?? grant?.duration ?? "").trim()) {
         next.duration = "1 Year";
       }
@@ -1766,6 +1773,17 @@ function ReadOnlyFieldValue({ rawValue }: { rawValue: any }) {
 
 // ─── Read-only details panel ─────────────────────────────────────────────────
 
+function isEmptyReadOnlyValue(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return !value.trim();
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([key]) => key !== "_priority");
+    return entries.length === 0 || entries.every(([, entryValue]) => isEmptyReadOnlyValue(entryValue));
+  }
+  return false;
+}
+
 function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
   const HIDE = new Set([
     "budget", "assessments", "tasks", "meta",
@@ -1787,6 +1805,7 @@ function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
       return { key: k, rawValue, priority };
     })
     .filter(({ priority }) => priority !== "hidden")
+    .filter(({ rawValue }) => !isEmptyReadOnlyValue(rawValue))
     .sort(
       (a, b) =>
         (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)

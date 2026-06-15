@@ -347,7 +347,7 @@ function RentRow({
 
   return (
     <div className={`rounded-lg border p-3 transition-colors ${stateClasses(state)}`}>
-      {plan.collapsed ? (
+      {plan.collapsed && (
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
@@ -368,8 +368,8 @@ function RentRow({
             <ChevronIcon open={false} />
           </button>
         </div>
-      ) : (
-      <>
+      )}
+      <div hidden={plan.collapsed}>
       <div className="mb-2 flex justify-end">
         <button
           type="button"
@@ -447,8 +447,7 @@ function RentRow({
           </label>
         </div>
       )}
-      </>
-      )}
+      </div>
     </div>
   );
 }
@@ -941,6 +940,7 @@ export default function PaymentScheduleBuilderDialog({
   const [viewMode, setViewMode] = React.useState<"builder" | "spreadsheet">("builder");
   const [ssRows, setSsRows] = React.useState<SSRow[]>(() => [newSSRow()]);
   const [error, setError] = React.useState<string | null>(null);
+  const [submitAttempted, setSubmitAttempted] = React.useState(false);
 
   const [certTask, setCertTask] = React.useState<CertTaskPlan>({
     enabled: true,
@@ -975,6 +975,7 @@ export default function PaymentScheduleBuilderDialog({
     setServicesOpen(false);
     setUtilitiesOpen(false);
     setShowPreview(false);
+    setSubmitAttempted(false);
     setCertTask({ enabled: true, cadenceMonths: "3", endDate: "", bucket: "compliance", title: "Rent Certification", advancedOpen: false });
     setError(null);
     const ssBase = newSSRow("monthly-rent", firstOfNextMonthISO(seedDate));
@@ -1038,6 +1039,9 @@ export default function PaymentScheduleBuilderDialog({
   const resolvedDepositLI = cleanText(deposit.lineItemId) || globalLineItemId;
   const resolvedProratedLI = cleanText(prorated.lineItemId) || globalLineItemId;
   const resolvedArrearsLI = cleanText(arrears.lineItemId) || globalLineItemId;
+  const showDefaultLineItemError = submitAttempted && !cleanText(globalLineItemId);
+  const showDefaultVendorError = submitAttempted && !cleanText(globalVendor);
+  const showDefaultsError = showDefaultLineItemError || showDefaultVendorError;
 
   const previewRows = React.useMemo<PreviewRow[]>(() => {
     const rows: PreviewRow[] = [];
@@ -1169,6 +1173,7 @@ export default function PaymentScheduleBuilderDialog({
   }, [previewRows, replaceUnpaid, selectedEnrollment?.payments, ssRows, viewMode]);
 
   const ssSubmit = () => {
+    setSubmitAttempted(true);
     setError(null);
     if (!enrollmentId) return setError("Select an enrollment.");
     if (ssRows.length === 0) return setError("Add at least one row.");
@@ -1226,6 +1231,7 @@ export default function PaymentScheduleBuilderDialog({
   };
 
   const handlePreviewSchedule = () => {
+    setSubmitAttempted(true);
     setError(null);
     const err = validate();
     if (err) return setError(err);
@@ -1456,11 +1462,15 @@ export default function PaymentScheduleBuilderDialog({
           ) : (
             <>
               {/* ── Settings card ── */}
-              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Defaults</div>
+              <div className={`rounded-lg border bg-white p-3 dark:bg-slate-900 ${
+                showDefaultsError
+                  ? "border-rose-400 bg-rose-50/40 dark:border-rose-500/80 dark:bg-rose-950/20"
+                  : "border-slate-200 dark:border-slate-700"
+              }`}>
+                <div className={`mb-2 text-xs font-semibold uppercase tracking-wide ${showDefaultsError ? "text-rose-500" : "text-slate-400"}`}>Defaults</div>
                 <div className="flex flex-wrap gap-3">
                   <div className="flex-1" style={{ minWidth: 200 }}>
-                    <div className="mb-1 text-xs text-slate-500">Default Line Item</div>
+                    <div className={`mb-1 text-xs ${showDefaultLineItemError ? "text-rose-600 dark:text-rose-300" : "text-slate-500"}`}>Default Line Item</div>
                     <LineItemSelect
                       grantId={selectedEnrollment?.grantId || null}
                       value={globalLineItemId || null}
@@ -1468,17 +1478,27 @@ export default function PaymentScheduleBuilderDialog({
                       fallbackLineItemIds={fallbackLineItemIds}
                       allowEmpty
                       placeholderLabel="None"
-                      inputClassName="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      inputClassName={`w-full rounded border px-2 py-1.5 dark:bg-slate-900 dark:text-slate-100 ${
+                        showDefaultLineItemError
+                          ? "border-rose-500 bg-rose-50 text-rose-900 dark:border-rose-500 dark:bg-rose-950/30"
+                          : "border-slate-300 dark:border-slate-700"
+                      }`}
                     />
+                    {showDefaultLineItemError && <div className="mt-1 text-xs text-rose-600 dark:text-rose-300">Select a line item.</div>}
                   </div>
                   <div className="flex-1" style={{ minWidth: 160 }}>
-                    <div className="mb-1 text-xs text-slate-500">Default Vendor</div>
+                    <div className={`mb-1 text-xs ${showDefaultVendorError ? "text-rose-600 dark:text-rose-300" : "text-slate-500"}`}>Default Vendor</div>
                     <input
-                      className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      className={`w-full rounded border px-2 py-1.5 dark:bg-slate-900 dark:text-slate-100 ${
+                        showDefaultVendorError
+                          ? "border-rose-500 bg-rose-50 text-rose-900 placeholder:text-rose-300 dark:border-rose-500 dark:bg-rose-950/30"
+                          : "border-slate-300 dark:border-slate-700"
+                      }`}
                       value={globalVendor}
                       onChange={(e) => setGlobalVendor(e.currentTarget.value)}
                       placeholder="e.g. Parkview Apartments"
                     />
+                    {showDefaultVendorError && <div className="mt-1 text-xs text-rose-600 dark:text-rose-300">Enter a vendor.</div>}
                   </div>
                 </div>
               </div>
