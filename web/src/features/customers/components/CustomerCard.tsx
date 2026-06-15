@@ -34,11 +34,12 @@ import {
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const CARD_TASKS_LIMIT = 1000;
 
-// Selected-state colors for the Tier 1/2/3 mini-cards (low → high).
+// Selected-state colors for the Tier 1/2/3 mini-cards.
+// Tier 1 = highest acuity/risk (red) → Tier 3 = lowest (green).
 const TIER_SELECTED_CLASS: Record<number, string> = {
-  1: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
+  1: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-200",
   2: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200",
-  3: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-200",
+  3: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
 };
 
 type CustomerCardProps = {
@@ -931,6 +932,11 @@ function CustomerCardInner({
   const [enrollmentPopupId, setEnrollmentPopupId] = React.useState<string | null>(null);
   const [contextMenu, setContextMenu] = React.useState<CustomerCardContextMenu | null>(null);
   const [actionBar, setActionBar] = React.useState<{ x: number; y: number } | null>(null);
+  // While a right-click menu/action bar is open, suppress the card's hover lift.
+  // The hover transform turns the card into the containing block for the
+  // fixed-positioned menus and (combined with overflow-hidden) clips/repositions
+  // them as the pointer crosses the card, making the actions un-clickable.
+  const menuOpen = !!contextMenu || !!actionBar;
 
   const handleResizeMouseDown = React.useCallback(
     (event: React.MouseEvent) => {
@@ -1138,7 +1144,8 @@ function CustomerCardInner({
       data-customer-active={inactiveCustomer ? "false" : "true"}
       className={[
         COL_SPAN_CLASSES[colSpan],
-        "group relative h-full cursor-pointer overflow-hidden rounded-[24px] border shadow-sm transition hover:-translate-y-0.5 hover:shadow-md",
+        "group relative h-full cursor-pointer overflow-hidden rounded-[24px] border shadow-sm transition",
+        menuOpen ? "" : "hover:-translate-y-0.5 hover:shadow-md",
         inactiveCustomer
           ? "border-slate-200 bg-slate-50/90 text-slate-500 dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-400"
           : "bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100",

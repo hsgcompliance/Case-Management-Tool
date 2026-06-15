@@ -16,6 +16,7 @@ import EnrollmentsAPI from "@client/enrollments";
 import PaymentsAPI from "@client/payments";
 import TasksAPI from "@client/tasks";
 import { toast } from "@lib/toast";
+import { fmtCurrencyUSD } from "@lib/formatters";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
 
@@ -135,6 +136,61 @@ function isCompletablePayment(payment: TPayment | null | undefined): payment is 
 function isReversiblePayment(payment: TPayment | null | undefined): payment is TPayment & { id: string } {
   const id = String(payment?.id || "").trim();
   return !!id && payment?.paid === true && payment?.void !== true && Number(payment?.amount || 0) > 0;
+}
+
+type CascadeStats = {
+  enrollmentsTotal: number;
+  enrollmentsActive: number;
+  paidCount: number;
+  paidAmount: number;
+  projectedCount: number;
+  projectedAmount: number;
+};
+
+function emptyCascade(): CascadeStats {
+  return {
+    enrollmentsTotal: 0,
+    enrollmentsActive: 0,
+    paidCount: 0,
+    paidAmount: 0,
+    projectedCount: 0,
+    projectedAmount: 0,
+  };
+}
+
+// Summarizes what deleting/archiving a customer touches: their enrollments and
+// the live (non-void) payments hanging off them, split into recorded (paid) vs
+// projected (unpaid) so the user can gauge the blast radius before confirming.
+function computeCustomerCascade(enrollments: Enrollment[]): CascadeStats {
+  const stats = emptyCascade();
+  for (const enrollment of enrollments) {
+    if (enrollment.deleted === true) continue;
+    stats.enrollmentsTotal += 1;
+    if (isActiveEnrollment(enrollment)) stats.enrollmentsActive += 1;
+    const payments = Array.isArray(enrollment.payments) ? enrollment.payments : [];
+    for (const payment of payments) {
+      if (payment?.void === true) continue;
+      const amount = Number(payment?.amount || 0) || 0;
+      if (amount <= 0) continue;
+      if (payment?.paid === true) {
+        stats.paidCount += 1;
+        stats.paidAmount += amount;
+      } else {
+        stats.projectedCount += 1;
+        stats.projectedAmount += amount;
+      }
+    }
+  }
+  return stats;
+}
+
+function addCascade(into: CascadeStats, from: CascadeStats): void {
+  into.enrollmentsTotal += from.enrollmentsTotal;
+  into.enrollmentsActive += from.enrollmentsActive;
+  into.paidCount += from.paidCount;
+  into.paidAmount += from.paidAmount;
+  into.projectedCount += from.projectedCount;
+  into.projectedAmount += from.projectedAmount;
 }
 
 function WorkspaceScaffold({
@@ -1078,8 +1134,34 @@ function BulkOperationsWorkspace({
   const patchCustomers = usePatchCustomers();
   const softDeleteCustomers = useSoftDeleteCustomers();
   const hardDeleteCustomers = useHardDeleteCustomers();
-  const { data: enrollmentsByCustomer } = useSelectedCustomerEnrollments(customers, tool !== "archive" && tool !== "delete" && tool !== "hard-delete");
+  // archive/delete/hard-delete show a cascade preview; the action tools below
+  // need the same enrollment data to operate on. Only refresh-enrollments can
+  // skip the upfront load.
+  const showsCascadePreview = tool === "archive" || tool === "delete" || tool === "hard-delete";
+  const { data: enrollmentsByCustomer, loading: enrollmentsLoading } = useSelectedCustomerEnrollments(
+    customers,
+    tool !== "refresh-enrollments",
+  );
   const [busy, setBusy] = React.useState(false);
+
+  const cascadeByCustomer = React.useMemo(() => {
+    const map = new Map<string, CascadeStats>();
+    for (const customer of customers) {
+      map.set(customer.id, computeCustomerCascade(enrollmentsByCustomer[customer.id] || []));
+    }
+    return map;
+  }, [customers, enrollmentsByCustomer]);
+
+  const cascadeTotals = React.useMemo(() => {
+    const totals = emptyCascade();
+    for (const stats of cascadeByCustomer.values()) addCascade(totals, stats);
+    return totals;
+  }, [cascadeByCustomer]);
+
+  // Ready only once the per-customer load has actually populated, so we never
+  // flash a misleading "0 enrollments / $0" preview on the first render frame.
+  const cascadeReady =
+    showsCascadePreview && !enrollmentsLoading && Object.keys(enrollmentsByCustomer).length > 0;
 
   const titleByTool: Record<typeof tool, string> = {
     archive: "Bulk Archive",
@@ -1239,6 +1321,77 @@ function BulkOperationsWorkspace({
               This action will run against <span className="font-semibold">{customers.length}</span> selected customer{customers.length === 1 ? "" : "s"}.
             </div>
           </div>
+
+          {showsCascadePreview ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-slate-900">Cascade preview</div>
+                {showsCascadePreview && !cascadeReady ? <span className="text-xs text-slate-400">Loading linked records…</span> : null}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {tool === "archive"
+                  ? "These customers stay in the system but are marked inactive. The linked records below are not deleted."
+                  : tool === "delete"
+                    ? "Soft-deleting hides these customers. The linked records below stay attached and can be restored."
+                    : "Permanently deleting these customers also drops the linked records below. This cannot be undone."}
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Enrollments</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{cascadeReady ? cascadeTotals.enrollmentsTotal : "—"}</div>
+                  <div className="text-[11px] text-slate-400">{cascadeReady ? `${cascadeTotals.enrollmentsActive} active` : " "}</div>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700">Projected (unpaid)</div>
+                  <div className="mt-0.5 text-lg font-semibold text-amber-900">{cascadeReady ? fmtCurrencyUSD(cascadeTotals.projectedAmount) : "—"}</div>
+                  <div className="text-[11px] text-amber-600">{cascadeReady ? `${cascadeTotals.projectedCount} payment${cascadeTotals.projectedCount === 1 ? "" : "s"}` : " "}</div>
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-emerald-700">Recorded (paid)</div>
+                  <div className="mt-0.5 text-lg font-semibold text-emerald-900">{cascadeReady ? fmtCurrencyUSD(cascadeTotals.paidAmount) : "—"}</div>
+                  <div className="text-[11px] text-emerald-600">{cascadeReady ? `${cascadeTotals.paidCount} payment${cascadeTotals.paidCount === 1 ? "" : "s"}` : " "}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Customers</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{customers.length}</div>
+                  <div className="text-[11px] text-slate-400">selected</div>
+                </div>
+              </div>
+
+              <div className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+                {customers.map((customer) => {
+                  const stats = cascadeByCustomer.get(customer.id) || emptyCascade();
+                  return (
+                    <div
+                      key={customer.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900">{displayName(customer)}</div>
+                        <div className="text-xs text-slate-400">DOB {formatDob(customer.dob)}</div>
+                      </div>
+                      <div className="shrink-0 text-right text-xs text-slate-600">
+                        {cascadeReady ? (
+                          <>
+                            <div>
+                              {stats.enrollmentsTotal} enrollment{stats.enrollmentsTotal === 1 ? "" : "s"} ({stats.enrollmentsActive} active)
+                            </div>
+                            <div className="text-slate-400">
+                              {fmtCurrencyUSD(stats.projectedAmount)} projected · {fmtCurrencyUSD(stats.paidAmount)} paid
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-slate-400">Loading…</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
@@ -1252,9 +1405,9 @@ function BulkOperationsWorkspace({
               type="button"
               className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
               onClick={() => void run()}
-              disabled={busy}
+              disabled={busy || (showsCascadePreview && !cascadeReady)}
             >
-              {busy ? "Working..." : "Run Action"}
+              {busy ? "Working..." : showsCascadePreview && !cascadeReady ? "Loading preview…" : "Run Action"}
             </button>
           </div>
         </div>
