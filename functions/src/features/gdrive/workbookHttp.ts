@@ -84,8 +84,12 @@ export const attachCustomerWorkbookByUrl = secureHandler(
     auth: "user",
     methods: ["POST", "OPTIONS"],
     secrets: SECRETS,
-    memory: "256MiB",
-    timeoutSeconds: 30,
+    // 256MiB OOMs on the lazy monolithic `googleapis` import (peaks >256MiB)
+    // → the worker is killed and Cloud Run returns an opaque plain-text 500
+    // before the handler can respond. 512 is the floor the other workbook
+    // endpoints (convert/append/getWorkbookData) already use.
+    memory: "512MiB",
+    timeoutSeconds: 60,
   },
 );
 
@@ -122,8 +126,10 @@ export const listCustomerFolderWorkbookCandidates = secureHandler(
     auth: "user",
     methods: ["GET", "OPTIONS"],
     secrets: SECRETS,
-    memory: "256MiB",
-    timeoutSeconds: 30,
+    // 256MiB OOMs on the lazy monolithic `googleapis` import (peaks >256MiB)
+    // → opaque plain-text 500. Match the 512 floor used by sibling endpoints.
+    memory: "512MiB",
+    timeoutSeconds: 60,
   },
 );
 
@@ -170,8 +176,12 @@ export const attachCustomerWorkbookCandidate = secureHandler(
     auth: "user",
     methods: ["POST", "OPTIONS"],
     secrets: SECRETS,
-    memory: "256MiB",
-    timeoutSeconds: 30,
+    // 256MiB OOMs on the lazy monolithic `googleapis` import (peaks >256MiB)
+    // → the worker is killed and Cloud Run returns an opaque plain-text 500
+    // before the handler can respond. 512 is the floor the other workbook
+    // endpoints (convert/append/getWorkbookData) already use.
+    memory: "512MiB",
+    timeoutSeconds: 60,
   },
 );
 

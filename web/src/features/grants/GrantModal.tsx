@@ -240,6 +240,43 @@ const pickNonMeta = (obj: Record<string, unknown>) => {
   return out;
 };
 
+const OPTIONAL_UNSET_FIELDS = [
+  "description",
+  "eligibility",
+  "levelOfAssistance",
+  "invoiceDocuments",
+  "lengthOfAssistance",
+  "maxLengthOfAssistance",
+  "maximumLengthOfAssistance",
+  "servicesOffered",
+] as const;
+
+function isEmptyOptionalValue(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return !value.trim();
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).every(isEmptyOptionalValue);
+  }
+  return false;
+}
+
+function cleanOptionalUnsetFields(
+  updates: Record<string, unknown>,
+  previous: Record<string, unknown> | null | undefined,
+) {
+  const unset = new Set<string>();
+  for (const field of OPTIONAL_UNSET_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(updates, field)) continue;
+    if (!isEmptyOptionalValue(updates[field])) continue;
+    delete updates[field];
+    if (previous && Object.prototype.hasOwnProperty.call(previous, field)) {
+      unset.add(field);
+    }
+  }
+  return Array.from(unset);
+}
+
 const grantKindOf = (row: Record<string, unknown>): "grant" | "program" => {
   const explicit = String(row?.kind || "").toLowerCase();
   if (explicit === "program") return "program";
@@ -479,6 +516,9 @@ export default function GrantDetailModal({
       if (!canEditKind && !isCreate && grant?.kind) {
         updates.kind = grant.kind;
       }
+      const unset = isCreate
+        ? []
+        : cleanOptionalUnsetFields(updates, grant as Record<string, unknown> | null | undefined);
 
       const budget = recomputeBudgetTotals(updates.budget);
       if (!shouldRetainBudgetForGrantForm(updates as Partial<Grant>)) {
@@ -510,7 +550,11 @@ export default function GrantDetailModal({
           return;
         }
       } else {
-        await patch.mutateAsync({ id: String(model.id), patch: safe });
+        await patch.mutateAsync({
+          id: String(model.id),
+          patch: safe,
+          ...(unset.length ? { unset } : {}),
+        });
       }
 
       toast("Grant saved successfully", { type: "success" });

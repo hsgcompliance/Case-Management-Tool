@@ -67,6 +67,50 @@ export type CandidateListResult =
   | { status: "folder_missing"; items: [] }
   | { status: "google_drive_not_connected"; folderId: string; items: [] };
 
+/**
+ * Best-effort Drive lookup for a spreadsheet's canonical name + type.
+ *
+ * NEVER throws: linking must not depend on a live Drive call succeeding. A failed
+ * lookup (not connected, 401/403/404, scope, transient, or no client) simply
+ * returns `{}` so the caller saves the link anyway. `confirmedNotSpreadsheet` is
+ * set ONLY when Drive positively answered with a non-spreadsheet mime (a
+ * successful call) — that one case is a real signal a caller may choose to
+ * reject, distinct from an API *failure*.
+ */
+async function lookupWorkbookMetaBestEffort(args: {
+  uid: string;
+  spreadsheetId: string;
+  googleAccessToken?: string;
+}): Promise<{ name?: string; confirmedNotSpreadsheet?: boolean }> {
+  const { uid, spreadsheetId, googleAccessToken } = args;
+  try {
+    const drive = await buildUserDriveClient(uid, googleAccessToken);
+    if (!drive) return {}; // not connected — link without validation
+    const meta = await drive.files.get({
+      fileId: spreadsheetId,
+      fields: "id,name,mimeType",
+      supportsAllDrives: true,
+    });
+    const mime = String(meta.data?.mimeType || "").trim();
+    if (mime && !isWorkbookMime(mime)) return { confirmedNotSpreadsheet: true };
+    const name = String(meta.data?.name || "").trim();
+    return name ? { name } : {};
+  } catch (err: any) {
+    const status = Number(err?.response?.status);
+    if (status === 401) {
+      void markTokenRevoked(uid, "googleDrive");
+      logger.warn("workbookService: Drive 401 — token revoked, linking without validation", { spreadsheetId });
+    } else {
+      logger.warn("workbookService: workbook validation skipped (non-fatal)", {
+        spreadsheetId,
+        reason: String(err?.message || ""),
+        ...(Number.isFinite(status) ? { status } : {}),
+      });
+    }
+    return {}; // any failure → link anyway
+  }
+}
+
 export async function attachWorkbookByUrl(args: {
   customerId: string;
   uid: string;
@@ -82,39 +126,14 @@ export async function attachWorkbookByUrl(args: {
   }
 
   const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
-  let spreadsheetName: string | undefined;
 
-  // Try to validate and fetch metadata via per-user server-side Drive OAuth
-  try {
-    const drive = await buildUserDriveClient(uid, googleAccessToken);
-    if (drive) {
-      const meta = await drive.files.get({
-        fileId: spreadsheetId,
-        fields: "id,name,mimeType",
-        supportsAllDrives: true,
-      });
-      const mime = String(meta.data?.mimeType || "").trim();
-      // Allow native Sheets, xlsx, and xls — reject anything else (e.g. Docs, PDFs)
-      if (mime && !isWorkbookMime(mime)) {
-        throw Object.assign(new Error("workbook_not_a_spreadsheet"), { code: 400 });
-      }
-      spreadsheetName = String(meta.data?.name || "").trim() || undefined;
-    }
-  } catch (err: any) {
-    const msg = String(err?.message || "");
-    if (msg === "workbook_not_a_spreadsheet") throw err;
-    const status = Number(err?.response?.status);
-    if (status === 404) throw Object.assign(new Error("workbook_not_found"), { code: 404 });
-    if (status === 403) throw Object.assign(new Error("workbook_access_denied"), { code: 403 });
-    if (status === 401) {
-      // Token revoked or expired beyond refresh — mark needs_reconnect, save anyway
-      void markTokenRevoked(uid, "googleDrive");
-      logger.warn("workbookService: Drive 401 — token revoked, saving without validation", { spreadsheetId });
-    } else {
-      // Non-fatal: Drive not connected or other transient error — save without validation
-      logger.warn("workbookService: url validation skipped", { spreadsheetId, reason: msg });
-    }
+  // Best-effort name/type resolution. Rejects ONLY when Drive positively confirms
+  // a non-spreadsheet file; any Drive failure is non-fatal and the link is saved.
+  const lookup = await lookupWorkbookMetaBestEffort({ uid, spreadsheetId, googleAccessToken });
+  if (lookup.confirmedNotSpreadsheet) {
+    throw Object.assign(new Error("workbook_not_a_spreadsheet"), { code: 400 });
   }
+  const spreadsheetName = lookup.name;
 
   const now = isoNow();
   const workbook: WorkbookMeta = {
@@ -213,34 +232,13 @@ export async function attachWorkbookCandidate(args: {
 }): Promise<{ workbook: WorkbookMeta }> {
   const { customerId, uid, spreadsheetId, spreadsheetName: nameHint, enrollmentId, googleAccessToken } = args;
 
-  let finalName: string | undefined = nameHint;
-
-  try {
-    const drive = await buildUserDriveClient(uid, googleAccessToken);
-    if (drive) {
-      const meta = await drive.files.get({
-        fileId: spreadsheetId,
-        fields: "id,name,mimeType",
-        supportsAllDrives: true,
-      });
-      const mime = String(meta.data?.mimeType || "").trim();
-      if (mime && !isWorkbookMime(mime)) {
-        throw Object.assign(new Error("workbook_not_a_spreadsheet"), { code: 400 });
-      }
-      finalName = String(meta.data?.name || "").trim() || finalName;
-    }
-  } catch (err: any) {
-    const msg = String(err?.message || "");
-    if (msg === "workbook_not_a_spreadsheet") throw err;
-    const status = Number(err?.response?.status);
-    if (status === 404) throw Object.assign(new Error("workbook_not_found"), { code: 404 });
-    if (status === 403) throw Object.assign(new Error("workbook_access_denied"), { code: 403 });
-    if (status === 401) {
-      void markTokenRevoked(uid, "googleDrive");
-      logger.warn("workbookService: Drive 401 — token revoked, saving without validation", { spreadsheetId });
-    } else {
-      logger.warn("workbookService: candidate validation skipped", { spreadsheetId, reason: msg });
-    }
+  // The candidate came from a mime-filtered folder listing, so its name and type
+  // are already known client-side — linking needs NO Drive call. Only when the
+  // client didn't supply a name do we attempt a best-effort lookup (never blocks).
+  let finalName: string | undefined = nameHint?.trim() || undefined;
+  if (!finalName) {
+    const lookup = await lookupWorkbookMetaBestEffort({ uid, spreadsheetId, googleAccessToken });
+    finalName = lookup.name;
   }
 
   const now = isoNow();

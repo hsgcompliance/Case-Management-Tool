@@ -1,11 +1,11 @@
 # Graph Report - .  (2026-06-11)
 
 ## Corpus Check
-- 735 files · ~696,719 words
+- 735 files · ~697,875 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4066 nodes · 5349 edges · 705 communities detected
+- 4069 nodes · 5354 edges · 705 communities detected
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
 - Token cost: 0 input · 0 output
 
@@ -759,7 +759,7 @@ Cohesion: 0.1
 Nodes (27): addMonths(), addYears(), assertOrgAccess(), buildIdFromKey(), compositeKey(), dueMonth(), ensureMonthlySubtypeTag(), ensurePaymentIds() (+19 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.07
+Cohesion: 0.06
 Nodes (16): applyUpsertToLists(), asArr(), attachIdsToFallbackRows(), docToCustomer(), extractUpsertIds(), extractUpsertRows(), fetchCustomerById(), getAllCustomerListKeys() (+8 more)
 
 ### Community 5 - "Community 5"
@@ -775,12 +775,12 @@ Cohesion: 0.19
 Nodes (32): addSnapshotUpdatesToBatch(), assertCustomerAccess(), assertEnrollmentAccess(), assertOrgScopedDoc(), batchCheckActiveStatus(), batchGetDocuments(), buildOutputEntry(), buildQuestionMap() (+24 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.14
-Nodes (29): appendWorkbookRow(), buildColMapForRow(), cellKindForDataType(), colToIdx(), contentColumns(), dataStartRow(), detectVariant(), effectiveRange() (+21 more)
+Cohesion: 0.09
+Nodes (17): cleanOptionalUnsetFields(), deepClone(), deriveBudget(), fromCents(), handleSave(), isEmptyOptionalValue(), isPlainObject(), normalizeGrantForForm() (+9 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.1
-Nodes (15): deepClone(), deriveBudget(), fromCents(), handleSave(), isPlainObject(), normalizeGrantForForm(), num(), recomputeBudgetTotals() (+7 more)
+Cohesion: 0.14
+Nodes (29): appendWorkbookRow(), buildColMapForRow(), cellKindForDataType(), colToIdx(), contentColumns(), dataStartRow(), detectVariant(), effectiveRange() (+21 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.11
@@ -799,20 +799,20 @@ Cohesion: 0.15
 Nodes (25): applyGrantLineItemDelete(), applyGrantLineItemUpsert(), applyGrantPatch(), applyPushOperation(), assertPaymentQueueOrg(), assertSheetsBridgeSecret(), buildGrantPatchPayload(), buildNextLineItems() (+17 more)
 
 ### Community 14 - "Community 14"
+Cohesion: 0.08
+Nodes (8): isDeletedCustomer(), levenshtein(), matchesDeletedFilter(), matchesSearch(), normName(), readPersistedFilters(), tokenFuzzy(), writePersistedFilters()
+
+### Community 15 - "Community 15"
 Cohesion: 0.12
 Nodes (22): drawEnemyShip(), drawFrame(), drawHud(), drawOverlay(), drawPlayer(), enemyCountForWave(), enemyFill(), isBossWave() (+14 more)
 
-### Community 15 - "Community 15"
+### Community 16 - "Community 16"
 Cohesion: 0.22
 Nodes (26): asText(), bucketCard(), buildFallbackRow(), buildRawMeta(), canonicalCard(), computeFlex(), emptyTypedFiles(), extractCreditCard() (+18 more)
 
-### Community 16 - "Community 16"
+### Community 17 - "Community 17"
 Cohesion: 0.16
 Nodes (24): canonTopRole(), claimsFromShape(), createUserService(), dottedPrefixToNested(), getUserComposite(), inviteContinueUrl(), inviteUserService(), isRecord() (+16 more)
-
-### Community 17 - "Community 17"
-Cohesion: 0.08
-Nodes (8): isDeletedCustomer(), levenshtein(), matchesDeletedFilter(), matchesSearch(), normName(), readPersistedFilters(), tokenFuzzy(), writePersistedFilters()
 
 ### Community 18 - "Community 18"
 Cohesion: 0.11
@@ -847,16 +847,16 @@ Cohesion: 0.1
 Nodes (5): applyOptimisticInboxStatusPatch(), applyOptimisticTasksListStatusPatch(), patchCollectionByStatus(), queryStatusFilter(), toTargetStatus()
 
 ### Community 26 - "Community 26"
-Cohesion: 0.11
-Nodes (14): addCustomCategory(), asInvoiceOptions(), eligibilityDraftObject(), hasRentalAssistanceTag(), invoiceDocumentsFrom(), levelOfAssistanceFrom(), listFromUnknown(), mergeInvoiceOptions() (+6 more)
-
-### Community 27 - "Community 27"
 Cohesion: 0.09
 Nodes (3): capEnrollmentEndDate(), createEnrollmentDraft(), isoToday()
 
-### Community 28 - "Community 28"
+### Community 27 - "Community 27"
 Cohesion: 0.12
 Nodes (13): buildNoteTags(), computeRentCertDues(), firstOfNextMonth(), isConsecutiveMonth(), isISO(), isRentPayment(), monthDiff(), normalizePayments() (+5 more)
+
+### Community 28 - "Community 28"
+Cohesion: 0.12
+Nodes (14): addCustomCategory(), asInvoiceOptions(), eligibilityDraftObject(), hasRentalAssistanceTag(), invoiceDocumentsFrom(), levelOfAssistanceFrom(), listFromUnknown(), mergeInvoiceOptions() (+6 more)
 
 ### Community 29 - "Community 29"
 Cohesion: 0.32
@@ -940,7 +940,7 @@ Nodes (8): asObject(), onLoadMoreFromJotform(), onPullFromMain(), onPullSubmissi
 
 ### Community 49 - "Community 49"
 Cohesion: 0.11
-Nodes (0):
+Nodes (0): 
 
 ### Community 50 - "Community 50"
 Cohesion: 0.2
@@ -984,7 +984,7 @@ Nodes (10): applyCustomerActiveToggle(), clone(), isCustomerActive(), isReserved
 
 ### Community 60 - "Community 60"
 Cohesion: 0.12
-Nodes (0):
+Nodes (0): 
 
 ### Community 61 - "Community 61"
 Cohesion: 0.16
@@ -1008,7 +1008,7 @@ Nodes (11): asBucket(), asNum(), asStatus(), asText(), makeTaskDefKey(), normali
 
 ### Community 66 - "Community 66"
 Cohesion: 0.12
-Nodes (0):
+Nodes (0): 
 
 ### Community 67 - "Community 67"
 Cohesion: 0.17
@@ -1188,7 +1188,7 @@ Nodes (3): applyIntegrationMode(), onSave(), saveSettings()
 
 ### Community 111 - "Community 111"
 Cohesion: 0.18
-Nodes (0):
+Nodes (0): 
 
 ### Community 112 - "Community 112"
 Cohesion: 0.38
@@ -1208,7 +1208,7 @@ Nodes (9): endpointNamespace(), getReqTemplateForEndpoint(), guessSchemaRef(), i
 
 ### Community 116 - "Community 116"
 Cohesion: 0.2
-Nodes (0):
+Nodes (0): 
 
 ### Community 117 - "Community 117"
 Cohesion: 0.27
@@ -1228,7 +1228,7 @@ Nodes (7): asRecord(), findCachedPaymentQueueItem(), findCachedPaymentQueueItemB
 
 ### Community 121 - "Community 121"
 Cohesion: 0.2
-Nodes (0):
+Nodes (0): 
 
 ### Community 122 - "Community 122"
 Cohesion: 0.31
@@ -1268,15 +1268,15 @@ Nodes (5): enrollmentControlDescriptor(), enrollmentControlDone(), enrollmentCon
 
 ### Community 131 - "Community 131"
 Cohesion: 0.22
-Nodes (0):
+Nodes (0): 
 
 ### Community 132 - "Community 132"
 Cohesion: 0.22
-Nodes (0):
+Nodes (0): 
 
 ### Community 133 - "Community 133"
 Cohesion: 0.22
-Nodes (0):
+Nodes (0): 
 
 ### Community 134 - "Community 134"
 Cohesion: 0.39
@@ -1288,7 +1288,7 @@ Nodes (7): hasTeamAccess(), nestedClaimObjects(), orgIdFromClaims(), requireOrg(
 
 ### Community 136 - "Community 136"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
 ### Community 137 - "Community 137"
 Cohesion: 0.5
@@ -1312,7 +1312,7 @@ Nodes (6): isRentalAssistance(), PaymentTypeBadge(), PaymentTypeChip(), paymentT
 
 ### Community 142 - "Community 142"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
 ### Community 143 - "Community 143"
 Cohesion: 0.43
@@ -1332,7 +1332,7 @@ Nodes (5): errorMessage(), openRunner(), parsePayload(), prettyJson(), runEndpoi
 
 ### Community 147 - "Community 147"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
 ### Community 148 - "Community 148"
 Cohesion: 0.46
@@ -1340,11 +1340,11 @@ Nodes (5): ACUITY_PRESET(), DEFAULT_DRAFT(), loadExisting(), loadPreset(), REFER
 
 ### Community 149 - "Community 149"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
 ### Community 150 - "Community 150"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
 ### Community 151 - "Community 151"
 Cohesion: 0.43
@@ -1416,7 +1416,7 @@ Nodes (3): removeOtherContact(), saveOtherContacts(), updateOtherContactUser()
 
 ### Community 168 - "Community 168"
 Cohesion: 0.29
-Nodes (0):
+Nodes (0): 
 
 ### Community 169 - "Community 169"
 Cohesion: 0.62
@@ -1444,7 +1444,7 @@ Nodes (4): asObj(), budgetTotal(), enrollmentPopulation(), isOtherPopulation()
 
 ### Community 175 - "Community 175"
 Cohesion: 0.29
-Nodes (0):
+Nodes (0): 
 
 ### Community 176 - "Community 176"
 Cohesion: 0.43
@@ -1452,19 +1452,19 @@ Nodes (4): attachGlobalQueryClient(), normalizePatchKeys(), useInvalidateMutatio
 
 ### Community 177 - "Community 177"
 Cohesion: 0.29
-Nodes (0):
+Nodes (0): 
 
 ### Community 178 - "Community 178"
 Cohesion: 0.29
-Nodes (0):
+Nodes (0): 
 
 ### Community 179 - "Community 179"
 Cohesion: 0.29
-Nodes (0):
+Nodes (0): 
 
 ### Community 180 - "Community 180"
 Cohesion: 0.33
-Nodes (0):
+Nodes (0): 
 
 ### Community 181 - "Community 181"
 Cohesion: 0.47
@@ -1488,7 +1488,7 @@ Nodes (5): ageInYears(), applyAgeOperator(), evaluateConditionalTaskRules(), nor
 
 ### Community 186 - "Community 186"
 Cohesion: 0.33
-Nodes (0):
+Nodes (0): 
 
 ### Community 187 - "Community 187"
 Cohesion: 0.4
@@ -1504,7 +1504,7 @@ Nodes (3): sanitizeEnrollmentForWrite(), sanitizeEnrollmentsUpsertBody(), stripU
 
 ### Community 190 - "Community 190"
 Cohesion: 0.33
-Nodes (0):
+Nodes (0): 
 
 ### Community 191 - "Community 191"
 Cohesion: 0.67
@@ -1516,7 +1516,7 @@ Nodes (4): asStringArray(), extrasRef(), getPinnedGrantIds(), parsePinnedGrantId
 
 ### Community 193 - "Community 193"
 Cohesion: 0.33
-Nodes (0):
+Nodes (0): 
 
 ### Community 194 - "Community 194"
 Cohesion: 0.4
@@ -1552,7 +1552,7 @@ Nodes (2): deepMerge(), isPlainObject()
 
 ### Community 202 - "Community 202"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 203 - "Community 203"
 Cohesion: 0.5
@@ -1560,7 +1560,7 @@ Nodes (2): getOrgId(), syncSubmission()
 
 ### Community 204 - "Community 204"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 205 - "Community 205"
 Cohesion: 0.6
@@ -1584,11 +1584,11 @@ Nodes (2): stableSortObject(), stableStringify()
 
 ### Community 210 - "Community 210"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 211 - "Community 211"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 212 - "Community 212"
 Cohesion: 0.6
@@ -1596,7 +1596,7 @@ Nodes (3): classifyError(), resetAuthAttempt(), startGoogleSignIn()
 
 ### Community 213 - "Community 213"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 214 - "Community 214"
 Cohesion: 0.5
@@ -1612,7 +1612,7 @@ Nodes (3): currentMonth(), ledgerToRow(), queueToRow()
 
 ### Community 217 - "Community 217"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 218 - "Community 218"
 Cohesion: 0.5
@@ -1620,19 +1620,19 @@ Nodes (2): getCardHealth(), SpentRemainingPanel()
 
 ### Community 219 - "Community 219"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 220 - "Community 220"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 221 - "Community 221"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 222 - "Community 222"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 223 - "Community 223"
 Cohesion: 0.5
@@ -1640,11 +1640,11 @@ Nodes (2): buildEmbedUrl(), WorkbookEmbed()
 
 ### Community 224 - "Community 224"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 225 - "Community 225"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 226 - "Community 226"
 Cohesion: 0.6
@@ -1660,7 +1660,7 @@ Nodes (3): folderUrl(), getCustomerDriveFolderLink(), parseDriveFolderId()
 
 ### Community 229 - "Community 229"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 230 - "Community 230"
 Cohesion: 0.6
@@ -1672,7 +1672,7 @@ Nodes (2): isTypingTarget(), shouldHandleGlobalGameKey()
 
 ### Community 232 - "Community 232"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 233 - "Community 233"
 Cohesion: 0.5
@@ -1684,15 +1684,15 @@ Nodes (2): DEFAULT_TEMPLATE(), removeTemplate()
 
 ### Community 235 - "Community 235"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 236 - "Community 236"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 237 - "Community 237"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 238 - "Community 238"
 Cohesion: 0.8
@@ -1700,7 +1700,7 @@ Nodes (4): getInboxDetailKind(), hasWord(), isInboxClosed(), tok()
 
 ### Community 239 - "Community 239"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 240 - "Community 240"
 Cohesion: 0.7
@@ -1720,7 +1720,7 @@ Nodes (2): field(), smartHeaderId()
 
 ### Community 244 - "Community 244"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 245 - "Community 245"
 Cohesion: 0.83
@@ -1728,15 +1728,15 @@ Nodes (3): requireUser(), unauthenticated(), verifyUserFromRequest()
 
 ### Community 246 - "Community 246"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 247 - "Community 247"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 248 - "Community 248"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 249 - "Community 249"
 Cohesion: 0.83
@@ -1748,7 +1748,7 @@ Nodes (3): getDigestEnabledFlags(), isDigestDisabledForOrg(), resolveImplicitOrg
 
 ### Community 251 - "Community 251"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 252 - "Community 252"
 Cohesion: 0.67
@@ -1764,7 +1764,7 @@ Nodes (3): ageInYears(), applyAgeOperator(), evaluateConditionalRules()
 
 ### Community 255 - "Community 255"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 256 - "Community 256"
 Cohesion: 0.67
@@ -1772,7 +1772,7 @@ Nodes (2): contribution(), enrollmentState()
 
 ### Community 257 - "Community 257"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 258 - "Community 258"
 Cohesion: 0.67
@@ -1780,11 +1780,11 @@ Nodes (2): monthKeysUTC(), summarizeEnrollment()
 
 ### Community 259 - "Community 259"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 260 - "Community 260"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 261 - "Community 261"
 Cohesion: 0.67
@@ -1792,7 +1792,7 @@ Nodes (2): createActivity(), resolveOrgId()
 
 ### Community 262 - "Community 262"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 263 - "Community 263"
 Cohesion: 0.83
@@ -1800,7 +1800,7 @@ Nodes (3): callFunction(), functionsBase(), toSearchParams()
 
 ### Community 264 - "Community 264"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 265 - "Community 265"
 Cohesion: 0.5
@@ -1812,15 +1812,15 @@ Nodes (1): Loading()
 
 ### Community 267 - "Community 267"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 268 - "Community 268"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 269 - "Community 269"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 270 - "Community 270"
 Cohesion: 0.67
@@ -1832,11 +1832,11 @@ Nodes (3): CardInvoiceEntryDialog(), parseDollarAmount(), todayISO()
 
 ### Community 272 - "Community 272"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 273 - "Community 273"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 274 - "Community 274"
 Cohesion: 0.83
@@ -1844,11 +1844,11 @@ Nodes (3): buildGrantMetricItems(), GrantMetricCards(), summarizePopulations()
 
 ### Community 275 - "Community 275"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 276 - "Community 276"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 277 - "Community 277"
 Cohesion: 0.67
@@ -1860,11 +1860,11 @@ Nodes (2): attemptClose(), onKey()
 
 ### Community 279 - "Community 279"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 280 - "Community 280"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 281 - "Community 281"
 Cohesion: 0.83
@@ -1872,11 +1872,11 @@ Nodes (3): cssEscape(), cssSelectorFor(), isValidId()
 
 ### Community 282 - "Community 282"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 283 - "Community 283"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 284 - "Community 284"
 Cohesion: 0.83
@@ -1884,7 +1884,7 @@ Nodes (3): cardFields(), field(), invoiceFields()
 
 ### Community 285 - "Community 285"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 286 - "Community 286"
 Cohesion: 0.67
@@ -1892,7 +1892,7 @@ Nodes (2): bandFromScore(), onSave()
 
 ### Community 287 - "Community 287"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 288 - "Community 288"
 Cohesion: 1.0
@@ -1900,7 +1900,7 @@ Nodes (3): moveSelectedUsers(), parseCsv(), uniqStrings()
 
 ### Community 289 - "Community 289"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 290 - "Community 290"
 Cohesion: 0.83
@@ -1908,7 +1908,7 @@ Nodes (3): computePositions(), pickColor(), refresh()
 
 ### Community 291 - "Community 291"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 292 - "Community 292"
 Cohesion: 0.67
@@ -1916,19 +1916,19 @@ Nodes (2): getGrantFinancialVisibility(), shouldShowInBudgetWorkspace()
 
 ### Community 293 - "Community 293"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 294 - "Community 294"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 295 - "Community 295"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 296 - "Community 296"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 297 - "Community 297"
 Cohesion: 0.67
@@ -1936,11 +1936,11 @@ Nodes (2): fetchCustomerNames(), fetchGrantAllocations()
 
 ### Community 298 - "Community 298"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 299 - "Community 299"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 300 - "Community 300"
 Cohesion: 1.0
@@ -1952,7 +1952,7 @@ Nodes (2): refreshAllCreditCardBudgets(), refreshCreditCardBudgets()
 
 ### Community 302 - "Community 302"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 303 - "Community 303"
 Cohesion: 1.0
@@ -1968,23 +1968,23 @@ Nodes (2): deleteEnrollmentsCore(), unlinkEnrollmentSpends()
 
 ### Community 306 - "Community 306"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 307 - "Community 307"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 308 - "Community 308"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 309 - "Community 309"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 310 - "Community 310"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 311 - "Community 311"
 Cohesion: 1.0
@@ -1996,7 +1996,7 @@ Nodes (2): carryPaymentStatus(), paymentsBulkCopyScheduleHandler()
 
 ### Community 313 - "Community 313"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 314 - "Community 314"
 Cohesion: 1.0
@@ -2004,39 +2004,39 @@ Nodes (2): generateTaskScheduleForEnrollments(), generateTaskScheduleWriteHandle
 
 ### Community 315 - "Community 315"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 316 - "Community 316"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 317 - "Community 317"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 318 - "Community 318"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 319 - "Community 319"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 320 - "Community 320"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 321 - "Community 321"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 322 - "Community 322"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 323 - "Community 323"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 324 - "Community 324"
 Cohesion: 1.0
@@ -2044,7 +2044,7 @@ Nodes (2): DevMenu(), isRouteActive()
 
 ### Community 325 - "Community 325"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 326 - "Community 326"
 Cohesion: 1.0
@@ -2052,11 +2052,11 @@ Nodes (2): extractSummary(), onSubmit()
 
 ### Community 327 - "Community 327"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 328 - "Community 328"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 329 - "Community 329"
 Cohesion: 1.0
@@ -2064,7 +2064,7 @@ Nodes (2): FileTypeIcon(), getMimeCategory()
 
 ### Community 330 - "Community 330"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 331 - "Community 331"
 Cohesion: 1.0
@@ -2080,35 +2080,35 @@ Nodes (2): buildSystemMetricItems(), SystemMetricCards()
 
 ### Community 334 - "Community 334"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 335 - "Community 335"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 336 - "Community 336"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 337 - "Community 337"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 338 - "Community 338"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 339 - "Community 339"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 340 - "Community 340"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 341 - "Community 341"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 342 - "Community 342"
 Cohesion: 1.0
@@ -2116,35 +2116,35 @@ Nodes (2): attemptClose(), onKey()
 
 ### Community 343 - "Community 343"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 344 - "Community 344"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 345 - "Community 345"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 346 - "Community 346"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 347 - "Community 347"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 348 - "Community 348"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 349 - "Community 349"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 350 - "Community 350"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 351 - "Community 351"
 Cohesion: 1.0
@@ -2152,7 +2152,7 @@ Nodes (2): asTaskDefs(), maybeGenerateTasks()
 
 ### Community 352 - "Community 352"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 353 - "Community 353"
 Cohesion: 1.0
@@ -2160,7 +2160,7 @@ Nodes (2): collectEntries(), refresh()
 
 ### Community 354 - "Community 354"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 355 - "Community 355"
 Cohesion: 1.0
@@ -2168,11 +2168,11 @@ Nodes (2): mapInboxItemToBoardTask(), mapInboxTasksToBoardState()
 
 ### Community 356 - "Community 356"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 357 - "Community 357"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 358 - "Community 358"
 Cohesion: 1.0
@@ -2180,15 +2180,15 @@ Nodes (2): answerAt(), valueText()
 
 ### Community 359 - "Community 359"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 360 - "Community 360"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 361 - "Community 361"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 362 - "Community 362"
 Cohesion: 1.0
@@ -2208,1359 +2208,1359 @@ Nodes (2): computeRect(), update()
 
 ### Community 366 - "Community 366"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 367 - "Community 367"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 368 - "Community 368"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 369 - "Community 369"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 370 - "Community 370"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 371 - "Community 371"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 372 - "Community 372"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 373 - "Community 373"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 374 - "Community 374"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 375 - "Community 375"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 376 - "Community 376"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 377 - "Community 377"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 378 - "Community 378"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 379 - "Community 379"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 380 - "Community 380"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 381 - "Community 381"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 382 - "Community 382"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 383 - "Community 383"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 384 - "Community 384"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 385 - "Community 385"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 386 - "Community 386"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 387 - "Community 387"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 388 - "Community 388"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 389 - "Community 389"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 390 - "Community 390"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 391 - "Community 391"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 392 - "Community 392"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 393 - "Community 393"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 394 - "Community 394"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 395 - "Community 395"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 396 - "Community 396"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 397 - "Community 397"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 398 - "Community 398"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 399 - "Community 399"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 400 - "Community 400"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 401 - "Community 401"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 402 - "Community 402"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 403 - "Community 403"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 404 - "Community 404"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 405 - "Community 405"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 406 - "Community 406"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 407 - "Community 407"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 408 - "Community 408"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 409 - "Community 409"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 410 - "Community 410"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 411 - "Community 411"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 412 - "Community 412"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 413 - "Community 413"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 414 - "Community 414"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 415 - "Community 415"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 416 - "Community 416"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 417 - "Community 417"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 418 - "Community 418"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 419 - "Community 419"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 420 - "Community 420"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 421 - "Community 421"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 422 - "Community 422"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 423 - "Community 423"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 424 - "Community 424"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 425 - "Community 425"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 426 - "Community 426"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 427 - "Community 427"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 428 - "Community 428"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 429 - "Community 429"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 430 - "Community 430"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 431 - "Community 431"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 432 - "Community 432"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 433 - "Community 433"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 434 - "Community 434"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 435 - "Community 435"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 436 - "Community 436"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 437 - "Community 437"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 438 - "Community 438"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 439 - "Community 439"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 440 - "Community 440"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 441 - "Community 441"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 442 - "Community 442"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 443 - "Community 443"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 444 - "Community 444"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 445 - "Community 445"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 446 - "Community 446"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 447 - "Community 447"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 448 - "Community 448"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 449 - "Community 449"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 450 - "Community 450"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 451 - "Community 451"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 452 - "Community 452"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 453 - "Community 453"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 454 - "Community 454"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 455 - "Community 455"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 456 - "Community 456"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 457 - "Community 457"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 458 - "Community 458"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 459 - "Community 459"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 460 - "Community 460"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 461 - "Community 461"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 462 - "Community 462"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 463 - "Community 463"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 464 - "Community 464"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 465 - "Community 465"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 466 - "Community 466"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 467 - "Community 467"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 468 - "Community 468"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 469 - "Community 469"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 470 - "Community 470"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 471 - "Community 471"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 472 - "Community 472"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 473 - "Community 473"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 474 - "Community 474"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 475 - "Community 475"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 476 - "Community 476"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 477 - "Community 477"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 478 - "Community 478"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 479 - "Community 479"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 480 - "Community 480"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 481 - "Community 481"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 482 - "Community 482"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 483 - "Community 483"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 484 - "Community 484"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 485 - "Community 485"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 486 - "Community 486"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 487 - "Community 487"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 488 - "Community 488"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 489 - "Community 489"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 490 - "Community 490"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 491 - "Community 491"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 492 - "Community 492"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 493 - "Community 493"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 494 - "Community 494"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 495 - "Community 495"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 496 - "Community 496"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 497 - "Community 497"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 498 - "Community 498"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 499 - "Community 499"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 500 - "Community 500"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 501 - "Community 501"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 502 - "Community 502"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 503 - "Community 503"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 504 - "Community 504"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 505 - "Community 505"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 506 - "Community 506"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 507 - "Community 507"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 508 - "Community 508"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 509 - "Community 509"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 510 - "Community 510"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 511 - "Community 511"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 512 - "Community 512"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 513 - "Community 513"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 514 - "Community 514"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 515 - "Community 515"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 516 - "Community 516"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 517 - "Community 517"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 518 - "Community 518"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 519 - "Community 519"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 520 - "Community 520"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 521 - "Community 521"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 522 - "Community 522"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 523 - "Community 523"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 524 - "Community 524"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 525 - "Community 525"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 526 - "Community 526"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 527 - "Community 527"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 528 - "Community 528"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 529 - "Community 529"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 530 - "Community 530"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 531 - "Community 531"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 532 - "Community 532"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 533 - "Community 533"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 534 - "Community 534"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 535 - "Community 535"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 536 - "Community 536"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 537 - "Community 537"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 538 - "Community 538"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 539 - "Community 539"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 540 - "Community 540"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 541 - "Community 541"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 542 - "Community 542"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 543 - "Community 543"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 544 - "Community 544"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 545 - "Community 545"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 546 - "Community 546"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 547 - "Community 547"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 548 - "Community 548"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 549 - "Community 549"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 550 - "Community 550"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 551 - "Community 551"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 552 - "Community 552"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 553 - "Community 553"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 554 - "Community 554"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 555 - "Community 555"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 556 - "Community 556"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 557 - "Community 557"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 558 - "Community 558"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 559 - "Community 559"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 560 - "Community 560"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 561 - "Community 561"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 562 - "Community 562"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 563 - "Community 563"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 564 - "Community 564"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 565 - "Community 565"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 566 - "Community 566"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 567 - "Community 567"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 568 - "Community 568"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 569 - "Community 569"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 570 - "Community 570"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 571 - "Community 571"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 572 - "Community 572"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 573 - "Community 573"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 574 - "Community 574"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 575 - "Community 575"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 576 - "Community 576"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 577 - "Community 577"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 578 - "Community 578"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 579 - "Community 579"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 580 - "Community 580"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 581 - "Community 581"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 582 - "Community 582"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 583 - "Community 583"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 584 - "Community 584"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 585 - "Community 585"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 586 - "Community 586"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 587 - "Community 587"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 588 - "Community 588"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 589 - "Community 589"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 590 - "Community 590"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 591 - "Community 591"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 592 - "Community 592"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 593 - "Community 593"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 594 - "Community 594"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 595 - "Community 595"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 596 - "Community 596"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 597 - "Community 597"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 598 - "Community 598"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 599 - "Community 599"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 600 - "Community 600"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 601 - "Community 601"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 602 - "Community 602"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 603 - "Community 603"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 604 - "Community 604"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 605 - "Community 605"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 606 - "Community 606"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 607 - "Community 607"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 608 - "Community 608"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 609 - "Community 609"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 610 - "Community 610"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 611 - "Community 611"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 612 - "Community 612"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 613 - "Community 613"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 614 - "Community 614"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 615 - "Community 615"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 616 - "Community 616"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 617 - "Community 617"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 618 - "Community 618"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 619 - "Community 619"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 620 - "Community 620"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 621 - "Community 621"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 622 - "Community 622"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 623 - "Community 623"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 624 - "Community 624"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 625 - "Community 625"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 626 - "Community 626"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 627 - "Community 627"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 628 - "Community 628"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 629 - "Community 629"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 630 - "Community 630"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 631 - "Community 631"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 632 - "Community 632"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 633 - "Community 633"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 634 - "Community 634"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 635 - "Community 635"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 636 - "Community 636"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 637 - "Community 637"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 638 - "Community 638"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 639 - "Community 639"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 640 - "Community 640"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 641 - "Community 641"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 642 - "Community 642"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 643 - "Community 643"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 644 - "Community 644"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 645 - "Community 645"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 646 - "Community 646"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 647 - "Community 647"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 648 - "Community 648"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 649 - "Community 649"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 650 - "Community 650"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 651 - "Community 651"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 652 - "Community 652"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 653 - "Community 653"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 654 - "Community 654"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 655 - "Community 655"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 656 - "Community 656"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 657 - "Community 657"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 658 - "Community 658"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 659 - "Community 659"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 660 - "Community 660"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 661 - "Community 661"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 662 - "Community 662"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 663 - "Community 663"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 664 - "Community 664"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 665 - "Community 665"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 666 - "Community 666"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 667 - "Community 667"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 668 - "Community 668"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 669 - "Community 669"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 670 - "Community 670"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 671 - "Community 671"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 672 - "Community 672"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 673 - "Community 673"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 674 - "Community 674"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 675 - "Community 675"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 676 - "Community 676"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 677 - "Community 677"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 678 - "Community 678"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 679 - "Community 679"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 680 - "Community 680"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 681 - "Community 681"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 682 - "Community 682"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 683 - "Community 683"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 684 - "Community 684"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 685 - "Community 685"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 686 - "Community 686"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 687 - "Community 687"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 688 - "Community 688"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 689 - "Community 689"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 690 - "Community 690"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 691 - "Community 691"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 692 - "Community 692"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 693 - "Community 693"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 694 - "Community 694"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 695 - "Community 695"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 696 - "Community 696"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 697 - "Community 697"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 698 - "Community 698"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 699 - "Community 699"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 700 - "Community 700"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 701 - "Community 701"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 702 - "Community 702"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 703 - "Community 703"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 704 - "Community 704"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ## Knowledge Gaps
 - **Thin community `Community 367`** (2 nodes): `core.ts`, `toArray()`
@@ -4252,7 +4252,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `Community 3` be split into smaller, more focused modules?**
   _Cohesion score 0.1 - nodes in this community are weakly interconnected._
 - **Should `Community 4` be split into smaller, more focused modules?**
-  _Cohesion score 0.07 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06 - nodes in this community are weakly interconnected._
 - **Should `Community 5` be split into smaller, more focused modules?**
   _Cohesion score 0.07 - nodes in this community are weakly interconnected._
 - **Should `Community 6` be split into smaller, more focused modules?**
