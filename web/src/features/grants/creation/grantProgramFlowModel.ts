@@ -2,6 +2,7 @@ import {
   getGrantFinancialCapabilities,
   normalizeGrantFinancialConfig,
   normalizeGrantComplianceConfig,
+  parseGrantMaxAssistanceMonths,
   type TGrantFinancialConfig,
   type TGrantFinancialModel,
   type TGrantKind,
@@ -38,6 +39,7 @@ export type GrantProgramFlowDraft = {
   endDate: string;
   duration: string;
   lengthOfAssistance: string;
+  maxAssistanceMonths: string;
   authorizationMonths: string;
   complianceConfig?: TGrantComplianceConfig | null;
   allocationEnabled: boolean;
@@ -282,6 +284,7 @@ export function createInitialGrantProgramDraft(
     endDate: text(source.endDate).slice(0, 10),
     duration: text(source.duration) || (kind === "grant" ? "1 Year" : ""),
     lengthOfAssistance: text(source.lengthOfAssistance || source.maxLengthOfAssistance),
+    maxAssistanceMonths: text(source.maxAssistanceMonths || parseGrantMaxAssistanceMonths(source.lengthOfAssistance || source.maxLengthOfAssistance) || ""),
     authorizationMonths: text(enrollmentDefaults.authorizationMonths),
     complianceConfig: isRecord(source.complianceConfig) ? normalizeGrantComplianceConfig(source) : null,
     allocationEnabled: normalizeGrantFinancialConfig(source).allocationEnabled,
@@ -376,7 +379,12 @@ export function buildGrantProgramPayload(draft: GrantProgramFlowDraft): Record<s
     startDate: draft.startDate || "",
     endDate: draft.endDate || "",
     duration: draft.duration.trim() || null,
-    lengthOfAssistance: draft.lengthOfAssistance.trim() || null,
+    lengthOfAssistance: draft.maxAssistanceMonths.trim()
+      ? `${Math.max(1, Math.min(240, Math.floor(asNumber(draft.maxAssistanceMonths, 1))))} months`
+      : draft.lengthOfAssistance.trim() || null,
+    maxAssistanceMonths: draft.maxAssistanceMonths.trim()
+      ? Math.max(1, Math.min(240, Math.floor(asNumber(draft.maxAssistanceMonths, 1))))
+      : null,
     description: draft.description.trim() || null,
     servicesOffered: draft.servicesOffered.map(text).filter(Boolean),
     eligibility: draft.eligibility,

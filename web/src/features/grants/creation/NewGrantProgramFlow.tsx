@@ -485,11 +485,19 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
           <span className="label">Max length of assistance</span>
           <input
             className="input"
-            value={draft.lengthOfAssistance}
-            placeholder=""
+            type="number"
+            min={1}
+            max={240}
+            step={1}
+            value={draft.maxAssistanceMonths}
+            placeholder="18"
             onChange={(e) => {
               const value = e.currentTarget.value;
-              setDraft((prev) => ({ ...prev, lengthOfAssistance: value }));
+              setDraft((prev) => ({
+                ...prev,
+                maxAssistanceMonths: value,
+                lengthOfAssistance: value ? `${value} months` : "",
+              }));
             }}
           />
         </label>
