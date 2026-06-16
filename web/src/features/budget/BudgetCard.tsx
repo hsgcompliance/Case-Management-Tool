@@ -1,6 +1,6 @@
 // web/src/features/budget/BudgetCard.tsx
 "use client";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useGrantMetrics } from "@hooks/useMetrics";
 import { useGrantCustomerAllocations, type CustomerAllocation } from "@hooks/useGrantCustomerAllocations";
 import { statusChipClass, grantAccentLeftBorder, grantAccentHeaderBg } from "@lib/colorRegistry";
@@ -31,7 +31,6 @@ function hasSelectedTextWithin(element: HTMLElement): boolean {
 const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 const toCents = (n: number) => Math.round(Number(n || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
-const ALLOCATION_MAX_DEFAULT = 10000;
 
 function getBudget(g: Partial<Grant>) {
   const b = (g?.budget || {}) as Record<string, unknown>;
@@ -184,37 +183,73 @@ function getBudgetLineItems(grant: Grant) {
 function filterAllocationRows(
   rows: CustomerAllocation[],
   sortMode: AllocationSort,
-  minAmount: number,
-  maxAmount: number,
+  amountForRow: (row: CustomerAllocation) => number,
 ) {
-  const min = Number.isFinite(minAmount) ? minAmount : 0;
-  const max = Number.isFinite(maxAmount) ? maxAmount : ALLOCATION_MAX_DEFAULT;
-  const filtered = rows.filter((row) => row.projected >= min && row.projected <= max);
+  const filtered = rows.filter((row) => amountForRow(row) !== 0);
   return filtered.sort((a, b) => {
     if (sortMode === "name-desc") return b.customerName.localeCompare(a.customerName);
-    if (sortMode === "amount-asc") return a.projected - b.projected || a.customerName.localeCompare(b.customerName);
-    if (sortMode === "amount-desc") return b.projected - a.projected || a.customerName.localeCompare(b.customerName);
+    if (sortMode === "amount-asc") return amountForRow(a) - amountForRow(b) || a.customerName.localeCompare(b.customerName);
+    if (sortMode === "amount-desc") return amountForRow(b) - amountForRow(a) || a.customerName.localeCompare(b.customerName);
     return a.customerName.localeCompare(b.customerName);
   });
 }
 
-function AllocationListCardBody({ grantId }: { grantId: string }) {
+function AllocationListCardBody({
+  grant,
+  lineItemId,
+}: {
+  grant: Grant;
+  lineItemId?: string;
+}) {
+  const grantId = String(grant.id);
   const { data: rows = [], isLoading, error } = useGrantCustomerAllocations(grantId, { enabled: !!grantId });
   const [sortMode, setSortMode] = useState<AllocationSort>("name-asc");
+  const lineItems = useMemo(() => getBudgetLineItems(grant).filter((item) => item.id), [grant]);
+  const allocationScopes = useMemo(
+    () => [
+      { id: "", label: "All line items" },
+      ...lineItems.map((item) => ({ id: item.id, label: item.label })),
+    ],
+    [lineItems],
+  );
+  const initialScopeIndex = useMemo(() => {
+    if (!lineItemId) return 0;
+    const idx = allocationScopes.findIndex((scope) => scope.id === lineItemId);
+    return idx >= 0 ? idx : 0;
+  }, [allocationScopes, lineItemId]);
+  const [scopeIndex, setScopeIndex] = useState(initialScopeIndex);
+  useEffect(() => {
+    setScopeIndex(initialScopeIndex);
+  }, [initialScopeIndex]);
+  const safeScopeIndex = Math.min(scopeIndex, allocationScopes.length - 1);
+  const selectedScope = allocationScopes[safeScopeIndex] ?? allocationScopes[0];
+  const canCycleLineItems = allocationScopes.length > 2;
+  const amountForRow = useMemo(
+    () => (row: CustomerAllocation) =>
+      selectedScope?.id ? Number(row.lineItemTotal?.[selectedScope.id] || 0) : Number(row.total || 0),
+    [selectedScope?.id],
+  );
 
   const filteredRows = useMemo(
-    () => filterAllocationRows(rows, sortMode, 0, ALLOCATION_MAX_DEFAULT),
-    [rows, sortMode],
+    () => filterAllocationRows(rows, sortMode, amountForRow),
+    [amountForRow, rows, sortMode],
   );
-  const projectedTotal = useMemo(
-    () => filteredRows.reduce((sum, row) => sum + row.projected, 0),
-    [filteredRows],
+  const allocatedTotal = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + amountForRow(row), 0),
+    [amountForRow, filteredRows],
   );
+  const cycleScope = (direction: -1 | 1) => {
+    if (allocationScopes.length <= 1) return;
+    setScopeIndex((current) => {
+      const next = (current + direction + allocationScopes.length) % allocationScopes.length;
+      return next;
+    });
+  };
 
   return (
     <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
       <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-        Customer allocations
+        Total Allocated
         <select
           className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium normal-case tracking-normal text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
           value={sortMode}
@@ -223,16 +258,47 @@ function AllocationListCardBody({ grantId }: { grantId: string }) {
         >
           <option value="name-asc">Name A-Z</option>
           <option value="name-desc">Name Z-A</option>
-          <option value="amount-desc">Projected high-low</option>
-          <option value="amount-asc">Projected low-high</option>
+          <option value="amount-desc">Total allocated high-low</option>
+          <option value="amount-asc">Total allocated low-high</option>
         </select>
       </label>
 
-      <div className="mt-3 flex items-center justify-between text-xs">
-        <span className="text-slate-500 dark:text-slate-400">
-          {rows.length} customer{rows.length === 1 ? "" : "s"}
-        </span>
-        <span className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmtUsd(projectedTotal)} projected</span>
+      <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+        <div className="min-w-0">
+          <div className="truncate font-semibold text-slate-700 dark:text-slate-200">{selectedScope?.label || "All line items"}</div>
+          <div className="text-slate-500 dark:text-slate-400">
+            {filteredRows.length} customer{filteredRows.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {canCycleLineItems && (
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Previous line item"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  cycleScope(-1);
+                }}
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                title="Next line item"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  cycleScope(1);
+                }}
+              >
+                →
+              </button>
+            </div>
+          )}
+          <span className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmtUsd(allocatedTotal)}</span>
+        </div>
       </div>
 
       <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
@@ -241,7 +307,7 @@ function AllocationListCardBody({ grantId }: { grantId: string }) {
         ) : error ? (
           <div className="px-3 py-6 text-center text-xs text-red-500">Failed to load allocations.</div>
         ) : filteredRows.length === 0 ? (
-          <div className="px-3 py-6 text-center text-xs text-slate-400">No customers in this amount range.</div>
+          <div className="px-3 py-6 text-center text-xs text-slate-400">No customer allocations recorded.</div>
         ) : (
           filteredRows.map((row) => (
             <div
@@ -250,7 +316,7 @@ function AllocationListCardBody({ grantId }: { grantId: string }) {
             >
               <span className="min-w-0 truncate text-xs font-medium text-slate-700 dark:text-slate-200">{row.customerName}</span>
               <span className="shrink-0 text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">
-                {fmtUsd(row.projected)}
+                {fmtUsd(amountForRow(row))}
               </span>
             </div>
           ))
@@ -425,7 +491,7 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
 
       {/* Metric rows */}
       {isClientAlloc ? (
-        <AllocationListCardBody grantId={gid} />
+        <AllocationListCardBody grant={grant} lineItemId={lineItemId} />
       ) : isBillableFinancialModel ? (
         <BillableFinancialModelCardBody grant={grant} activeEnrollments={gm?.enrollments?.active} />
       ) : (
