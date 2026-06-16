@@ -13,7 +13,7 @@ export type BudgetGroupItem = {
   labelOverride?: string;
   /** Color key from COLOR_KEYS in BudgetConfigModal */
   color?: string;
-  cardType?: "standard" | "client-allocation";
+  cardType?: "standard" | "budget" | "client-allocation" | "allocation" | "billable";
 };
 
 export type BudgetGroupCfg = {

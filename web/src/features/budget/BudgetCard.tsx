@@ -162,6 +162,7 @@ function getLineItemBudget(grant: Grant, lineItemId: string) {
 }
 
 export type BudgetCardType = "standard" | "client-allocation";
+type BudgetCardDisplayType = BudgetCardType | "budget" | "allocation" | "billable";
 type AllocationSort = "name-asc" | "name-desc" | "amount-asc" | "amount-desc";
 
 function getBudgetLineItems(grant: Grant) {
@@ -200,12 +201,10 @@ function filterAllocationRows(
 function AllocationListCardBody({ grantId }: { grantId: string }) {
   const { data: rows = [], isLoading, error } = useGrantCustomerAllocations(grantId, { enabled: !!grantId });
   const [sortMode, setSortMode] = useState<AllocationSort>("name-asc");
-  const [minAmount, setMinAmount] = useState(0);
-  const [maxAmount, setMaxAmount] = useState(ALLOCATION_MAX_DEFAULT);
 
   const filteredRows = useMemo(
-    () => filterAllocationRows(rows, sortMode, minAmount, maxAmount),
-    [rows, sortMode, minAmount, maxAmount],
+    () => filterAllocationRows(rows, sortMode, 0, ALLOCATION_MAX_DEFAULT),
+    [rows, sortMode],
   );
   const projectedTotal = useMemo(
     () => filteredRows.reduce((sum, row) => sum + row.projected, 0),
@@ -214,52 +213,20 @@ function AllocationListCardBody({ grantId }: { grantId: string }) {
 
   return (
     <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
-      <div className="grid grid-cols-3 gap-2">
-        <label className="col-span-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          Customer allocations
-          <select
-            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium normal-case tracking-normal text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-            value={sortMode}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => setSortMode(event.currentTarget.value as AllocationSort)}
-          >
-            <option value="name-asc">Name A-Z</option>
-            <option value="name-desc">Name Z-A</option>
-            <option value="amount-desc">Projected high-low</option>
-            <option value="amount-asc">Projected low-high</option>
-          </select>
-        </label>
-        <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          Min
-          <input
-            type="number"
-            min={0}
-            max={10000}
-            step={100}
-            value={minAmount}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => setMinAmount(Number(event.currentTarget.value || 0))}
-            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-          />
-        </label>
-        <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          Max
-          <input
-            type="number"
-            min={0}
-            max={10000}
-            step={100}
-            value={maxAmount}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => setMaxAmount(Number(event.currentTarget.value || 0))}
-            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-          />
-        </label>
-        <div className="flex flex-col justify-end rounded-md border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
-          <span className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Shown</span>
-          <span className="text-xs font-semibold tabular-nums text-slate-800 dark:text-slate-100">{filteredRows.length}</span>
-        </div>
-      </div>
+      <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        Customer allocations
+        <select
+          className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium normal-case tracking-normal text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+          value={sortMode}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => setSortMode(event.currentTarget.value as AllocationSort)}
+        >
+          <option value="name-asc">Name A-Z</option>
+          <option value="name-desc">Name Z-A</option>
+          <option value="amount-desc">Projected high-low</option>
+          <option value="amount-asc">Projected low-high</option>
+        </select>
+      </label>
 
       <div className="mt-3 flex items-center justify-between text-xs">
         <span className="text-slate-500 dark:text-slate-400">
@@ -346,7 +313,7 @@ function BillableFinancialModelCardBody({
 interface BudgetCardProps {
   grant: Grant;
   lineItemId?: string;
-  cardType?: BudgetCardType;
+  cardType?: BudgetCardDisplayType;
   labelOverride?: string;
   accentColor?: string;
   onClick: () => void;
@@ -370,14 +337,10 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
   const isBillingMode = !drawsDownBudget && (financialCapabilities.billingEnabled || financialCapabilities.usesBillingLedger);
   const status = String(grant.status || "active");
 
-  // Allocation cards are explicit, or derived from line-item caps. Billable programs
-  // with allocation render a separate allocation card from BudgetGroupSection.
-  const isClientAlloc = cardType === "client-allocation" ||
-    (lineItemId
-      ? ((grant as any)?.budget?.lineItems as Array<Record<string, unknown>> | undefined)
-          ?.find((l) => l.id === lineItemId)?.capEnabled === true
-      : false);
-  const isBillableFinancialModel = isBillingMode && !isClientAlloc;
+  const displayType: BudgetCardDisplayType =
+    cardType === "allocation" ? "client-allocation" : cardType === "budget" ? "standard" : cardType;
+  const isClientAlloc = displayType === "client-allocation";
+  const isBillableFinancialModel = displayType === "billable";
 
   const availClass =
     !drawsDownBudget

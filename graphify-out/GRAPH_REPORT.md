@@ -1,11 +1,11 @@
 # Graph Report - .  (2026-06-16)
 
 ## Corpus Check
-- 737 files · ~704,775 words
+- 737 files · ~704,292 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4085 nodes · 5370 edges · 707 communities detected
+- 4080 nodes · 5365 edges · 707 communities detected
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
 - Token cost: 0 input · 0 output
 
@@ -801,52 +801,52 @@ Cohesion: 0.15
 Nodes (25): applyGrantLineItemDelete(), applyGrantLineItemUpsert(), applyGrantPatch(), applyPushOperation(), assertPaymentQueueOrg(), assertSheetsBridgeSecret(), buildGrantPatchPayload(), buildNextLineItems() (+17 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.08
-Nodes (8): isDeletedCustomer(), levenshtein(), matchesDeletedFilter(), matchesSearch(), normName(), readPersistedFilters(), tokenFuzzy(), writePersistedFilters()
-
-### Community 15 - "Community 15"
 Cohesion: 0.12
 Nodes (22): drawEnemyShip(), drawFrame(), drawHud(), drawOverlay(), drawPlayer(), enemyCountForWave(), enemyFill(), isBossWave() (+14 more)
 
-### Community 16 - "Community 16"
+### Community 15 - "Community 15"
 Cohesion: 0.22
 Nodes (26): asText(), bucketCard(), buildFallbackRow(), buildRawMeta(), canonicalCard(), computeFlex(), emptyTypedFiles(), extractCreditCard() (+18 more)
 
-### Community 17 - "Community 17"
+### Community 16 - "Community 16"
 Cohesion: 0.16
 Nodes (24): canonTopRole(), claimsFromShape(), createUserService(), dottedPrefixToNested(), getUserComposite(), inviteContinueUrl(), inviteUserService(), isRecord() (+16 more)
 
-### Community 18 - "Community 18"
+### Community 17 - "Community 17"
 Cohesion: 0.11
 Nodes (16): asTime(), close(), closeEnrollment(), CustomerTasksList(), displayName(), enrollmentSummaryLabel(), formatDate(), isActiveEnrollment() (+8 more)
 
-### Community 19 - "Community 19"
+### Community 18 - "Community 18"
 Cohesion: 0.11
 Nodes (15): buildFolderName(), buildTemplatePayload(), cleanLinkedFolders(), fileToBase64(), normalizeMatchText(), onAddFolder(), onLinkByUrl(), onLinkConfirm() (+7 more)
 
-### Community 20 - "Community 20"
+### Community 19 - "Community 19"
 Cohesion: 0.08
 Nodes (5): commitBlankDraft(), handleBlankKeyDown(), hasDraftValue(), normalizeText(), sourceStatusClass()
 
-### Community 21 - "Community 21"
+### Community 20 - "Community 20"
 Cohesion: 0.17
 Nodes (25): amountNumber(), asRecord(), buildPaymentEditorEnrollmentOptions(), buildPaymentEditorGrantInfo(), buildPaymentEditorRows(), buildPaymentEditorSavePlan(), compliancePatchFromStatus(), complianceStatus() (+17 more)
 
-### Community 22 - "Community 22"
+### Community 21 - "Community 21"
 Cohesion: 0.16
 Nodes (25): amountFromPayment(), assistanceTable(), budgetCell(), budgetColor(), budgetStrip(), buildAndSendRentalAssistanceDigest(), buildRentalAssistanceDigestData(), buildRentalAssistanceDigestHtml() (+17 more)
 
-### Community 23 - "Community 23"
+### Community 22 - "Community 22"
 Cohesion: 0.21
 Nodes (24): addDays(), addMonthsISO(), addYears(), firstOfNextMonthISO(), fmtFromTsLike(), fmtLongDate(), fmtMDY(), fmtShortMonthDay() (+16 more)
 
-### Community 24 - "Community 24"
+### Community 23 - "Community 23"
 Cohesion: 0.13
 Nodes (17): asPositiveInt(), asPositiveNumber(), cleanText(), defaultMonthlyPlan(), defaultServicePlan(), flagsFromPlan(), handleConfirmBuild(), handlePreviewSchedule() (+9 more)
 
-### Community 25 - "Community 25"
+### Community 24 - "Community 24"
 Cohesion: 0.1
 Nodes (5): applyOptimisticInboxStatusPatch(), applyOptimisticTasksListStatusPatch(), patchCollectionByStatus(), queryStatusFilter(), toTargetStatus()
+
+### Community 25 - "Community 25"
+Cohesion: 0.09
+Nodes (8): isDeletedCustomer(), levenshtein(), matchesDeletedFilter(), matchesSearch(), normName(), readPersistedFilters(), tokenFuzzy(), writePersistedFilters()
 
 ### Community 26 - "Community 26"
 Cohesion: 0.09
@@ -965,28 +965,28 @@ Cohesion: 0.13
 Nodes (4): sanitizeIndexQuery(), sanitizeParentId(), useGDriveBuildCustomerFolder(), useGDriveCustomerFolderIndex()
 
 ### Community 55 - "Community 55"
+Cohesion: 0.12
+Nodes (1): useGrants()
+
+### Community 56 - "Community 56"
 Cohesion: 0.19
 Nodes (10): capMatchesWant(), evaluateGate(), hasAnyCap(), hasLevel(), normTok(), RoleGate(), roleRankFromClaims(), roleTagsFromClaims() (+2 more)
 
-### Community 56 - "Community 56"
+### Community 57 - "Community 57"
 Cohesion: 0.2
 Nodes (11): amountToCents(), dateIso10(), invoiceLooksLikeCreditCardSpend(), itemMatchesCard(), ledgerMatchesCard(), ledgerRow(), matchingTerms(), monthFrom() (+3 more)
 
-### Community 57 - "Community 57"
+### Community 58 - "Community 58"
 Cohesion: 0.18
 Nodes (7): emptyTree(), groupsToTree(), makeDefaultFormSchemas(), makeEmptyDraft(), makeFormSchema(), newId(), pipelineToDraft()
 
-### Community 58 - "Community 58"
+### Community 59 - "Community 59"
 Cohesion: 0.17
 Nodes (10): applyCustomerActiveToggle(), clone(), isCustomerActive(), isReservedRouteId(), onSave(), onToggleActive(), resetToServer(), stable() (+2 more)
 
-### Community 59 - "Community 59"
-Cohesion: 0.12
-Nodes (0): 
-
 ### Community 60 - "Community 60"
 Cohesion: 0.12
-Nodes (1): useGrants()
+Nodes (0): 
 
 ### Community 61 - "Community 61"
 Cohesion: 0.16
@@ -1413,52 +1413,52 @@ Cohesion: 0.38
 Nodes (3): fromCents(), getBudget(), toCents()
 
 ### Community 167 - "Community 167"
+Cohesion: 0.29
+Nodes (0): 
+
+### Community 168 - "Community 168"
 Cohesion: 0.43
 Nodes (4): onToggleAssessment(), onToggleCompliance(), onTogglePaid(), refreshEnrollmentViews()
 
-### Community 168 - "Community 168"
+### Community 169 - "Community 169"
 Cohesion: 0.38
 Nodes (3): removeOtherContact(), saveOtherContacts(), updateOtherContactUser()
 
-### Community 169 - "Community 169"
+### Community 170 - "Community 170"
 Cohesion: 0.29
 Nodes (0): 
 
-### Community 170 - "Community 170"
+### Community 171 - "Community 171"
 Cohesion: 0.62
 Nodes (6): buildGameRecordUpdate(), buildHighScoreUpdate(), getGameHighScore(), getGameRecord(), getHighScore(), getRawMeta()
 
-### Community 171 - "Community 171"
+### Community 172 - "Community 172"
 Cohesion: 0.33
 Nodes (2): drawEnemyAvatar(), drawSkull()
 
-### Community 172 - "Community 172"
+### Community 173 - "Community 173"
 Cohesion: 0.33
 Nodes (2): maxBoardSize(), refreshBounds()
 
-### Community 173 - "Community 173"
+### Community 174 - "Community 174"
 Cohesion: 0.43
 Nodes (4): handleClearEnrollments(), handleClearPayments(), handleReconcile(), invalidateGrant()
 
-### Community 174 - "Community 174"
+### Community 175 - "Community 175"
 Cohesion: 0.33
 Nodes (2): addRule(), newRule()
 
-### Community 175 - "Community 175"
+### Community 176 - "Community 176"
 Cohesion: 0.38
 Nodes (4): asObj(), budgetTotal(), enrollmentPopulation(), isOtherPopulation()
 
-### Community 176 - "Community 176"
+### Community 177 - "Community 177"
 Cohesion: 0.29
 Nodes (0): 
-
-### Community 177 - "Community 177"
-Cohesion: 0.43
-Nodes (4): attachGlobalQueryClient(), normalizePatchKeys(), useInvalidateMutation(), useOptimisticMutation()
 
 ### Community 178 - "Community 178"
-Cohesion: 0.29
-Nodes (0): 
+Cohesion: 0.43
+Nodes (4): attachGlobalQueryClient(), normalizePatchKeys(), useInvalidateMutation(), useOptimisticMutation()
 
 ### Community 179 - "Community 179"
 Cohesion: 0.29
@@ -1469,164 +1469,164 @@ Cohesion: 0.29
 Nodes (0): 
 
 ### Community 181 - "Community 181"
-Cohesion: 0.33
+Cohesion: 0.29
 Nodes (0): 
 
 ### Community 182 - "Community 182"
+Cohesion: 0.33
+Nodes (0): 
+
+### Community 183 - "Community 183"
 Cohesion: 0.47
 Nodes (3): activeInactiveForGrant(), enrollmentState(), enrollmentStatus()
 
-### Community 183 - "Community 183"
+### Community 184 - "Community 184"
 Cohesion: 0.4
 Nodes (2): isLikelyPermissionOrVisibilityError(), listFoldersInParent()
 
-### Community 184 - "Community 184"
+### Community 185 - "Community 185"
 Cohesion: 0.4
 Nodes (2): enqueueAutoDigest(), makeAutoDigestDocId()
 
-### Community 185 - "Community 185"
+### Community 186 - "Community 186"
 Cohesion: 0.6
 Nodes (4): monthAdd(), monthKey(), nextMonthKey(), prevMonthKey()
 
-### Community 186 - "Community 186"
+### Community 187 - "Community 187"
 Cohesion: 0.6
 Nodes (5): ageInYears(), applyAgeOperator(), evaluateConditionalTaskRules(), normPopulation(), rulePopulations()
 
-### Community 187 - "Community 187"
+### Community 188 - "Community 188"
 Cohesion: 0.33
 Nodes (0): 
 
-### Community 188 - "Community 188"
+### Community 189 - "Community 189"
 Cohesion: 0.4
 Nodes (2): countRuleConditions(), schemaRuleSummary()
 
-### Community 189 - "Community 189"
+### Community 190 - "Community 190"
 Cohesion: 0.33
 Nodes (1): Page()
 
-### Community 190 - "Community 190"
+### Community 191 - "Community 191"
 Cohesion: 0.47
 Nodes (3): sanitizeEnrollmentForWrite(), sanitizeEnrollmentsUpsertBody(), stripUndefinedDeep()
 
-### Community 191 - "Community 191"
+### Community 192 - "Community 192"
 Cohesion: 0.33
 Nodes (0): 
 
-### Community 192 - "Community 192"
+### Community 193 - "Community 193"
 Cohesion: 0.67
 Nodes (5): applyPinWithLRU(), createDefaultState(), pageLayoutReducer(), sanitizeForTools(), uniq()
 
-### Community 193 - "Community 193"
+### Community 194 - "Community 194"
 Cohesion: 0.53
 Nodes (4): asStringArray(), extrasRef(), getPinnedGrantIds(), parsePinnedGrantIds()
 
-### Community 194 - "Community 194"
-Cohesion: 0.33
-Nodes (0): 
-
 ### Community 195 - "Community 195"
-Cohesion: 0.33
-Nodes (0): 
-
-### Community 196 - "Community 196"
 Cohesion: 0.4
 Nodes (2): addCondition(), newCondition()
 
-### Community 197 - "Community 197"
+### Community 196 - "Community 196"
 Cohesion: 0.47
 Nodes (3): blockStoreKey(), loadBlocks(), saveBlocks()
 
-### Community 198 - "Community 198"
+### Community 197 - "Community 197"
 Cohesion: 0.47
 Nodes (3): loadCardPhysics(), saveCardPhysics(), STORAGE_KEY()
 
-### Community 199 - "Community 199"
+### Community 198 - "Community 198"
 Cohesion: 0.4
 Nodes (2): enrollmentIsActive(), enrollmentStatusLabel()
 
-### Community 200 - "Community 200"
+### Community 199 - "Community 199"
 Cohesion: 0.47
 Nodes (3): useGoogleIntegrationScopes(), useGoogleIntegrationStatus(), useGoogleIntegrationStatuses()
 
-### Community 201 - "Community 201"
+### Community 200 - "Community 200"
 Cohesion: 0.4
 Nodes (2): start(), withPending()
 
-### Community 202 - "Community 202"
+### Community 201 - "Community 201"
 Cohesion: 0.7
 Nodes (4): computeBudgetTotals(), fromBudgetCents(), sumBudgetField(), toBudgetCents()
 
-### Community 203 - "Community 203"
+### Community 202 - "Community 202"
 Cohesion: 0.5
 Nodes (2): deepMerge(), isPlainObject()
 
-### Community 204 - "Community 204"
+### Community 203 - "Community 203"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 205 - "Community 205"
+### Community 204 - "Community 204"
 Cohesion: 0.5
 Nodes (2): getOrgId(), syncSubmission()
 
-### Community 206 - "Community 206"
+### Community 205 - "Community 205"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 207 - "Community 207"
+### Community 206 - "Community 206"
 Cohesion: 0.6
 Nodes (4): canAssignElevatedTopRole(), normalizeTeamIds(), scopeForManagedUser(), topRoleRank()
 
-### Community 208 - "Community 208"
+### Community 207 - "Community 207"
 Cohesion: 0.6
 Nodes (3): classifyTaskKind(), contribution(), monthKeysUTC()
 
-### Community 209 - "Community 209"
+### Community 208 - "Community 208"
 Cohesion: 0.5
 Nodes (2): docToActivity(), tsToISO()
 
-### Community 210 - "Community 210"
+### Community 209 - "Community 209"
 Cohesion: 0.6
 Nodes (3): isBrowserLocalhost(), isEmulatorRequested(), shouldUseEmulators()
 
-### Community 211 - "Community 211"
+### Community 210 - "Community 210"
 Cohesion: 0.6
 Nodes (2): stableSortObject(), stableStringify()
+
+### Community 211 - "Community 211"
+Cohesion: 0.4
+Nodes (0): 
 
 ### Community 212 - "Community 212"
 Cohesion: 0.4
 Nodes (0): 
 
 ### Community 213 - "Community 213"
-Cohesion: 0.4
-Nodes (0): 
-
-### Community 214 - "Community 214"
 Cohesion: 0.6
 Nodes (3): classifyError(), resetAuthAttempt(), startGoogleSignIn()
 
-### Community 215 - "Community 215"
+### Community 214 - "Community 214"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 216 - "Community 216"
+### Community 215 - "Community 215"
 Cohesion: 0.5
 Nodes (2): sanitizeCreditCardForWrite(), stripUndefinedDeep()
 
-### Community 217 - "Community 217"
+### Community 216 - "Community 216"
 Cohesion: 0.6
 Nodes (4): driveHeaders(), maybeDriveHeaders(), sanitizeCustomerFolderIndexQuery(), sanitizeParentId()
 
-### Community 218 - "Community 218"
+### Community 217 - "Community 217"
 Cohesion: 0.6
 Nodes (3): currentMonth(), ledgerToRow(), queueToRow()
 
-### Community 219 - "Community 219"
+### Community 218 - "Community 218"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 220 - "Community 220"
+### Community 219 - "Community 219"
 Cohesion: 0.5
 Nodes (2): getCardHealth(), SpentRemainingPanel()
+
+### Community 220 - "Community 220"
+Cohesion: 0.4
+Nodes (0): 
 
 ### Community 221 - "Community 221"
 Cohesion: 0.4
@@ -1641,56 +1641,56 @@ Cohesion: 0.4
 Nodes (0): 
 
 ### Community 224 - "Community 224"
-Cohesion: 0.4
-Nodes (0): 
-
-### Community 225 - "Community 225"
 Cohesion: 0.5
 Nodes (2): buildEmbedUrl(), WorkbookEmbed()
+
+### Community 225 - "Community 225"
+Cohesion: 0.4
+Nodes (0): 
 
 ### Community 226 - "Community 226"
 Cohesion: 0.4
 Nodes (0): 
 
 ### Community 227 - "Community 227"
-Cohesion: 0.4
-Nodes (0): 
-
-### Community 228 - "Community 228"
 Cohesion: 0.6
 Nodes (3): handleClose(), handleSubmit(), parseLast4()
 
-### Community 229 - "Community 229"
+### Community 228 - "Community 228"
 Cohesion: 0.9
 Nodes (4): contactCaseManagerIdsForCustomer(), customerContactRoleForUid(), normalizeOtherContacts(), trimOrEmpty()
 
-### Community 230 - "Community 230"
+### Community 229 - "Community 229"
 Cohesion: 0.6
 Nodes (3): folderUrl(), getCustomerDriveFolderLink(), parseDriveFolderId()
 
-### Community 231 - "Community 231"
+### Community 230 - "Community 230"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 232 - "Community 232"
+### Community 231 - "Community 231"
 Cohesion: 0.6
 Nodes (3): asTaskDefs(), async(), maybeGenerateTasks()
 
-### Community 233 - "Community 233"
+### Community 232 - "Community 232"
 Cohesion: 0.5
 Nodes (2): isTypingTarget(), shouldHandleGlobalGameKey()
 
-### Community 234 - "Community 234"
+### Community 233 - "Community 233"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 235 - "Community 235"
+### Community 234 - "Community 234"
 Cohesion: 0.5
 Nodes (2): defaultGrantDriveTemplateKeys(), grantDriveTemplates()
 
-### Community 236 - "Community 236"
+### Community 235 - "Community 235"
 Cohesion: 0.5
 Nodes (2): DEFAULT_TEMPLATE(), removeTemplate()
+
+### Community 236 - "Community 236"
+Cohesion: 0.4
+Nodes (0): 
 
 ### Community 237 - "Community 237"
 Cohesion: 0.4
@@ -1701,40 +1701,40 @@ Cohesion: 0.4
 Nodes (0): 
 
 ### Community 239 - "Community 239"
-Cohesion: 0.4
-Nodes (0): 
-
-### Community 240 - "Community 240"
 Cohesion: 0.8
 Nodes (4): getInboxDetailKind(), hasWord(), isInboxClosed(), tok()
 
-### Community 241 - "Community 241"
+### Community 240 - "Community 240"
 Cohesion: 0.4
 Nodes (0): 
 
-### Community 242 - "Community 242"
+### Community 241 - "Community 241"
 Cohesion: 0.7
 Nodes (4): inBrowser(), isReassignDebugEnabled(), reassignDebugLog(), setReassignDebugEnabled()
 
-### Community 243 - "Community 243"
+### Community 242 - "Community 242"
 Cohesion: 0.5
 Nodes (2): dbg(), isDebug()
 
-### Community 244 - "Community 244"
+### Community 243 - "Community 243"
 Cohesion: 0.6
 Nodes (3): isValidSelector(), qsaSafe(), selectorStatus()
 
-### Community 245 - "Community 245"
+### Community 244 - "Community 244"
 Cohesion: 0.67
 Nodes (2): field(), smartHeaderId()
 
-### Community 246 - "Community 246"
+### Community 245 - "Community 245"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 247 - "Community 247"
+### Community 246 - "Community 246"
 Cohesion: 0.83
 Nodes (3): requireUser(), unauthenticated(), verifyUserFromRequest()
+
+### Community 247 - "Community 247"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 248 - "Community 248"
 Cohesion: 0.5
@@ -1745,80 +1745,80 @@ Cohesion: 0.5
 Nodes (0): 
 
 ### Community 250 - "Community 250"
-Cohesion: 0.5
-Nodes (0): 
-
-### Community 251 - "Community 251"
 Cohesion: 0.83
 Nodes (3): deriveEnrollmentNames(), fmtEnrollmentName(), norm()
 
-### Community 252 - "Community 252"
+### Community 251 - "Community 251"
 Cohesion: 0.83
 Nodes (3): getDigestEnabledFlags(), isDigestDisabledForOrg(), resolveImplicitOrgId()
 
-### Community 253 - "Community 253"
+### Community 252 - "Community 252"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 254 - "Community 254"
+### Community 253 - "Community 253"
 Cohesion: 0.67
 Nodes (2): defaultSubFor(), isSubscribed()
 
-### Community 255 - "Community 255"
+### Community 254 - "Community 254"
 Cohesion: 0.83
 Nodes (3): buildAssignmentHtml(), fmtDate(), sendTaskAssignmentEmail()
 
-### Community 256 - "Community 256"
+### Community 255 - "Community 255"
 Cohesion: 0.83
 Nodes (3): ageInYears(), applyAgeOperator(), evaluateConditionalRules()
 
-### Community 257 - "Community 257"
+### Community 256 - "Community 256"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 258 - "Community 258"
+### Community 257 - "Community 257"
 Cohesion: 0.67
 Nodes (2): contribution(), enrollmentState()
 
-### Community 259 - "Community 259"
+### Community 258 - "Community 258"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 260 - "Community 260"
+### Community 259 - "Community 259"
 Cohesion: 0.67
 Nodes (2): monthKeysUTC(), summarizeEnrollment()
+
+### Community 260 - "Community 260"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 261 - "Community 261"
 Cohesion: 0.5
 Nodes (0): 
 
 ### Community 262 - "Community 262"
-Cohesion: 0.5
-Nodes (0): 
-
-### Community 263 - "Community 263"
 Cohesion: 0.67
 Nodes (2): createActivity(), resolveOrgId()
 
-### Community 264 - "Community 264"
+### Community 263 - "Community 263"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 265 - "Community 265"
+### Community 264 - "Community 264"
 Cohesion: 0.83
 Nodes (3): callFunction(), functionsBase(), toSearchParams()
 
-### Community 266 - "Community 266"
+### Community 265 - "Community 265"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 267 - "Community 267"
+### Community 266 - "Community 266"
 Cohesion: 0.5
 Nodes (1): DefaultModal()
 
-### Community 268 - "Community 268"
+### Community 267 - "Community 267"
 Cohesion: 0.5
 Nodes (1): Loading()
+
+### Community 268 - "Community 268"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 269 - "Community 269"
 Cohesion: 0.5
@@ -1829,56 +1829,56 @@ Cohesion: 0.5
 Nodes (0): 
 
 ### Community 271 - "Community 271"
-Cohesion: 0.5
-Nodes (0): 
-
-### Community 272 - "Community 272"
 Cohesion: 0.67
 Nodes (2): applyThemeMode(), toggleTheme()
 
-### Community 273 - "Community 273"
+### Community 272 - "Community 272"
 Cohesion: 0.83
 Nodes (3): CardInvoiceEntryDialog(), parseDollarAmount(), todayISO()
+
+### Community 273 - "Community 273"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 274 - "Community 274"
 Cohesion: 0.5
 Nodes (0): 
 
 ### Community 275 - "Community 275"
-Cohesion: 0.5
-Nodes (0): 
-
-### Community 276 - "Community 276"
 Cohesion: 0.83
 Nodes (3): buildGrantMetricItems(), GrantMetricCards(), summarizePopulations()
+
+### Community 276 - "Community 276"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 277 - "Community 277"
 Cohesion: 0.5
 Nodes (0): 
 
 ### Community 278 - "Community 278"
-Cohesion: 0.5
-Nodes (0): 
-
-### Community 279 - "Community 279"
 Cohesion: 0.67
 Nodes (2): PINNED_ITEMS_QK(), usePinnedItems()
 
-### Community 280 - "Community 280"
+### Community 279 - "Community 279"
 Cohesion: 0.67
 Nodes (2): attemptClose(), onKey()
+
+### Community 280 - "Community 280"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 281 - "Community 281"
 Cohesion: 0.5
 Nodes (0): 
 
 ### Community 282 - "Community 282"
-Cohesion: 0.5
-Nodes (0): 
-
-### Community 283 - "Community 283"
 Cohesion: 0.83
 Nodes (3): cssEscape(), cssSelectorFor(), isValidId()
+
+### Community 283 - "Community 283"
+Cohesion: 0.5
+Nodes (0): 
 
 ### Community 284 - "Community 284"
 Cohesion: 0.5
