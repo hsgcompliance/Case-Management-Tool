@@ -5,10 +5,12 @@ import { Pagination, usePagination } from "@entities/ui/dashboardStyle/Paginatio
 import { SmartExportButton } from "@entities/ui/dashboardStyle/SmartExportButton";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import { useAdminEnrollmentsData } from "@entities/Page/dashboardStyle/hooks/useAdminEnrollmentsData";
+import { computeRentCertDues, todayISO } from "@features/customers/components/paymentScheduleUtils";
+import { SortableHeader, sortRows, useTableSort } from "@hooks/useTableSort";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 
 export type RentalAssistanceFilterState = {
-  activeOnly: boolean;
+  status: "active" | "inactive" | "all";
   query: string;
   caseManagerId: string;
 };
@@ -19,8 +21,10 @@ type RentalAssistanceRow = {
   caseManagerId: string;
   caseManagerName: string;
   grantName: string;
+  customerId: string;
   assistanceStartDate: string;
   assistanceEndDate: string;
+  nextRentCertDue: string;
   committedAmount: number;
   maxAssistanceMonths: number | null;
   maxAssistanceCutoffDate: string;
@@ -35,6 +39,11 @@ type CaseManagerOption = {
 
 const RENTAL_ASSISTANCE_TAG = "rental-assistance";
 const RENTAL_PAYMENT_TYPES = new Set(["monthly", "rent", "prorated", "arrears"]);
+
+function rentalAssistanceStatus(filterState: RentalAssistanceFilterState) {
+  const saved = (filterState as RentalAssistanceFilterState & { activeOnly?: boolean }).activeOnly;
+  return filterState.status || (saved === false ? "all" : "active");
+}
 
 function isoMonth(value: unknown): string {
   const text = String(value || "").slice(0, 10);
@@ -143,6 +152,8 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [customers, enrollments]);
 
+  const status = rentalAssistanceStatus(filterState);
+
   const rows = React.useMemo<RentalAssistanceRow[]>(() => {
     const query = filterState.query.trim().toLowerCase();
     const output: RentalAssistanceRow[] = [];
@@ -168,7 +179,8 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
         .sort();
       const activeThisMonth = assistancePayments.some((payment) => isoMonth(payment.dueDate || payment.date) === month);
-      if (filterState.activeOnly && !activeThisMonth) continue;
+      if (status === "active" && !activeThisMonth) continue;
+      if (status === "inactive" && activeThisMonth) continue;
 
       const customerId = String(enrollment.customerId || enrollment.clientId || "").trim();
       const customer = customersById.get(customerId);
@@ -181,6 +193,12 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         String(enrollment.customerName || enrollment.clientName || customerId || "-");
       const grantName = grantNameById.get(grantId) || String(grant?.name || enrollment.grantName || grantId || "-");
       const committedAmount = assistancePayments.reduce((sum, payment) => sum + paymentAmount(payment), 0);
+      const nextRentCertDue = computeRentCertDues(assistancePayments, {
+        enrollmentId: String(enrollment.id || ""),
+        enrollmentLabel: grantName,
+      })
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+        .find((due) => due.targetPaymentDate >= todayISO())?.dueDate || "";
       const maxAssistanceMonths = maxMonthsFrom(grant, enrollment);
       const maxAssistanceCutoffDate = String(enrollment.maxAssistanceCutoffDate || "").slice(0, 10);
       const remaining = maxAssistanceCutoffDate
@@ -196,8 +214,10 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         caseManagerId: caseManagerId || "unassigned",
         caseManagerName,
         grantName,
+        customerId,
         assistanceStartDate: paymentDates[0] || "",
         assistanceEndDate: paymentDates[paymentDates.length - 1] || "",
+        nextRentCertDue,
         committedAmount,
         maxAssistanceMonths,
         maxAssistanceCutoffDate,
@@ -212,12 +232,12 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
     customersById,
     customerNameById,
     enrollments,
-    filterState.activeOnly,
     filterState.caseManagerId,
     filterState.query,
     grantNameById,
     grantsById,
     month,
+    status,
   ]);
 
   return {
@@ -234,16 +254,24 @@ export const RentalAssistanceTopbar: DashboardToolDefinition<RentalAssistanceFil
   onChange,
 }) => {
   const { rows, caseManagerOptions } = useRentalAssistanceRows(value);
+  const selectedStatus = rentalAssistanceStatus(value);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <label className="inline-flex items-center gap-1 text-xs">
-        <input
-          type="checkbox"
-          checked={value.activeOnly}
-          onChange={(e) => onChange({ ...value, activeOnly: e.currentTarget.checked })}
-        />
-        Active this month
-      </label>
+      <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white text-xs">
+        {(["active", "inactive", "all"] as const).map((status) => (
+          <button
+            key={status}
+            type="button"
+            className={[
+              "px-3 py-1.5 capitalize",
+              selectedStatus === status ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
+            ].join(" ")}
+            onClick={() => onChange({ ...value, status })}
+          >
+            {status}
+          </button>
+        ))}
+      </div>
       <select
         className="input"
         value={value.caseManagerId}
@@ -271,6 +299,7 @@ export const RentalAssistanceTopbar: DashboardToolDefinition<RentalAssistanceFil
           { key: "grantName", label: "Grant", value: (r: RentalAssistanceRow) => r.grantName },
           { key: "assistanceStartDate", label: "Assistance Start", value: (r: RentalAssistanceRow) => r.assistanceStartDate },
           { key: "assistanceEndDate", label: "Assistance End", value: (r: RentalAssistanceRow) => r.assistanceEndDate },
+          { key: "nextRentCertDue", label: "Next Rent Cert Due", value: (r: RentalAssistanceRow) => r.nextRentCertDue },
           { key: "committedAmount", label: "Projected + Spent", value: (r: RentalAssistanceRow) => r.committedAmount },
           { key: "maxAssistanceMonthsRemaining", label: "Max Months Remaining", value: (r: RentalAssistanceRow) => r.maxAssistanceMonthsRemaining ?? "" },
           { key: "maxAssistanceCutoffDate", label: "Hard Cutoff", value: (r: RentalAssistanceRow) => r.maxAssistanceCutoffDate },
@@ -284,7 +313,24 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
   filterState,
 }) => {
   const { rows, sharedDataLoading, sharedDataError, isTruncated } = useRentalAssistanceRows(filterState);
-  const pagination = usePagination(rows, 50);
+  const { sort, onSort } = useTableSort({ col: "customerName", dir: "asc" });
+  const sortedRows = React.useMemo(
+    () =>
+      sortRows(rows, sort, (row, col) => {
+        if (col === "customerName") return row.customerName;
+        if (col === "caseManagerName") return row.caseManagerName;
+        if (col === "grantName") return row.grantName;
+        if (col === "assistanceStartDate") return row.assistanceStartDate;
+        if (col === "assistanceEndDate") return row.assistanceEndDate;
+        if (col === "nextRentCertDue") return row.nextRentCertDue;
+        if (col === "committedAmount") return row.committedAmount;
+        if (col === "maxAssistanceMonthsRemaining") return row.maxAssistanceMonthsRemaining ?? row.maxAssistanceMonths ?? null;
+        if (col === "maxAssistanceCutoffDate") return row.maxAssistanceCutoffDate;
+        return null;
+      }),
+    [rows, sort],
+  );
+  const pagination = usePagination(sortedRows, 50);
 
   return (
     <div className="space-y-3">
@@ -296,28 +342,38 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
       <ToolTable
         caption="Rental assistance customers"
         headers={[
-          "Customer",
-          "Case Manager",
-          "Grant",
-          "Assistance Start",
-          "Assistance End",
-          "Projected + Spent",
-          "Max Remaining",
-          "Hard Cutoff",
+          <SortableHeader key="customerName" label="Customer" col="customerName" sort={sort} onSort={onSort} />,
+          <SortableHeader key="caseManagerName" label="Case Manager" col="caseManagerName" sort={sort} onSort={onSort} />,
+          <SortableHeader key="grantName" label="Grant" col="grantName" sort={sort} onSort={onSort} />,
+          <SortableHeader key="assistanceStartDate" label="Assistance Start" col="assistanceStartDate" sort={sort} onSort={onSort} defaultDir="desc" />,
+          <SortableHeader key="assistanceEndDate" label="Assistance End" col="assistanceEndDate" sort={sort} onSort={onSort} defaultDir="desc" />,
+          <SortableHeader key="nextRentCertDue" label="Next Rent Cert Due" col="nextRentCertDue" sort={sort} onSort={onSort} defaultDir="desc" />,
+          <SortableHeader key="committedAmount" label="Projected + Spent" col="committedAmount" sort={sort} onSort={onSort} defaultDir="desc" align="right" />,
+          <SortableHeader key="maxAssistanceMonthsRemaining" label="Max Remaining" col="maxAssistanceMonthsRemaining" sort={sort} onSort={onSort} defaultDir="desc" />,
+          <SortableHeader key="maxAssistanceCutoffDate" label="Hard Cutoff" col="maxAssistanceCutoffDate" sort={sort} onSort={onSort} defaultDir="desc" />,
         ]}
         rows={
           sharedDataLoading ? (
-            <tr><td colSpan={8}>Loading rental assistance...</td></tr>
+            <tr><td colSpan={9}>Loading rental assistance...</td></tr>
           ) : sharedDataError ? (
-            <tr><td colSpan={8}>Failed to load rental assistance data.</td></tr>
+            <tr><td colSpan={9}>Failed to load rental assistance data.</td></tr>
           ) : pagination.pageRows.length ? (
             pagination.pageRows.map((row) => (
               <tr key={row.id}>
-                <td>{row.customerName}</td>
+                <td>
+                  {row.customerId ? (
+                    <a className="font-medium text-sky-700 hover:text-sky-800 hover:underline" href={`/customers/${row.customerId}?tab=payments`}>
+                      {row.customerName}
+                    </a>
+                  ) : (
+                    row.customerName
+                  )}
+                </td>
                 <td>{row.caseManagerName}</td>
                 <td>{row.grantName}</td>
                 <td>{fmtDateOrDash(row.assistanceStartDate)}</td>
                 <td>{fmtDateOrDash(row.assistanceEndDate)}</td>
+                <td>{fmtDateOrDash(row.nextRentCertDue)}</td>
                 <td className="text-right">{fmtCurrencyUSD(row.committedAmount)}</td>
                 <td>
                   {row.maxAssistanceMonthsRemaining == null
@@ -330,7 +386,7 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
               </tr>
             ))
           ) : (
-            <tr><td colSpan={8}>No rental assistance rows match the current filters.</td></tr>
+            <tr><td colSpan={9}>No rental assistance rows match the current filters.</td></tr>
           )
         }
       />
