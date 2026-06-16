@@ -86,7 +86,7 @@ export const AMBIENT_TRIGGER_DEFAULTS: Record<AmbientTriggerId, AmbientTriggerAd
   // ── Card triggers (attach to / overlay a customer card) ─────────────────────
   plant:    { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 12, jitterMinutes: 4  },
   farm:     { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 15, jitterMinutes: 5  },
-  alert:    { enabled: true, allowedRoutes: ["customers"], minIntervalMinutes: 11, jitterMinutes: 3  },
+  alert:    { enabled: false, allowedRoutes: ["customers"], minIntervalMinutes: 11, jitterMinutes: 3  },
 };
 
 export const AMBIENT_TRIGGER_LABELS: Record<AmbientTriggerId, { emoji: string; label: string; hint: string }> = {

@@ -12,7 +12,6 @@ import AsteroidFloat from "./triggers/AsteroidFloat";
 import PlantFloat from "./triggers/PlantSprout";
 import SnakeFloat from "./triggers/SnakeFloat";
 import FarmFloat from "./triggers/FarmFloat";
-import AlertBadge from "./triggers/AlertBadge";
 import MoonRise from "./triggers/MoonRise";
 import { useLegacySecretGameLauncher } from "@features/secret-games";
 import { toast } from "@lib/toast";
@@ -116,9 +115,6 @@ export default function GameTriggersHost() {
   const handleFarmActivate = React.useCallback(() => {
     toast("Farm game - prototype, not yet playable", { type: "info" });
   }, []);
-  const handleAlertActivate = React.useCallback(() => {
-    toast("Broken Data - prototype, not yet playable", { type: "info" });
-  }, []);
   const handleMoonActivate = React.useCallback(() => {
     const customers = scanCustomersFromDOM();
     setNecroCustomers(customers);
@@ -130,7 +126,6 @@ export default function GameTriggersHost() {
   const snakeMs = triggerMs("snake");
   const moonMs = triggerMs("moon");
   const farmMs = triggerMs("farm");
-  const alertMs = triggerMs("alert");
 
   return (
     <>
@@ -172,14 +167,6 @@ export default function GameTriggersHost() {
           onActivate={handleFarmActivate}
           minIntervalMs={farmMs.minIntervalMs}
           jitterMs={farmMs.jitterMs}
-        />
-      )}
-
-      {triggerEnabled("alert") && (
-        <AlertBadge
-          onActivate={handleAlertActivate}
-          minIntervalMs={alertMs.minIntervalMs}
-          jitterMs={alertMs.jitterMs}
         />
       )}
 
