@@ -6,6 +6,7 @@ import { grantAccentSolid } from "@lib/colorRegistry";
 import type { BudgetGroupItem } from "@hooks/useOrgConfig";
 import type { TGrant as Grant } from "@types";
 import { fmtCurrencyUSD } from "@lib/formatters";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 const COL_CLASS: Record<number, string> = {
   1: "grid-cols-1",
@@ -17,6 +18,17 @@ const COL_CLASS: Record<number, string> = {
 const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 const toCents = (n: unknown) => Math.round(Number(n || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
+
+function hasLineItemAllocation(grant: Grant, lineItemId?: string) {
+  if (!lineItemId) return false;
+  const lineItems = (grant as any)?.budget?.lineItems as Array<Record<string, unknown>> | undefined;
+  return lineItems?.find((lineItem) => lineItem.id === lineItemId)?.capEnabled === true;
+}
+
+function hasGrantAllocation(grant: Grant) {
+  const capabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
+  return capabilities.allocationEnabled || (grant as any)?.budget?.allocationEnabled === true;
+}
 
 interface BudgetGroupSectionProps {
   label: string;
@@ -80,17 +92,40 @@ export function BudgetGroupSection({
 
       {/* Card grid */}
       <div className={`grid gap-4 ${colClass}`}>
-        {resolved.map(({ item, grant }) => (
-          <BudgetCard
-            key={item.id}
-            grant={grant}
-            lineItemId={item.lineItemId}
-            cardType={item.cardType ?? "standard"}
-            labelOverride={item.labelOverride}
-            accentColor={item.color}
-            onClick={() => onOpen(item.grantId)}
-          />
-        ))}
+        {resolved.flatMap(({ item, grant }) => {
+          const capabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
+          const explicitAllocation = item.cardType === "client-allocation";
+          const lineItemAllocation = hasLineItemAllocation(grant, item.lineItemId);
+          const grantAllocation = !item.lineItemId && hasGrantAllocation(grant);
+          const isBillable = capabilities.billingEnabled || capabilities.usesBillingLedger;
+          const shouldUseAllocationCard = explicitAllocation || lineItemAllocation || (grantAllocation && !isBillable);
+          const cards = [
+            <BudgetCard
+              key={item.id}
+              grant={grant}
+              lineItemId={item.lineItemId}
+              cardType={shouldUseAllocationCard ? "client-allocation" : "standard"}
+              labelOverride={item.labelOverride}
+              accentColor={item.color}
+              onClick={() => onOpen(item.grantId)}
+            />,
+          ];
+
+          if (grantAllocation && isBillable && !explicitAllocation && !item.lineItemId) {
+            cards.push(
+              <BudgetCard
+                key={`${item.id}::allocation`}
+                grant={grant}
+                cardType="client-allocation"
+                labelOverride={`${item.labelOverride || grant.name || grant.id} Allocations`}
+                accentColor={item.color}
+                onClick={() => onOpen(item.grantId)}
+              />,
+            );
+          }
+
+          return cards;
+        })}
       </div>
     </section>
   );

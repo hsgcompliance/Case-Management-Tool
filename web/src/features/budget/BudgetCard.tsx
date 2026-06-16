@@ -1,7 +1,8 @@
 // web/src/features/budget/BudgetCard.tsx
 "use client";
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { useGrantMetrics } from "@hooks/useMetrics";
+import { useGrantCustomerAllocations, type CustomerAllocation } from "@hooks/useGrantCustomerAllocations";
 import { statusChipClass, grantAccentLeftBorder, grantAccentHeaderBg } from "@lib/colorRegistry";
 import type { TGrant as Grant } from "@types";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/PinnedGrantCards";
@@ -30,6 +31,7 @@ function hasSelectedTextWithin(element: HTMLElement): boolean {
 const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 const toCents = (n: number) => Math.round(Number(n || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
+const ALLOCATION_MAX_DEFAULT = 10000;
 
 function getBudget(g: Partial<Grant>) {
   const b = (g?.budget || {}) as Record<string, unknown>;
@@ -160,6 +162,186 @@ function getLineItemBudget(grant: Grant, lineItemId: string) {
 }
 
 export type BudgetCardType = "standard" | "client-allocation";
+type AllocationSort = "name-asc" | "name-desc" | "amount-asc" | "amount-desc";
+
+function getBudgetLineItems(grant: Grant) {
+  const raw = (grant as any)?.budget?.lineItems;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item: Record<string, unknown>) => {
+    const spent = fromCents(toCents(Number(item.spent || 0)));
+    const projected = fromCents(toCents(Number(item.projected || 0)));
+    return {
+      id: String(item.id || ""),
+      label: String(item.label || item.id || "Line item"),
+      amount: fromCents(toCents(Number(item.amount || 0))),
+      spent,
+      projected,
+    };
+  });
+}
+
+function filterAllocationRows(
+  rows: CustomerAllocation[],
+  sortMode: AllocationSort,
+  minAmount: number,
+  maxAmount: number,
+) {
+  const min = Number.isFinite(minAmount) ? minAmount : 0;
+  const max = Number.isFinite(maxAmount) ? maxAmount : ALLOCATION_MAX_DEFAULT;
+  const filtered = rows.filter((row) => row.projected >= min && row.projected <= max);
+  return filtered.sort((a, b) => {
+    if (sortMode === "name-desc") return b.customerName.localeCompare(a.customerName);
+    if (sortMode === "amount-asc") return a.projected - b.projected || a.customerName.localeCompare(b.customerName);
+    if (sortMode === "amount-desc") return b.projected - a.projected || a.customerName.localeCompare(b.customerName);
+    return a.customerName.localeCompare(b.customerName);
+  });
+}
+
+function AllocationListCardBody({ grantId }: { grantId: string }) {
+  const { data: rows = [], isLoading, error } = useGrantCustomerAllocations(grantId, { enabled: !!grantId });
+  const [sortMode, setSortMode] = useState<AllocationSort>("name-asc");
+  const [minAmount, setMinAmount] = useState(0);
+  const [maxAmount, setMaxAmount] = useState(ALLOCATION_MAX_DEFAULT);
+
+  const filteredRows = useMemo(
+    () => filterAllocationRows(rows, sortMode, minAmount, maxAmount),
+    [rows, sortMode, minAmount, maxAmount],
+  );
+  const projectedTotal = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + row.projected, 0),
+    [filteredRows],
+  );
+
+  return (
+    <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+      <div className="grid grid-cols-3 gap-2">
+        <label className="col-span-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Customer allocations
+          <select
+            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium normal-case tracking-normal text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+            value={sortMode}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => setSortMode(event.currentTarget.value as AllocationSort)}
+          >
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="amount-desc">Projected high-low</option>
+            <option value="amount-asc">Projected low-high</option>
+          </select>
+        </label>
+        <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Min
+          <input
+            type="number"
+            min={0}
+            max={10000}
+            step={100}
+            value={minAmount}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => setMinAmount(Number(event.currentTarget.value || 0))}
+            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+          />
+        </label>
+        <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Max
+          <input
+            type="number"
+            min={0}
+            max={10000}
+            step={100}
+            value={maxAmount}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => setMaxAmount(Number(event.currentTarget.value || 0))}
+            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+          />
+        </label>
+        <div className="flex flex-col justify-end rounded-md border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
+          <span className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Shown</span>
+          <span className="text-xs font-semibold tabular-nums text-slate-800 dark:text-slate-100">{filteredRows.length}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between text-xs">
+        <span className="text-slate-500 dark:text-slate-400">
+          {rows.length} customer{rows.length === 1 ? "" : "s"}
+        </span>
+        <span className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmtUsd(projectedTotal)} projected</span>
+      </div>
+
+      <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+        {isLoading ? (
+          <div className="px-3 py-6 text-center text-xs text-slate-400">Loading allocations...</div>
+        ) : error ? (
+          <div className="px-3 py-6 text-center text-xs text-red-500">Failed to load allocations.</div>
+        ) : filteredRows.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-slate-400">No customers in this amount range.</div>
+        ) : (
+          filteredRows.map((row) => (
+            <div
+              key={row.customerId}
+              className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 last:border-0 dark:border-slate-800"
+            >
+              <span className="min-w-0 truncate text-xs font-medium text-slate-700 dark:text-slate-200">{row.customerName}</span>
+              <span className="shrink-0 text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">
+                {fmtUsd(row.projected)}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BillableFinancialModelCardBody({
+  grant,
+  activeEnrollments,
+}: {
+  grant: Grant;
+  activeEnrollments?: number;
+}) {
+  const lineItems = getBudgetLineItems(grant);
+  const projectedTotal = lineItems.reduce((sum, item) => sum + item.projected, 0);
+
+  return (
+    <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Projected spending</div>
+          <div className="mt-1 text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">{fmtUsd(projectedTotal)}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Enrollments</div>
+          <div className="mt-1 text-sm font-bold tabular-nums text-slate-800 dark:text-slate-100">{activeEnrollments ?? 0}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+        {lineItems.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-slate-400">No line items configured.</div>
+        ) : (
+          lineItems.map((item) => (
+            <div
+              key={item.id || item.label}
+              className="border-b border-slate-100 px-3 py-2 last:border-0 dark:border-slate-800"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate text-xs font-semibold text-slate-700 dark:text-slate-200">{item.label}</span>
+                <span className="shrink-0 text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">
+                  {fmtUsd(item.projected)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 text-[10px] text-slate-400 dark:text-slate-500">
+                <span>{fmtUsd(item.spent)} recorded</span>
+                <span>{fmtUsd(item.projected)} projected</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface BudgetCardProps {
   grant: Grant;
@@ -188,13 +370,14 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
   const isBillingMode = !drawsDownBudget && (financialCapabilities.billingEnabled || financialCapabilities.usesBillingLedger);
   const status = String(grant.status || "active");
 
-  // Auto-detect client-allocation: explicit prop OR grant has allocationEnabled OR displayed line item has capEnabled
+  // Allocation cards are explicit, or derived from line-item caps. Billable programs
+  // with allocation render a separate allocation card from BudgetGroupSection.
   const isClientAlloc = cardType === "client-allocation" ||
-    (grant as any)?.budget?.allocationEnabled === true ||
     (lineItemId
       ? ((grant as any)?.budget?.lineItems as Array<Record<string, unknown>> | undefined)
           ?.find((l) => l.id === lineItemId)?.capEnabled === true
       : false);
+  const isBillableFinancialModel = isBillingMode && !isClientAlloc;
 
   const availClass =
     !drawsDownBudget
@@ -241,6 +424,11 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
               Client Allocation
             </div>
           )}
+          {isBillableFinancialModel && (
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-violet-500 dark:text-violet-400">
+              Billable Financial Model
+            </div>
+          )}
           <div className="truncate font-bold text-slate-900 dark:text-slate-100 group-hover:text-sky-700 dark:group-hover:text-sky-400 transition-colors text-lg leading-snug">
             {displayName}
           </div>
@@ -261,51 +449,59 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       </button>
 
       {/* Progress bar */}
-      <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
-        <BudgetProgressBar
-          spent={budget.spent}
-          projected={budget.projected}
-          total={budget.total}
-          drawsDownBudget={drawsDownBudget}
-        />
-      </div>
+      {!isClientAlloc && !isBillableFinancialModel && (
+        <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+          <BudgetProgressBar
+            spent={budget.spent}
+            projected={budget.projected}
+            total={budget.total}
+            drawsDownBudget={drawsDownBudget}
+          />
+        </div>
+      )}
 
       {/* Metric rows */}
-      <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
-        {/* Total row */}
-        <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {drawsDownBudget ? "Total" : "Reference"}
-          </span>
-          <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-            {fmtUsd(budget.total)}
-          </span>
-        </div>
+      {isClientAlloc ? (
+        <AllocationListCardBody grantId={gid} />
+      ) : isBillableFinancialModel ? (
+        <BillableFinancialModelCardBody grant={grant} activeEnrollments={gm?.enrollments?.active} />
+      ) : (
+        <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
+          {/* Total row */}
+          <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {drawsDownBudget ? "Total" : "Reference"}
+            </span>
+            <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+              {fmtUsd(budget.total)}
+            </span>
+          </div>
 
-        <MetricRow
-          label={isBillingMode ? "Recorded Spend" : "Spent"}
-          value={fmtUsd(budget.spent)}
-          valueClass="text-amber-700 dark:text-amber-400"
-        />
-        {drawsDownBudget ? (
           <MetricRow
-            label="Remaining"
-            value={fmtUsd(budget.remaining)}
-            valueClass="text-slate-700 dark:text-slate-200"
+            label={isBillingMode ? "Recorded Spend" : "Spent"}
+            value={fmtUsd(budget.spent)}
+            valueClass="text-amber-700 dark:text-amber-400"
           />
-        ) : null}
-        <MetricRow
-          label={isBillingMode ? "Projected Activity" : "Projected to Spend"}
-          value={fmtUsd(budget.projectedToSpend)}
-          valueClass={drawsDownBudget && budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
-          dimmed={budget.projectedToSpend === 0}
-        />
-        <MetricRow
-          label={drawsDownBudget ? "Available" : "Activity Total"}
-          value={fmtUsd(drawsDownBudget ? budget.available : budget.projectedToSpend)}
-          valueClass={availClass}
-        />
-      </div>
+          {drawsDownBudget ? (
+            <MetricRow
+              label="Remaining"
+              value={fmtUsd(budget.remaining)}
+              valueClass="text-slate-700 dark:text-slate-200"
+            />
+          ) : null}
+          <MetricRow
+            label={isBillingMode ? "Projected Activity" : "Projected to Spend"}
+            value={fmtUsd(budget.projectedToSpend)}
+            valueClass={drawsDownBudget && budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
+            dimmed={budget.projectedToSpend === 0}
+          />
+          <MetricRow
+            label={drawsDownBudget ? "Available" : "Activity Total"}
+            value={fmtUsd(drawsDownBudget ? budget.available : budget.projectedToSpend)}
+            valueClass={availClass}
+          />
+        </div>
+      )}
 
       {/* Footer */}
       <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800 flex items-center justify-between gap-2">
