@@ -6,7 +6,8 @@ import { Modal } from "@entities/ui/Modal";
 import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import type { BudgetGroupCfg, BudgetGroupItem, OrgDisplayConfig } from "@hooks/useOrgConfig";
 import type { TGrant as Grant } from "@types";
-import { GRANT_ACCENT_COLORS, GRANT_ACCENT_REGISTRY, grantAccentChip, grantAccentSolid, grantAccentRing } from "@lib/colorRegistry";
+import { GRANT_ACCENT_COLORS, GRANT_ACCENT_REGISTRY, grantAccentSolid, grantAccentRing } from "@lib/colorRegistry";
+import { getGrantFinancialCapabilities } from "@hdb/contracts";
 
 // ─── ColorPicker ─────────────────────────────────────────────────────────────
 
@@ -79,6 +80,12 @@ function makeItemId(grantId: string, lineItemId?: string): string {
   return `${grantId}::${lineItemId ?? "grant"}::${Date.now()}`;
 }
 
+function normalizeCardType(cardType: BudgetGroupItem["cardType"]): "budget" | "allocation" | "billable" {
+  if (cardType === "client-allocation" || cardType === "allocation") return "allocation";
+  if (cardType === "billable") return "billable";
+  return "budget";
+}
+
 // ─── Left panel: Grant source list ───────────────────────────────────────────
 
 type LineItemDef = { id: string; label: string };
@@ -99,6 +106,14 @@ function GrantSourceRow({
   const [expanded, setExpanded] = useState(false);
   const lineItems = getLineItems(grant);
   const grantPlaced = placedSet.has(`${grant.id}::grant`);
+  const capabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
+  const sourceType = capabilities.billingEnabled || capabilities.usesBillingLedger
+    ? "billable program"
+    : capabilities.drawsDownBudget
+    ? "budget"
+    : capabilities.allocationEnabled
+    ? "allocation"
+    : "financial source";
 
   return (
     <div className="select-none">
@@ -135,9 +150,9 @@ function GrantSourceRow({
           <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
             {String(grant.name || grant.id)}
           </div>
-          {lineItems.length > 0 && (
-            <div className="text-[10px] text-slate-400">{lineItems.length} line items</div>
-          )}
+          <div className="text-[10px] text-slate-400">
+            {[sourceType, lineItems.length > 0 ? `${lineItems.length} line items` : ""].filter(Boolean).join(" | ")}
+          </div>
         </div>
 
         {grantPlaced && (
@@ -202,7 +217,7 @@ function GrantSourcePanel({
     <div className="flex h-full flex-col">
       <div className="flex-shrink-0 border-b border-slate-200 dark:border-slate-700 px-3 py-2">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
-          Grant Sources
+          Budget Sources
         </div>
         <input
           type="search"
@@ -236,6 +251,8 @@ function BucketItemChip({
   isEditing,
   onEdit,
   onUpdate,
+  onMoveUp,
+  onMoveDown,
   onRemove,
 }: {
   item: BudgetGroupItem;
@@ -243,6 +260,8 @@ function BucketItemChip({
   isEditing: boolean;
   onEdit: () => void;
   onUpdate: (patch: Partial<BudgetGroupItem>) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onRemove: () => void;
 }) {
   const grant = grantsById.get(item.grantId);
@@ -255,6 +274,7 @@ function BucketItemChip({
 
   const displayLabel = item.labelOverride || defaultLabel;
   const cd = colorDef(item.color);
+  const displayType = normalizeCardType(item.cardType);
 
   return (
     <div>
@@ -275,6 +295,22 @@ function BucketItemChip({
         {item.lineItemId && (
           <span className="flex-shrink-0 text-[9px] opacity-60 border rounded px-1">line</span>
         )}
+        <button
+          type="button"
+          title="Move up"
+          onClick={(e) => { e.stopPropagation(); onMoveUp(); }}
+          className="flex-shrink-0 text-current opacity-45 transition hover:opacity-100"
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          title="Move down"
+          onClick={(e) => { e.stopPropagation(); onMoveDown(); }}
+          className="flex-shrink-0 text-current opacity-45 transition hover:opacity-100"
+        >
+          ↓
+        </button>
         <button
           type="button"
           title="Remove from group"
@@ -311,22 +347,26 @@ function BucketItemChip({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Card Type
+              Card Display
             </label>
-            <div className="mt-1 flex gap-1.5">
-              {(["standard", "client-allocation"] as const).map((t) => (
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {([
+                ["budget", "Budget"],
+                ["allocation", "Allocation"],
+                ["billable", "Billable"],
+              ] as const).map(([value, label]) => (
                 <button
-                  key={t}
+                  key={value}
                   type="button"
-                  onClick={() => onUpdate({ cardType: t })}
+                  onClick={() => onUpdate({ cardType: value })}
                   className={[
-                    "rounded px-2 py-0.5 text-[10px] font-semibold capitalize transition",
-                    (item.cardType ?? "standard") === t
+                    "rounded px-2 py-0.5 text-[10px] font-semibold transition",
+                    displayType === value
                       ? "bg-sky-600 text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300",
                   ].join(" ")}
                 >
-                  {t}
+                  {label}
                 </button>
               ))}
             </div>
@@ -405,6 +445,15 @@ function GroupBucket({
   const removeItem = (itemId: string) => {
     onChange({ items: group.items.filter((it) => it.id !== itemId) });
     if (editingItemId === itemId) onEditItem(null);
+  };
+
+  const moveItem = (itemId: string, direction: -1 | 1) => {
+    const index = group.items.findIndex((it) => it.id === itemId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= group.items.length) return;
+    const next = [...group.items];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    onChange({ items: next });
   };
 
   const cd = colorDef(group.color);
@@ -510,6 +559,8 @@ function GroupBucket({
             isEditing={editingItemId === item.id}
             onEdit={() => onEditItem(editingItemId === item.id ? null : item.id)}
             onUpdate={(patch) => updateItem(item.id, patch)}
+            onMoveUp={() => moveItem(item.id, -1)}
+            onMoveDown={() => moveItem(item.id, 1)}
             onRemove={() => removeItem(item.id)}
           />
         ))}
