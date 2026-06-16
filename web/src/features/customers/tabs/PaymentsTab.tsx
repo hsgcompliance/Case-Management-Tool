@@ -17,6 +17,7 @@ import {
 import { useCustomerEnrollments } from "@hooks/useEnrollments";
 import { useGrants } from "@hooks/useGrants";
 import { useLedgerEntries } from "@hooks/useLedger";
+import { useTasksList, type TasksListItem } from "@hooks/useTasks";
 import PaymentPaidDialog from "@entities/dialogs/payments/PaymentPaidDialog";
 import PaymentsDeleteDialog from "@entities/dialogs/payments/PaymentsDeleteDialog";
 import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
@@ -31,6 +32,7 @@ const PaymentEditorSheetSurface = dynamic(
   { ssr: false, loading: () => <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-500">Loading sheet editor...</div> },
 );
 import { CustomerPaymentsTable } from "../components";
+import { addMonthsISO } from "../components/paymentScheduleUtils";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
@@ -42,6 +44,8 @@ type SelectedPayment = {
   payment: TPayment;
   row: CustomerPaymentRow;
 };
+
+type RentCertStatus = "none" | "due" | "completed";
 
 function paymentDate(p: TPayment): string {
   const legacyDate = (p as Record<string, unknown>).date;
@@ -98,6 +102,28 @@ function positiveLedgerPaymentKey(entry: unknown): string | null {
   const paymentId = String(row.paymentId || origin.baseId || "").trim();
   if (!enrollmentId || !paymentId) return null;
   return `${enrollmentId}:${paymentId}`;
+}
+
+function rentCertTargetDate(task: TasksListItem): string {
+  const defId = String((task as Record<string, unknown>).defId || "");
+  const defMatch = defId.match(/(\d{4}-\d{2}-\d{2})(?:_[a-z]+)?$/i);
+  if (defMatch) return defMatch[1];
+  const dueDate = safeISODate10((task as Record<string, unknown>).dueDate);
+  return dueDate ? addMonthsISO(dueDate, 1) : "";
+}
+
+function isRentCertTask(task: TasksListItem): boolean {
+  const row = task as Record<string, unknown>;
+  const defId = String(row.defId || "");
+  if (defId.startsWith("payment_rent_cert_") || defId.startsWith("pay_cert_")) return true;
+  const title = String(row.title || "").toLowerCase();
+  const note = String(row.note || "").toLowerCase();
+  return title.includes("rent cert") || note.includes("rent certification");
+}
+
+function rentCertDone(task: TasksListItem): boolean {
+  const status = String((task as Record<string, unknown>).status || "").toLowerCase();
+  return status === "done" || status === "verified";
 }
 
 export function PaymentsTab({ customerId, customerName }: { customerId: string; customerName?: string }) {
@@ -171,6 +197,45 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     if (enrollmentFilterId === "all") return sorted;
     return sorted.filter((r) => String(r.enrollmentId || "") === enrollmentFilterId);
   }, [sorted, enrollmentFilterId]);
+
+  const filteredEnrollmentIds = React.useMemo(
+    () => Array.from(new Set(filteredRows.map((row) => String(row.enrollmentId || "")).filter(Boolean))),
+    [filteredRows],
+  );
+
+  const { data: rentCertTasks = [] } = useTasksList(
+    filteredEnrollmentIds.length
+      ? { enrollmentIds: filteredEnrollmentIds, limit: 1000 }
+      : undefined,
+    { enabled: filteredEnrollmentIds.length > 0 },
+  );
+
+  const rentCertStatusByPaymentKey = React.useMemo(() => {
+    const tasksByPaymentKey = new Map<string, TasksListItem[]>();
+    for (const task of rentCertTasks) {
+      if (!isRentCertTask(task)) continue;
+      const enrollmentId = String((task as Record<string, unknown>).enrollmentId || "").trim();
+      const targetDate = rentCertTargetDate(task);
+      if (!enrollmentId || !targetDate) continue;
+      const key = `${enrollmentId}:${targetDate}`;
+      const list = tasksByPaymentKey.get(key) || [];
+      list.push(task);
+      tasksByPaymentKey.set(key, list);
+    }
+
+    const next: Record<string, RentCertStatus> = {};
+    for (const row of filteredRows) {
+      const payment = row.payment as Record<string, unknown>;
+      const pid = String(payment?.id || "").trim();
+      const enrollmentId = String(row.enrollmentId || "").trim();
+      if (!pid || !enrollmentId) continue;
+      const targetDate = paymentDate(row.payment);
+      const tasks = targetDate ? tasksByPaymentKey.get(`${enrollmentId}:${targetDate}`) || [] : [];
+      next[`${enrollmentId}:${pid}`] =
+        tasks.length === 0 ? "none" : tasks.every(rentCertDone) ? "completed" : "due";
+    }
+    return next;
+  }, [filteredRows, rentCertTasks]);
 
   const ledgerPaymentKeys = React.useMemo(() => {
     const keys = new Set<string>();
@@ -377,6 +442,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           enrollmentId: selected.enrollmentId,
           paymentId,
           reverse: true,
+          forceSync: false,
         },
       });
       setSelected(null);
@@ -395,6 +461,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           enrollmentId: selected.enrollmentId,
           paymentId,
           reverse: false,
+          forceSync: false,
           ...(meta.note ? { note: meta.note } : {}),
           ...(meta.vendor ? { vendor: meta.vendor } : {}),
           ...(meta.comment ? { comment: meta.comment } : {}),
@@ -483,6 +550,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           enrollmentId,
           paymentId: pid,
           reverse: !nextPaid,
+          forceSync: false,
         },
       });
       if (selected?.enrollmentId === enrollmentId && paymentId === pid) {
@@ -750,6 +818,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           <CustomerPaymentsTable
             rows={filteredRows}
             rowIssues={rowIssues}
+            rentCertStatuses={rentCertStatusByPaymentKey}
             selectedKey={selected?.paymentKey || null}
           renderSelectedRowDetail={() =>
             selected ? (

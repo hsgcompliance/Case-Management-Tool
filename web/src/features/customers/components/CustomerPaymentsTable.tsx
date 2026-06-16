@@ -14,6 +14,7 @@ type Props = {
   onAdjustSchedule?: (row: CustomerPaymentRow, key: string) => void;
   onDeleteRow?: (row: CustomerPaymentRow, key: string) => void;
   rowIssues?: Record<string, { label: string } | undefined>;
+  rentCertStatuses?: Record<string, "none" | "due" | "completed" | undefined>;
   selectedKey?: string | null;
   renderSelectedRowDetail?: (row: CustomerPaymentRow, key: string) => React.ReactNode;
   onTogglePaid?: (row: CustomerPaymentRow, nextPaid: boolean) => void | Promise<void>;
@@ -31,6 +32,42 @@ function paymentDate(p: unknown): string {
   return safeISODate10(payment.dueDate || payment.date) || "";
 }
 
+function RentCertChip({ status }: { status: "none" | "due" | "completed" | undefined }) {
+  const normalized = status || "none";
+  const config =
+    normalized === "completed"
+      ? {
+          label: "Rent Cert Completed",
+          flag: "OK",
+          className: "border-emerald-300 bg-emerald-50 text-emerald-800",
+        }
+      : normalized === "due"
+      ? {
+          label: "Rent Cert Due",
+          flag: "!",
+          className: "border-amber-300 bg-amber-50 text-amber-800",
+        }
+      : {
+          label: "No Rent Cert Due",
+          flag: "",
+          className: "border-slate-200 bg-slate-50 text-slate-500",
+        };
+
+  return (
+    <span
+      title={config.label}
+      className={[
+        "inline-flex min-w-[9.75rem] items-center justify-between gap-2 rounded border px-2 py-1 text-xs font-semibold leading-none",
+        config.className,
+      ].join(" ")}
+    >
+      <span>{config.label}</span>
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm border border-current text-[10px] leading-none">
+        {config.flag}
+      </span>
+    </span>
+  );
+}
 
 export default function CustomerPaymentsTable({
   rows,
@@ -38,6 +75,7 @@ export default function CustomerPaymentsTable({
   onAdjustSchedule,
   onDeleteRow,
   rowIssues,
+  rentCertStatuses,
   selectedKey = null,
   renderSelectedRowDetail,
   onTogglePaid,
@@ -97,6 +135,7 @@ export default function CustomerPaymentsTable({
             <th className="px-3 py-2 text-left">Amount</th>
             <th className="px-3 py-2 text-left">Paid</th>
             <th className="px-3 py-2 text-left">Compliance</th>
+            <th className="px-3 py-2 text-left">Rent Cert</th>
             <th className="px-3 py-2 text-left">Enrollment</th>
             <th className="px-3 py-2 text-left"> </th>
           </tr>
@@ -215,6 +254,9 @@ export default function CustomerPaymentsTable({
                       </label>
                     </div>
                   </td>
+                  <td className="px-3 py-2">
+                    <RentCertChip status={rentCertStatuses?.[key]} />
+                  </td>
                   <td className="px-3 py-2 text-base font-semibold leading-snug text-slate-900">
                     {formatEnrollmentLabel(row.enrollment, { fallback: String(row.enrollmentId || "") })}
                   </td>
@@ -250,7 +292,7 @@ export default function CustomerPaymentsTable({
                 </tr>
                 {isSelected && renderSelectedRowDetail ? (
                   <tr className="border-t border-sky-100 bg-sky-50/70">
-                    <td className="px-3 py-3" colSpan={7}>
+                    <td className="px-3 py-3" colSpan={8}>
                       {renderSelectedRowDetail(row, key)}
                     </td>
                   </tr>
