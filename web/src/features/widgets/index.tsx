@@ -1983,7 +1983,7 @@ export const DASHBOARD_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
     id: "rental-assistance",
     title: "Rental Assistance",
     defaultPinned: true,
-    createFilterState: () => ({ activeOnly: true, query: "", caseManagerId: "all" } satisfies RentalAssistanceFilterState),
+    createFilterState: () => ({ status: "active", query: "", caseManagerId: "all" } satisfies RentalAssistanceFilterState),
     ToolTopbar: RentalAssistanceTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Main: RentalAssistanceMain as AnyDashboardToolDefinition["Main"],
   },
