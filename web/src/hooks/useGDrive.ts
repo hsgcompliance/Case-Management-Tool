@@ -239,7 +239,10 @@ export function useSheetArchiveClient() {
       if (!token) throw new Error("No Google access token");
       return appsScriptFetch("archiveClient", { folderId }, token);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() });
+      qc.invalidateQueries({ queryKey: qk.gdrive.root });
+    },
   });
 }
 
@@ -251,7 +254,10 @@ export function useSheetUnarchiveClient() {
       if (!token) throw new Error("No Google access token");
       return appsScriptFetch("unarchiveClient", { folderId }, token);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() });
+      qc.invalidateQueries({ queryKey: qk.gdrive.root });
+    },
   });
 }
 
