@@ -9,6 +9,7 @@ import { currentMonthKey } from "@hooks/useMetrics";
 import { useGrant, useGrants } from "@hooks/useGrants";
 import { useAuth } from "@app/auth/AuthProvider";
 import { Modal } from "@entities/ui/Modal";
+import { CustomerActionMenuBody, EnrollCustomerQuickModal, TIER_SELECTED_CLASS } from "./CustomerActionMenu";
 import { EnrollmentMigrateDialog } from "@entities/dialogs/enrollment/EnrollmentMigrateDialog";
 import { EnrollmentCleanupDialog, type EnrollmentCleanupOptions } from "@entities/dialogs/enrollment/EnrollmentCleanupDialog";
 import { populationChipClass, populationTone } from "@lib/colorRegistry";
@@ -33,14 +34,6 @@ import {
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 const CARD_TASKS_LIMIT = 1000;
-
-// Selected-state colors for the Tier 1/2/3 mini-cards.
-// Tier 1 = highest acuity/risk (red) → Tier 3 = lowest (green).
-const TIER_SELECTED_CLASS: Record<number, string> = {
-  1: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-200",
-  2: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200",
-  3: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
-};
 
 type CustomerCardProps = {
   customer: TCustomerEntity & { id: string };
@@ -930,8 +923,17 @@ function CustomerCardInner({
   const showEnrollmentSections = colSpan > 1;
   const [paymentPopupEnrollmentId, setPaymentPopupEnrollmentId] = React.useState<string | null>(null);
   const [enrollmentPopupId, setEnrollmentPopupId] = React.useState<string | null>(null);
+  const [enrollOpen, setEnrollOpen] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<CustomerCardContextMenu | null>(null);
   const [actionBar, setActionBar] = React.useState<{ x: number; y: number } | null>(null);
+  // Farewell animation when marking a customer inactive: red outline → grey → fade out.
+  const [archivePhase, setArchivePhase] = React.useState<null | "outline" | "fade" | "collapse">(null);
+  const archiveTimers = React.useRef<number[]>([]);
+  const clearArchiveTimers = React.useCallback(() => {
+    for (const id of archiveTimers.current) window.clearTimeout(id);
+    archiveTimers.current = [];
+  }, []);
+  React.useEffect(() => () => clearArchiveTimers(), [clearArchiveTimers]);
   // While a right-click menu/action bar is open, suppress the card's hover lift.
   // The hover transform turns the card into the containing block for the
   // fixed-positioned menus and (combined with overflow-hidden) clips/repositions
@@ -981,13 +983,43 @@ function CustomerCardInner({
 
   const onToggleCustomerActive = React.useCallback(async () => {
     if (!canManageEnrollments || setCustomerActive.isPending) return;
-    try {
-      await setCustomerActive.mutateAsync({ id: customer.id, active: inactiveCustomer });
-      toast(inactiveCustomer ? "Customer marked active." : "Customer marked inactive.", { type: "success" });
-    } catch (error: unknown) {
-      toast(toApiError(error).error || "Failed to update status.", { type: "error" });
+
+    // Reactivating: flip immediately, no exit animation.
+    if (inactiveCustomer) {
+      try {
+        await setCustomerActive.mutateAsync({ id: customer.id, active: true });
+        toast("Customer marked active.", { type: "success" });
+      } catch (error: unknown) {
+        toast(toApiError(error).error || "Failed to update status.", { type: "error" });
+      }
+      return;
     }
-  }, [canManageEnrollments, customer.id, inactiveCustomer, setCustomerActive]);
+
+    // Marking inactive: play red outline → grey → fade out, then commit. The
+    // mutation is optimistic and drops the card from active-filtered lists, so
+    // we run it last to let the animation finish first.
+    if (archivePhase) return;
+    clearArchiveTimers();
+    setArchivePhase("outline");
+    archiveTimers.current.push(
+      window.setTimeout(() => setArchivePhase("fade"), 350),
+      window.setTimeout(() => setArchivePhase("collapse"), 750),
+      window.setTimeout(() => {
+        void (async () => {
+          try {
+            await setCustomerActive.mutateAsync({ id: customer.id, active: false });
+            toast("Customer marked inactive.", { type: "success" });
+          } catch (error: unknown) {
+            toast(toApiError(error).error || "Failed to update status.", { type: "error" });
+          } finally {
+            // If the card is still mounted (this view keeps inactive customers),
+            // settle back into the normal grey inactive card.
+            setArchivePhase(null);
+          }
+        })();
+      }, 1150),
+    );
+  }, [archivePhase, canManageEnrollments, clearArchiveTimers, customer.id, inactiveCustomer, setCustomerActive]);
 
   const viewerId = String(viewerUid || "").trim();
   const selectedCmId = String(selectedCmUid || "").trim();
@@ -1132,6 +1164,16 @@ function CustomerCardInner({
       }
     : null;
 
+  // Mark-inactive farewell: outline red, then desaturate/dim to grey, then fade + shrink away.
+  const archiveClass =
+    archivePhase === "outline"
+      ? "z-10 ring-4 ring-rose-400 dark:ring-rose-500/70"
+      : archivePhase === "fade"
+        ? "z-10 ring-4 ring-slate-300 grayscale opacity-80 dark:ring-slate-600"
+        : archivePhase === "collapse"
+          ? "ring-0 grayscale opacity-0 scale-95 pointer-events-none"
+          : "";
+
   return (
     <article
       data-card-physics-id={`customer:${customer.id}`}
@@ -1145,13 +1187,15 @@ function CustomerCardInner({
       className={[
         COL_SPAN_CLASSES[colSpan],
         "group relative h-full cursor-pointer overflow-hidden rounded-[24px] border shadow-sm transition",
-        menuOpen ? "" : "hover:-translate-y-0.5 hover:shadow-md",
+        archivePhase ? "duration-500 ease-out" : "",
+        menuOpen || archivePhase ? "" : "hover:-translate-y-0.5 hover:shadow-md",
         inactiveCustomer
           ? "border-slate-200 bg-slate-50/90 text-slate-500 dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-400"
           : "bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100",
         selected
           ? "border-sky-500 ring-2 ring-sky-200 bg-sky-50/40 shadow-md dark:ring-sky-500/40 dark:bg-sky-950/40"
           : "border-slate-200 dark:border-slate-700",
+        archiveClass,
       ].join(" ")}
       onClick={(event) => {
         if ((event.target as HTMLElement | null)?.closest(".modal-overlay")) return;
@@ -1806,57 +1850,29 @@ function CustomerCardInner({
           }}
           role="menu"
         >
-          <div className="border-b border-slate-100 px-3 pb-2 dark:border-slate-800">
-            <div className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
-              {displayName(customer)}
-            </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              {inactiveCustomer ? "Inactive" : "Active"}
-              {customerTier ? ` · Tier ${customerTier}` : ""}
-            </div>
-          </div>
-          {canManageEnrollments ? (
-            <button
-              type="button"
-              className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
-              onClick={() => {
-                setActionBar(null);
-                void onToggleCustomerActive();
-              }}
-              disabled={setCustomerActive.isPending}
-              role="menuitem"
-            >
-              {inactiveCustomer ? "Mark active" : "Mark inactive"}
-            </button>
-          ) : null}
-          <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
-            Tier
-          </div>
-          <div className="grid grid-cols-3 gap-1 px-3 pb-2">
-            {[1, 2, 3].map((t) => {
-              const selected = customerTier === t;
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => {
-                    setActionBar(null);
-                    void onSelectTier(t);
-                  }}
-                  disabled={!canManageEnrollments || setCustomerTier.isPending}
-                  title={selected ? `Tier ${t} — click to clear` : `Set Tier ${t}`}
-                  className={[
-                    "rounded-md border px-1.5 py-1 text-center text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50",
-                    selected
-                      ? TIER_SELECTED_CLASS[t]
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
-                  ].join(" ")}
-                >
-                  {t}
-                </button>
-              );
-            })}
-          </div>
+          <CustomerActionMenuBody
+            customerName={displayName(customer)}
+            inactive={inactiveCustomer}
+            currentTier={customerTier}
+            canManage={canManageEnrollments}
+            busy={setCustomerActive.isPending || setCustomerTier.isPending}
+            onOpen={() => {
+              setActionBar(null);
+              onOpen(customer.id);
+            }}
+            onToggleActive={() => {
+              setActionBar(null);
+              void onToggleCustomerActive();
+            }}
+            onEnroll={() => {
+              setActionBar(null);
+              setEnrollOpen(true);
+            }}
+            onSelectTier={(t) => {
+              setActionBar(null);
+              void onSelectTier(t);
+            }}
+          />
         </div>
       ) : null}
 
@@ -1875,6 +1891,19 @@ function CustomerCardInner({
           enrollment={enrollmentPopup}
           onClose={() => setEnrollmentPopupId(null)}
           onChanged={() => {
+            void enrollmentsQuery.refetch();
+          }}
+        />
+      ) : null}
+
+      {enrollOpen ? (
+        <EnrollCustomerQuickModal
+          open
+          customerId={customer.id}
+          customerName={displayName(customer)}
+          onClose={() => setEnrollOpen(false)}
+          onEnrolled={() => {
+            setShouldLoadEnrollments(true);
             void enrollmentsQuery.refetch();
           }}
         />
