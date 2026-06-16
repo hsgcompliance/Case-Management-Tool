@@ -381,6 +381,26 @@ export function computeGrantLineItemOverCap(
 /** ---------- helpers ---------- */
 // Zod v4: .finite() is deprecated
 const Num = z.coerce.number().refine(Number.isFinite, "not_finite").default(0);
+const NullablePositiveInt = z.coerce.number().int().min(1).max(240).nullable();
+
+export function parseGrantMaxAssistanceMonths(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 1) return null;
+    return Math.max(1, Math.min(240, Math.floor(value)));
+  }
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const direct = Number(text);
+  if (Number.isFinite(direct) && direct >= 1) {
+    return Math.max(1, Math.min(240, Math.floor(direct)));
+  }
+  const match = text.match(/(\d{1,3})/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed) || parsed < 1) return null;
+  return Math.max(1, Math.min(240, Math.floor(parsed)));
+}
 
 /** ---------- Budget ---------- */
 const GrantLineItemTypeInput = z.preprocess((v) => {
@@ -727,6 +747,8 @@ export const GrantInputSchema = z
     financialConfig: GrantFinancialConfigPatch.nullish(),
 
     duration: z.string().trim().nullish().default("1 Year"),
+    lengthOfAssistance: z.string().trim().nullish(),
+    maxAssistanceMonths: NullablePositiveInt.nullish(),
 
     // Date | Timestamp | ISO string; server normalizes
     startDate: z.unknown().optional(),

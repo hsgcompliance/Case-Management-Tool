@@ -293,6 +293,7 @@ export {
   shouldRetainGrantBudget,
   getGrantLineItemAmountSemantics,
   computeGrantLineItemOverCap,
+  parseGrantMaxAssistanceMonths,
 } from "./grants";
 
 // Jotform

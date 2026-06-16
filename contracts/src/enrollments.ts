@@ -263,6 +263,8 @@ export const Enrollment = z.object({
   population: Population.optional(),
   caseManagerId: z.string().nullable().optional(),
   caseManagerName: z.string().nullable().optional(),
+  maxAssistanceMonthsAtEnrollment: z.number().int().min(1).max(240).nullable().optional(),
+  maxAssistanceCutoffDate: z.string().nullable().optional(),
 
   // --- Finance (kept here for now; payments & spends also live in dedicated features)
   payments: z.array(Payment).nullable().optional(),

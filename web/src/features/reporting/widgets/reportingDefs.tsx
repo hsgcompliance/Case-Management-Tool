@@ -4,7 +4,7 @@ import { DASHBOARD_TOOL_DEFS } from "@widgets";
 import type { AnyDashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 
 // "inbox" temporarily hidden — will return later
-const REPORTING_IDS = ["grant-budgets", "all-enrollments", "case-manager-load", "caseload-board"];
+const REPORTING_IDS = ["grant-budgets", "rental-assistance", "all-enrollments", "case-manager-load", "caseload-board"];
 
 // Map report IDs → digest type so the toolbar can show a "Subscribe" button
 const REPORT_DIGEST_MAP: Record<string, AnyDashboardToolDefinition["digestType"]> = {

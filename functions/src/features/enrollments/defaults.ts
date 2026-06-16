@@ -1,4 +1,7 @@
-import { normalizeGrantComplianceConfig } from "@hdb/contracts/grants";
+import {
+  normalizeGrantComplianceConfig,
+  parseGrantMaxAssistanceMonths,
+} from "@hdb/contracts/grants";
 
 function iso10(value: unknown): string {
   const s = String(value || "").slice(0, 10);
@@ -77,6 +80,50 @@ function addMonthsMinusOneDay(startISO: string, months: number): string {
   return `${y}-${m}-${d}`;
 }
 
+function addMonthsToMonthEnd(startISO: string, months: number): string {
+  const [year, month, day] = startISO.split("-").map(Number);
+  if (!year || !month || !day || !Number.isFinite(months) || months < 1) return "";
+  const countedFirstMonth = day < 15 ? 1 : 0;
+  const monthOffset = Math.max(0, Math.floor(months) - countedFirstMonth);
+  const target = new Date(year, month - 1 + monthOffset + 1, 0);
+  const y = target.getFullYear();
+  const m = String(target.getMonth() + 1).padStart(2, "0");
+  const d = String(target.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export function grantMaxAssistanceMonths(grant: Record<string, any>): number | null {
+  return (
+    parseGrantMaxAssistanceMonths(grant?.maxAssistanceMonths) ??
+    parseGrantMaxAssistanceMonths(grant?.lengthOfAssistance) ??
+    parseGrantMaxAssistanceMonths(grant?.maxLengthOfAssistance) ??
+    parseGrantMaxAssistanceMonths(grant?.maximumLengthOfAssistance) ??
+    parseGrantMaxAssistanceMonths(grant?.details?.maximumLengthOfAssistance)
+  );
+}
+
+export function deriveMaxAssistanceSnapshot(
+  extra: Record<string, any>,
+  grant: Record<string, any>,
+): {
+  maxAssistanceMonthsAtEnrollment: number | null;
+  maxAssistanceCutoffDate: string | null;
+} {
+  const months = grantMaxAssistanceMonths(grant);
+  if (!months) {
+    return {
+      maxAssistanceMonthsAtEnrollment: null,
+      maxAssistanceCutoffDate: null,
+    };
+  }
+  const start = iso10(extra?.startDate) || iso10(new Date().toISOString());
+  const cutoff = addMonthsToMonthEnd(start, months);
+  return {
+    maxAssistanceMonthsAtEnrollment: months,
+    maxAssistanceCutoffDate: cutoff || null,
+  };
+}
+
 function capToGrantEnd(endDate: string, grant: Record<string, any>): string {
   const grantEndDate = iso10(grant?.endDate);
   if (!grantEndDate || !endDate) return endDate;
@@ -129,6 +176,7 @@ export function applyGrantEnrollmentDefaults(
   }
 
   applyComplianceDefaults(next, grant || {});
+  Object.assign(next, deriveMaxAssistanceSnapshot(next, grant || {}));
 
   return next;
 }

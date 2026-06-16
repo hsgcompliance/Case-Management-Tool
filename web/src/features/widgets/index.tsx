@@ -42,6 +42,11 @@ import {
   AllEnrollmentsTopbar,
 } from "./enrollments/AllEnrollmentsTool";
 import {
+  RentalAssistanceFilterState,
+  RentalAssistanceMain,
+  RentalAssistanceTopbar,
+} from "./rental-assistance/RentalAssistanceTool";
+import {
   CaseManagerLoadFilterState,
   CaseManagerLoadSelection,
   CaseManagerLoadTool,
@@ -1973,6 +1978,14 @@ export const DASHBOARD_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
     ToolTopbar: AllEnrollmentsTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Sidebar: AllEnrollmentsSidebar as AnyDashboardToolDefinition["Sidebar"],
     Main: AllEnrollmentsMain as AnyDashboardToolDefinition["Main"],
+  },
+  {
+    id: "rental-assistance",
+    title: "Rental Assistance",
+    defaultPinned: true,
+    createFilterState: () => ({ activeOnly: true, query: "", caseManagerId: "all" } satisfies RentalAssistanceFilterState),
+    ToolTopbar: RentalAssistanceTopbar as AnyDashboardToolDefinition["ToolTopbar"],
+    Main: RentalAssistanceMain as AnyDashboardToolDefinition["Main"],
   },
   {
     id: "jotform-dashboard",

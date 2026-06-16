@@ -18,6 +18,9 @@ import {
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
 import { deleteEnrollmentsCore } from "../enrollments/delete";
 import {
+  deriveMaxAssistanceSnapshot,
+} from "../enrollments/defaults";
+import {
   Grant,
   GrantPatchBody,
   GrantUpsertBody,
@@ -27,6 +30,7 @@ import {
   normalizeGrantComplianceConfig,
   normalizeGrantDriveTemplates,
   shouldRetainGrantBudget,
+  parseGrantMaxAssistanceMonths,
   toArray,
 } from "./schemas";
 
@@ -227,6 +231,8 @@ const KNOWN_GRANT_FIELDS = new Set<string>([
   "kind",
   "financialConfig",
   "duration",
+  "lengthOfAssistance",
+  "maxAssistanceMonths",
   "startDate",
   "endDate",
   "budget",
@@ -255,6 +261,54 @@ function cleanTopLevelExtras(input: Record<string, unknown>) {
     out[key] = sanitizeNestedObject(value);
   }
   return out;
+}
+
+function patchTouchesMaxAssistance(
+  patch: Record<string, unknown>,
+  unset?: string[],
+): boolean {
+  return (
+    hasOwn(patch, "maxAssistanceMonths") ||
+    hasOwn(patch, "lengthOfAssistance") ||
+    hasOwn(patch, "maxLengthOfAssistance") ||
+    hasOwn(patch, "maximumLengthOfAssistance") ||
+    (Array.isArray(unset) &&
+      unset.some((key) =>
+        ["maxAssistanceMonths", "lengthOfAssistance", "maxLengthOfAssistance", "maximumLengthOfAssistance"].includes(String(key || "")),
+      ))
+  );
+}
+
+async function syncGrantMaxAssistanceToActiveEnrollments(grantId: string) {
+  const grantSnap = await db.collection("grants").doc(grantId).get();
+  if (!grantSnap.exists) return { scanned: 0, updated: 0 };
+  const grant = (grantSnap.data() || {}) as Record<string, any>;
+  const snap = await db
+    .collection("customerEnrollments")
+    .where("grantId", "==", grantId)
+    .where("active", "==", true)
+    .get();
+  if (snap.empty) return { scanned: 0, updated: 0 };
+
+  const writer = newBulkWriter(2);
+  let updated = 0;
+  for (const doc of snap.docs) {
+    const enrollment = (doc.data() || {}) as Record<string, any>;
+    const status = String(enrollment.status || "").toLowerCase();
+    if (enrollment.deleted === true || status === "deleted" || status === "closed") continue;
+    const next = deriveMaxAssistanceSnapshot(enrollment, grant);
+    writer.set(
+      doc.ref,
+      {
+        ...next,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    updated += 1;
+  }
+  await writer.close();
+  return { scanned: snap.size, updated };
 }
 
 /* ---------------- Program/Grant coherence ---------------- */
@@ -388,6 +442,11 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
     financialConfig,
 
     duration: parsed.duration ?? null,
+    lengthOfAssistance: parsed.lengthOfAssistance ?? null,
+    maxAssistanceMonths:
+      parsed.maxAssistanceMonths ??
+      parseGrantMaxAssistanceMonths(parsed.lengthOfAssistance) ??
+      null,
     startDate: parsed.startDate ?? null,
     endDate: parsed.endDate ?? null,
 
@@ -474,6 +533,7 @@ export async function patchGrants(
   }> = [];
   // Track grants whose terminal status should be reflected on enrollments after write.
   const cascadeNeeded: Array<{ id: string; targetStatus: "closed" | "deleted" }> = [];
+  const maxAssistanceSyncIds = new Set<string>();
 
   for (let i = 0; i < rows.length; i++) {
     const { id, patch, unset } = rows[i];
@@ -486,6 +546,10 @@ export async function patchGrants(
     if (touchesBudget) {
       budgetRows.push({ id, patch: safePatch, unset });
       continue;
+    }
+
+    if (patchTouchesMaxAssistance(safePatch as Record<string, unknown>, unset)) {
+      maxAssistanceSyncIds.add(id);
     }
 
     // status coherence
@@ -676,6 +740,19 @@ export async function patchGrants(
         console.error(`[patchGrants] cascade failed for grant ${id} -> ${cascadeTargetStatus}:`, e?.message || e)
       );
     }
+    if (patchTouchesMaxAssistance(patch as Record<string, unknown>, unset)) {
+      maxAssistanceSyncIds.add(id);
+    }
+  }
+
+  if (maxAssistanceSyncIds.size) {
+    await Promise.allSettled(
+      Array.from(maxAssistanceSyncIds).map((id) =>
+        syncGrantMaxAssistanceToActiveEnrollments(id).catch((e: any) =>
+          console.error(`[patchGrants] max assistance sync failed for grant ${id}:`, e?.message || e)
+        )
+      )
+    );
   }
 
   return { ids };

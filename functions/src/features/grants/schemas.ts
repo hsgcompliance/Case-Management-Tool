@@ -24,6 +24,7 @@ export {
   shouldRetainGrantBudget,
   getGrantLineItemAmountSemantics,
   computeGrantLineItemOverCap,
+  parseGrantMaxAssistanceMonths,
   GrantLineItemType,
   GrantBudget,
   GrantBudgetLineItem,

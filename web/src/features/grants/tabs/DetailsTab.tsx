@@ -15,7 +15,7 @@ import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
 import { TSS_COMPLIANCE_CONFIG } from "../creation/grantProgramFlowModel";
-import type { TGrantComplianceConfig } from "@hdb/contracts";
+import { parseGrantMaxAssistanceMonths, type TGrantComplianceConfig } from "@hdb/contracts";
 import { grantDriveTemplates, inferDriveTemplateType, parseDriveFileId } from "../driveTemplates";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
@@ -248,6 +248,8 @@ function levelOfAssistanceFrom(row: Record<string, any> | null | undefined): Rec
 
 function grantMaxLengthFrom(row: Record<string, any> | null | undefined): string {
   if (!row) return "";
+  const months = parseGrantMaxAssistanceMonths(row.maxAssistanceMonths);
+  if (months) return `${months} months`;
   const direct = String(row.lengthOfAssistance ?? row.maxLengthOfAssistance ?? row.maximumLengthOfAssistance ?? "").trim();
   if (direct) return direct;
   const dynamic = row["Maximum Length of Assistance"];
@@ -255,6 +257,14 @@ function grantMaxLengthFrom(row: Record<string, any> | null | undefined): string
     return String((dynamic as Record<string, unknown>)._value || "").trim();
   }
   return String(row.details?.maximumLengthOfAssistance || "").trim();
+}
+
+function grantMaxMonthsFrom(row: Record<string, any> | null | undefined): string {
+  if (!row) return "";
+  const months =
+    parseGrantMaxAssistanceMonths(row.maxAssistanceMonths) ??
+    parseGrantMaxAssistanceMonths(grantMaxLengthFrom(row));
+  return months ? String(months) : "";
 }
 
 function asInvoiceOptions(value: unknown): InvoiceOption[] {
@@ -834,8 +844,8 @@ function RecommendedGrantInfoEditor({
   const invoiceDocuments = invoiceDocumentsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
   const duration = String(model.duration ?? grant?.duration ?? "");
   const maxLength = String(
-    model.lengthOfAssistance ??
-    grantMaxLengthFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ??
+    model.maxAssistanceMonths ??
+    grantMaxMonthsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ??
     "",
   );
 
@@ -855,9 +865,21 @@ function RecommendedGrantInfoEditor({
           <span className="text-xs font-medium text-slate-500">Max Length of Assistance</span>
           <input
             className="input w-full"
+            type="number"
+            min={1}
+            max={240}
+            step={1}
             value={maxLength}
-            placeholder={isGrant ? "Up to 24 Months, Internal Policy of 6 currently" : ""}
-            onChange={(e) => setModel((m) => ({ ...m, lengthOfAssistance: e.currentTarget.value }))}
+            placeholder={isGrant ? "18" : ""}
+            onChange={(e) => {
+              const raw = e.currentTarget.value;
+              const months = parseGrantMaxAssistanceMonths(raw);
+              setModel((m) => ({
+                ...m,
+                maxAssistanceMonths: months,
+                lengthOfAssistance: months ? `${months} months` : null,
+              }));
+            }}
           />
         </label>
       </div>
@@ -1108,8 +1130,9 @@ export function DetailsTab({
       if (isGrantKind && !String(next.duration ?? grant?.duration ?? "").trim()) {
         next.duration = "1 Year";
       }
-      if (isGrantKind && !grantMaxLengthFrom(next) && !grantMaxLengthFrom(grant as any)) {
-        next.lengthOfAssistance = "Up to 24 Months, Internal Policy of 6 currently";
+      if (isGrantKind && !grantMaxMonthsFrom(next) && !grantMaxMonthsFrom(grant as any)) {
+        next.maxAssistanceMonths = 24;
+        next.lengthOfAssistance = "24 months";
       }
       return next;
     });
@@ -1254,9 +1277,20 @@ export function DetailsTab({
               <div className="text-slate-500 dark:text-slate-400">Max Length of Assistance</div>
               <input
                 className="input pointer-events-auto mt-1"
-                value={String(model.lengthOfAssistance ?? grantMaxLengthFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ?? "")}
-                placeholder="Up to 24 months"
-                onChange={(e) => setModel((m) => ({ ...m, lengthOfAssistance: e.currentTarget.value }))}
+                type="number"
+                min={1}
+                max={240}
+                step={1}
+                value={String(model.maxAssistanceMonths ?? grantMaxMonthsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ?? "")}
+                placeholder="18"
+                onChange={(e) => {
+                  const months = parseGrantMaxAssistanceMonths(e.currentTarget.value);
+                  setModel((m) => ({
+                    ...m,
+                    maxAssistanceMonths: months,
+                    lengthOfAssistance: months ? `${months} months` : null,
+                  }));
+                }}
               />
             </label>
           </div>
