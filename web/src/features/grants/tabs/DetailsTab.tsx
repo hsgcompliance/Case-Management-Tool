@@ -11,11 +11,11 @@ import {
   PRIORITY_META,
   type Priority,
 } from "@entities/ui/DynamicFormFields";
-import type { TGrant as Grant } from "@types";
+import type { TGrant as Grant, TGrantComplianceConfig } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
 import { TSS_COMPLIANCE_CONFIG } from "../creation/grantProgramFlowModel";
-import { parseGrantMaxAssistanceMonths, type TGrantComplianceConfig } from "@hdb/contracts";
+import { parseGrantMaxAssistanceMonths } from "@hdb/contracts";
 import { grantDriveTemplates, inferDriveTemplateType, parseDriveFileId } from "../driveTemplates";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
@@ -103,6 +103,10 @@ const FINANCIAL_MODEL_COPY: Record<FinancialModel, { title: string; body: string
   },
 };
 
+function emptyBudget() {
+  return { total: 0, lineItems: [] };
+}
+
 const LEGACY_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
   preset: "hmisCaseworthy",
   active: [
@@ -120,6 +124,111 @@ const NO_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
   active: [],
   inactive: [],
 };
+
+type EnrollmentControlChip = {
+  id: string;
+  label: string;
+  active?: NonNullable<TGrantComplianceConfig["active"]>;
+  inactive?: NonNullable<TGrantComplianceConfig["inactive"]>;
+};
+
+const ENROLLMENT_CONTROL_CHIPS: EnrollmentControlChip[] = [
+  {
+    id: "cw-entry",
+    label: "CW Entry",
+    active: [
+      { key: "caseworthyEntryComplete", label: "CW Entry", field: "compliance.caseworthyEntryComplete", type: "boolean" },
+    ],
+  },
+  {
+    id: "cw-exit",
+    label: "CW Exit",
+    inactive: [
+      { key: "caseworthyExitComplete", label: "CW Exit", field: "compliance.caseworthyExitComplete", type: "boolean" },
+    ],
+  },
+  {
+    id: "hmis",
+    label: "HMIS Entry + Exit",
+    active: [
+      { key: "hmisEntryComplete", label: "HMIS Entry", field: "compliance.hmisEntryComplete", type: "boolean" },
+    ],
+    inactive: [
+      { key: "hmisExitComplete", label: "HMIS Exit", field: "compliance.hmisExitComplete", type: "boolean" },
+    ],
+  },
+  {
+    id: "medicaid-active",
+    label: "Medicaid Active",
+    active: [
+      { key: "medicaidActive", label: "Medicaid Active", field: "medicaid.active", type: "boolean" },
+    ],
+  },
+  {
+    id: "tss-active",
+    label: "TSS Active",
+    active: [
+      { key: "tssActive", label: "TSS Active", field: "tss.active", type: "boolean" },
+    ],
+  },
+];
+
+function complianceControlsFrom(config: unknown): {
+  active: NonNullable<TGrantComplianceConfig["active"]>;
+  inactive: NonNullable<TGrantComplianceConfig["inactive"]>;
+} {
+  const raw = config && typeof config === "object" ? (config as TGrantComplianceConfig) : {};
+  return {
+    active: Array.isArray(raw.active) ? raw.active : [],
+    inactive: Array.isArray(raw.inactive) ? raw.inactive : [],
+  };
+}
+
+function controlKey(control: Record<string, unknown>) {
+  return String(control.field || control.key || "").trim();
+}
+
+function hasControl(list: Array<Record<string, unknown>>, control: Record<string, unknown>) {
+  const key = controlKey(control);
+  return !!key && list.some((entry) => controlKey(entry) === key);
+}
+
+function addEnrollmentControlChip(config: unknown, chip: EnrollmentControlChip): TGrantComplianceConfig {
+  const current = complianceControlsFrom(config);
+  const active = [...current.active];
+  const inactive = [...current.inactive];
+  for (const control of chip.active || []) {
+    if (!hasControl(active as Array<Record<string, unknown>>, control)) active.push(control);
+  }
+  for (const control of chip.inactive || []) {
+    if (!hasControl(inactive as Array<Record<string, unknown>>, control)) inactive.push(control);
+  }
+  return { preset: "custom", active, inactive };
+}
+
+function removeEnrollmentControl(config: unknown, target: Record<string, unknown>): TGrantComplianceConfig {
+  const current = complianceControlsFrom(config);
+  const key = controlKey(target);
+  return {
+    preset: current.active.length + current.inactive.length > 1 ? "custom" : "none",
+    active: current.active.filter((control) => controlKey(control as Record<string, unknown>) !== key),
+    inactive: current.inactive.filter((control) => controlKey(control as Record<string, unknown>) !== key),
+  };
+}
+
+function addCustomEnrollmentControl(config: unknown, label: string): TGrantComplianceConfig {
+  const cleanLabel = label.trim();
+  if (!cleanLabel) return (config && typeof config === "object" ? config : NO_COMPLIANCE_CONFIG) as TGrantComplianceConfig;
+  const key = cleanLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || `custom_${Date.now().toString(36)}`;
+  return addEnrollmentControlChip(config, {
+    id: key,
+    label: cleanLabel,
+    active: [{ key, label: cleanLabel, field: `compliance.${key}`, type: "boolean" }],
+  });
+}
 
 function financialModelOf(model: Record<string, any>, grant: Grant | null): FinancialModel {
   const raw = String((model.financialConfig ?? grant?.financialConfig ?? {})?.model || "").trim();
@@ -265,6 +374,23 @@ function grantMaxMonthsFrom(row: Record<string, any> | null | undefined): string
     parseGrantMaxAssistanceMonths(row.maxAssistanceMonths) ??
     parseGrantMaxAssistanceMonths(grantMaxLengthFrom(row));
   return months ? String(months) : "";
+}
+
+function maxAssistanceInputValue(model: Record<string, any>, grant: Record<string, any> | null | undefined): string {
+  if (Object.prototype.hasOwnProperty.call(model, "maxAssistanceMonths")) {
+    return model.maxAssistanceMonths == null ? "" : String(model.maxAssistanceMonths);
+  }
+  return grantMaxMonthsFrom(grant);
+}
+
+function maxAssistancePatchFromInput(raw: string): { maxAssistanceMonths: number | null; lengthOfAssistance: string | null } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { maxAssistanceMonths: null, lengthOfAssistance: null };
+  const months = parseGrantMaxAssistanceMonths(trimmed);
+  return {
+    maxAssistanceMonths: months,
+    lengthOfAssistance: months ? `${months} months` : null,
+  };
 }
 
 function asInvoiceOptions(value: unknown): InvoiceOption[] {
@@ -843,11 +969,7 @@ function RecommendedGrantInfoEditor({
   const level = levelOfAssistanceFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
   const invoiceDocuments = invoiceDocumentsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
   const duration = String(model.duration ?? grant?.duration ?? "");
-  const maxLength = String(
-    model.maxAssistanceMonths ??
-    grantMaxMonthsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ??
-    "",
-  );
+  const maxLength = maxAssistanceInputValue(model, grant);
 
   return (
     <div className="md:col-span-2 space-y-4">
@@ -872,13 +994,8 @@ function RecommendedGrantInfoEditor({
             value={maxLength}
             placeholder={isGrant ? "18" : ""}
             onChange={(e) => {
-              const raw = e.currentTarget.value;
-              const months = parseGrantMaxAssistanceMonths(raw);
-              setModel((m) => ({
-                ...m,
-                maxAssistanceMonths: months,
-                lengthOfAssistance: months ? `${months} months` : null,
-              }));
+              const patch = maxAssistancePatchFromInput(e.currentTarget.value);
+              setModel((m) => ({ ...m, ...patch }));
             }}
           />
         </label>
@@ -1080,6 +1197,13 @@ export function DetailsTab({
     ...(Array.isArray(complianceConfig.active) ? complianceConfig.active : []),
     ...(Array.isArray(complianceConfig.inactive) ? complianceConfig.inactive : []),
   ];
+  const [customControlLabel, setCustomControlLabel] = useState("");
+  const addCustomControl = useCallback(() => {
+    const label = customControlLabel.trim();
+    if (!label) return;
+    setModel((m) => ({ ...m, complianceConfig: addCustomEnrollmentControl(m.complianceConfig ?? complianceConfig, label) }));
+    setCustomControlLabel("");
+  }, [complianceConfig, customControlLabel, setModel]);
   const driveTemplates = grantDriveTemplates((model ?? grant) as Record<string, unknown>);
   const updateDriveTemplate = (index: number, patch: Record<string, unknown>) => {
     setModel((m) => {
@@ -1278,20 +1402,19 @@ export function DetailsTab({
               <input
                 className="input pointer-events-auto mt-1"
                 type="number"
-                min={1}
+                min={0}
                 max={240}
                 step={1}
-                value={String(model.maxAssistanceMonths ?? grantMaxMonthsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null) ?? "")}
-                placeholder="18"
+                value={maxAssistanceInputValue(model, grant as Record<string, any> | null)}
+                placeholder={isGrantKind ? "18" : "Indefinite"}
                 onChange={(e) => {
-                  const months = parseGrantMaxAssistanceMonths(e.currentTarget.value);
-                  setModel((m) => ({
-                    ...m,
-                    maxAssistanceMonths: months,
-                    lengthOfAssistance: months ? `${months} months` : null,
-                  }));
+                  const patch = maxAssistancePatchFromInput(e.currentTarget.value);
+                  setModel((m) => ({ ...m, ...patch }));
                 }}
               />
+              <div className="mt-1 text-xs text-slate-500">
+                Leave blank for indefinite assistance.
+              </div>
             </label>
           </div>
 
@@ -1423,10 +1546,45 @@ export function DetailsTab({
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
+              {ENROLLMENT_CONTROL_CHIPS.map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800"
+                  onClick={() => setModel((m) => ({ ...m, complianceConfig: addEnrollmentControlChip(m.complianceConfig ?? complianceConfig, chip) }))}
+                >
+                  + {chip.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                className="input h-8 w-56 text-xs"
+                value={customControlLabel}
+                placeholder="Custom control"
+                onChange={(e) => setCustomControlLabel(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomControl();
+                  }
+                }}
+              />
+              <button type="button" className="btn btn-secondary btn-xs" onClick={addCustomControl}>
+                Add custom
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
               {complianceControls.length ? complianceControls.map((control: any) => (
-                <span key={`${control.field || control.key}`} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                  {String(control.label || control.key)}
-                </span>
+                <button
+                  key={`${control.field || control.key}`}
+                  type="button"
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                  title="Remove enrollment control"
+                  onClick={() => setModel((m) => ({ ...m, complianceConfig: removeEnrollmentControl(m.complianceConfig ?? complianceConfig, control) }))}
+                >
+                  {String(control.label || control.key)} <span aria-hidden="true">x</span>
+                </button>
               )) : (
                 <span className="text-xs text-slate-500">No enrollment controls configured.</span>
               )}

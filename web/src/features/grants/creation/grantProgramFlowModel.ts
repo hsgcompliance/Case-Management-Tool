@@ -117,8 +117,8 @@ export const TSS_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
     },
     {
       key: "serviceStatus",
-      label: "Service Active",
-      field: "serviceStatus",
+      label: "TSS Active",
+      field: "tss.active",
       type: "boolean",
     },
     {
