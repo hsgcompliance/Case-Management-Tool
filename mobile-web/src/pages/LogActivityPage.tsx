@@ -21,6 +21,14 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Initials from a display name: "Griffin Seyfried" → "GS"; single token → first 2 chars. */
+function staffInitials(name?: string | null): string {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // ─── Calendar sync failure sheet ─────────────────────────────────────────────
 
 interface SyncWarningProps {
@@ -230,6 +238,15 @@ export function LogActivityPage() {
         return;
       }
       try {
+        // Fold the session modality (In Person / Phone / …) into the Summary —
+        // TSS Progress Notes has no dedicated contact-type column. Staff name +
+        // initials come from the signed-in case manager.
+        const modalityLabel = TYPES.find((t) => t.value === type)?.label ?? "";
+        const trimmedNote = note.trim();
+        const summary = [modalityLabel, trimmedNote].filter(Boolean).join(" — ");
+        const staffName = (user?.displayName ?? "").trim();
+        const staffInitial = staffInitials(user?.displayName);
+
         const resp = await GoogleIntegrations.pushWorkbookRow({
           customerId: customer.id,
           entityId: "progressNotes",
@@ -237,7 +254,9 @@ export function LogActivityPage() {
             progressDate: date,
             ...(startTime ? { startTime } : {}),
             ...(endTime ? { endTime } : {}),
-            ...(note.trim() ? { summary: note.trim() } : {}),
+            ...(summary ? { summary } : {}),
+            ...(staffName ? { staffName } : {}),
+            ...(staffInitial ? { staffInitial } : {}),
           },
         });
         if (!resp.ok) {

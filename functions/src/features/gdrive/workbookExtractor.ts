@@ -87,12 +87,53 @@ function makeCell(raw: string, dataType?: string): TssNS.TssExtractedCell {
 
 // ── Header normalization ────────────────────────────────────────────────────
 
-/** All accepted normalized header ids for a field (its expected + aliases). */
-function fieldHeaderIds(field: { expected?: string; aliases?: readonly string[] }): Set<string> {
+// Shared worksheet header-alias dictionary (keyed by field id / appField). Folded
+// into each field's accepted header ids so column matching tolerates real-world
+// header wording (e.g. "Service Date" for Date, "Summary" for "Summary (what &
+// why)") even when the entity field config doesn't enumerate every variant inline.
+const HEADER_ALIAS_DICT = tss.TSS_HEADER_ALIASES as Record<string, readonly string[]>;
+
+/** All accepted normalized header ids for a field (expected + inline + dictionary aliases). */
+function fieldHeaderIds(field: {
+  id?: string;
+  appField?: string;
+  expected?: string;
+  aliases?: readonly string[];
+}): Set<string> {
   const ids = new Set<string>();
   if (field.expected) ids.add(tss.smartHeaderId(field.expected));
   for (const a of field.aliases ?? []) ids.add(tss.smartHeaderId(a));
+  for (const key of [field.id, field.appField]) {
+    const dictAliases = key ? HEADER_ALIAS_DICT[key] : undefined;
+    if (dictAliases) for (const a of dictAliases) ids.add(tss.smartHeaderId(a));
+  }
   return ids;
+}
+
+/**
+ * Expand each required header id into the set of acceptable ids using the owning
+ * field's full alias set, so a header row "satisfies" a required id when it
+ * contains ANY of that field's accepted headers — not only the exact configured
+ * wording. Ids with no owning field fall back to an exact match.
+ */
+function buildMustContainMatchers(
+  fields: readonly TssNS.TssSmartHeaderConfig[],
+  mustContain: readonly string[],
+): Array<Set<string>> {
+  return mustContain.map((id) => {
+    for (const f of fields) {
+      const ids = fieldHeaderIds(f);
+      if (ids.has(id)) return ids;
+    }
+    return new Set([id]);
+  });
+}
+
+function rowSatisfiesMatchers(rowIds: Set<string>, matchers: Array<Set<string>>): boolean {
+  return matchers.every((set) => {
+    for (const id of set) if (rowIds.has(id)) return true;
+    return false;
+  });
 }
 
 // ── Sheet resolution ────────────────────────────────────────────────────────
@@ -302,10 +343,21 @@ function resolveTableLayout(
   const warnings: TssNS.TssExtractionWarning[] = [];
   const mustContain = range.headerScan?.mustContainHeaderIds ?? [];
   const scoreIds = range.headerScan?.scoreHeaderIds ?? mustContain;
+  const matchers = buildMustContainMatchers(fields, mustContain);
   const rowIdsAt = (rowIdx: number) => new Set((grid[rowIdx] ?? []).map((c) => tss.smartHeaderId(c)));
+  // Score a row by configured score ids PLUS how many of this entity's fields
+  // resolve a column there. The field signature is what lets a header row be
+  // detected even when a variant range omits headerScan/scoreHeaderIds, or when
+  // the header wording drifts from the configured `expected` strings.
   const rowScore = (rowIdx: number) => {
     const ids = rowIdsAt(rowIdx);
-    return scoreIds.reduce((acc, id) => acc + (ids.has(id) ? 1 : 0), 0);
+    let sc = 0;
+    for (const id of scoreIds) if (ids.has(id)) sc++;
+    for (const f of fields) {
+      const set = fieldHeaderIds(f);
+      for (const id of set) { if (ids.has(id)) { sc++; break; } }
+    }
+    return sc;
   };
 
   // Candidate rows in priority order: fixed headerRow, configured candidates,
@@ -321,13 +373,14 @@ function resolveTableLayout(
   const orderedRows = candidateRows.filter((r) => r >= 0 && !seenRows.has(r) && (seenRows.add(r), true));
 
   let headerRow = -1;
-  let bestScore = -1;
+  let bestScore = 0;
   for (const r of orderedRows) {
-    if (mustContain.length && !mustContain.every((id) => rowIdsAt(r).has(id))) continue;
+    if (mustContain.length && !rowSatisfiesMatchers(rowIdsAt(r), matchers)) continue;
     const sc = rowScore(r);
     if (sc > bestScore) { bestScore = sc; headerRow = r; }
   }
   if (headerRow < 0) {
+    // mustContain matched no row — fall back to the strongest field-signature row.
     for (const r of orderedRows) {
       const sc = rowScore(r);
       if (sc >= 2 && sc > bestScore) { bestScore = sc; headerRow = r; }
@@ -373,13 +426,18 @@ function dataStartRow(range: RangeCfg, headerRow: number): number {
 // rows, and capture the banner rows as section breaks.
 
 /** Every row that satisfies the table's required header ids (a section header). */
-function findHeaderRows(grid: Grid, range: RangeCfg): number[] {
+function findHeaderRows(
+  grid: Grid,
+  range: RangeCfg,
+  fields: readonly TssNS.TssSmartHeaderConfig[],
+): number[] {
   const mustContain = range.headerScan?.mustContainHeaderIds ?? [];
   if (!mustContain.length) return [];
+  const matchers = buildMustContainMatchers(fields, mustContain);
   const out: number[] = [];
   for (let r = 0; r < MAX_SCAN_ROWS; r++) {
     const ids = new Set((grid[r] ?? []).map((c) => tss.smartHeaderId(c)));
-    if (mustContain.every((id) => ids.has(id))) out.push(r);
+    if (rowSatisfiesMatchers(ids, matchers)) out.push(r);
   }
   return out;
 }
@@ -427,7 +485,7 @@ function extractNotesEntity(
     return { rows: [], sectionBreaks: [], warnings: [], status: "missing_headers" };
   }
 
-  let headerRows = findHeaderRows(grid, range);
+  let headerRows = findHeaderRows(grid, range, fields);
   if (!headerRows.length) {
     // No header matched by signature — fall back to the drift-tolerant single resolver.
     const layout = resolveTableLayout(grid, range, fields, entity.id);
@@ -754,7 +812,7 @@ export async function appendWorkbookRow(args: {
   let colMap: Map<string, number>;
   let start: number;
   if (entity.section === "notes") {
-    const headerRows = findHeaderRows(grid, range);
+    const headerRows = findHeaderRows(grid, range, fields);
     const lastHeader = headerRows.length
       ? headerRows[headerRows.length - 1]
       : resolveTableLayout(grid, range, fields, entity.id)?.headerRow ?? -1;
