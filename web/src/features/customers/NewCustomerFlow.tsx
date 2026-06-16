@@ -2,13 +2,14 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import { toApiError } from "@client/api";
+import api, { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
 import type { CustomersUpsertReq, ReqOf, TCustomerEntity, TPayment } from "@types";
 import { AssessmentInput } from "@entities/assessments/AssessmentInput";
 import PaymentScheduleBuilderDialog from "@entities/dialogs/payments/PaymentScheduleBuilderDialog";
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
 import { TaskBuilder, type TaskTemplateDraft } from "@entities/tasks/TaskBuilder";
+import { WorkbookLinkControls } from "@entities/workbook/WorkbookLinkControls";
 import { useAssessmentTemplate, useAssessmentTemplates } from "@hooks/useAssessments";
 import { useCustomer, useUpsertCustomers, usePatchCustomers } from "@hooks/useCustomers";
 import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
@@ -29,6 +30,7 @@ import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
 import { findDuplicates, DUP_WARN_THRESHOLD } from "@lib/duplicateScore";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import { isCaseManagerLike } from "@lib/roles";
+import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
 import { toast } from "@lib/toast";
 import { DuplicateChecker, type DupCheckState } from "./DuplicateChecker";
 import type { DupMatch } from "@lib/duplicateScore";
@@ -222,14 +224,17 @@ function buildFlowTemplatePayload(args: {
   medicaid: "yes" | "no" | "not_sure";
   firstName: string;
   lastName: string;
-}): Array<{ fileId: string; name: string }> {
+}): Array<{ fileId: string; name: string; role?: string }> {
   const first = args.firstName.trim();
   const last = args.lastName.trim();
   return FOLDER_TEMPLATES_FLOW.flatMap((tmpl) => {
     if (!args.selectedTemplates.has(tmpl.key)) return [];
     const fileId = resolveFlowTemplateFileId(tmpl, args.medicaid);
     if (fileId.length < 3) return [];
-    return [{ fileId, name: renderFlowDocName(tmpl.docNameTpl, first, last) }];
+    // Flag the TSS workbook template so the backend returns the copied Sheet as
+    // `folder.workbook`, which we then auto-link as the customer's TSS workbook.
+    const role = tmpl.key === "tss_workbook" ? "tssWorkbook" : undefined;
+    return [{ fileId, name: renderFlowDocName(tmpl.docNameTpl, first, last), ...(role ? { role } : {}) }];
   });
 }
 
@@ -492,6 +497,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [wantsFolderLink, setWantsFolderLink] = React.useState(false);
   const [folderUrl, setFolderUrl] = React.useState("");
   const [folderAlias, setFolderAlias] = React.useState("");
+  const [workbookLinkedInFlow, setWorkbookLinkedInFlow] = React.useState(false);
   // Folder builder state (step 8)
   const [folderMode, setFolderMode] = React.useState<"none" | "build" | "link">("none");
   const [buildFolderName, setBuildFolderName] = React.useState("");
@@ -586,6 +592,9 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
       setSelectedEnrollmentDrafts(seeded);
     }
   }, [enrollments, existingGrantIds.size, grantEndDateById, selectedEnrollmentDrafts.length]);
+
+  // Reset the in-flow workbook-linked confirmation whenever the chosen folder changes.
+  React.useEffect(() => { setWorkbookLinkedInFlow(false); }, [folderUrl]);
 
   // Reset dup check when identifying fields change after a check was run
   React.useEffect(() => {
@@ -1024,7 +1033,9 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
           templates,
           subfolders: buildSubfolders,
         });
-        const builtFolder = (built as any)?.folder as { id: string; name: string } | undefined;
+        const builtFolder = (built as any)?.folder as
+          | { id: string; name: string; workbook?: { spreadsheetId?: string; name?: string } }
+          | undefined;
         if (builtFolder?.id) {
           // Transitional folder-link write. Future writes should populate
           // customerDrive.folderId as the primary pointer and keep these meta
@@ -1039,6 +1050,22 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
               },
             },
           } as unknown as Parameters<typeof patchCustomer.mutateAsync>[0]);
+        }
+
+        // Auto-link the TSS workbook the build just created (Medicaid / non-Medicaid
+        // variant). Non-blocking: a link failure must not fail the folder build.
+        const builtWorkbook = builtFolder?.workbook;
+        if (builtWorkbook?.spreadsheetId) {
+          try {
+            const tok = getGoogleDriveAccessToken();
+            await api.postWith(
+              "attachCustomerWorkbookCandidate",
+              { customerId: ensuredCustomerId, spreadsheetId: builtWorkbook.spreadsheetId, spreadsheetName: builtWorkbook.name },
+              tok ? { "x-drive-access-token": tok } : undefined,
+            );
+          } catch {
+            toast("Folder built, but couldn't auto-link the TSS workbook — link it from the Files tab.", { type: "warning" });
+          }
         }
       } else if (folderMode === "link" && folderUrl.trim()) {
         failureTitle = "Error linking Customer folder";
@@ -1913,6 +1940,43 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
               <span className="label">Alias (optional)</span>
               <input className="input w-full" value={folderAlias} onChange={(e) => setFolderAlias(e.currentTarget.value)} />
             </label>
+
+            {/* TSS workbook link — scan the chosen folder for a Sheet (or paste a
+                URL). Also drives the auto-match path: the "Use this" action in the
+                Possible-folders modal sets this folder, surfacing the picker here. */}
+            {(() => {
+              const linkFolderId = parseFlowFolderId(folderUrl);
+              if (!customerId) {
+                return (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                    The TSS workbook link appears here once the customer record exists and a folder is chosen.
+                  </div>
+                );
+              }
+              if (!linkFolderId) {
+                return (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                    Choose or paste a folder above to link its TSS workbook.
+                  </div>
+                );
+              }
+              return (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">TSS Workbook</div>
+                  {workbookLinkedInFlow ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                      <span>✓</span> TSS workbook linked to this customer.
+                    </div>
+                  ) : (
+                    <WorkbookLinkControls
+                      customerId={customerId}
+                      folderId={linkFolderId}
+                      onLinked={() => { setWorkbookLinkedInFlow(true); toast("TSS workbook linked.", { type: "success" }); }}
+                    />
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
