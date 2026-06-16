@@ -5,13 +5,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { ListStyleLayout } from "@entities/Page/listStyle";
 import { TourProvider } from "../../tour/TourCtx";
-import {
-  useCustomers,
-  useCustomersAll,
-  useSetCustomerActive,
-  useSoftDeleteCustomers,
-  useHardDeleteCustomers,
-} from "@hooks/useCustomers";
+import { useCustomers, useCustomersAll } from "@hooks/useCustomers";
 import { useGrantEnrollmentMap, type EnrollmentStatusBucket } from "@hooks/useEnrollments";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
@@ -27,10 +21,9 @@ import {
 import PageHeader from "@entities/Page/PageHeader";
 import { HelpButton } from "@entities/help/HelpButton";
 import RefreshButton from "@entities/ui/RefreshButton";
-import ActionMenu from "@entities/ui/ActionMenu";
-import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
+import { CustomerFilterBar } from "./components/CustomerFilterBar";
+import { CustomerRowActionMenu, TIER_SELECTED_CLASS } from "./components/CustomerActionMenu";
 import { statusChipClass } from "@lib/colorRegistry";
-import { fmtDateSmartOrDash } from "@lib/formatters";
 import { isAdminLike, isCaseManagerLike, isDevLike, isViewerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
 import { useSystemMetrics } from "@hooks/useMetrics";
@@ -156,10 +149,6 @@ function displayName(c: TCustomerEntity) {
     [c?.firstName, c?.lastName].filter(Boolean).join(" ").trim() ||
     "(Unnamed)"
   );
-}
-
-function fmtDate(v: unknown) {
-  return fmtDateSmartOrDash(v);
 }
 
 function asTime(value: unknown): number {
@@ -341,6 +330,12 @@ export function CustomersPage() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [users]);
 
+  const cmNameByUid = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of caseManagerOptions) map.set(option.uid, option.label);
+    return map;
+  }, [caseManagerOptions]);
+
   React.useEffect(() => {
     setCursorId(undefined);
     setCursorStack([]);
@@ -385,7 +380,7 @@ export function CustomersPage() {
   } = useCustomersAll(
     { active: "all", deleted: "include", contactCaseManagerId: myUid || undefined },
     {
-      enabled: pageMode === "new" && meReady && defaultCardPoolMode === "mine",
+      enabled: meReady && defaultCardPoolMode === "mine",
       maxItems: 25_000,
     },
   );
@@ -397,7 +392,7 @@ export function CustomersPage() {
   } = useCustomersAll(
     { active: "all", deleted: "include" },
     {
-      enabled: pageMode === "new" && meReady && (defaultCardPoolMode === "all" || cardPoolMode === "all"),
+      enabled: meReady && (defaultCardPoolMode === "all" || cardPoolMode === "all"),
       maxItems: 25_000,
     },
   );
@@ -498,10 +493,9 @@ export function CustomersPage() {
   }, [locallyFilteredRows, search, sortMode]);
 
   const secretSearchFallbackCustomerId = React.useMemo(() => {
-    const rows = pageMode === "new" ? newPageDisplayRows : displayRows;
-    const firstCustomer = rows.find((customer) => !!String(customer?.id || "").trim());
+    const firstCustomer = newPageDisplayRows.find((customer) => !!String(customer?.id || "").trim());
     return firstCustomer ? String(firstCustomer.id || "").trim() : null;
-  }, [displayRows, newPageDisplayRows, pageMode]);
+  }, [newPageDisplayRows]);
 
   const secretGamesAdminConfig = React.useMemo(
     () => readSecretGamesAdminConfig(orgConfig?.secretGames),
@@ -522,11 +516,11 @@ export function CustomersPage() {
     defaultCardPoolMode === "mine" && cardPoolMode !== "all"
       ? isMyCustomersPoolError
       : isAllCustomersPoolError;
+  const newPageIsLoading = isFetchingNewPagePool || (grantFilterActive && isLoadingEnrolledIds);
 
   const promoteCustomersPool = React.useCallback(() => {
-    if (pageMode !== "new") return;
     if (defaultCardPoolMode === "mine") setCardPoolMode("all");
-  }, [defaultCardPoolMode, pageMode, setCardPoolMode]);
+  }, [defaultCardPoolMode, setCardPoolMode]);
 
   const onNext = () => {
     if (!items.length || items.length < PAGE_SIZE) return;
@@ -545,39 +539,6 @@ export function CustomersPage() {
 
   const openDetailModal = (id: string) => router.push(`/customers/${id}`);
   const openNewModal = () => router.push(`/customers/new`);
-
-  const setActive = useSetCustomerActive();
-  const softDelete = useSoftDeleteCustomers();
-  const hardDelete = useHardDeleteCustomers();
-
-  const toggleActive = async (id: string, nextActive: boolean) => {
-    try {
-      await setActive.mutateAsync({ id, active: nextActive });
-    } catch {
-      // no-op for now
-    }
-  };
-
-  const doDelete = async (id: string) => {
-    const ok = window.confirm("Soft delete this customer? (You can include deleted later.)");
-    if (!ok) return;
-    try {
-      await softDelete.mutateAsync(id);
-    } catch {
-      // no-op for now
-    }
-  };
-
-  const doHardDelete = async (id: string) => {
-    if (!isAdminUser) return;
-    const ok = window.confirm("Hard delete this customer permanently? This cannot be undone.");
-    if (!ok) return;
-    try {
-      await hardDelete.mutateAsync(id);
-    } catch {
-      // no-op for now
-    }
-  };
 
   const { data: systemMetrics } = useSystemMetrics();
   // True total from the weekly-reconciled metric doc — avoids the page-size cap
@@ -800,54 +761,6 @@ export function CustomersPage() {
                   New Customer
                 </button>
               )}
-              {pageMode === "legacy" ? (
-                <div className="relative" ref={menuRef}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm rounded-lg"
-                    aria-label="More filters"
-                    title="More filters"
-                    onClick={() => setMenuOpen((v) => !v)}
-                  >
-                    <span className="text-lg leading-none">...</span>
-                  </button>
-                  {menuOpen && (
-                    <div className="absolute right-0 z-50 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                      <div className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        Filters
-                      </div>
-                      <div className="space-y-3">
-                        {isAdminUser ? (
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm text-slate-600 dark:text-slate-300">Deleted</span>
-                            <select
-                              className="select"
-                              value={deletedMode}
-                              onChange={(e) => setDeletedMode(e.currentTarget.value as DeletedMode)}
-                            >
-                              <option value="exclude">Exclude</option>
-                              <option value="include">Include</option>
-                              <option value="only">Only</option>
-                            </select>
-                          </div>
-                        ) : null}
-                        <div className="flex items-center justify-between gap-2 border-t pt-2">
-                          <button type="button" className="btn btn-ghost btn-sm rounded-lg" onClick={resetFilters}>
-                            Reset
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm rounded-lg"
-                            onClick={() => setMenuOpen(false)}
-                          >
-                            Close
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : null}
             </>
           }
         />
@@ -858,7 +771,7 @@ export function CustomersPage() {
             isAdminUser={isAdminUser}
             rows={newPageDisplayRows}
             totalRows={newPageTotalRows}
-            isLoading={isFetchingNewPagePool || (grantFilterActive && isLoadingEnrolledIds)}
+            isLoading={newPageIsLoading}
             isError={isNewPageError}
             activeMode={activeMode}
             deletedMode={deletedMode}
@@ -887,104 +800,36 @@ export function CustomersPage() {
           />
         ) : (
           <>
-            <div className="card" data-tour="customers-filters">
-              <div className="card-section">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-600">Status</span>
-                    <div className="inline-flex overflow-hidden rounded border border-slate-300 text-sm">
-                      {([
-                        ["all", "All"],
-                        ["active", "Active"],
-                        ["inactive", "Inactive"],
-                      ] as Array<[ActiveMode, string]>).map(([mode, label], index) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={[
-                            "px-3 py-1",
-                            index > 0 ? "border-l border-slate-300" : "",
-                            activeMode === mode
-                              ? "bg-blue-600 text-white font-medium"
-                              : "bg-white text-slate-700 hover:bg-slate-50",
-                          ].join(" ")}
-                          onClick={() => setActiveMode(mode)}
-                          disabled={isFetching || isFilteringPool}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {myUid ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-600">Scope</span>
-                      <div className="inline-flex overflow-hidden rounded border border-slate-300 text-sm">
-                        <button
-                          type="button"
-                          className={[
-                            "px-3 py-1",
-                            cmFilter === myUid
-                              ? "bg-blue-600 text-white font-medium"
-                              : "bg-white text-slate-700 hover:bg-slate-50",
-                          ].join(" ")}
-                          onClick={() => setCmFilter(myUid)}
-                        >
-                          My Customers
-                        </button>
-                        <button
-                          type="button"
-                          className={[
-                            "border-l border-slate-300 px-3 py-1",
-                            cmFilter === "all"
-                              ? "bg-blue-600 text-white font-medium"
-                              : "bg-white text-slate-700 hover:bg-slate-50",
-                          ].join(" ")}
-                          onClick={() => setCmFilter("all")}
-                        >
-                          All
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-600">Case Manager</span>
-                    <CaseManagerSelect
-                      value={cmFilter === "all" ? null : cmFilter}
-                      onChange={(uid) => setCmFilter(uid || "all")}
-                      options={caseManagerOptions}
-                      includeAll
-                      allLabel="All"
-                      tourId="customers-filter-cm"
-                    />
-                  </div>
-
-                  <div className="ml-auto flex items-center gap-2">
-                    <span className="text-sm text-slate-600">Search</span>
-                    <input
-                      className="input min-w-[260px]"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleSearchEnter(); }}
-                      placeholder="Name, ID, HMIS, CW — Enter to search all"
-                      aria-label="Search customers"
-                      data-tour="customers-filter-search"
-                    />
-                    {search.trim() ? (
-                      <button className="btn btn-ghost btn-sm rounded-lg" onClick={() => setSearch("")}>
-                        Clear
-                      </button>
-                    ) : null}
-                    <div className="text-xs text-gray-500">
-                      {displayRows.length} / {metricTotal ?? sourceRows.length}
-                      {metricTotal != null && cmFilter !== "all" ? " (filtered)" : ""}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <CustomerFilterBar
+              myUid={myUid}
+              isAdminUser={isAdminUser}
+              search={search}
+              defaultExpanded
+              searchPlaceholder="Name, ID, HMIS, CW — Enter to search all"
+              resultLabel={newPageIsLoading ? "Loading..." : `${newPageDisplayRows.length} / ${newPageTotalRows} Customers`}
+              activeMode={activeMode}
+              deletedMode={deletedMode}
+              scopeMode={scopeMode}
+              cmFilter={cmFilter}
+              populationFilter={populationFilter}
+              tierFilter={tierFilter}
+              sortMode={sortMode}
+              grantFilter={grantFilter}
+              enrollmentStatuses={enrollmentStatuses}
+              caseManagerOptions={caseManagerOptions}
+              onActiveModeChange={setActiveMode}
+              onDeletedModeChange={setDeletedMode}
+              onScopeModeChange={handleScopeModeChange}
+              onCmFilterChange={handleCmFilterChange}
+              onSearchChange={handleSearchChange}
+              onPopulationFilterChange={setPopulationFilter}
+              onTierFilterChange={setTierFilter}
+              onSortModeChange={setSortMode}
+              onGrantFilterChange={setGrantFilter}
+              onEnrollmentStatusesChange={setEnrollmentStatuses}
+              onResetFilters={resetFilters}
+              onSearchEnter={handleSearchEnter}
+            />
 
             <div className="table-wrap" data-tour="customers-list">
               <table className="table">
@@ -992,16 +837,16 @@ export function CustomersPage() {
                   <tr>
                     <th>Name</th>
                     <th>Case Manager</th>
+                    <th>Secondary Contact</th>
                     <th>Status</th>
                     <th>Population</th>
-                    <th>Acuity</th>
-                    <th>Updated</th>
+                    <th>Tier</th>
                     <th className="w-1">Actions</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {(isFetching || isFilteringPool) && sourceRows.length === 0 ? (
+                  {newPageIsLoading && newPageDisplayRows.length === 0 ? (
                     <tr>
                       <td className="px-4 py-3 text-gray-600" colSpan={7}>
                         Loading...
@@ -1009,7 +854,7 @@ export function CustomersPage() {
                     </tr>
                   ) : null}
 
-                  {isError && !isFetching && !isFilteringPool ? (
+                  {isNewPageError && !newPageIsLoading ? (
                     <tr>
                       <td className="px-4 py-3 text-red-600" colSpan={7}>
                         Error loading customers.
@@ -1017,7 +862,7 @@ export function CustomersPage() {
                     </tr>
                   ) : null}
 
-                  {!isFetching && !isFilteringPool && !isError && displayRows.length === 0 ? (
+                  {!newPageIsLoading && !isNewPageError && newPageDisplayRows.length === 0 ? (
                     <tr>
                       <td className="px-4 py-8 text-center text-gray-600" colSpan={7}>
                         {search.trim()
@@ -1027,13 +872,14 @@ export function CustomersPage() {
                     </tr>
                   ) : null}
 
-                  {displayRows.map((c) => {
+                  {newPageDisplayRows.map((c) => {
                     const id = String(c?.id || "");
                     const status = String(c?.status || "-");
-                    const active =
-                      typeof c?.active === "boolean"
-                        ? c.active
-                        : String(c?.status || "active").toLowerCase() === "active";
+                    const secondaryUid = String(
+                      (c as { secondaryCaseManagerId?: string | null }).secondaryCaseManagerId || "",
+                    ).trim();
+                    const secondaryName = secondaryUid ? cmNameByUid.get(secondaryUid) || secondaryUid : "—";
+                    const tier = (c as { tier?: number | null }).tier ?? null;
 
                     return (
                       <tr key={id} onClick={() => openDetailModal(id)} title="Open customer">
@@ -1047,6 +893,8 @@ export function CustomersPage() {
 
                         <td className="text-slate-700">{c?.caseManagerName || c?.caseManagerId || "-"}</td>
 
+                        <td className="text-slate-700">{secondaryName}</td>
+
                         <td>
                           <span
                             className={[
@@ -1059,41 +907,27 @@ export function CustomersPage() {
                         </td>
 
                         <td className="text-slate-700">{c?.population ?? "-"}</td>
-                        <td className="text-slate-700">
-                          {typeof c?.acuityScore === "number" ? c.acuityScore.toFixed(2) : "-"}
+
+                        <td>
+                          {typeof tier === "number" ? (
+                            <span
+                              className={[
+                                "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold",
+                                TIER_SELECTED_CLASS[tier] || "border-slate-200 bg-white text-slate-600",
+                              ].join(" ")}
+                            >
+                              Tier {tier}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
-                        <td className="text-slate-700">{fmtDate(c?.updatedAt || c?.createdAt)}</td>
 
                         <td onClick={(e) => e.stopPropagation()}>
-                          <ActionMenu
-                            tourId={`customers-row-actions-${id}`}
-                            disabled={setActive.isPending || softDelete.isPending || hardDelete.isPending}
-                            items={[
-                              {
-                                key: "open",
-                                label: "Open",
-                                onSelect: () => openDetailModal(id),
-                              },
-                              {
-                                key: "toggle-active",
-                                label: active ? "Deactivate" : "Activate",
-                                onSelect: () => toggleActive(id, !active),
-                              },
-                              {
-                                key: "delete",
-                                label: "Delete",
-                                danger: true,
-                                onSelect: () => doDelete(id),
-                              },
-                              ...(isAdminUser
-                                ? [{
-                                    key: "hard-delete",
-                                    label: "Hard Delete",
-                                    danger: true,
-                                    onSelect: () => doHardDelete(id),
-                                  }]
-                                : []),
-                            ]}
+                          <CustomerRowActionMenu
+                            customer={c as TCustomerEntity & { id: string }}
+                            canManage={!isViewer}
+                            onOpen={() => openDetailModal(id)}
                           />
                         </td>
                       </tr>
@@ -1101,30 +935,6 @@ export function CustomersPage() {
                   })}
                 </tbody>
               </table>
-
-              <div className="flex items-center justify-between border-t p-3" data-tour="customers-pager">
-                <button
-                  className="btn btn-sm"
-                  onClick={onPrev}
-                  disabled={needsFullFilterPool || isFetching || cursorStack.length === 0}
-                  title={needsFullFilterPool ? "Paging disabled while search is active" : undefined}
-                >
-                  Prev
-                </button>
-                <span className="text-xs text-gray-500">
-                  {needsFullFilterPool
-                    ? `${displayRows.length} results`
-                    : `${Math.min(items.length, PAGE_SIZE)} / ${PAGE_SIZE}`}
-                </span>
-                <button
-                  className="btn btn-sm"
-                  onClick={onNext}
-                  disabled={needsFullFilterPool || isFetching || items.length < PAGE_SIZE}
-                  title={needsFullFilterPool ? "Paging disabled while search is active" : undefined}
-                >
-                  Next
-                </button>
-              </div>
             </div>
           </>
         )}
