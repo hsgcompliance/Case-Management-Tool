@@ -2,9 +2,11 @@
 
 import React from "react";
 import {
-  useSheetCustomerFolderIndex,
+  useGDriveCustomerFolderIndex,
   useSheetArchiveClient,
   useSheetUnarchiveClient,
+  ACTIVE_PARENT_ID,
+  EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
 import type { TCustomerFolder } from "@types";
 import { ToolCard } from "@entities/ui/dashboardStyle/ToolCard";
@@ -19,6 +21,9 @@ export type CustomerFoldersFilterState = {
 };
 
 type CustomerFoldersSelection = null;
+
+const LEGACY_CUSTOMER_FOLDERS_URL =
+  "https://script.google.com/a/macros/thehrdc.org/s/AKfycby1UgNzSZYurMKSq67cFEj9CUfFHZt7Ox4-yVC_MVa7Bum4B14BqUb0lVBkxAd95N90yQ/exec";
 
 type CustomerFoldersTopbarProps = {
   value: CustomerFoldersFilterState;
@@ -37,20 +42,12 @@ function normStr(s: string | null | undefined) {
   return (s ?? "").toLowerCase();
 }
 
-export const CustomerFoldersTopbar: DashboardToolDefinition<
-  CustomerFoldersFilterState,
-  CustomerFoldersSelection
->["ToolTopbar"] = ({ value, onChange }: CustomerFoldersTopbarProps) => {
+function useTemporaryDriveAccess() {
   const { signInWithGoogle } = useAuth();
   const [hasDriveToken, setHasDriveToken] = React.useState(() => !!getGoogleDriveAccessToken());
   const [connecting, setConnecting] = React.useState(false);
 
-  const { refetch, isFetching } = useSheetCustomerFolderIndex({
-    staleTime: 5 * 60_000,
-    enabled: hasDriveToken,
-  });
-
-  const handleConnect = async () => {
+  const connect = React.useCallback(async () => {
     setConnecting(true);
     try {
       await signInWithGoogle();
@@ -58,23 +55,46 @@ export const CustomerFoldersTopbar: DashboardToolDefinition<
     } finally {
       setConnecting(false);
     }
-  };
+  }, [signInWithGoogle]);
 
-  if (!hasDriveToken) {
-    return (
-      <button
-        type="button"
-        className="btn btn-sm rounded-lg border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100"
-        disabled={connecting}
-        onClick={() => void handleConnect()}
-      >
-        {connecting ? "Connecting…" : "Connect Google Drive"}
-      </button>
-    );
-  }
+  return { hasDriveToken, connecting, connect };
+}
+
+function ConnectForArchiveButton({
+  connecting,
+  onConnect,
+}: {
+  connecting: boolean;
+  onConnect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="btn btn-sm rounded-lg border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+      disabled={connecting}
+      onClick={() => void onConnect()}
+      title="Needed for archive and restore actions"
+    >
+      {connecting ? "Connecting..." : "Connect for archive"}
+    </button>
+  );
+}
+
+export const CustomerFoldersTopbar: DashboardToolDefinition<
+  CustomerFoldersFilterState,
+  CustomerFoldersSelection
+>["ToolTopbar"] = ({ value, onChange }: CustomerFoldersTopbarProps) => {
+  const { hasDriveToken, connecting, connect } = useTemporaryDriveAccess();
+  const { refetch, isFetching } = useGDriveCustomerFolderIndex(
+    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { staleTime: 5 * 60_000 },
+  );
 
   return (
     <>
+      {!hasDriveToken ? (
+        <ConnectForArchiveButton connecting={connecting} onConnect={connect} />
+      ) : null}
       <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-700">
         <input
           type="checkbox"
@@ -101,11 +121,9 @@ export function CustomerFoldersTool(
   props: {
     filterState?: CustomerFoldersFilterState;
     onFilterChange?: (next: CustomerFoldersFilterState) => void;
-  } = {}
+  } = {},
 ) {
-  const { signInWithGoogle } = useAuth();
-  const [hasDriveToken, setHasDriveToken] = React.useState(() => !!getGoogleDriveAccessToken());
-  const [connecting, setConnecting] = React.useState(false);
+  const { hasDriveToken, connecting, connect } = useTemporaryDriveAccess();
 
   const [localFilterState, setLocalFilterState] = React.useState<CustomerFoldersFilterState>({
     search: "",
@@ -115,23 +133,13 @@ export function CustomerFoldersTool(
   const setFilterState = props.onFilterChange ?? setLocalFilterState;
   const { search, showExited } = filterState;
 
-  const { data, isLoading, isError, refetch, isFetching } = useSheetCustomerFolderIndex({
-    staleTime: 5 * 60_000,
-    enabled: hasDriveToken,
-  });
+  const { data, isLoading, isError, error, refetch, isFetching } = useGDriveCustomerFolderIndex(
+    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { staleTime: 5 * 60_000 },
+  );
 
   const archiveMut = useSheetArchiveClient();
   const unarchiveMut = useSheetUnarchiveClient();
-
-  const handleConnect = async () => {
-    setConnecting(true);
-    try {
-      await signInWithGoogle();
-      setHasDriveToken(!!getGoogleDriveAccessToken());
-    } finally {
-      setConnecting(false);
-    }
-  };
 
   const folders: TCustomerFolder[] = React.useMemo(() => {
     const all = data?.folders ?? [];
@@ -153,34 +161,15 @@ export function CustomerFoldersTool(
   const activeCount = data?.folders?.filter((f) => f.status === "active").length ?? 0;
   const exitedCount = data?.folders?.filter((f) => f.status === "exited").length ?? 0;
 
-  if (!hasDriveToken) {
-    return (
-      <ToolCard title="Customer Folders">
-        <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-          <div className="text-sm text-slate-600">
-            You may not have access to the Rental Assistance Drive.
-            <br />
-            Please request access to view customer files.
-          </div>
-          <button
-            type="button"
-            className="btn btn-sm rounded-lg border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100"
-            disabled={connecting}
-            onClick={() => void handleConnect()}
-          >
-            {connecting ? "Connecting…" : "Connect Google Drive"}
-          </button>
-        </div>
-      </ToolCard>
-    );
-  }
-
   return (
     <ToolCard
       title="Customer Folders"
       actions={
         props.filterState ? undefined : (
           <div className="flex items-center gap-2">
+            {!hasDriveToken ? (
+              <ConnectForArchiveButton connecting={connecting} onConnect={connect} />
+            ) : null}
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
               <input
                 type="checkbox"
@@ -215,16 +204,30 @@ export function CustomerFoldersTool(
           isLoading ? (
             <tr>
               <td colSpan={7} className="py-4 text-center text-sm text-slate-500">
-                Loading folders from index sheet...
+                Loading folders from Drive...
               </td>
             </tr>
           ) : isError ? (
             <tr>
               <td colSpan={7} className="py-6 text-center">
                 <div className="text-sm text-slate-600">
-                  You may not have access to the Rental Assistance Drive.
+                  Customer folders could not be loaded.
                   <br />
-                  Please request access to view customer files.
+                  <span className="text-xs text-slate-500">
+                    {error instanceof Error
+                      ? error.message
+                      : "Check the Drive integration settings and folder index configuration."}
+                  </span>
+                  <div className="mt-3">
+                    <a
+                      href={LEGACY_CUSTOMER_FOLDERS_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-sm rounded-lg border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100"
+                    >
+                      Open legacy Customer Folders
+                    </a>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -242,6 +245,7 @@ export function CustomerFoldersTool(
                 onArchive={() => archiveMut.mutate(f.id)}
                 onUnarchive={() => unarchiveMut.mutate(f.id)}
                 busy={archiveMut.isPending || unarchiveMut.isPending}
+                canMutate={hasDriveToken}
               />
             ))
           )
@@ -256,11 +260,13 @@ function FolderRow({
   onArchive,
   onUnarchive,
   busy,
+  canMutate,
 }: {
   folder: TCustomerFolder;
   onArchive: () => void;
   onUnarchive: () => void;
   busy: boolean;
+  canMutate: boolean;
 }) {
   return (
     <tr className="hover:bg-slate-50">
@@ -297,9 +303,9 @@ function FolderRow({
           <button
             type="button"
             className="btn btn-ghost btn-xs text-slate-500 hover:text-red-600"
-            disabled={busy}
+            disabled={busy || !canMutate}
             onClick={onArchive}
-            title="Mark inactive"
+            title={canMutate ? "Mark inactive" : "Connect temporary Drive access to archive"}
           >
             Archive
           </button>
@@ -307,9 +313,9 @@ function FolderRow({
           <button
             type="button"
             className="btn btn-ghost btn-xs text-slate-500 hover:text-emerald-600"
-            disabled={busy}
+            disabled={busy || !canMutate}
             onClick={onUnarchive}
-            title="Restore to active"
+            title={canMutate ? "Restore to active" : "Connect temporary Drive access to restore"}
           >
             Restore
           </button>
