@@ -5,6 +5,8 @@ import { Pagination, usePagination } from "@entities/ui/dashboardStyle/Paginatio
 import { SmartExportButton } from "@entities/ui/dashboardStyle/SmartExportButton";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import { useAdminEnrollmentsData } from "@entities/Page/dashboardStyle/hooks/useAdminEnrollmentsData";
+import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
+import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { computeRentCertDues, todayISO } from "@features/customers/components/paymentScheduleUtils";
 import { SortableHeader, sortRows, useTableSort } from "@hooks/useTableSort";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
@@ -22,6 +24,7 @@ type RentalAssistanceRow = {
   caseManagerName: string;
   grantName: string;
   customerId: string;
+  grantId: string;
   assistanceStartDate: string;
   assistanceEndDate: string;
   nextRentCertDue: string;
@@ -215,6 +218,7 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         caseManagerName,
         grantName,
         customerId,
+        grantId,
         assistanceStartDate: paymentDates[0] || "",
         assistanceEndDate: paymentDates[paymentDates.length - 1] || "",
         nextRentCertDue,
@@ -313,6 +317,8 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
   filterState,
 }) => {
   const { rows, sharedDataLoading, sharedDataError, isTruncated } = useRentalAssistanceRows(filterState);
+  const [customerWorkspace, setCustomerWorkspace] = React.useState<string | null>(null);
+  const [grantWorkspace, setGrantWorkspace] = React.useState<string | null>(null);
   const { sort, onSort } = useTableSort({ col: "customerName", dir: "asc" });
   const sortedRows = React.useMemo(
     () =>
@@ -362,15 +368,31 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
               <tr key={row.id}>
                 <td>
                   {row.customerId ? (
-                    <a className="font-medium text-sky-700 hover:text-sky-800 hover:underline" href={`/customers/${row.customerId}?tab=payments`}>
+                    <button
+                      type="button"
+                      className="font-medium text-sky-700 hover:text-sky-800 hover:underline"
+                      onClick={() => setCustomerWorkspace(row.customerId)}
+                    >
                       {row.customerName}
-                    </a>
+                    </button>
                   ) : (
                     row.customerName
                   )}
                 </td>
                 <td>{row.caseManagerName}</td>
-                <td>{row.grantName}</td>
+                <td>
+                  {row.grantId ? (
+                    <button
+                      type="button"
+                      className="font-medium text-sky-700 hover:text-sky-800 hover:underline"
+                      onClick={() => setGrantWorkspace(row.grantId)}
+                    >
+                      {row.grantName}
+                    </button>
+                  ) : (
+                    row.grantName
+                  )}
+                </td>
                 <td>{fmtDateOrDash(row.assistanceStartDate)}</td>
                 <td>{fmtDateOrDash(row.assistanceEndDate)}</td>
                 <td>{fmtDateOrDash(row.nextRentCertDue)}</td>
@@ -391,6 +413,19 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
         }
       />
       <Pagination page={pagination.page} pageCount={pagination.pageCount} setPage={pagination.setPage} />
+      {customerWorkspace ? (
+        <CustomerWorkspaceModal
+          customerId={customerWorkspace}
+          initialTab="payments"
+          onClose={() => setCustomerWorkspace(null)}
+        />
+      ) : null}
+      {grantWorkspace ? (
+        <GrantWorkspaceModal
+          grantId={grantWorkspace}
+          onClose={() => setGrantWorkspace(null)}
+        />
+      ) : null}
     </div>
   );
 };
