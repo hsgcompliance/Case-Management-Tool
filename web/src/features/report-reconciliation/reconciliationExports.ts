@@ -5,8 +5,11 @@ import type { ReconciliationFinding, ReconciliationReviewResult } from "./reconc
 
 export type ReconciliationExportRow = {
   tool: string;
+  title: string;
   severity: string;
   kind: string;
+  sourceSystem: string;
+  sourceProfile: string;
   confidence: string;
   sourceFile: string;
   sourceRowNumber: string;
@@ -18,6 +21,7 @@ export type ReconciliationExportRow = {
   reportValue: string;
   dashboardValue: string;
   proposedAction: string;
+  matchCriteria: string;
   explanation: string;
 };
 
@@ -32,8 +36,11 @@ function titleCase(value: string) {
 
 export const RECONCILIATION_EXPORT_COLUMNS: ExportColumn<ReconciliationExportRow>[] = [
   { key: "tool", label: "Tool", value: (row) => row.tool },
+  { key: "title", label: "Finding", value: (row) => row.title },
   { key: "severity", label: "Severity", value: (row) => row.severity },
   { key: "kind", label: "Finding Kind", value: (row) => row.kind },
+  { key: "sourceSystem", label: "Source System", value: (row) => row.sourceSystem },
+  { key: "sourceProfile", label: "Source Profile", value: (row) => row.sourceProfile },
   { key: "confidence", label: "Confidence", value: (row) => row.confidence },
   { key: "sourceFile", label: "Source File", value: (row) => row.sourceFile },
   { key: "sourceRowNumber", label: "Source Row", value: (row) => row.sourceRowNumber },
@@ -45,14 +52,18 @@ export const RECONCILIATION_EXPORT_COLUMNS: ExportColumn<ReconciliationExportRow
   { key: "reportValue", label: "Report Value", value: (row) => row.reportValue },
   { key: "dashboardValue", label: "Dashboard Value", value: (row) => row.dashboardValue },
   { key: "proposedAction", label: "Proposed Action", value: (row) => row.proposedAction },
+  { key: "matchCriteria", label: "Match Criteria", value: (row) => row.matchCriteria },
   { key: "explanation", label: "Explanation", value: (row) => row.explanation },
 ];
 
 export function reconciliationFindingToExportRow(toolTitle: string, finding: ReconciliationFinding): ReconciliationExportRow {
   return {
     tool: toolTitle,
+    title: finding.title ?? titleCase(finding.kind),
     severity: finding.severity,
     kind: titleCase(finding.kind),
+    sourceSystem: finding.sourceSystemLabel,
+    sourceProfile: finding.sourceProfileLabel ?? finding.sourceProfileId ?? "",
     confidence: `${Math.round(finding.confidence * 100)}%`,
     sourceFile: finding.sourceFile,
     sourceRowNumber: finding.sourceRowNumber == null ? "" : String(finding.sourceRowNumber),
@@ -64,6 +75,7 @@ export function reconciliationFindingToExportRow(toolTitle: string, finding: Rec
     reportValue: finding.reportValue ?? "",
     dashboardValue: finding.dashboardValue ?? "",
     proposedAction: finding.proposedAction ?? "",
+    matchCriteria: finding.match?.criteria.join(" | ") ?? "",
     explanation: finding.explanation.join(" | "),
   };
 }

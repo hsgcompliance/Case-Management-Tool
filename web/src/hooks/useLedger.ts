@@ -30,6 +30,42 @@ export function useLedgerEntries(
   });
 }
 
+export function useLedgerEntriesForMonths(
+  months: string[],
+  query?: Partial<LedgerListReq>,
+  opts?: { enabled?: boolean; staleTime?: number; maxMonths?: number }
+) {
+  const sorted = Array.from(new Set(months.filter(Boolean))).sort();
+  const maxMonths = opts?.maxMonths ?? 36;
+  const scoped = sorted.slice(0, maxMonths);
+  return useQuery<LedgerEntry[]>({
+    ...RQ_DEFAULTS,
+    enabled: (opts?.enabled ?? true) && scoped.length > 0,
+    staleTime: opts?.staleTime ?? RQ_DEFAULTS.staleTime,
+    queryKey: qk.ledger.list({ months: scoped, ...((query as Record<string, unknown>) || {}) }),
+    queryFn: async () => {
+      const perMonth = await Promise.all(
+        scoped.map(async (month) => {
+          const res = await LedgerAPI.list({
+            ...(query || {}),
+            month,
+            limit: 500,
+          });
+          return Array.isArray(res?.entries) ? (res.entries as LedgerEntry[]) : [];
+        })
+      );
+      const byId = new Map<string, LedgerEntry>();
+      for (const arr of perMonth) {
+        for (const entry of arr) {
+          const id = String((entry as Record<string, unknown>).id || "");
+          if (id) byId.set(id, entry);
+        }
+      }
+      return Array.from(byId.values());
+    },
+  });
+}
+
 export function useLedgerEntry(
   id?: string,
   opts?: { enabled?: boolean; staleTime?: number }

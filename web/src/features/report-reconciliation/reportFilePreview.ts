@@ -10,6 +10,9 @@ export type ParsedReportPreview = {
   fileName: string;
   fileType: "csv" | "txt" | "xlsx";
   sheetName?: string;
+  recommendedEnabled: boolean;
+  sheetRole: "data" | "helper";
+  sheetReason: string;
   headerRowIndex: number;
   headers: string[];
   sampleRows: unknown[][];
@@ -84,6 +87,15 @@ export function parseDelimitedText(text: string): string[][] {
   return rows;
 }
 
+export function rowsToCsv(rows: unknown[][]): string {
+  return rows.map((row) =>
+    row.map((value) => {
+      const raw = String(value ?? "");
+      return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, "\"\"")}"` : raw;
+    }).join(","),
+  ).join("\r\n");
+}
+
 function findHeaderRow(rows: unknown[][], profiles: ReportSourceProfile[], sourceName: string) {
   let best = { index: 0, score: Number.NEGATIVE_INFINITY };
   rows.slice(0, MAX_HEADER_SCAN_ROWS).forEach((row, index) => {
@@ -103,21 +115,34 @@ function buildPreview(
   maxRows: number,
   sheetName?: string,
 ): ParsedReportPreview {
-  const headerRowIndex = findHeaderRow(rows, profiles, fileName);
+  const sourceName = `${fileName} ${sheetName || ""}`;
+  const headerRowIndex = findHeaderRow(rows, profiles, sourceName);
   const headers = (rows[headerRowIndex] ?? []).map((value) => String(value ?? "").trim());
   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row.some((value) => String(value ?? "").trim()));
+  const profileCandidates = detectLikelyReportProfiles(profiles, headers, sourceName);
+  const sheetText = normalizeHeader(`${sheetName || ""} ${rows.slice(0, 3).flat().join(" ")}`);
+  const helperSheet = /\b(guide|budget|summary|data entry guide|instructions?)\b/.test(sheetText);
+  const bestScore = profileCandidates[0]?.score ?? 0;
+  const recommendedEnabled = !helperSheet && bestScore >= 30 && dataRows.length > 0;
   // Keep the full grid (capped) including leading title rows so the operator can re-pick the header row.
   const allRows = rows.slice(0, headerRowIndex + 1 + maxRows);
   return {
     fileName,
     fileType,
     sheetName,
+    recommendedEnabled,
+    sheetRole: recommendedEnabled ? "data" : "helper",
+    sheetReason: recommendedEnabled
+      ? `Detected ${profileCandidates[0]?.profile.label || "report data"} with ${dataRows.length} data rows.`
+      : helperSheet
+        ? "Looks like a workbook guide, budget, summary, or helper sheet."
+        : "No strong report profile match was detected.",
     headerRowIndex,
     headers,
     sampleRows: dataRows.slice(0, maxRows),
     allRows,
     totalRows: dataRows.length,
-    profileCandidates: detectLikelyReportProfiles(profiles, headers, fileName),
+    profileCandidates,
   };
 }
 
@@ -287,6 +312,49 @@ async function readXlsxRows(file: File, preferredSheet?: string) {
   return { sheetName: selected.name, rows: readSheetRows(sheetXml, readSharedStrings(sharedXml)) };
 }
 
+async function readXlsxSheets(file: File) {
+  const buffer = await file.arrayBuffer();
+  const entries = listZipEntries(buffer);
+  const byName = new Map(entries.map((entry) => [entry.name, entry]));
+  const readText = async (name: string) => {
+    const entry = byName.get(name);
+    return entry ? readZipEntry(buffer, entry) : null;
+  };
+  const [workbookXml, relsXml, sharedXml] = await Promise.all([
+    readText("xl/workbook.xml"),
+    readText("xl/_rels/workbook.xml.rels"),
+    readText("xl/sharedStrings.xml"),
+  ]);
+  if (!workbookXml || !relsXml) throw new Error("Unable to find workbook metadata in XLSX.");
+  const workbook = parseXml(workbookXml);
+  const rels = parseXml(relsXml);
+  const relMap = new Map(
+    findByLocalName(rels, "Relationship").map((rel) => [attrByLocalName(rel, "Id"), attrByLocalName(rel, "Target")]),
+  );
+  const sharedStrings = readSharedStrings(sharedXml);
+  const sheets = findByLocalName(workbook, "sheet").map((sheet, index) => ({
+    name: attrByLocalName(sheet, "name") || `Sheet${index + 1}`,
+    relId: attrByLocalName(sheet, "id"),
+  }));
+  if (!sheets.length) {
+    const worksheetEntries = entries.filter((entry) => /^xl\/worksheets\/.+\.xml$/i.test(entry.name));
+    if (!worksheetEntries.length) throw new Error("No worksheets found in XLSX.");
+    const fallback = await Promise.all(worksheetEntries.map(async (entry, index) => ({
+      sheetName: `Sheet${index + 1}`,
+      rows: readSheetRows(await readZipEntry(buffer, entry), sharedStrings),
+    })));
+    return fallback;
+  }
+  const out: Array<{ sheetName: string; rows: unknown[][] }> = [];
+  for (const sheet of sheets) {
+    const sheetPath = normalizeXlsxPath(relMap.get(sheet.relId) || "");
+    const sheetXml = await readText(sheetPath);
+    if (sheetXml) out.push({ sheetName: sheet.name, rows: readSheetRows(sheetXml, sharedStrings) });
+  }
+  if (!out.length) throw new Error("No readable worksheets found in XLSX.");
+  return out;
+}
+
 export type ParseReportFileOptions = {
   preferredSheet?: string;
   /** Max data rows to retain. Defaults to a small preview cap; reconciliation passes a large cap. */
@@ -312,4 +380,18 @@ export async function parseReportFilePreview(
     throw new Error("Legacy .xls (binary) files aren't supported — re-save as .xlsx or export to CSV.");
   }
   throw new Error("Only CSV, TXT, and XLSX files can be previewed.");
+}
+
+export async function parseReportFilePreviews(
+  file: File,
+  profiles: ReportSourceProfile[],
+  opts: ParseReportFileOptions = {},
+): Promise<ParsedReportPreview[]> {
+  const maxRows = opts.maxRows ?? DEFAULT_PREVIEW_ROWS;
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".xlsx") || XLSX_MIME_RE.test(file.type)) {
+    const sheets = await readXlsxSheets(file);
+    return sheets.map((sheet) => buildPreview(file.name, "xlsx", sheet.rows, profiles, maxRows, sheet.sheetName));
+  }
+  return [await parseReportFilePreview(file, profiles, opts)];
 }

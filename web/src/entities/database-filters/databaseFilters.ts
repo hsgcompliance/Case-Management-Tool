@@ -62,7 +62,8 @@ export type PaymentQueueFilters = {
 
 export type LedgerFilters = {
   enabled: boolean;
-  source: "any" | "card" | "manual";
+  paidStatus: "any" | "paid" | "unpaid";
+  source: "any" | "enrollment" | "manual" | "card" | "migration" | "adjustment" | "system";
   direction: "any" | "charge" | "return";
   grantId: string;
   hasCustomer: TriState;
@@ -131,6 +132,7 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
   },
   ledger: {
     enabled: true,
+    paidStatus: "any",
     source: "any",
     direction: "any",
     grantId: "",
@@ -244,6 +246,9 @@ function paymentQueuePasses(p: Row, f: PaymentQueueFilters): boolean {
 
 function ledgerPasses(l: Row, f: LedgerFilters): boolean {
   if (f.source !== "any" && lower(l.source) !== f.source) return false;
+  const paid = l.paid === true || has(l.paidAt) || has(l.origin && typeof l.origin === "object" ? (l.origin as Row).paymentQueueId : null);
+  if (f.paidStatus === "paid" && !paid) return false;
+  if (f.paidStatus === "unpaid" && paid) return false;
   const amount = num(l.amount ?? l.amountCents);
   const direction = str(l.direction) || (amount != null && amount < 0 ? "return" : "charge");
   if (f.direction !== "any" && direction !== f.direction) return false;

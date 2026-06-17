@@ -9,6 +9,12 @@ import {
   type ReconciliationPacket,
   type ReportSourceProfile,
 } from "@features/report-reconciliation/reportProfiles";
+import {
+  DEFAULT_FE_REFERENCE_PATTERNS,
+  likelyBetterTool,
+  parseFinancialEdgeReference,
+} from "@features/report-reconciliation/reportParsingEngines";
+import { rowsToCsv } from "@features/report-reconciliation/reportFilePreview";
 
 /**
  * Reusable report upload + mapping-config entity.
@@ -31,6 +37,10 @@ export type ReportUpload = {
   id: string;
   fileName: string;
   sheetName?: string;
+  workbookKey?: string;
+  enabled?: boolean;
+  sheetRole?: "data" | "helper";
+  sheetReason?: string;
   allRows: unknown[][];
   profileCandidates: { profile: ReportSourceProfile; score: number }[];
   config: ReportUploadConfig;
@@ -47,8 +57,12 @@ export type ReportUploadPanelProps = {
   error: string | null;
   onFiles: (files: FileList | File[] | null) => void;
   onUpdateConfig: (id: string, patch: Partial<ReportUploadConfig>) => void;
+  onApplyConfigToWorkbook?: (id: string) => void;
+  onSetUploadEnabled?: (id: string, enabled: boolean) => void;
+  onSetWorkbookEnabled?: (workbookKey: string, enabledIds: Set<string>) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
+  toolKind?: "enrollment" | "payment" | "identity";
 };
 
 const ACCEPT = ".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -86,17 +100,39 @@ function reportGrantRows(upload: ReportUpload, grants: ReportUploadGrant[]): { v
   if (signals.length) {
     return signals.map((value) => ({ value, match: matchGrant(value, grants) }));
   }
-  // Financial Edge & similar: the grant lives in the file name, not the rows.
+  // Financial Edge and workbook sheets often carry the grant in file/sheet/title context.
   const seen = new Set<string>();
   const rows: { value: string; match: ReportUploadGrant | null }[] = [];
+  const context = [
+    upload.fileName,
+    upload.sheetName || "",
+    ...upload.allRows.slice(0, 3).map((row) => row.map((value) => String(value ?? "")).filter(Boolean).join(" ")),
+  ].join(" ");
   for (const grant of grants) {
-    if (wordTokens(grant.name).some((token) => norm(upload.fileName).includes(token))) {
+    if (wordTokens(grant.name).some((token) => norm(context).includes(token))) {
       if (seen.has(grant.id)) continue;
       seen.add(grant.id);
-      rows.push({ value: upload.fileName, match: grant });
+      rows.push({ value: context, match: grant });
     }
   }
   return rows;
+}
+
+function downloadRowsAsCsv(upload: ReportUpload) {
+  const csv = rowsToCsv(upload.allRows);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const baseName = `${upload.fileName.replace(/\.[^.]+$/, "")}-${upload.sheetName || "sheet"}`
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${baseName || "report-sheet"}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function Dropzone({ reading, onFiles }: { reading: boolean; onFiles: ReportUploadPanelProps["onFiles"] }) {
@@ -168,25 +204,40 @@ function UploadsList({
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Uploaded reports ({uploads.length})</div>
         <button type="button" className="btn btn-ghost btn-xs" onClick={onClear}>Clear all</button>
       </div>
-      {uploads.map((upload) => {
-        const profile = upload.profileCandidates[0]?.profile;
-        const requiredMissing = upload.packet.summary.requiredMissingCount;
-        return (
-          <div key={upload.id} className="flex items-center justify-between gap-2 rounded border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
-            <div className="min-w-0">
-              <div className="truncate font-semibold text-slate-800 dark:text-slate-100">{upload.fileName}</div>
-              <div className="text-slate-500">
-                {upload.packet.profileLabel || profile?.label || "Unknown type"} · {upload.packet.summary.totalRows} rows
-                {requiredMissing ? <span className="ml-1 text-amber-600">· {requiredMissing} required unmapped</span> : null}
-              </div>
+      <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
+        {uploads.map((upload) => {
+          const profile = upload.profileCandidates[0]?.profile;
+          const requiredMissing = upload.packet.summary.requiredMissingCount;
+          const label = upload.sheetName || upload.fileName;
+          return (
+            <div
+              key={upload.id}
+              className="group mb-[-1px] flex max-w-[260px] items-center gap-2 rounded-t-md border border-slate-200 bg-white px-3 py-2 text-left text-xs hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900"
+              title={`${upload.fileName}${upload.sheetName ? ` / ${upload.sheetName}` : ""}`}
+            >
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => onConfigure(upload.id)}
+              >
+                <span className="block truncate font-semibold text-slate-800 dark:text-slate-100">{label}</span>
+                <span className="block truncate text-slate-500">
+                  {upload.enabled === false ? "Skipped" : (upload.packet.profileLabel || profile?.label || "Unknown type")} - {upload.packet.summary.totalRows} rows
+                  {requiredMissing ? <span className="ml-1 text-amber-600">- {requiredMissing} required unmapped</span> : null}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="rounded px-1 text-slate-400 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                onClick={() => onRemove(upload.id)}
+                aria-label={`Remove ${label}`}
+              >
+                x
+              </button>
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <button type="button" className="btn btn-ghost btn-xs" onClick={() => onConfigure(upload.id)}>Configure</button>
-              <button type="button" className="btn btn-ghost btn-xs" onClick={() => onRemove(upload.id)}>Remove</button>
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -229,6 +280,71 @@ function HeaderRowPicker({
   );
 }
 
+function WorkbookSheetSelector({
+  uploads,
+  selected,
+  onSelect,
+  onSetUploadEnabled,
+  onSetWorkbookEnabled,
+}: {
+  uploads: ReportUpload[];
+  selected: ReportUpload;
+  onSelect: (id: string) => void;
+  onSetUploadEnabled?: ReportUploadPanelProps["onSetUploadEnabled"];
+  onSetWorkbookEnabled?: ReportUploadPanelProps["onSetWorkbookEnabled"];
+}) {
+  if (!selected.workbookKey) return null;
+  const workbookSheets = uploads.filter((upload) => upload.workbookKey === selected.workbookKey);
+  if (workbookSheets.length <= 1) return null;
+  const enabledCount = workbookSheets.filter((upload) => upload.enabled !== false).length;
+  const recommendedIds = new Set(workbookSheets.filter((upload) => upload.sheetRole !== "helper").map((upload) => upload.id));
+  return (
+    <div className="rounded border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workbook sheets</div>
+          <div className="text-[11px] text-slate-500">{enabledCount} of {workbookSheets.length} selected for reconciliation</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => onSetWorkbookEnabled?.(selected.workbookKey || "", new Set(workbookSheets.map((upload) => upload.id)))}>
+            Select all
+          </button>
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => onSetWorkbookEnabled?.(selected.workbookKey || "", recommendedIds)}>
+            Select detected data
+          </button>
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => onSetWorkbookEnabled?.(selected.workbookKey || "", new Set())}>
+            Select none
+          </button>
+        </div>
+      </div>
+      <div className="grid max-h-44 gap-1 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+        {workbookSheets.map((upload) => (
+          <div
+            key={upload.id}
+            className={[
+              "flex min-w-0 items-start gap-2 rounded border bg-white px-2 py-1 text-xs dark:bg-slate-950",
+              upload.id === selected.id ? "border-sky-400" : "border-slate-200 dark:border-slate-800",
+            ].join(" ")}
+            title={upload.sheetReason}
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              aria-label={`Include ${upload.sheetName || upload.fileName} in reconciliation`}
+              checked={upload.enabled !== false}
+              onChange={(event) => onSetUploadEnabled?.(upload.id, event.currentTarget.checked)}
+            />
+            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelect(upload.id)}>
+              <span className="block truncate font-medium text-slate-700 dark:text-slate-200">{upload.sheetName || upload.fileName}</span>
+              <span className="block truncate text-[11px] text-slate-500">{upload.sheetRole === "helper" ? "helper" : "data"} - {upload.packet.summary.totalRows} rows</span>
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ConfigureTab({
   uploads,
   profiles,
@@ -236,6 +352,10 @@ function ConfigureTab({
   selectedId,
   onSelect,
   onUpdateConfig,
+  onApplyConfigToWorkbook,
+  onSetUploadEnabled,
+  onSetWorkbookEnabled,
+  toolKind,
 }: {
   uploads: ReportUpload[];
   profiles: ReportSourceProfile[];
@@ -243,7 +363,12 @@ function ConfigureTab({
   selectedId: string;
   onSelect: (id: string) => void;
   onUpdateConfig: ReportUploadPanelProps["onUpdateConfig"];
+  onApplyConfigToWorkbook?: ReportUploadPanelProps["onApplyConfigToWorkbook"];
+  onSetUploadEnabled?: ReportUploadPanelProps["onSetUploadEnabled"];
+  onSetWorkbookEnabled?: ReportUploadPanelProps["onSetWorkbookEnabled"];
+  toolKind?: ReportUploadPanelProps["toolKind"];
 }) {
+  const [sheetPage, setSheetPage] = React.useState(0);
   const selected = uploads.find((upload) => upload.id === selectedId) ?? uploads[0] ?? null;
   if (!selected) {
     return <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950">Upload a report to configure its mapping.</div>;
@@ -254,6 +379,19 @@ function ConfigureTab({
   const { matches, diagnostics } = matchProfileHeaders(profile, headers, selected.config.fieldOverrides);
   const missingRequired = diagnostics.filter((diagnostic) => diagnostic.code === "required_header_missing");
   const grantRows = reportGrantRows(selected, grants);
+  const toolWarning = toolKind ? likelyBetterTool(selected.config.profileId, toolKind) : "";
+  const visibleSheetTabs = React.useMemo(() => {
+    const workbookSheets = selected.workbookKey ? uploads.filter((upload) => upload.workbookKey === selected.workbookKey) : uploads;
+    const pageSize = 8;
+    const maxPage = Math.max(0, Math.ceil(workbookSheets.length / pageSize) - 1);
+    const page = Math.min(sheetPage, maxPage);
+    return {
+      page,
+      maxPage,
+      total: workbookSheets.length,
+      rows: workbookSheets.slice(page * pageSize, page * pageSize + pageSize),
+    };
+  }, [sheetPage, selected.workbookKey, uploads]);
 
   const sampleValue = (columnIndex: number) => {
     for (const row of dataRows.slice(0, 5)) {
@@ -268,26 +406,60 @@ function ConfigureTab({
     else next[fieldKey] = Number(raw);
     onUpdateConfig(selected.id, { fieldOverrides: next });
   };
+  const referenceSamples = React.useMemo(() => {
+    const referenceMatch = matches.find((match) => match.fieldKey === "reference");
+    if (referenceMatch?.sourceIndex == null) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const row of dataRows) {
+      const value = String((row as unknown[])[referenceMatch.sourceIndex] ?? "").trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      out.push(value);
+      if (out.length >= 5) break;
+    }
+    return out;
+  }, [dataRows, matches]);
 
   return (
     <div className="space-y-3">
-      {uploads.length > 1 ? (
-        <div className="flex flex-wrap gap-1">
-          {uploads.map((upload) => (
+      <WorkbookSheetSelector
+        uploads={uploads}
+        selected={selected}
+        onSelect={onSelect}
+        onSetUploadEnabled={onSetUploadEnabled}
+        onSetWorkbookEnabled={onSetWorkbookEnabled}
+      />
+
+      {visibleSheetTabs.total > 1 ? (
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sheet config</div>
+            {visibleSheetTabs.maxPage > 0 ? (
+              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                <button type="button" className="btn btn-ghost btn-xs" disabled={visibleSheetTabs.page <= 0} onClick={() => setSheetPage((page) => Math.max(0, page - 1))}>Prev</button>
+                <span>Page {visibleSheetTabs.page + 1} of {visibleSheetTabs.maxPage + 1}</span>
+                <button type="button" className="btn btn-ghost btn-xs" disabled={visibleSheetTabs.page >= visibleSheetTabs.maxPage} onClick={() => setSheetPage((page) => Math.min(visibleSheetTabs.maxPage, page + 1))}>Next</button>
+              </div>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
+          {visibleSheetTabs.rows.map((upload) => (
             <button
               key={upload.id}
               type="button"
               onClick={() => onSelect(upload.id)}
               className={[
-                "max-w-[220px] truncate rounded border px-2 py-1 text-xs",
+                "mb-[-1px] max-w-[220px] truncate rounded-t-md border px-2 py-1 text-xs",
                 upload.id === selected.id
-                  ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+                  ? "border-slate-900 bg-white text-slate-900 dark:border-slate-100 dark:bg-slate-950 dark:text-slate-50"
                   : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:text-slate-300",
               ].join(" ")}
             >
-              {upload.fileName}
+              {upload.enabled === false ? "(skipped) " : ""}{upload.sheetName || upload.fileName}
             </button>
           ))}
+          </div>
         </div>
       ) : null}
 
@@ -308,6 +480,19 @@ function ConfigureTab({
               <div className="mt-1 text-[11px] text-slate-500">
                 Best guess: {selected.profileCandidates[0]?.profile.label} (score {selected.profileCandidates[0]?.score})
               </div>
+            ) : null}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {selected.workbookKey ? (
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => onApplyConfigToWorkbook?.(selected.id)}>
+                  Save config for all sheets
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-ghost btn-xs" onClick={() => downloadRowsAsCsv(selected)}>
+                Download sheet CSV
+              </button>
+            </div>
+            {toolWarning ? (
+              <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{toolWarning}</div>
             ) : null}
           </div>
           <HeaderRowPicker
@@ -376,6 +561,27 @@ function ConfigureTab({
               )}
             </div>
           </div>
+
+          {selected.config.profileId === "financial_edge_project_activity" ? (
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">FE reference extraction test</div>
+              <div className="max-h-44 space-y-2 overflow-y-auto rounded border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
+                {referenceSamples.length ? referenceSamples.map((reference) => {
+                  const parsed = parseFinancialEdgeReference(reference, DEFAULT_FE_REFERENCE_PATTERNS);
+                  return (
+                    <div key={reference} className="text-xs">
+                      <div className="truncate font-medium text-slate-700 dark:text-slate-200" title={reference}>{reference}</div>
+                      <div className="mt-1 text-slate-500">
+                        {parsed ? `${parsed.patternLabel}: ${Object.entries(parsed.fields).map(([key, value]) => `${key}=${value}`).join(" | ")}` : "No configured regex matched."}
+                      </div>
+                    </div>
+                  );
+                }) : (
+                  <div className="text-center text-[11px] text-slate-400">Map a Reference column to test extraction against sample rows.</div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -390,8 +596,12 @@ export function ReportUploadPanel({
   error,
   onFiles,
   onUpdateConfig,
+  onApplyConfigToWorkbook,
+  onSetUploadEnabled,
+  onSetWorkbookEnabled,
   onRemove,
   onClear,
+  toolKind,
 }: ReportUploadPanelProps) {
   const [tab, setTab] = React.useState<"upload" | "configure">("upload");
   const [selectedId, setSelectedId] = React.useState("");
@@ -435,8 +645,12 @@ export function ReportUploadPanel({
           grants={grants}
           selectedId={selectedId}
           onSelect={setSelectedId}
-          onUpdateConfig={onUpdateConfig}
-        />
+              onUpdateConfig={onUpdateConfig}
+              onApplyConfigToWorkbook={onApplyConfigToWorkbook}
+              onSetUploadEnabled={onSetUploadEnabled}
+              onSetWorkbookEnabled={onSetWorkbookEnabled}
+              toolKind={toolKind}
+            />
       )}
     </div>
   );

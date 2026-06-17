@@ -10,13 +10,14 @@ import {
 } from "./reportProfiles";
 import {
   MAX_RECONCILIATION_ROWS,
-  parseReportFilePreview,
+  parseReportFilePreviews,
   type ParsedReportPreview,
 } from "./reportFilePreview";
 import type { ReportUpload, ReportUploadConfig } from "@entities/report-upload/ReportUploadPanel";
 
 const ACTIVE_PROFILE_IDS = [
   "financial_edge_project_activity",
+  "rental_assistance_invoice_request",
   "coordinated_entry_by_name_list",
   "hmis_service_payment_report",
   "caseworthy_service_report",
@@ -31,6 +32,9 @@ type ReconciliationWorkspaceValue = {
   reading: boolean;
   addFiles: (files: FileList | File[] | null) => Promise<void>;
   updateUploadConfig: (id: string, patch: Partial<ReportUploadConfig>) => void;
+  applyUploadConfigToWorkbook: (id: string) => void;
+  setUploadEnabled: (id: string, enabled: boolean) => void;
+  setWorkbookEnabled: (workbookKey: string, enabledIds: Set<string>) => void;
   removeUpload: (id: string) => void;
   clearUploads: () => void;
 };
@@ -63,6 +67,10 @@ function buildPacketForUpload(
   });
 }
 
+function uploadSourceLabel(upload: Pick<ReportUpload, "fileName" | "sheetName">) {
+  return upload.sheetName ? `${upload.fileName} / ${upload.sheetName}` : upload.fileName;
+}
+
 function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedReportPreview): ReportUpload {
   const config: ReportUploadConfig = {
     profileId: preview.profileCandidates[0]?.profile.id ?? profiles[0]?.id ?? "",
@@ -73,10 +81,14 @@ function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedRepor
     id: `${preview.fileName}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
     fileName: preview.fileName,
     sheetName: preview.sheetName,
+    workbookKey: preview.fileName,
+    enabled: preview.recommendedEnabled,
+    sheetRole: preview.sheetRole,
+    sheetReason: preview.sheetReason,
     allRows: preview.allRows,
     profileCandidates: preview.profileCandidates.map((candidate) => ({ profile: candidate.profile, score: candidate.score })),
     config,
-    packet: buildPacketForUpload(profiles, preview.fileName, preview.allRows, config),
+    packet: buildPacketForUpload(profiles, uploadSourceLabel(preview), preview.allRows, config),
   };
 }
 
@@ -96,13 +108,13 @@ export function ReconciliationWorkspaceProvider({ children }: { children: React.
       const errors: string[] = [];
       for (const file of arr) {
         try {
-          const preview = await parseReportFilePreview(file, profiles, { maxRows: MAX_RECONCILIATION_ROWS });
-          created.push(uploadFromPreview(profiles, preview));
+          const previews = await parseReportFilePreviews(file, profiles, { maxRows: MAX_RECONCILIATION_ROWS });
+          created.push(...previews.map((preview) => uploadFromPreview(profiles, preview)));
         } catch (e: unknown) {
           errors.push(`${file.name}: ${e instanceof Error ? e.message : "Unable to parse this report."}`);
         }
       }
-      if (created.length) setUploads((prev) => [...created, ...prev].slice(0, 12));
+      if (created.length) setUploads((prev) => [...created, ...prev].slice(0, 60));
       setError(errors.length ? errors.join(" · ") : null);
       setReading(false);
     },
@@ -115,7 +127,7 @@ export function ReconciliationWorkspaceProvider({ children }: { children: React.
         prev.map((upload) => {
           if (upload.id !== id) return upload;
           const config = { ...upload.config, ...patch };
-          return { ...upload, config, packet: buildPacketForUpload(profiles, upload.fileName, upload.allRows, config) };
+          return { ...upload, config, packet: buildPacketForUpload(profiles, uploadSourceLabel(upload), upload.allRows, config) };
         }),
       );
     },
@@ -126,11 +138,28 @@ export function ReconciliationWorkspaceProvider({ children }: { children: React.
     () => ({
       profiles,
       uploads,
-      packets: uploads.map((upload) => upload.packet),
+      packets: uploads.filter((upload) => upload.enabled !== false).map((upload) => upload.packet),
       error,
       reading,
       addFiles,
       updateUploadConfig,
+      applyUploadConfigToWorkbook: (id) => {
+        setUploads((prev) => {
+          const source = prev.find((upload) => upload.id === id);
+          if (!source?.workbookKey) return prev;
+          return prev.map((upload) => {
+            if (upload.workbookKey !== source.workbookKey || upload.id === source.id) return upload;
+            const config = { ...source.config };
+            return { ...upload, config, packet: buildPacketForUpload(profiles, uploadSourceLabel(upload), upload.allRows, config) };
+          });
+        });
+      },
+      setUploadEnabled: (id, enabled) => {
+        setUploads((prev) => prev.map((upload) => upload.id === id ? { ...upload, enabled } : upload));
+      },
+      setWorkbookEnabled: (workbookKey, enabledIds) => {
+        setUploads((prev) => prev.map((upload) => upload.workbookKey === workbookKey ? { ...upload, enabled: enabledIds.has(upload.id) } : upload));
+      },
       removeUpload: (id) => setUploads((prev) => prev.filter((upload) => upload.id !== id)),
       clearUploads: () => setUploads([]),
     }),

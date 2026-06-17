@@ -22,14 +22,27 @@ export type ReconciliationFindingKind =
   | "grant_mapping_review"
   | "report_row_diagnostic";
 
+export type ReconciliationSourceSystem = "hmis" | "financial_edge" | "caseworthy" | "dashboard" | "unknown";
+
+export type ReconciliationMatchContext = {
+  criteria: string[];
+  customerMethod?: string;
+  customerConfidence?: number;
+  paymentCandidateCount?: number;
+};
+
 export type ReconciliationFinding = {
   id: string;
   kind: ReconciliationFindingKind;
   /** Human-readable, context-aware headline (filled in post-pass). */
   title?: string;
+  sourceSystem: ReconciliationSourceSystem;
+  sourceSystemLabel: string;
   severity: ReportDiagnosticSeverity;
   confidence: number;
   sourceFile: string;
+  sourceProfileId?: string;
+  sourceProfileLabel?: string;
   sourceRowNumber: number | null;
   recordKind: string;
   customerId?: string;
@@ -40,6 +53,11 @@ export type ReconciliationFinding = {
   dashboardValue?: string;
   explanation: string[];
   proposedAction?: string;
+  reportRecord?: NormalizedReportRecord;
+  matchedCustomer?: Record<string, unknown>;
+  matchedEnrollment?: Record<string, unknown>;
+  matchedPaymentCandidates?: Array<Record<string, unknown>>;
+  match?: ReconciliationMatchContext;
 };
 
 export type ReconciliationReviewSummary = {
@@ -60,6 +78,7 @@ type DashboardData = {
   enrollments: Array<Record<string, unknown>>;
   grants: Array<Record<string, unknown>>;
   paymentQueueItems: Array<Record<string, unknown>>;
+  ledger?: Array<Record<string, unknown>>;
 };
 
 function text(value: unknown) {
@@ -70,13 +89,47 @@ function lower(value: unknown) {
   return text(value).toLowerCase();
 }
 
+function sourceSystemFor(sourceType: unknown, recordKind: unknown): ReconciliationSourceSystem {
+  const value = lower(`${sourceType || ""} ${recordKind || ""}`);
+  if (value.includes("financial") || value.includes("edge")) return "financial_edge";
+  if (value.includes("hmis") || value.includes("coordinated")) return "hmis";
+  if (value.includes("caseworthy")) return "caseworthy";
+  if (value.includes("dashboard")) return "dashboard";
+  return "unknown";
+}
+
+function sourceSystemLabel(system: ReconciliationSourceSystem) {
+  if (system === "financial_edge") return "Financial Edge";
+  if (system === "hmis") return "HMIS";
+  if (system === "caseworthy") return "Caseworthy";
+  if (system === "dashboard") return "Dashboard";
+  return "Unknown source";
+}
+
 function cents(value: unknown) {
   const amount = normalizeAmount(value);
   return amount == null ? null : Math.round(amount * 100);
 }
 
+function rowCents(row: Record<string, unknown>) {
+  const amountCents = Number(row.amountCents);
+  if (Number.isFinite(amountCents)) return Math.round(amountCents);
+  return cents(row.amount ?? row.amountAbs);
+}
+
 function monthKey(value: unknown) {
   return normalizeDate(value).slice(0, 7);
+}
+
+function tokenSet(value: unknown) {
+  return new Set(lower(value).split(/[^a-z0-9]+/).filter((token) => token.length >= 3));
+}
+
+function hasTokenOverlap(a: unknown, b: unknown) {
+  const left = tokenSet(a);
+  if (!left.size) return false;
+  for (const token of tokenSet(b)) if (left.has(token)) return true;
+  return false;
 }
 
 function isActiveLike(row: Record<string, unknown>) {
@@ -130,7 +183,7 @@ function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
 
 function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof buildCustomerIndexes>) {
   const dashboardId = text(record.customerIdentity.dashboardCustomerId);
-  if (dashboardId && indexes.byId.has(dashboardId)) return { customer: indexes.byId.get(dashboardId) ?? null, confidence: 1, method: "dashboard id" };
+  if (dashboardId && indexes.byId.has(dashboardId)) return { customer: indexes.byId.get(dashboardId) ?? null, confidence: 1, method: "dashboard customer ID" };
   const hmisId = text(record.customerIdentity.hmisId);
   if (hmisId && indexes.byHmis.has(hmisId)) return { customer: indexes.byHmis.get(hmisId) ?? null, confidence: 0.95, method: "HMIS ID" };
   const name = recordNameKey(record);
@@ -163,17 +216,102 @@ function findEnrollments(customerId: string, enrollments: Array<Record<string, u
   return enrollments.filter((enrollment) => text(enrollment.customerId ?? enrollment.clientId) === customerId && isActiveLike(enrollment));
 }
 
-function findPaymentCandidates(record: NormalizedReportRecord, paymentQueueItems: Array<Record<string, unknown>>, customerId?: string) {
+function paymentRowMonth(row: Record<string, unknown>) {
+  return text(row.month) || monthKey(row.dueDate ?? row.transactionDate ?? row.postedAt ?? row.date ?? row.serviceDate);
+}
+
+function paymentRowVendor(row: Record<string, unknown>) {
+  return text(row.vendor ?? row.merchant ?? row.payee ?? row.landlord ?? row.customerNameAtSpend ?? row.description ?? row.note ?? row.notes);
+}
+
+function paymentRowGrant(row: Record<string, unknown>) {
+  return text(row.grantId ?? row.grantName ?? row.program ?? row.project ?? row.lineItemName);
+}
+
+function paymentRowSource(row: Record<string, unknown>) {
+  const source = lower(row.source ?? row.kind ?? row.originSource ?? (row.origin as Record<string, unknown> | undefined)?.paymentQueueSource);
+  if (source.includes("ledger") || "amountCents" in row || "paid" in row) return "ledger";
+  if (source.includes("queue") || "queueStatus" in row) return "payment queue";
+  return "dashboard payment";
+}
+
+function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<string, unknown>, customerId?: string) {
   const amount = cents(record.paymentEvidence.amount);
   const serviceMonth = record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate);
-  return paymentQueueItems.filter((item) => {
-    if (customerId && text(item.customerId) && text(item.customerId) !== customerId) return false;
-    const itemAmount = cents(item.amount ?? item.amountAbs);
-    if (amount != null && itemAmount != null && Math.abs(amount - itemAmount) > 1) return false;
-    const itemMonth = text(item.month) || monthKey(item.dueDate ?? item.transactionDate ?? item.postedAt);
-    if (serviceMonth && itemMonth && serviceMonth !== itemMonth) return false;
-    return true;
-  });
+  const itemAmount = rowCents(row);
+  const itemMonth = paymentRowMonth(row);
+  const reportVendor = record.paymentEvidence.vendor || record.paymentEvidence.reference;
+  const itemVendor = paymentRowVendor(row);
+  const reportGrant = record.paymentEvidence.grant || record.enrollmentEvidence.projectName;
+  const itemGrant = paymentRowGrant(row);
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  let score = 0;
+
+  if (customerId && text(row.customerId) === customerId) {
+    score += 40;
+    reasons.push("customerId exact");
+  } else if (customerId && text(row.customerId)) {
+    score -= 30;
+    warnings.push("different customerId");
+  } else if (record.customerIdentity.fullName && hasTokenOverlap(record.customerIdentity.fullName, row.customerNameAtSpend ?? row.customerName ?? row.customer)) {
+    score += 18;
+    reasons.push("customer name token overlap");
+  }
+
+  if (serviceMonth && itemMonth && serviceMonth === itemMonth) {
+    score += 25;
+    reasons.push("same service month");
+  } else if (serviceMonth && itemMonth) {
+    score -= 15;
+    warnings.push(`month differs (${serviceMonth} vs ${itemMonth})`);
+  }
+
+  if (amount != null && itemAmount != null) {
+    const diff = Math.abs(amount - itemAmount);
+    if (diff <= 1) {
+      score += 30;
+      reasons.push("amount exact");
+    } else if (diff <= 5000) {
+      score += 8;
+      warnings.push(`amount differs by ${(diff / 100).toFixed(2)}`);
+    } else {
+      score -= 20;
+      warnings.push(`amount differs by ${(diff / 100).toFixed(2)}`);
+    }
+  }
+
+  if (reportVendor && itemVendor && hasTokenOverlap(reportVendor, itemVendor)) {
+    score += 10;
+    reasons.push("vendor/payee overlap");
+  }
+
+  if (reportGrant && itemGrant && hasTokenOverlap(reportGrant, itemGrant)) {
+    score += 10;
+    reasons.push("grant/project overlap");
+  }
+
+  if (lower(row.queueStatus) === "void") {
+    score -= 20;
+    warnings.push("queue item is void");
+  }
+
+  return { row, score, reasons, warnings, amountDiffCents: amount != null && itemAmount != null ? amount - itemAmount : null };
+}
+
+function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Array<Record<string, unknown>>, customerId?: string) {
+  return paymentRows
+    .map((row) => scorePaymentCandidate(record, row, customerId))
+    .filter((candidate) => candidate.score >= 35)
+    .sort((a, b) => b.score - a.score)
+    .map((candidate) => ({
+      ...candidate.row,
+      _matchScore: candidate.score,
+      _matchReasons: candidate.reasons,
+      _matchWarnings: candidate.warnings,
+      _matchSource: paymentRowSource(candidate.row),
+      _amountDiffCents: candidate.amountDiffCents,
+    }));
 }
 
 function findingId(kind: ReconciliationFindingKind, record: NormalizedReportRecord, suffix: string) {
@@ -181,13 +319,18 @@ function findingId(kind: ReconciliationFindingKind, record: NormalizedReportReco
 }
 
 function addRecordDiagnostics(findings: ReconciliationFinding[], packet: ReconciliationPacket) {
+  const system = sourceSystemFor(packet.summary.sourceType, packet.summary.recordKind);
   for (const diagnostic of packet.diagnostics) {
     findings.push({
       id: `diagnostic::${packet.sourceFile}::${diagnostic.fieldKey || diagnostic.code}`,
       kind: "report_row_diagnostic",
+      sourceSystem: system,
+      sourceSystemLabel: sourceSystemLabel(system),
       severity: diagnostic.severity,
       confidence: 1,
       sourceFile: packet.sourceFile,
+      sourceProfileId: packet.profileId,
+      sourceProfileLabel: packet.profileLabel,
       sourceRowNumber: diagnostic.sourceRowNumber ?? null,
       recordKind: packet.summary.recordKind,
       reportValue: diagnostic.fieldKey,
@@ -199,29 +342,30 @@ function addRecordDiagnostics(findings: ReconciliationFinding[], packet: Reconci
 
 function findingTitle(finding: ReconciliationFinding): string {
   const who = finding.customerLabel || finding.customerId || "Unmatched row";
+  const source = finding.sourceSystemLabel;
   switch (finding.kind) {
     case "customer_missing":
-      return `Not in dashboard: ${finding.reportValue || who}`;
+      return `${source} name/ID missing from dashboard: ${finding.reportValue || who}`;
     case "customer_possible_match":
-      return `Weak identity match: ${who}`;
+      return `Low-confidence ${source} customer match: ${who}`;
     case "enrollment_missing":
-      return `No dashboard enrollment: ${who}`;
+      return `${source} enrollment missing from dashboard: ${who}`;
     case "entry_date_mismatch":
-      return `Entry date differs: ${who}`;
+      return `${source} entry date differs from dashboard: ${who}`;
     case "exit_date_mismatch":
-      return `Exit date differs: ${who}`;
+      return `${source} exit date differs from dashboard: ${who}`;
     case "enrollment_compliance_missing":
-      return `HMIS compliance gap: ${who}`;
+      return `${source} evidence not marked complete in dashboard: ${who}`;
     case "payment_missing_dashboard":
-      return `Payment not in dashboard: ${who}`;
+      return `${source} payment row missing from dashboard queue/ledger: ${who}`;
     case "payment_possible_match":
-      return `Ambiguous payment match: ${who}`;
+      return `Multiple dashboard payment matches for ${source} row: ${who}`;
     case "payment_amount_mismatch":
-      return `Payment amount differs: ${who}`;
+      return `${source} payment amount differs from dashboard: ${who}`;
     case "grant_mapping_review":
-      return `Grant mapping review: ${who}`;
+      return `${source} grant/provider mapping needs review: ${who}`;
     case "report_row_diagnostic":
-      return `Report data issue${finding.reportValue ? `: ${finding.reportValue}` : ""}`;
+      return `${source} report data issue${finding.reportValue ? `: ${finding.reportValue}` : ""}`;
     default:
       return finding.kind.replace(/_/g, " ");
   }
@@ -234,6 +378,8 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
   for (const packet of packets) {
     addRecordDiagnostics(findings, packet);
     for (const record of packet.records) {
+      const sourceSystem = sourceSystemFor(record.sourceType, record.recordKind);
+      const sourceLabel = sourceSystemLabel(sourceSystem);
       const match = findCustomer(record, customerIndexes);
       const customer = match.customer;
       const customerId = customer ? text(customer.id) : "";
@@ -244,14 +390,20 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         findings.push({
           id: findingId("customer_missing", record, record.customerIdentity.hmisId || name),
           kind: "customer_missing",
+          sourceSystem,
+          sourceSystemLabel: sourceLabel,
           severity: "error",
           confidence: 0.8,
           sourceFile: record.sourceFile,
+          sourceProfileId: packet.profileId,
+          sourceProfileLabel: packet.profileLabel,
           sourceRowNumber: record.sourceRowNumber,
           recordKind: record.recordKind,
           reportValue: record.customerIdentity.hmisId || name,
-          explanation: ["Report row has a customer identity that was not found in dashboard cached customers."],
+          explanation: [`${sourceLabel} row has a customer identity that was not found in dashboard cached customers.`],
           proposedAction: "Review customer identity and create or link the dashboard customer if appropriate.",
+          reportRecord: record,
+          match: { criteria: ["No dashboard customer matched by dashboard ID, HMIS ID, name + DOB, or unique name."] },
         });
         continue;
       }
@@ -260,15 +412,22 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         findings.push({
           id: findingId("customer_possible_match", record, customerId),
           kind: "customer_possible_match",
+          sourceSystem,
+          sourceSystemLabel: sourceLabel,
           severity: "warning",
           confidence: match.confidence,
           sourceFile: record.sourceFile,
+          sourceProfileId: packet.profileId,
+          sourceProfileLabel: packet.profileLabel,
           sourceRowNumber: record.sourceRowNumber,
           recordKind: record.recordKind,
           customerId,
           customerLabel: customerLabel(customer),
-          explanation: [`Customer matched by ${match.method}; review before applying any identity changes.`],
+          explanation: [`${sourceLabel} customer matched by ${match.method}; review before applying any identity changes.`],
           proposedAction: "Confirm customer identity.",
+          reportRecord: record,
+          matchedCustomer: customer,
+          match: { criteria: [`Matched customer by ${match.method}.`], customerMethod: match.method, customerConfidence: match.confidence },
         });
       }
 
@@ -285,16 +444,23 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           findings.push({
             id: findingId("enrollment_missing", record, customerId),
             kind: "enrollment_missing",
+            sourceSystem,
+            sourceSystemLabel: sourceLabel,
             severity: "error",
             confidence: 0.75,
             sourceFile: record.sourceFile,
+            sourceProfileId: packet.profileId,
+            sourceProfileLabel: packet.profileLabel,
             sourceRowNumber: record.sourceRowNumber,
             recordKind: record.recordKind,
             customerId,
             customerLabel: customerLabel(customer),
             reportValue: record.enrollmentEvidence.projectName || record.enrollmentEvidence.programId,
-            explanation: ["Report row indicates enrollment evidence, but no active dashboard enrollment was found for this customer/profile."],
+            explanation: [`${sourceLabel} row indicates enrollment evidence, but no matching dashboard enrollment was found for this customer/profile.`],
             proposedAction: "Review for CREATE_ENROLLMENT.",
+            reportRecord: record,
+            matchedCustomer: customer,
+            match: { criteria: [`Customer matched by ${match.method}.`, "No active dashboard enrollment matched the report grant/provider signal."] },
           });
         }
 
@@ -306,9 +472,13 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             findings.push({
               id: findingId("entry_date_mismatch", record, enrollmentId),
               kind: "entry_date_mismatch",
+              sourceSystem,
+              sourceSystemLabel: sourceLabel,
               severity: "warning",
               confidence: 0.7,
               sourceFile: record.sourceFile,
+              sourceProfileId: packet.profileId,
+              sourceProfileLabel: packet.profileLabel,
               sourceRowNumber: record.sourceRowNumber,
               recordKind: record.recordKind,
               customerId,
@@ -316,17 +486,25 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               enrollmentId,
               reportValue: record.enrollmentEvidence.entryDate,
               dashboardValue: dashboardEntry,
-              explanation: ["Report entry date differs from dashboard enrollment entry/start date."],
+              explanation: [`${sourceLabel} entry date differs from dashboard enrollment entry/start date.`],
               proposedAction: "Review enrollment date source of truth.",
+              reportRecord: record,
+              matchedCustomer: customer,
+              matchedEnrollment: matchingEnrollment,
+              match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${reportGrant ? "grant/provider signal" : "first active enrollment fallback"}.`] },
             });
           }
           if (record.enrollmentEvidence.exitDate && record.enrollmentEvidence.exitDate !== dashboardExit) {
             findings.push({
               id: findingId("exit_date_mismatch", record, enrollmentId),
               kind: "exit_date_mismatch",
+              sourceSystem,
+              sourceSystemLabel: sourceLabel,
               severity: "warning",
               confidence: 0.75,
               sourceFile: record.sourceFile,
+              sourceProfileId: packet.profileId,
+              sourceProfileLabel: packet.profileLabel,
               sourceRowNumber: record.sourceRowNumber,
               recordKind: record.recordKind,
               customerId,
@@ -334,8 +512,12 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               enrollmentId,
               reportValue: record.enrollmentEvidence.exitDate,
               dashboardValue: dashboardExit || "active/no exit date",
-              explanation: ["Report exit date differs from the dashboard enrollment exit/closed date."],
+              explanation: [`${sourceLabel} exit date differs from the dashboard enrollment exit/closed date.`],
               proposedAction: dashboardExit ? "Review enrollment exit date conflict." : "Review for CLOSE_ENROLLMENT.",
+              reportRecord: record,
+              matchedCustomer: customer,
+              matchedEnrollment: matchingEnrollment,
+              match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${reportGrant ? "grant/provider signal" : "first active enrollment fallback"}.`] },
             });
           }
 
@@ -346,52 +528,130 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             findings.push({
               id: findingId("enrollment_compliance_missing", record, `${enrollmentId}:hmisEntry`),
               kind: "enrollment_compliance_missing",
+              sourceSystem,
+              sourceSystemLabel: sourceLabel,
               severity: "warning",
               confidence: 0.65,
               sourceFile: record.sourceFile,
+              sourceProfileId: packet.profileId,
+              sourceProfileLabel: packet.profileLabel,
               sourceRowNumber: record.sourceRowNumber,
               recordKind: record.recordKind,
               customerId,
               customerLabel: customerLabel(customer),
               enrollmentId,
-              explanation: ["HMIS report evidence exists, but the dashboard enrollment does not show HMIS entry compliance complete."],
+              explanation: [`${sourceLabel} report evidence exists, but the dashboard enrollment does not show HMIS entry compliance complete.`],
               proposedAction: "Review HMIS enrollment compliance flag.",
+              reportRecord: record,
+              matchedCustomer: customer,
+              matchedEnrollment: matchingEnrollment,
+              match: { criteria: [`Customer matched by ${match.method}.`, "Dashboard enrollment compliance.hmisEntryComplete is not true."] },
             });
           }
         }
       }
 
       if (record.paymentEvidence.amount != null) {
-        const candidates = findPaymentCandidates(record, dashboard.paymentQueueItems, customerId || undefined);
+        const dashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
+        const candidates = findPaymentCandidates(record, dashboardPaymentRows, customerId || undefined);
         if (!candidates.length) {
           findings.push({
             id: findingId("payment_missing_dashboard", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
             kind: "payment_missing_dashboard",
+            sourceSystem,
+            sourceSystemLabel: sourceLabel,
             severity: record.recordKind === "financialEdgeTransaction" ? "error" : "warning",
             confidence: 0.7,
             sourceFile: record.sourceFile,
+            sourceProfileId: packet.profileId,
+            sourceProfileLabel: packet.profileLabel,
             sourceRowNumber: record.sourceRowNumber,
             recordKind: record.recordKind,
             customerId: customerId || undefined,
             customerLabel: customer ? customerLabel(customer) : undefined,
             reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
-            explanation: ["Report payment/service row did not match a cached dashboard payment queue item by customer, amount, and month."],
+            explanation: [`${sourceLabel} payment/service row did not match cached dashboard payment queue or ledger rows by customer, amount, and month.`],
             proposedAction: "Review for missing payment schedule, unmatched FE transaction, or mapping issue.",
+            reportRecord: record,
+            matchedCustomer: customer ?? undefined,
+            match: {
+              criteria: [
+                customer ? `Customer matched by ${match.method}.` : "No dashboard customer match was available for payment matching.",
+                "No payment queue or ledger row matched amount and service month.",
+              ],
+              customerMethod: match.method || undefined,
+              customerConfidence: match.confidence || undefined,
+              paymentCandidateCount: 0,
+            },
           });
-        } else if (candidates.length > 1) {
+        } else {
+          const best = candidates[0];
+          const amountDiff = Number((best as Record<string, unknown>)._amountDiffCents);
+          if (Number.isFinite(amountDiff) && Math.abs(amountDiff) > 1) {
+            findings.push({
+              id: findingId("payment_amount_mismatch", record, String(best.id ?? amountDiff)),
+              kind: "payment_amount_mismatch",
+              sourceSystem,
+              sourceSystemLabel: sourceLabel,
+              severity: "warning",
+              confidence: Math.min(0.95, Number((best as Record<string, unknown>)._matchScore ?? 55) / 100),
+              sourceFile: record.sourceFile,
+              sourceProfileId: packet.profileId,
+              sourceProfileLabel: packet.profileLabel,
+              sourceRowNumber: record.sourceRowNumber,
+              recordKind: record.recordKind,
+              customerId: customerId || undefined,
+              customerLabel: customer ? customerLabel(customer) : undefined,
+              reportValue: String(record.paymentEvidence.amount),
+              dashboardValue: String((rowCents(best) ?? 0) / 100),
+              explanation: [`Best ${String((best as Record<string, unknown>)._matchSource || "dashboard payment")} match has the same customer/month context but a different amount.`],
+              proposedAction: "Review source of truth before updating payment queue or ledger.",
+              reportRecord: record,
+              matchedCustomer: customer ?? undefined,
+              matchedPaymentCandidates: candidates.slice(0, 5),
+              match: {
+                criteria: [
+                  customer ? `Customer matched by ${match.method}.` : "Payment matched without a confirmed dashboard customer.",
+                  ...((best as Record<string, unknown>)._matchReasons as string[] ?? []),
+                  ...((best as Record<string, unknown>)._matchWarnings as string[] ?? []),
+                ],
+                customerMethod: match.method || undefined,
+                customerConfidence: match.confidence || undefined,
+                paymentCandidateCount: candidates.length,
+              },
+            });
+          } else if (candidates.length > 1) {
           findings.push({
             id: findingId("payment_possible_match", record, String(candidates.length)),
             kind: "payment_possible_match",
+            sourceSystem,
+            sourceSystemLabel: sourceLabel,
             severity: "warning",
             confidence: 0.55,
             sourceFile: record.sourceFile,
+            sourceProfileId: packet.profileId,
+            sourceProfileLabel: packet.profileLabel,
             sourceRowNumber: record.sourceRowNumber,
             recordKind: record.recordKind,
             customerId: customerId || undefined,
             customerLabel: customer ? customerLabel(customer) : undefined,
-            explanation: [`Found ${candidates.length} possible dashboard payment matches by amount/month.`],
+            explanation: [`Found ${candidates.length} possible dashboard payment matches by customer, amount, and month.`],
             proposedAction: "Review candidate payment match manually.",
+            reportRecord: record,
+            matchedCustomer: customer ?? undefined,
+            matchedPaymentCandidates: candidates.slice(0, 5),
+            match: {
+              criteria: [
+                customer ? `Customer matched by ${match.method}.` : "Payment matched without a confirmed dashboard customer.",
+                `Found ${candidates.length} scored queue/ledger candidates.`,
+                ...(((candidates[0] as Record<string, unknown>)._matchReasons as string[] | undefined) ?? []),
+              ],
+              customerMethod: match.method || undefined,
+              customerConfidence: match.confidence || undefined,
+              paymentCandidateCount: candidates.length,
+            },
           });
+          }
         }
       }
     }
