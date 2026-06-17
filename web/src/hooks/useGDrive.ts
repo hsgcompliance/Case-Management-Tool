@@ -12,8 +12,8 @@ import type {
 import { qk } from './queryKeys';
 import { RQ_DEFAULTS } from './base';
 import { useInvalidateMutation } from './optimistic';
-import { ACTIVE_PARENT_ID, EXITED_PARENT_ID, FOLDER_INDEX_SHEET_ID, APPS_SCRIPT_EXEC_URL } from '@lib/driveConfig';
-import { getGoogleDriveAccessToken } from '@lib/googleDriveAccessToken';
+import { ACTIVE_PARENT_ID, EXITED_PARENT_ID, FOLDER_INDEX_SHEET_ID } from '@lib/driveConfig';
+import { getGoogleDriveAccessToken, clearGoogleDriveAccessToken } from '@lib/googleDriveAccessToken';
 
 const INDEX_STALE_MS = 20 * 60_000; // 20 min - index changes infrequently
 
@@ -193,22 +193,107 @@ function parseSheetRows(values: string[][]): TCustomerFolder[] {
     }));
 }
 
+// Index sheet layout mirrors the Apps Script INDEX_HEADERS: FUNC is column A and
+// Folder ID is column F. Writing a command word into the FUNC cell queues it for
+// the nightly index job (which processes ARCHIVE/UNARCHIVE/DELETE/NEW and clears
+// the column). We never move the folder live from the client.
+const FOLDER_INDEX_TAB = "index";
+const FOLDER_INDEX_ID_COL = "F";
+const FOLDER_INDEX_FUNC_COL = "A";
+
+/**
+ * Raised when a Sheets call fails for an auth reason. The temporary Drive token
+ * is cleared so the UI re-prompts via the existing "Connect for archive" flow.
+ */
+export class DriveSheetsAuthError extends Error {
+  readonly needsAuth = true;
+  constructor(public readonly status: number) {
+    super(
+      status === 401 || status === 403
+        ? "Google access expired or is missing the Sheets permission. Reconnect Drive access and try again."
+        : "Connect Google Drive access to queue customer-folder changes.",
+    );
+    this.name = "DriveSheetsAuthError";
+  }
+}
+
+function requireDriveToken(): string {
+  const token = getGoogleDriveAccessToken();
+  if (!token) throw new DriveSheetsAuthError(0);
+  return token;
+}
+
 async function sheetsApiFetch(path: string, token: string) {
   const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!resp.ok) throw new Error(`Sheets API ${resp.status}`);
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      clearGoogleDriveAccessToken();
+      throw new DriveSheetsAuthError(resp.status);
+    }
+    throw new Error(`Sheets API ${resp.status}`);
+  }
   return resp.json();
 }
 
-async function appsScriptFetch(route: string, params: Record<string, string>, token: string) {
-  const qs = new URLSearchParams({ route, ...params }).toString();
-  const resp = await fetch(`${APPS_SCRIPT_EXEC_URL}?${qs}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    redirect: "follow",
+async function sheetsApiWrite(spreadsheetId: string, rangeA1: string, values: string[][], token: string) {
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/` +
+    `${encodeURIComponent(rangeA1)}?valueInputOption=RAW`;
+  const resp = await fetch(url, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ values }),
   });
-  if (!resp.ok) throw new Error(`Apps Script ${resp.status}`);
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      clearGoogleDriveAccessToken();
+      throw new DriveSheetsAuthError(resp.status);
+    }
+    throw new Error(`Sheets API ${resp.status}`);
+  }
   return resp.json();
+}
+
+/** Find a folder's 1-based row in the index sheet by Folder ID (column F). */
+async function findFolderIndexRow(spreadsheetId: string, folderId: string, token: string): Promise<number> {
+  const range = `${FOLDER_INDEX_TAB}!${FOLDER_INDEX_ID_COL}:${FOLDER_INDEX_ID_COL}`;
+  const json = (await sheetsApiFetch(`${spreadsheetId}/values/${encodeURIComponent(range)}`, token)) as {
+    values?: string[][];
+  };
+  const rows = json.values ?? [];
+  const target = String(folderId || "").trim();
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i]?.[0] ?? "").trim() === target) return i + 1; // sheet rows are 1-based
+  }
+  return -1;
+}
+
+/** Queue a FUNC command (ARCHIVE / UNARCHIVE) for a folder in the index sheet. */
+async function queueFolderFuncCommand(
+  spreadsheetId: string,
+  folderId: string,
+  command: "ARCHIVE" | "UNARCHIVE",
+): Promise<{ folderId: string; command: string; row: number }> {
+  const sheetId = String(spreadsheetId || "").trim();
+  if (!sheetId) {
+    throw new Error("No customer index sheet configured. Set it in Org Config → Google Drive.");
+  }
+  const token = requireDriveToken();
+  const row = await findFolderIndexRow(sheetId, folderId, token);
+  if (row < 0) {
+    throw new Error("Folder is not in the index sheet yet. Rebuild the folder index, then retry.");
+  }
+  await sheetsApiWrite(sheetId, `${FOLDER_INDEX_TAB}!${FOLDER_INDEX_FUNC_COL}${row}`, [[command]], token);
+  return { folderId, command, row };
+}
+
+/** Effective customer index sheet id: org config first, env fallback. */
+function useResolvedIndexSheetId(): string {
+  const configQ = useGDriveConfig();
+  const fromConfig = String(configQ.data?.config?.customerFolderIndex?.sheetId || "").trim();
+  return fromConfig || FOLDER_INDEX_SHEET_ID;
 }
 
 export function useSheetCustomerFolderIndex(opts?: { enabled?: boolean; staleTime?: number }) {
@@ -231,14 +316,15 @@ export function useSheetCustomerFolderIndex(opts?: { enabled?: boolean; staleTim
   });
 }
 
+// Archive / restore queue an ARCHIVE / UNARCHIVE FUNC command into the index
+// sheet. The nightly index job performs the actual Drive move, so the live Drive
+// index won't change until it runs — callers should reflect a "queued" state
+// rather than an immediate status flip.
 export function useSheetArchiveClient() {
   const qc = useQueryClient();
+  const sheetId = useResolvedIndexSheetId();
   return useMutation({
-    mutationFn: async (folderId: string) => {
-      const token = getGoogleDriveAccessToken();
-      if (!token) throw new Error("No Google access token");
-      return appsScriptFetch("archiveClient", { folderId }, token);
-    },
+    mutationFn: (folderId: string) => queueFolderFuncCommand(sheetId, folderId, "ARCHIVE"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() });
       qc.invalidateQueries({ queryKey: qk.gdrive.root });
@@ -248,12 +334,9 @@ export function useSheetArchiveClient() {
 
 export function useSheetUnarchiveClient() {
   const qc = useQueryClient();
+  const sheetId = useResolvedIndexSheetId();
   return useMutation({
-    mutationFn: async (folderId: string) => {
-      const token = getGoogleDriveAccessToken();
-      if (!token) throw new Error("No Google access token");
-      return appsScriptFetch("unarchiveClient", { folderId }, token);
-    },
+    mutationFn: (folderId: string) => queueFolderFuncCommand(sheetId, folderId, "UNARCHIVE"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.gdrive.sheetFolderIndex() });
       qc.invalidateQueries({ queryKey: qk.gdrive.root });

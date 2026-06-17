@@ -22,14 +22,25 @@ const OptionalDriveRef = z.preprocess((value) => {
 export const GDRIVE_TEMPLATE_TYPES = ["doc", "sheet", "pdf", "folder", "other"] as const;
 export type TGDriveTemplateType = typeof GDRIVE_TEMPLATE_TYPES[number];
 
+// Payer/non-payer file pair for templates whose source file depends on the
+// customer's Medicaid status (e.g. the TSS workbook). When present, the build
+// flow resolves `fileId` from these based on the Medicaid toggle and `fileId`
+// on the template itself may be empty.
+export type TGDriveTemplateVariants = {
+  payer: string;
+  nonpayer: string;
+};
+
 export type TGDriveTemplate = {
   key: string;
+  /** May be empty when `variants` supplies the source file ids. */
   fileId: string;
   fileUrl?: string;
   type: TGDriveTemplateType;
   alias: string;
   description?: string;
   defaultChecked?: boolean;
+  variants?: TGDriveTemplateVariants;
 };
 
 export type TGDriveBuildSettings = {
@@ -37,15 +48,30 @@ export type TGDriveBuildSettings = {
   defaultTemplateKeys?: string[];
 };
 
-const GDriveTemplateSchema = z.object({
-  key: z.string().min(1).max(100),
-  fileId: z.string().min(1).max(300),
-  fileUrl: z.string().max(500).optional(),
-  type: z.enum(GDRIVE_TEMPLATE_TYPES),
-  alias: z.string().min(1).max(200),
-  description: z.string().max(500).optional(),
-  defaultChecked: z.boolean().optional(),
+const GDriveTemplateVariantsSchema = z.object({
+  payer: z.string().max(300).default(""),
+  nonpayer: z.string().max(300).default(""),
 });
+
+const GDriveTemplateSchema = z
+  .object({
+    key: z.string().min(1).max(100),
+    // Relaxed from min(1): a variant-only template (e.g. TSS payer/non-payer)
+    // carries its source ids in `variants` and may leave `fileId` empty.
+    fileId: z.string().max(300).default(""),
+    fileUrl: z.string().max(500).optional(),
+    type: z.enum(GDRIVE_TEMPLATE_TYPES),
+    alias: z.string().min(1).max(200),
+    description: z.string().max(500).optional(),
+    defaultChecked: z.boolean().optional(),
+    variants: GDriveTemplateVariantsSchema.optional(),
+  })
+  .refine(
+    (t) =>
+      t.fileId.trim().length >= 3 ||
+      !!(t.variants && (t.variants.payer.trim() || t.variants.nonpayer.trim())),
+    { message: "Template requires a fileId or payer/non-payer variant file ids." }
+  );
 
 const GDriveBuildSettingsSchema = z.object({
   defaultSubfolders: z.array(z.string().min(1).max(200)).optional(),

@@ -12,9 +12,8 @@ import {
   useGDriveCustomerFolderIndex,
   useGDriveBuildCustomerFolder,
   useGDriveUpload,
-  ACTIVE_PARENT_ID,
-  EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
+import { useResolvedDriveConfig } from "@hooks/useResolvedDriveConfig";
 import { useGoogleIntegrationStatus } from "@hooks/useGoogleIntegrations";
 import {
   useJotformFormsLite,
@@ -404,7 +403,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
       const folderId = firstFolder?.id || "";
       const [listRes, indexRes] = await Promise.allSettled([
         fetch(`${base}/gdriveList?${folderId ? `folderId=${folderId}&` : ""}debug=1`, { headers }).then((r) => r.json()),
-        fetch(`${base}/gdriveCustomerFolderIndex?activeParentId=${ACTIVE_PARENT_ID}&exitedParentId=${EXITED_PARENT_ID}&debug=1`, { headers }).then((r) => r.json()),
+        fetch(`${base}/gdriveCustomerFolderIndex?activeParentId=${activeParentId}&exitedParentId=${exitedParentId}&debug=1`, { headers }).then((r) => r.json()),
       ]);
       setDiagResult({
         headerTokenSent: !!driveToken,
@@ -479,8 +478,9 @@ function GDriveBlock({ customerId }: { customerId: string }) {
   );
   const files = readFiles(filesQ.data);
 
+  const { activeParentId, exitedParentId } = useResolvedDriveConfig();
   const { data: indexData, isLoading: indexLoading } = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
     { enabled: (open || showBuildDialog || showLinkDialog) && hasDriveToken },
   );
   const indexFolders = indexData?.folders ?? [];
@@ -503,7 +503,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
   };
 
   const buildFolder = useGDriveBuildCustomerFolder(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
     {
       onSuccess: async (folder) => {
         const next = [...folders, { id: folder.id, name: folder.name, alias: null }];

@@ -12,12 +12,21 @@ export type TGDriveCreateFolderBody = GDriveNS.TGDriveCreateFolderBody;
 export type TGDriveUploadBody = GDriveNS.TGDriveUploadBody;
 export type TGDriveCopyGrantTemplatesBody = GDriveNS.TGDriveCopyGrantTemplatesBody;
 
-// Defined locally (not yet in compiled vendor) — keep in sync with contracts/src/gdrive.ts
+// Defined locally (not yet in compiled vendor) — keep in sync with contracts/src/gdrive.ts.
+// `role` must be preserved: service.buildCustomerFolder keys the TSS workbook
+// auto-link off `role === "tssWorkbook"`, so dropping it silently breaks workbook
+// linking (incl. the Medicaid payer/non-payer variants).
 export const GDriveBuildCustomerFolderBody = z.object({
   name: z.string().min(1).max(255),
   parentId: z.string().min(3),
   templates: z
-    .array(z.object({ fileId: z.string().min(3), name: z.string().min(1).max(255) }))
+    .array(
+      z.object({
+        fileId: z.string().min(3),
+        name: z.string().min(1).max(255),
+        role: z.string().max(40).optional(),
+      }),
+    )
     .optional()
     .default([]),
   subfolders: z.array(z.string().min(1).max(255)).optional().default([]),

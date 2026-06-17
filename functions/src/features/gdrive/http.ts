@@ -469,12 +469,19 @@ export const gdriveUpload = secureHandler(
 
 const GDriveTemplateBody = z.object({
   key: z.string().min(1).max(100),
-  fileId: z.string().min(1).max(300),
+  // Relaxed from min(1): variant-only templates carry source ids in `variants`.
+  fileId: z.string().max(300).optional().default(""),
   fileUrl: z.string().max(500).optional(),
   type: z.enum(["doc", "sheet", "pdf", "folder", "other"]),
   alias: z.string().min(1).max(200),
   description: z.string().max(500).optional(),
   defaultChecked: z.boolean().optional(),
+  variants: z
+    .object({
+      payer: z.string().max(300).optional().default(""),
+      nonpayer: z.string().max(300).optional().default(""),
+    })
+    .optional(),
 });
 
 const GDriveBuildSettingsBody = z.object({

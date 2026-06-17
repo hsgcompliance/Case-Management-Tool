@@ -177,6 +177,7 @@ export type {
   TGDriveCustomerFolderIndexConfig,
   TGDriveTemplate,
   TGDriveTemplateType,
+  TGDriveTemplateVariants,
   TGDriveBuildSettings,
 } from "./gdrive";
 export { GDRIVE_TEMPLATE_TYPES } from "./gdrive";
