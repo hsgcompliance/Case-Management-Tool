@@ -108,6 +108,12 @@ export type {
   TGDriveCreateFolderBody,
   TGDriveUploadBody,
   TGDriveBuildCustomerFolderBody,
+  TGDriveTemplate,
+  TGDriveTemplateType,
+  TGDriveTemplateVariants,
+  TGDriveBuildSettings,
+  TGDriveCustomerFolderIndexConfig,
+  TGDriveOrgConfig,
   TCustomerFolder,
 
   TGoogleAuthMode,

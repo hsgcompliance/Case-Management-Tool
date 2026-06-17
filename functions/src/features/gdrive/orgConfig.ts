@@ -22,6 +22,11 @@ export type GDriveCustomerFolderIndexConfig = {
 
 export type GDriveTemplateType = "doc" | "sheet" | "pdf" | "folder" | "other";
 
+export type GDriveTemplateVariants = {
+  payer: string;
+  nonpayer: string;
+};
+
 export type GDriveTemplate = {
   key: string;
   fileId: string;
@@ -30,6 +35,7 @@ export type GDriveTemplate = {
   alias: string;
   description?: string;
   defaultChecked?: boolean;
+  variants?: GDriveTemplateVariants;
 };
 
 export type GDriveBuildSettings = {
@@ -151,7 +157,12 @@ function normalizeTemplate(raw: unknown): GDriveTemplate | null {
   const key = String(data.key ?? "").trim();
   const fileId = String(data.fileId ?? "").trim();
   const alias = String(data.alias ?? "").trim();
-  if (!key || !fileId || !alias) return null;
+  const variantsRaw = asRecord(data.variants);
+  const payer = String(variantsRaw.payer ?? "").trim();
+  const nonpayer = String(variantsRaw.nonpayer ?? "").trim();
+  const hasVariants = !!(payer || nonpayer);
+  // A template is valid with either a direct fileId or a payer/non-payer pair.
+  if (!key || !alias || (!fileId && !hasVariants)) return null;
   const type = VALID_TEMPLATE_TYPES.has(String(data.type ?? ""))
     ? (String(data.type) as GDriveTemplateType)
     : "other";
@@ -163,6 +174,7 @@ function normalizeTemplate(raw: unknown): GDriveTemplate | null {
     alias,
     ...(data.description ? { description: String(data.description) } : {}),
     ...(data.defaultChecked != null ? { defaultChecked: !!data.defaultChecked } : {}),
+    ...(hasVariants ? { variants: { payer, nonpayer } } : {}),
   };
 }
 

@@ -5,15 +5,16 @@ import {
   useGDriveCustomerFolderIndex,
   useSheetArchiveClient,
   useSheetUnarchiveClient,
-  ACTIVE_PARENT_ID,
-  EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
+import { useResolvedDriveConfig } from "@hooks/useResolvedDriveConfig";
 import type { TCustomerFolder } from "@types";
 import { ToolCard } from "@entities/ui/dashboardStyle/ToolCard";
 import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import type { DashboardToolDefinition, NavCrumb } from "@entities/Page/dashboardStyle/types";
 import { useAuth } from "@app/auth/AuthProvider";
 import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
+import { toast } from "@lib/toast";
+import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
 
 export type CustomerFoldersFilterState = {
   search: string;
@@ -80,18 +81,42 @@ function ConnectForArchiveButton({
   );
 }
 
+// Opens the full New Customer flow (create record + build folder through the
+// shared system) as an overlay modal instead of a standalone folder-only builder
+// or a redirect. Renders CustomerWorkspaceModal directly because the
+// `/customers/@modal/(.)new` interceptor only fires from within /customers — from
+// the dashboard a router.push would full-navigate away.
+function NewCustomerButton() {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-sm btn-primary rounded-lg"
+        onClick={() => setOpen(true)}
+        title="Create a customer and build their folder"
+      >
+        New Customer
+      </button>
+      {open ? <CustomerWorkspaceModal customerId={null} onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
 export const CustomerFoldersTopbar: DashboardToolDefinition<
   CustomerFoldersFilterState,
   CustomerFoldersSelection
 >["ToolTopbar"] = ({ value, onChange }: CustomerFoldersTopbarProps) => {
   const { hasDriveToken, connecting, connect } = useTemporaryDriveAccess();
+  const { activeParentId, exitedParentId } = useResolvedDriveConfig();
   const { refetch, isFetching } = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
     { staleTime: 5 * 60_000 },
   );
 
   return (
     <>
+      <NewCustomerButton />
       {!hasDriveToken ? (
         <ConnectForArchiveButton connecting={connecting} onConnect={connect} />
       ) : null}
@@ -124,6 +149,7 @@ export function CustomerFoldersTool(
   } = {},
 ) {
   const { hasDriveToken, connecting, connect } = useTemporaryDriveAccess();
+  const { activeParentId, exitedParentId } = useResolvedDriveConfig();
 
   const [localFilterState, setLocalFilterState] = React.useState<CustomerFoldersFilterState>({
     search: "",
@@ -133,13 +159,39 @@ export function CustomerFoldersTool(
   const setFilterState = props.onFilterChange ?? setLocalFilterState;
   const { search, showExited } = filterState;
 
+  // Folders with a pending FUNC command queued this session (applied by the
+  // nightly index job — the live Drive index won't reflect it until then).
+  const [queued, setQueued] = React.useState<Record<string, "archive" | "restore">>({});
+
   const { data, isLoading, isError, error, refetch, isFetching } = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
     { staleTime: 5 * 60_000 },
   );
 
   const archiveMut = useSheetArchiveClient();
   const unarchiveMut = useSheetUnarchiveClient();
+
+  const onQueueError = (err: unknown) => {
+    toast(err instanceof Error ? err.message : "Could not queue the folder change.", { type: "error" });
+  };
+
+  const onArchive = (folderId: string) =>
+    archiveMut.mutate(folderId, {
+      onSuccess: () => {
+        setQueued((prev) => ({ ...prev, [folderId]: "archive" }));
+        toast("Archive queued — applied in tonight's folder sync.", { type: "success" });
+      },
+      onError: onQueueError,
+    });
+
+  const onUnarchive = (folderId: string) =>
+    unarchiveMut.mutate(folderId, {
+      onSuccess: () => {
+        setQueued((prev) => ({ ...prev, [folderId]: "restore" }));
+        toast("Restore queued — applied in tonight's folder sync.", { type: "success" });
+      },
+      onError: onQueueError,
+    });
 
   const folders: TCustomerFolder[] = React.useMemo(() => {
     const all = data?.folders ?? [];
@@ -167,6 +219,7 @@ export function CustomerFoldersTool(
       actions={
         props.filterState ? undefined : (
           <div className="flex items-center gap-2">
+            <NewCustomerButton />
             {!hasDriveToken ? (
               <ConnectForArchiveButton connecting={connecting} onConnect={connect} />
             ) : null}
@@ -242,10 +295,11 @@ export function CustomerFoldersTool(
               <FolderRow
                 key={f.id}
                 folder={f}
-                onArchive={() => archiveMut.mutate(f.id)}
-                onUnarchive={() => unarchiveMut.mutate(f.id)}
+                onArchive={() => onArchive(f.id)}
+                onUnarchive={() => onUnarchive(f.id)}
                 busy={archiveMut.isPending || unarchiveMut.isPending}
                 canMutate={hasDriveToken}
+                queuedKind={queued[f.id]}
               />
             ))
           )
@@ -261,12 +315,14 @@ function FolderRow({
   onUnarchive,
   busy,
   canMutate,
+  queuedKind,
 }: {
   folder: TCustomerFolder;
   onArchive: () => void;
   onUnarchive: () => void;
   busy: boolean;
   canMutate: boolean;
+  queuedKind?: "archive" | "restore";
 }) {
   return (
     <tr className="hover:bg-slate-50">
@@ -299,13 +355,20 @@ function FolderRow({
         {f.createdTime ? new Date(f.createdTime).toLocaleDateString() : "-"}
       </td>
       <td className="text-right">
-        {f.status === "active" ? (
+        {queuedKind ? (
+          <span
+            className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
+            title="Queued in the index sheet — applied in tonight's folder sync"
+          >
+            {queuedKind === "archive" ? "Archive queued" : "Restore queued"}
+          </span>
+        ) : f.status === "active" ? (
           <button
             type="button"
             className="btn btn-ghost btn-xs text-slate-500 hover:text-red-600"
             disabled={busy || !canMutate}
             onClick={onArchive}
-            title={canMutate ? "Mark inactive" : "Connect temporary Drive access to archive"}
+            title={canMutate ? "Queue archive (nightly sync)" : "Connect temporary Drive access to archive"}
           >
             Archive
           </button>
@@ -315,7 +378,7 @@ function FolderRow({
             className="btn btn-ghost btn-xs text-slate-500 hover:text-emerald-600"
             disabled={busy || !canMutate}
             onClick={onUnarchive}
-            title={canMutate ? "Restore to active" : "Connect temporary Drive access to restore"}
+            title={canMutate ? "Queue restore (nightly sync)" : "Connect temporary Drive access to restore"}
           >
             Restore
           </button>

@@ -17,16 +17,14 @@ import {
   useGDriveBuildCustomerFolder,
   useGDriveCopyGrantTemplates,
   useGDriveCustomerFolderIndex,
-  ACTIVE_PARENT_ID,
-  EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
+import { useResolvedDriveConfig, type ResolvedDriveTemplate } from "@hooks/useResolvedDriveConfig";
 import { useGrants } from "@hooks/useGrants";
 import { usePaymentsBuildSchedule, type PaymentScheduleBuildInput } from "@hooks/usePayments";
 import { useTasksGenerateScheduleWrite } from "@hooks/useTasks";
 import { useMe, useUsers, type CompositeUser } from "@hooks/useUsers";
 import { useQueryClient } from "@tanstack/react-query";
 import CustomersAPI from "@client/customers";
-import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
 import { findDuplicates, DUP_WARN_THRESHOLD } from "@lib/duplicateScore";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import { isCaseManagerLike } from "@lib/roles";
@@ -200,26 +198,28 @@ function readPayments(enrollment: Enrollment): Array<Record<string, unknown>> {
     : [];
 }
 
-// ── Folder builder config (mirrors GAS config.gs) ────────────────────────────
-const FOLDER_TEMPLATES_FLOW = DRIVE_FILE_TEMPLATES;
+// ── Folder builder config ────────────────────────────────────────────────────
+// Templates resolve from per-org Drive config (with env fallback) at runtime via
+// useResolvedDriveConfig; these helpers operate on that normalized shape.
 
 function renderFlowDocName(tpl: string, first: string, last: string): string {
   return tpl.replace(/\{first\}/gi, first).replace(/\{last\}/gi, last).replace(/\s{2,}/g, " ").trim();
 }
 
 function resolveFlowTemplateFileId(
-  tmpl: (typeof FOLDER_TEMPLATES_FLOW)[number],
+  tmpl: ResolvedDriveTemplate,
   medicaid: "yes" | "no" | "not_sure",
 ): string {
-  const fileId = "variants" in tmpl
+  const fileId = tmpl.variants
     ? medicaid === "yes"
       ? tmpl.variants.payer
       : tmpl.variants.nonpayer
-    : tmpl.id;
+    : tmpl.fileId;
   return String(fileId || "").trim();
 }
 
 function buildFlowTemplatePayload(args: {
+  templates: ResolvedDriveTemplate[];
   selectedTemplates: Set<string>;
   medicaid: "yes" | "no" | "not_sure";
   firstName: string;
@@ -227,14 +227,13 @@ function buildFlowTemplatePayload(args: {
 }): Array<{ fileId: string; name: string; role?: string }> {
   const first = args.firstName.trim();
   const last = args.lastName.trim();
-  return FOLDER_TEMPLATES_FLOW.flatMap((tmpl) => {
+  return args.templates.flatMap((tmpl) => {
     if (!args.selectedTemplates.has(tmpl.key)) return [];
     const fileId = resolveFlowTemplateFileId(tmpl, args.medicaid);
     if (fileId.length < 3) return [];
-    // Flag the TSS workbook template so the backend returns the copied Sheet as
-    // `folder.workbook`, which we then auto-link as the customer's TSS workbook.
-    const role = tmpl.key === "tss_workbook" ? "tssWorkbook" : undefined;
-    return [{ fileId, name: renderFlowDocName(tmpl.docNameTpl, first, last), ...(role ? { role } : {}) }];
+    // `role` ("tssWorkbook") flags the template whose copied Sheet the backend
+    // returns as `folder.workbook` for auto-linking as the customer's workbook.
+    return [{ fileId, name: renderFlowDocName(tmpl.docNameTpl, first, last), ...(tmpl.role ? { role: tmpl.role } : {}) }];
   });
 }
 
@@ -502,9 +501,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [folderMode, setFolderMode] = React.useState<"none" | "build" | "link">("none");
   const [buildFolderName, setBuildFolderName] = React.useState("");
   const [buildMedicaid, setBuildMedicaid] = React.useState<"yes" | "no" | "not_sure">("not_sure");
-  const [buildSelectedTemplates, setBuildSelectedTemplates] = React.useState<Set<string>>(
-    () => new Set(FOLDER_TEMPLATES_FLOW.filter((t) => t.defaultChecked).map((t) => t.key)),
-  );
+  const [buildSelectedTemplates, setBuildSelectedTemplates] = React.useState<Set<string>>(() => new Set());
   const [buildSubfolderInput, setBuildSubfolderInput] = React.useState("");
   const [buildSubfolders, setBuildSubfolders] = React.useState<string[]>([]);
   const [workingLabel, setWorkingLabel] = React.useState<string | null>(null);
@@ -530,13 +527,29 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const enrollmentsQ = useCustomerEnrollments(customerId || undefined, { enabled: !!customerId });
   const enrollments = React.useMemo(() => enrollmentsQ.data || [], [enrollmentsQ.data]);
 
+  const {
+    activeParentId,
+    exitedParentId,
+    templates: flowTemplates,
+    defaultSubfolders: flowDefaultSubfolders,
+  } = useResolvedDriveConfig();
   const folderIndexQ = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
     { enabled: folderMode !== "none" },
   );
-  const buildFolder = useGDriveBuildCustomerFolder(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
-  );
+  const buildFolder = useGDriveBuildCustomerFolder({ activeParentId, exitedParentId });
+
+  // Seed default templates/subfolders from resolved org config once it loads.
+  const flowSeededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (flowSeededRef.current) return;
+    if (!flowTemplates.length) return;
+    flowSeededRef.current = true;
+    setBuildSelectedTemplates(new Set(flowTemplates.filter((t) => t.defaultChecked).map((t) => t.key)));
+    if (flowDefaultSubfolders.length) {
+      setBuildSubfolders((prev) => (prev.length ? prev : [...flowDefaultSubfolders]));
+    }
+  }, [flowTemplates, flowDefaultSubfolders]);
 
   const folderDupes = React.useMemo(() => {
     if (!lastName.trim() || folderMode !== "build") return [];
@@ -1022,6 +1035,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         setWorkingLabel("Building Drive folder…");
         failureTitle = "Error building Customer folder";
         const templates = buildFlowTemplatePayload({
+          templates: flowTemplates,
           selectedTemplates: buildSelectedTemplates,
           medicaid: buildMedicaid,
           firstName,
@@ -1029,7 +1043,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         });
         const built = await buildFolder.mutateAsync({
           name: buildFolderName.trim(),
-          parentId: ACTIVE_PARENT_ID,
+          parentId: activeParentId,
           templates,
           subfolders: buildSubfolders,
         });
@@ -1120,6 +1134,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     }
   }, [
     activeEnrollments,
+    activeParentId,
     buildFolder,
     buildFolderName,
     buildMedicaid,
@@ -1131,6 +1146,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     ensureCustomerExists,
     ensureEnrollmentsExist,
     firstName,
+    flowTemplates,
     folderAlias,
     folderMode,
     folderUrl,
@@ -1780,7 +1796,12 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Copy templates</div>
               <div className="space-y-1.5">
-                {FOLDER_TEMPLATES_FLOW.map((tmpl) => {
+                {flowTemplates.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+                    No templates configured. Add them in Org Config → Google Drive.
+                  </div>
+                )}
+                {flowTemplates.map((tmpl) => {
                   const fileId = resolveFlowTemplateFileId(tmpl, buildMedicaid);
                   const templateConfigured = fileId.length >= 3;
                   const checked = buildSelectedTemplates.has(tmpl.key) && templateConfigured;
@@ -1813,7 +1834,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                       />
                       <div>
                         <div className="font-medium text-slate-900">{tmpl.label}</div>
-                        {"variants" in tmpl && (
+                        {tmpl.variants && (
                           <div className="text-xs text-slate-400">
                             {buildMedicaid === "yes" ? "Payer variant" : "Non-payer variant"}
                           </div>

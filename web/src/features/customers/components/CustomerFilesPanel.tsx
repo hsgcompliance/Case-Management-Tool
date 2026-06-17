@@ -9,13 +9,11 @@ import {
   useGDriveBuildCustomerFolder,
   useGDriveCustomerFolderSync,
   useGDriveUpload,
-  ACTIVE_PARENT_ID,
-  EXITED_PARENT_ID,
 } from "@hooks/useGDrive";
+import { useResolvedDriveConfig } from "@hooks/useResolvedDriveConfig";
 import { useGoogleIntegrationConnect } from "@hooks/useGoogleIntegrations";
 import { fmtBytes, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
-import { DRIVE_FILE_TEMPLATES } from "@lib/driveConfig";
 import { PermissionErrorBanner, isScopeError, type ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
 import {
   FileTypeIcon,
@@ -46,7 +44,6 @@ type DriveFile = {
 
 // FileTypeIcon, FOLDER_MIME, getMimeCategory imported from @entities/gdrive/FileTypeIcon
 
-const FOLDER_TEMPLATES = DRIVE_FILE_TEMPLATES;
 const ORIGINAL_CUSTOMER_FILE_TOOL_URL =
   "https://script.google.com/a/macros/thehrdc.org/s/AKfycby1UgNzSZYurMKSq67cFEj9CUfFHZt7Ox4-yVC_MVa7Bum4B14BqUb0lVBkxAd95N90yQ/exec";
 const CUSTOMER_FILE_PARENT_FOLDER_URL =
@@ -227,15 +224,33 @@ export function BuildFolderDialog({
   indexFolders: TCustomerFolder[];
   indexLoading: boolean;
 }) {
+  const {
+    activeParentId,
+    exitedParentId,
+    templates: resolvedTemplates,
+    defaultSubfolders,
+  } = useResolvedDriveConfig();
   const [name, setName] = React.useState(defaultName);
-  const [parentId, setParentId] = React.useState(ACTIVE_PARENT_ID);
+  const [parentId, setParentId] = React.useState("");
   const [medicaid, setMedicaid] = React.useState<"yes" | "no" | "not_sure">("not_sure");
-  const [selectedTemplates, setSelectedTemplates] = React.useState<Set<string>>(
-    () => new Set(FOLDER_TEMPLATES.filter((t) => t.defaultChecked).map((t) => t.key)),
-  );
+  const [selectedTemplates, setSelectedTemplates] = React.useState<Set<string>>(() => new Set());
   const [subfolderDrafts, setSubfolderDrafts] = React.useState<string[]>([]);
   const [subfolderInput, setSubfolderInput] = React.useState("");
   const [dupesAcknowledged, setDupesAcknowledged] = React.useState(false);
+
+  // Seed location + default templates/subfolders from the resolved org config
+  // once it loads. Guarded so a late-settling config query doesn't clobber edits.
+  const seededRef = React.useRef(false);
+  React.useEffect(() => {
+    if (seededRef.current) return;
+    if (!resolvedTemplates.length && !activeParentId) return;
+    seededRef.current = true;
+    setParentId((prev) => prev || activeParentId);
+    setSelectedTemplates(new Set(resolvedTemplates.filter((t) => t.defaultChecked).map((t) => t.key)));
+    if (defaultSubfolders.length) {
+      setSubfolderDrafts((prev) => (prev.length ? prev : [...defaultSubfolders]));
+    }
+  }, [resolvedTemplates, activeParentId, defaultSubfolders]);
 
   // Duplicate detection against the index
   const duplicates = React.useMemo(() => {
@@ -258,19 +273,19 @@ export function BuildFolderDialog({
   };
 
   const buildTemplatePayload = (): Array<{ fileId: string; name: string; role?: string }> => {
-    return FOLDER_TEMPLATES.flatMap((tmpl) => {
+    return resolvedTemplates.flatMap((tmpl) => {
       if (!selectedTemplates.has(tmpl.key)) return [];
       const docName = renderDocName(tmpl.docNameTpl, customerFirst, customerLast);
-      // The TSS Workbook template gets flagged so the build returns its created
-      // file for auto-linking as the customer's TSS workbook.
-      const role = tmpl.key === "tss_workbook" ? "tssWorkbook" : undefined;
-      if ("variants" in tmpl) {
-        const fileId = medicaid === "yes" ? tmpl.variants.payer : tmpl.variants.nonpayer;
-        if (fileId.length < 3) return [];
-        return [{ fileId, name: docName, ...(role ? { role } : {}) }];
-      }
-      if (tmpl.id.length < 3) return [];
-      return [{ fileId: tmpl.id, name: docName, ...(role ? { role } : {}) }];
+      // `role` ("tssWorkbook") flags the template whose created file auto-links as
+      // the customer's TSS workbook. Variant templates resolve their source file
+      // from the Medicaid toggle.
+      const fileId = tmpl.variants
+        ? medicaid === "yes"
+          ? tmpl.variants.payer
+          : tmpl.variants.nonpayer
+        : tmpl.fileId;
+      if (!fileId || fileId.length < 3) return [];
+      return [{ fileId, name: docName, ...(tmpl.role ? { role: tmpl.role } : {}) }];
     });
   };
 
@@ -357,8 +372,8 @@ export function BuildFolderDialog({
                 <label className="field">
                   <span className="label">Location</span>
                   <select className="input w-full" value={parentId} onChange={(e) => setParentId(e.currentTarget.value)}>
-                    <option value={ACTIVE_PARENT_ID}>Active Customers</option>
-                    <option value={EXITED_PARENT_ID}>Exited Customers</option>
+                    <option value={activeParentId}>Active Customers</option>
+                    <option value={exitedParentId}>Exited Customers</option>
                   </select>
                 </label>
                 <label className="field">
@@ -381,7 +396,12 @@ export function BuildFolderDialog({
                   Copy templates into folder
                 </div>
                 <div className="space-y-1.5">
-                  {FOLDER_TEMPLATES.map((tmpl) => {
+                  {resolvedTemplates.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+                      No templates configured. Add them in Org Config → Google Drive.
+                    </div>
+                  )}
+                  {resolvedTemplates.map((tmpl) => {
                     const checked = selectedTemplates.has(tmpl.key);
                     return (
                       <label
@@ -408,13 +428,11 @@ export function BuildFolderDialog({
                         />
                         <div>
                           <div className="font-medium">{tmpl.label}</div>
-                          {"variants" in tmpl ? (
+                          {tmpl.variants ? (
                             <div className="text-xs text-slate-400">
-                              {medicaid === "yes" ? "Payer variant" : "Non-payer variant"} · Google Sheet
+                              {medicaid === "yes" ? "Payer variant" : "Non-payer variant"}
                             </div>
-                          ) : (
-                            <div className="text-xs text-slate-400">Google Sheet</div>
-                          )}
+                          ) : null}
                         </div>
                       </label>
                     );
@@ -517,8 +535,9 @@ export function LinkFolderDialog({
   const [urlError, setUrlError] = React.useState<string | null>(null);
   const [searchMode, setSearchMode] = React.useState<"suggestions" | "url">("suggestions");
 
+  const { activeParentId, exitedParentId } = useResolvedDriveConfig();
   const { data: indexData, isLoading: indexLoading } = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
   );
 
   const suggestions = React.useMemo(() => {
@@ -698,9 +717,11 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   const files = readFiles(filesQ.data);
   const filesError = filesQ.error ? toApiError(filesQ.error).error : null;
 
+  const { activeParentId, exitedParentId } = useResolvedDriveConfig();
+
   // Index data — preloaded so BuildFolderDialog has it immediately
   const { data: indexData, isLoading: indexLoading } = useGDriveCustomerFolderIndex(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
   );
   const indexFolders = indexData?.folders ?? [];
   const linkedFolderIds = React.useMemo(
@@ -709,7 +730,7 @@ export default function CustomerFilesPanel({ customerId }: { customerId: string 
   );
 
   const buildFolder = useGDriveBuildCustomerFolder(
-    { activeParentId: ACTIVE_PARENT_ID, exitedParentId: EXITED_PARENT_ID },
+    { activeParentId, exitedParentId },
     {
       onSuccess: async (folder) => {
         // Attach to customer

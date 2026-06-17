@@ -113,20 +113,38 @@ type TemplateDraft = {
   alias: string;
   description: string;
   defaultChecked: boolean;
+  // When true the source file is chosen by Medicaid status (payer / non-payer)
+  // and `fileInput` may be left blank.
+  useVariants: boolean;
+  payerInput: string;
+  nonpayerInput: string;
 };
 
 function blankTemplateDraft(): TemplateDraft {
-  return { key: "", fileInput: "", type: "sheet", alias: "", description: "", defaultChecked: false };
+  return {
+    key: "",
+    fileInput: "",
+    type: "sheet",
+    alias: "",
+    description: "",
+    defaultChecked: false,
+    useVariants: false,
+    payerInput: "",
+    nonpayerInput: "",
+  };
 }
 
 function draftFromTemplate(t: TGDriveTemplate): TemplateDraft {
   return {
     key: t.key,
-    fileInput: t.fileUrl || `https://drive.google.com/file/d/${t.fileId}`,
+    fileInput: t.fileUrl || (t.fileId ? `https://drive.google.com/file/d/${t.fileId}` : ""),
     type: t.type,
     alias: t.alias,
     description: t.description ?? "",
     defaultChecked: t.defaultChecked ?? false,
+    useVariants: !!t.variants,
+    payerInput: t.variants?.payer ?? "",
+    nonpayerInput: t.variants?.nonpayer ?? "",
   };
 }
 
@@ -146,17 +164,26 @@ function TemplateForm({
   existingKeys: Set<string>;
 }) {
   const fileId = parseDriveId(draft.fileInput);
+  const payerId = parseDriveId(draft.payerInput);
+  const nonpayerId = parseDriveId(draft.nonpayerInput);
   const aliasError = !draft.alias.trim() ? "Alias is required." : null;
-  const fileError = !draft.fileInput.trim()
+  // In variant mode the single file is optional; otherwise it is required.
+  const fileError = draft.useVariants
+    ? null
+    : !draft.fileInput.trim()
     ? "URL or ID is required."
     : !fileId
     ? "Could not extract a Drive file ID from this URL."
     : null;
+  const variantError =
+    draft.useVariants && !payerId && !nonpayerId
+      ? "Add at least one variant file (payer or non-payer)."
+      : null;
   const keyError =
     !isEdit && draft.key && existingKeys.has(draft.key)
       ? "A template with this key already exists."
       : null;
-  const canSave = !aliasError && !fileError && !keyError;
+  const canSave = !aliasError && !fileError && !variantError && !keyError;
 
   return (
     <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-3">
@@ -246,6 +273,38 @@ function TemplateForm({
         />
         Check this template by default in Build Folder dialog
       </label>
+
+      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-slate-300"
+          checked={draft.useVariants}
+          onChange={(e) => onChange({ ...draft, useVariants: e.currentTarget.checked })}
+        />
+        Pick the source file by Medicaid status (payer / non-payer)
+      </label>
+
+      {draft.useVariants && (
+        <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+          <DriveRefInput
+            label="Payer file (Medicaid enrolled)"
+            hint="Copied when the customer is enrolled in Medicaid"
+            value={draft.payerInput}
+            onChange={(v) => onChange({ ...draft, payerInput: v })}
+            kind={draft.type === "sheet" ? "sheet" : "file"}
+          />
+          <DriveRefInput
+            label="Non-payer file (not enrolled / not sure)"
+            hint="Copied otherwise; the single file above is optional in this mode"
+            value={draft.nonpayerInput}
+            onChange={(v) => onChange({ ...draft, nonpayerInput: v })}
+            kind={draft.type === "sheet" ? "sheet" : "file"}
+          />
+          {variantError ? (
+            <div className="sm:col-span-2 text-xs text-red-600">{variantError}</div>
+          ) : null}
+        </div>
+      )}
 
       <div className="flex gap-2 pt-1">
         <button
@@ -465,16 +524,24 @@ export default function GDriveConfigPanel() {
   };
 
   const saveTemplateDraft = () => {
-    const fileId = parseDriveId(templateDraft.fileInput);
-    if (!fileId || !templateDraft.alias.trim() || !templateDraft.key.trim()) return;
+    const fileId = parseDriveId(templateDraft.fileInput) || "";
+    const payer = templateDraft.useVariants ? parseDriveId(templateDraft.payerInput) || "" : "";
+    const nonpayer = templateDraft.useVariants ? parseDriveId(templateDraft.nonpayerInput) || "" : "";
+    const hasVariants = !!(payer || nonpayer);
+    // Valid with either a direct file or at least one variant file.
+    if ((!fileId && !hasVariants) || !templateDraft.alias.trim() || !templateDraft.key.trim()) return;
     const resolved: TGDriveTemplate = {
       key: templateDraft.key.trim() || slugify(templateDraft.alias),
       fileId,
-      fileUrl: templateDraft.fileInput.trim().startsWith("http") ? templateDraft.fileInput.trim() : undefined,
+      fileUrl:
+        fileId && templateDraft.fileInput.trim().startsWith("http")
+          ? templateDraft.fileInput.trim()
+          : undefined,
       type: templateDraft.type,
       alias: templateDraft.alias.trim(),
       ...(templateDraft.description.trim() ? { description: templateDraft.description.trim() } : {}),
       defaultChecked: templateDraft.defaultChecked,
+      ...(hasVariants ? { variants: { payer, nonpayer } } : {}),
     };
     if (editingTemplateKey) {
       setDraft((d) => ({
@@ -707,11 +774,20 @@ export default function GDriveConfigPanel() {
                               default
                             </span>
                           )}
+                          {tmpl.variants && (
+                            <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
+                              payer / non-payer
+                            </span>
+                          )}
                         </div>
                         {tmpl.description && (
                           <div className="truncate text-xs text-slate-500">{tmpl.description}</div>
                         )}
-                        <div className="font-mono text-[10px] text-slate-400">{tmpl.fileId}</div>
+                        <div className="font-mono text-[10px] text-slate-400">
+                          {tmpl.variants
+                            ? `payer:${tmpl.variants.payer || "—"} · non-payer:${tmpl.variants.nonpayer || "—"}`
+                            : tmpl.fileId}
+                        </div>
                       </div>
 
                       {/* Actions */}
