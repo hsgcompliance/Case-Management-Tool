@@ -25,6 +25,8 @@ export type ReconciliationFindingKind =
 export type ReconciliationFinding = {
   id: string;
   kind: ReconciliationFindingKind;
+  /** Human-readable, context-aware headline (filled in post-pass). */
+  title?: string;
   severity: ReportDiagnosticSeverity;
   confidence: number;
   sourceFile: string;
@@ -192,6 +194,36 @@ function addRecordDiagnostics(findings: ReconciliationFinding[], packet: Reconci
       explanation: [diagnostic.message],
       proposedAction: "Review report mapping or source report headers.",
     });
+  }
+}
+
+function findingTitle(finding: ReconciliationFinding): string {
+  const who = finding.customerLabel || finding.customerId || "Unmatched row";
+  switch (finding.kind) {
+    case "customer_missing":
+      return `Not in dashboard: ${finding.reportValue || who}`;
+    case "customer_possible_match":
+      return `Weak identity match: ${who}`;
+    case "enrollment_missing":
+      return `No dashboard enrollment: ${who}`;
+    case "entry_date_mismatch":
+      return `Entry date differs: ${who}`;
+    case "exit_date_mismatch":
+      return `Exit date differs: ${who}`;
+    case "enrollment_compliance_missing":
+      return `HMIS compliance gap: ${who}`;
+    case "payment_missing_dashboard":
+      return `Payment not in dashboard: ${who}`;
+    case "payment_possible_match":
+      return `Ambiguous payment match: ${who}`;
+    case "payment_amount_mismatch":
+      return `Payment amount differs: ${who}`;
+    case "grant_mapping_review":
+      return `Grant mapping review: ${who}`;
+    case "report_row_diagnostic":
+      return `Report data issue${finding.reportValue ? `: ${finding.reportValue}` : ""}`;
+    default:
+      return finding.kind.replace(/_/g, " ");
   }
 }
 
@@ -368,6 +400,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
   const byKind: Record<string, number> = {};
   const bySeverity: Record<ReportDiagnosticSeverity, number> = { info: 0, warning: 0, error: 0 };
   for (const finding of findings) {
+    finding.title = findingTitle(finding);
     byKind[finding.kind] = (byKind[finding.kind] ?? 0) + 1;
     bySeverity[finding.severity] += 1;
   }

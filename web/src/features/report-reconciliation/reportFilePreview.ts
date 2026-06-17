@@ -13,6 +13,8 @@ export type ParsedReportPreview = {
   headerRowIndex: number;
   headers: string[];
   sampleRows: unknown[][];
+  /** Full row grid (including any leading title/prompt rows) so the header row can be re-chosen. */
+  allRows: unknown[][];
   totalRows: number;
   profileCandidates: ReturnType<typeof detectLikelyReportProfiles>;
 };
@@ -24,7 +26,10 @@ type ZipEntry = {
   localHeaderOffset: number;
 };
 
-const MAX_SAMPLE_ROWS = 25;
+/** Default cap when generating a lightweight preview (admin mapping tool). */
+export const DEFAULT_PREVIEW_ROWS = 25;
+/** Cap when extracting a full report for reconciliation (whole-file processing). */
+export const MAX_RECONCILIATION_ROWS = 20000;
 const MAX_HEADER_SCAN_ROWS = 30;
 const XLSX_MIME_RE = /spreadsheetml|excel|xlsx/i;
 
@@ -95,18 +100,22 @@ function buildPreview(
   fileType: ParsedReportPreview["fileType"],
   rows: unknown[][],
   profiles: ReportSourceProfile[],
+  maxRows: number,
   sheetName?: string,
 ): ParsedReportPreview {
   const headerRowIndex = findHeaderRow(rows, profiles, fileName);
   const headers = (rows[headerRowIndex] ?? []).map((value) => String(value ?? "").trim());
   const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row.some((value) => String(value ?? "").trim()));
+  // Keep the full grid (capped) including leading title rows so the operator can re-pick the header row.
+  const allRows = rows.slice(0, headerRowIndex + 1 + maxRows);
   return {
     fileName,
     fileType,
     sheetName,
     headerRowIndex,
     headers,
-    sampleRows: dataRows.slice(0, MAX_SAMPLE_ROWS),
+    sampleRows: dataRows.slice(0, maxRows),
+    allRows,
     totalRows: dataRows.length,
     profileCandidates: detectLikelyReportProfiles(profiles, headers, fileName),
   };
@@ -161,18 +170,48 @@ async function readZipEntry(buffer: ArrayBuffer, entry: ZipEntry): Promise<strin
 }
 
 function parseXml(xml: string) {
-  return new DOMParser().parseFromString(xml, "application/xml");
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  // DOMParser surfaces malformed XML as a <parsererror> root rather than throwing.
+  if (doc.getElementsByTagName("parsererror").length) {
+    const detail = doc.getElementsByTagName("parsererror")[0]?.textContent?.trim().slice(0, 200) || "unknown XML error";
+    throw new Error(`Could not parse XLSX XML (${detail}).`);
+  }
+  return doc;
 }
 
-function textContent(parent: Element, tag: string) {
-  return parent.getElementsByTagName(tag)[0]?.textContent ?? "";
+/**
+ * Find elements by local name regardless of namespace prefix. Real-world Excel /
+ * Financial Edge exports sometimes prefix the spreadsheetml elements (e.g.
+ * `<x:sheet>`), which `getElementsByTagName("sheet")` (qualified-name match) misses.
+ * `getElementsByTagNameNS("*", local)` matches the local name in any namespace.
+ */
+function findByLocalName(root: Document | Element, localName: string): Element[] {
+  const ns = root.getElementsByTagNameNS("*", localName);
+  if (ns.length) return Array.from(ns);
+  return Array.from(root.getElementsByTagName(localName));
+}
+
+/** Read an attribute by local name, tolerant of namespace prefixes (e.g. `r:id`). */
+function attrByLocalName(el: Element, localName: string): string {
+  const direct = el.getAttribute(localName);
+  if (direct != null) return direct;
+  for (const attr of Array.from(el.attributes)) {
+    if (attr.localName === localName || attr.name === localName || attr.name.endsWith(`:${localName}`)) {
+      return attr.value;
+    }
+  }
+  return "";
+}
+
+function textOfLocal(parent: Element, localName: string) {
+  return findByLocalName(parent, localName)[0]?.textContent ?? "";
 }
 
 function readSharedStrings(xml: string | null) {
   if (!xml) return [];
   const doc = parseXml(xml);
-  return Array.from(doc.getElementsByTagName("si")).map((node) =>
-    Array.from(node.getElementsByTagName("t")).map((item) => item.textContent ?? "").join(""),
+  return findByLocalName(doc, "si").map((node) =>
+    findByLocalName(node, "t").map((item) => item.textContent ?? "").join(""),
   );
 }
 
@@ -183,15 +222,16 @@ function columnIndex(cellRef: string) {
 
 function readSheetRows(xml: string, sharedStrings: string[]): unknown[][] {
   const doc = parseXml(xml);
-  return Array.from(doc.getElementsByTagName("row")).map((rowNode) => {
+  return findByLocalName(doc, "row").map((rowNode) => {
     const row: unknown[] = [];
-    Array.from(rowNode.getElementsByTagName("c")).forEach((cell) => {
-      const ref = cell.getAttribute("r") || "";
-      const index = Math.max(0, columnIndex(ref));
-      const type = cell.getAttribute("t");
-      let value = textContent(cell, "v");
+    findByLocalName(rowNode, "c").forEach((cell, cellOrder) => {
+      const ref = attrByLocalName(cell, "r");
+      // Fall back to positional order when a cell omits its reference attribute.
+      const index = ref ? Math.max(0, columnIndex(ref)) : cellOrder;
+      const type = attrByLocalName(cell, "t");
+      let value = textOfLocal(cell, "v");
       if (type === "s") value = sharedStrings[Number(value)] ?? value;
-      if (type === "inlineStr") value = textContent(cell, "t");
+      if (type === "inlineStr" || type === "str") value = textOfLocal(cell, "t") || value;
       while (row.length < index) row.push("");
       row[index] = value;
     });
@@ -221,29 +261,55 @@ async function readXlsxRows(file: File, preferredSheet?: string) {
   const workbook = parseXml(workbookXml);
   const rels = parseXml(relsXml);
   const relMap = new Map(
-    Array.from(rels.getElementsByTagName("Relationship")).map((rel) => [rel.getAttribute("Id") || "", rel.getAttribute("Target") || ""]),
+    findByLocalName(rels, "Relationship").map((rel) => [attrByLocalName(rel, "Id"), attrByLocalName(rel, "Target")]),
   );
-  const sheets = Array.from(workbook.getElementsByTagName("sheet")).map((sheet) => ({
-    name: sheet.getAttribute("name") || "Sheet",
-    relId: sheet.getAttribute("r:id") || sheet.getAttribute("id") || "",
+  const sheets = findByLocalName(workbook, "sheet").map((sheet) => ({
+    name: attrByLocalName(sheet, "name") || "Sheet",
+    relId: attrByLocalName(sheet, "id"),
   }));
+  if (!sheets.length) {
+    // Last resort: any worksheet part in the package, so a structurally-odd workbook
+    // (no <sheets> block, unexpected prefixes) still previews instead of dead-ending.
+    const worksheetEntry = entries.find((entry) => /^xl\/worksheets\/.+\.xml$/i.test(entry.name));
+    if (worksheetEntry) {
+      const fallbackXml = await readText(worksheetEntry.name);
+      if (fallbackXml) {
+        return { sheetName: "Sheet1", rows: readSheetRows(fallbackXml, readSharedStrings(sharedXml)) };
+      }
+    }
+    const sheetParts = entries.filter((entry) => /worksheets/i.test(entry.name)).map((entry) => entry.name);
+    throw new Error(`No worksheets found in XLSX (parts: ${sheetParts.join(", ") || "none"}).`);
+  }
   const selected = sheets.find((sheet) => sheet.name === preferredSheet) ?? sheets[0];
-  if (!selected) throw new Error("No worksheets found in XLSX.");
   const sheetPath = normalizeXlsxPath(relMap.get(selected.relId) || "");
   const sheetXml = await readText(sheetPath);
-  if (!sheetXml) throw new Error(`Unable to read worksheet ${selected.name}.`);
+  if (!sheetXml) throw new Error(`Unable to read worksheet ${selected.name} (path: ${sheetPath}).`);
   return { sheetName: selected.name, rows: readSheetRows(sheetXml, readSharedStrings(sharedXml)) };
 }
 
-export async function parseReportFilePreview(file: File, profiles: ReportSourceProfile[], preferredSheet?: string): Promise<ParsedReportPreview> {
+export type ParseReportFileOptions = {
+  preferredSheet?: string;
+  /** Max data rows to retain. Defaults to a small preview cap; reconciliation passes a large cap. */
+  maxRows?: number;
+};
+
+export async function parseReportFilePreview(
+  file: File,
+  profiles: ReportSourceProfile[],
+  opts: ParseReportFileOptions = {},
+): Promise<ParsedReportPreview> {
+  const maxRows = opts.maxRows ?? DEFAULT_PREVIEW_ROWS;
   const lowerName = file.name.toLowerCase();
   if (lowerName.endsWith(".xlsx") || XLSX_MIME_RE.test(file.type)) {
-    const result = await readXlsxRows(file, preferredSheet);
-    return buildPreview(file.name, "xlsx", result.rows, profiles, result.sheetName);
+    const result = await readXlsxRows(file, opts.preferredSheet);
+    return buildPreview(file.name, "xlsx", result.rows, profiles, maxRows, result.sheetName);
   }
   if (lowerName.endsWith(".csv") || lowerName.endsWith(".txt") || file.type.startsWith("text/")) {
     const rows = parseDelimitedText(await file.text());
-    return buildPreview(file.name, lowerName.endsWith(".txt") ? "txt" : "csv", rows, profiles);
+    return buildPreview(file.name, lowerName.endsWith(".txt") ? "txt" : "csv", rows, profiles, maxRows);
+  }
+  if (lowerName.endsWith(".xls")) {
+    throw new Error("Legacy .xls (binary) files aren't supported — re-save as .xlsx or export to CSV.");
   }
   throw new Error("Only CSV, TXT, and XLSX files can be previewed.");
 }

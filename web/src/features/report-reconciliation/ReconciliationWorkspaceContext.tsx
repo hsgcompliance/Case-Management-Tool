@@ -4,10 +4,16 @@ import React from "react";
 import {
   DEFAULT_REPORT_SOURCE_PROFILES,
   buildReconciliationPacket,
+  deriveHeadersAndRows,
   type ReconciliationPacket,
   type ReportSourceProfile,
 } from "./reportProfiles";
-import { parseReportFilePreview, type ParsedReportPreview } from "./reportFilePreview";
+import {
+  MAX_RECONCILIATION_ROWS,
+  parseReportFilePreview,
+  type ParsedReportPreview,
+} from "./reportFilePreview";
+import type { ReportUpload, ReportUploadConfig } from "@entities/report-upload/ReportUploadPanel";
 
 const ACTIVE_PROFILE_IDS = [
   "financial_edge_project_activity",
@@ -18,13 +24,15 @@ const ACTIVE_PROFILE_IDS = [
 
 type ReconciliationWorkspaceValue = {
   profiles: ReportSourceProfile[];
+  uploads: ReportUpload[];
+  /** Live packets derived from each upload's current mapping config. */
   packets: ReconciliationPacket[];
-  lastPreview: ParsedReportPreview | null;
   error: string | null;
   reading: boolean;
-  addFile: (file: File | null, preferredProfileId?: string) => Promise<void>;
-  removePacket: (packetKey: string) => void;
-  clearPackets: () => void;
+  addFiles: (files: FileList | File[] | null) => Promise<void>;
+  updateUploadConfig: (id: string, patch: Partial<ReportUploadConfig>) => void;
+  removeUpload: (id: string) => void;
+  clearUploads: () => void;
 };
 
 const ReconciliationWorkspaceContext = React.createContext<ReconciliationWorkspaceValue | null>(null);
@@ -37,42 +45,79 @@ export function reconciliationPacketKey(packet: ReconciliationPacket) {
   return `${packet.profileId}:${packet.sourceFile}:${packet.headerRowIndex}`;
 }
 
+function buildPacketForUpload(
+  profiles: ReportSourceProfile[],
+  fileName: string,
+  allRows: unknown[][],
+  config: ReportUploadConfig,
+): ReconciliationPacket {
+  const profile = profiles.find((item) => item.id === config.profileId) ?? profiles[0];
+  const { headers, dataRows, headerRowIndex } = deriveHeadersAndRows(allRows, config.headerRowIndex);
+  return buildReconciliationPacket({
+    profile,
+    headers,
+    rows: dataRows,
+    sourceFile: fileName,
+    headerRowIndex,
+    fieldOverrides: config.fieldOverrides,
+  });
+}
+
+function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedReportPreview): ReportUpload {
+  const config: ReportUploadConfig = {
+    profileId: preview.profileCandidates[0]?.profile.id ?? profiles[0]?.id ?? "",
+    headerRowIndex: preview.headerRowIndex,
+    fieldOverrides: {},
+  };
+  return {
+    id: `${preview.fileName}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+    fileName: preview.fileName,
+    sheetName: preview.sheetName,
+    allRows: preview.allRows,
+    profileCandidates: preview.profileCandidates.map((candidate) => ({ profile: candidate.profile, score: candidate.score })),
+    config,
+    packet: buildPacketForUpload(profiles, preview.fileName, preview.allRows, config),
+  };
+}
+
 export function ReconciliationWorkspaceProvider({ children }: { children: React.ReactNode }) {
   const profiles = React.useMemo(() => getReconciliationProfiles(), []);
-  const [packets, setPackets] = React.useState<ReconciliationPacket[]>([]);
-  const [lastPreview, setLastPreview] = React.useState<ParsedReportPreview | null>(null);
+  const [uploads, setUploads] = React.useState<ReportUpload[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [reading, setReading] = React.useState(false);
 
-  const addFile = React.useCallback(
-    async (file: File | null, preferredProfileId?: string) => {
-      if (!file) return;
+  const addFiles = React.useCallback(
+    async (files: FileList | File[] | null) => {
+      const arr = Array.from(files ?? []).filter((file): file is File => Boolean(file));
+      if (!arr.length) return;
       setReading(true);
       setError(null);
-      try {
-        const preview = await parseReportFilePreview(file, profiles);
-        const preferred = profiles.find((profile) => profile.id === preferredProfileId) ?? null;
-        const profile = preview.profileCandidates.find((candidate) => candidate.profile.id === preferred?.id)?.profile
-          ?? preview.profileCandidates[0]?.profile
-          ?? preferred
-          ?? profiles[0];
-        const packet = buildReconciliationPacket({
-          profile,
-          headers: preview.headers,
-          rows: preview.sampleRows,
-          sourceFile: preview.fileName,
-          headerRowIndex: preview.headerRowIndex,
-        });
-        setLastPreview(preview);
-        setPackets((prev) => {
-          const key = reconciliationPacketKey(packet);
-          return [packet, ...prev.filter((item) => reconciliationPacketKey(item) !== key)].slice(0, 12);
-        });
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Unable to parse this report.");
-      } finally {
-        setReading(false);
+      const created: ReportUpload[] = [];
+      const errors: string[] = [];
+      for (const file of arr) {
+        try {
+          const preview = await parseReportFilePreview(file, profiles, { maxRows: MAX_RECONCILIATION_ROWS });
+          created.push(uploadFromPreview(profiles, preview));
+        } catch (e: unknown) {
+          errors.push(`${file.name}: ${e instanceof Error ? e.message : "Unable to parse this report."}`);
+        }
       }
+      if (created.length) setUploads((prev) => [...created, ...prev].slice(0, 12));
+      setError(errors.length ? errors.join(" · ") : null);
+      setReading(false);
+    },
+    [profiles],
+  );
+
+  const updateUploadConfig = React.useCallback(
+    (id: string, patch: Partial<ReportUploadConfig>) => {
+      setUploads((prev) =>
+        prev.map((upload) => {
+          if (upload.id !== id) return upload;
+          const config = { ...upload.config, ...patch };
+          return { ...upload, config, packet: buildPacketForUpload(profiles, upload.fileName, upload.allRows, config) };
+        }),
+      );
     },
     [profiles],
   );
@@ -80,15 +125,16 @@ export function ReconciliationWorkspaceProvider({ children }: { children: React.
   const value = React.useMemo<ReconciliationWorkspaceValue>(
     () => ({
       profiles,
-      packets,
-      lastPreview,
+      uploads,
+      packets: uploads.map((upload) => upload.packet),
       error,
       reading,
-      addFile,
-      removePacket: (packetKey) => setPackets((prev) => prev.filter((packet) => reconciliationPacketKey(packet) !== packetKey)),
-      clearPackets: () => setPackets([]),
+      addFiles,
+      updateUploadConfig,
+      removeUpload: (id) => setUploads((prev) => prev.filter((upload) => upload.id !== id)),
+      clearUploads: () => setUploads([]),
     }),
-    [addFile, error, lastPreview, packets, profiles, reading],
+    [addFiles, error, profiles, reading, updateUploadConfig, uploads],
   );
 
   return <ReconciliationWorkspaceContext.Provider value={value}>{children}</ReconciliationWorkspaceContext.Provider>;

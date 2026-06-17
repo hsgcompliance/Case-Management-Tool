@@ -42,6 +42,48 @@ export function usePaymentQueueItems(
   });
 }
 
+/**
+ * Fetch payment-queue items scoped to a set of report months, paging within each
+ * month so we never exceed the backend's 1000-row hard cap. Used by the
+ * reconciliation tools so we only pull rows in the uploaded report's date range
+ * instead of requesting the entire queue (which 500s past the limit).
+ */
+export function usePaymentQueueItemsForMonths(
+  months: string[],
+  opts?: { enabled?: boolean; staleTime?: number; maxMonths?: number; pagesPerMonth?: number }
+) {
+  const sorted = Array.from(new Set(months.filter(Boolean))).sort();
+  const maxMonths = opts?.maxMonths ?? 36;
+  const pagesPerMonth = opts?.pagesPerMonth ?? 10;
+  const scoped = sorted.slice(0, maxMonths);
+  return useQuery<PaymentQueueItem[]>({
+    ...RQ_DEFAULTS,
+    enabled: (opts?.enabled ?? true) && scoped.length > 0,
+    staleTime: opts?.staleTime ?? RQ_DEFAULTS.staleTime,
+    queryKey: qk.paymentQueue.list({ months: scoped }),
+    queryFn: async () => {
+      const perMonth = await Promise.all(
+        scoped.map(async (month) => {
+          const out: PaymentQueueItem[] = [];
+          let cursor: string | undefined;
+          for (let page = 0; page < pagesPerMonth; page += 1) {
+            const res = await PaymentQueue.list({ month, limit: 1000, cursor });
+            const items = Array.isArray(res?.items) ? res.items : [];
+            out.push(...items);
+            if (!res?.hasMore || !items.length) break;
+            cursor = String(items[items.length - 1]?.id || "") || undefined;
+            if (!cursor) break;
+          }
+          return out;
+        })
+      );
+      const byId = new Map<string, PaymentQueueItem>();
+      for (const arr of perMonth) for (const item of arr) byId.set(item.id, item);
+      return Array.from(byId.values());
+    },
+  });
+}
+
 export function usePaymentQueueItem(
   id?: string,
   opts?: { enabled?: boolean; staleTime?: number }
