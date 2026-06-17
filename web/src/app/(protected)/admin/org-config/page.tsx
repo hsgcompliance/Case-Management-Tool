@@ -1,12 +1,7 @@
 "use client";
 
-import RequireAdmin from "@app/_guards/RequireAdmin";
-import OrgConfigPage from "@features/admin/OrgConfigPage";
+import OrgConfigDashboardPage from "@features/admin/org-config/OrgConfigDashboardPage";
 
 export default function OrgConfigRoute() {
-  return (
-    <RequireAdmin>
-      <OrgConfigPage />
-    </RequireAdmin>
-  );
+  return <OrgConfigDashboardPage />;
 }

@@ -1,27 +1,25 @@
 // features/reporting/widgets/reportingDefs.tsx
-// Reporting page widget definitions — shown on /dashboard (Reporting)
+// Reporting page widget definitions shown on /reports.
 import { DASHBOARD_TOOL_DEFS } from "@widgets";
 import type { AnyDashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 
-// "inbox" temporarily hidden — will return later
 const REPORTING_IDS = ["grant-budgets", "rental-assistance", "all-enrollments", "case-manager-load", "caseload-board"];
 
-// Map report IDs → digest type so the toolbar can show a "Subscribe" button
 const REPORT_DIGEST_MAP: Record<string, AnyDashboardToolDefinition["digestType"]> = {
-  "grant-budgets":     "budget",
-  "all-enrollments":   "enrollments",
+  "grant-budgets": "budget",
+  "all-enrollments": "enrollments",
   "case-manager-load": "caseManagers",
-  "caseload-board":    "caseload",
+  "caseload-board": "caseload",
 };
 
 export const REPORTING_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = DASHBOARD_TOOL_DEFS
-  .filter((t) => REPORTING_IDS.includes(t.id))
-  .map((t) => ({
-    ...t,
-    defaultPinned: !t.hidden,
-    digestType: REPORT_DIGEST_MAP[t.id],
+  .filter((tool) => REPORTING_IDS.includes(tool.id))
+  .map((tool) => ({
+    ...tool,
+    defaultPinned: !tool.hidden,
+    digestType: REPORT_DIGEST_MAP[tool.id],
   }));
 
 export function getReportingToolDef(toolId: string) {
-  return REPORTING_TOOL_DEFS.find((t) => t.id === toolId) ?? null;
+  return REPORTING_TOOL_DEFS.find((tool) => tool.id === toolId) ?? null;
 }
