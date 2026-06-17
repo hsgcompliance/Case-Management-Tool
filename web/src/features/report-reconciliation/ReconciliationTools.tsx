@@ -3,18 +3,16 @@
 import React from "react";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
-import { usePaymentQueueItems } from "@hooks/usePaymentQueue";
+import { usePaymentQueueItemsForMonths } from "@hooks/usePaymentQueue";
 import { type ReconciliationPacket } from "./reportProfiles";
+import { ReportUploadPanel, type ReportUploadGrant } from "@entities/report-upload/ReportUploadPanel";
 import {
   buildReconciliationReview,
   type ReconciliationFinding,
   type ReconciliationFindingKind,
   type ReconciliationReviewResult,
 } from "./reconciliationReview";
-import {
-  reconciliationPacketKey,
-  useReconciliationWorkspace,
-} from "./ReconciliationWorkspaceContext";
+import { useReconciliationWorkspace } from "./ReconciliationWorkspaceContext";
 import ReviewExportDialog from "@entities/dialogs/export/ReviewExportDialog";
 import {
   RECONCILIATION_EXPORT_COLUMNS,
@@ -71,38 +69,6 @@ function packetMatchesTool(packet: ReconciliationPacket, config: (typeof TOOL_CO
   return config.preferredProfiles.includes(packet.profileId);
 }
 
-function PacketStrip({ kind }: { kind: ReconciliationToolKind }) {
-  const config = TOOL_CONFIG[kind];
-  const { packets, removePacket, clearPackets } = useReconciliationWorkspace();
-  const relevantPackets = packets.filter((packet) => packetMatchesTool(packet, config));
-  if (!packets.length) return null;
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Shared Uploaded Packets</div>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={clearPackets}>Clear All</button>
-      </div>
-      <div className="grid gap-2 md:grid-cols-2">
-        {(relevantPackets.length ? relevantPackets : packets).map((packet) => {
-          const key = reconciliationPacketKey(packet);
-          return (
-            <div key={key} className="rounded border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="font-semibold text-slate-800 dark:text-slate-100">{packet.profileLabel}</div>
-                  <div className="text-slate-500">{packet.sourceFile}</div>
-                </div>
-                <button type="button" className="btn btn-ghost btn-xs" onClick={() => removePacket(key)}>Remove</button>
-              </div>
-              <div className="mt-1 text-slate-500">{packet.summary.totalRows} rows - {packet.summary.diagnosticCount} diagnostics</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function FindingList({
   findings,
   selection,
@@ -130,7 +96,7 @@ function FindingList({
             onClick={() => onSelect({ findingId: finding.id })}
           >
             <div className="flex items-start justify-between gap-2">
-              <div className="font-semibold">{finding.kind.replace(/_/g, " ")}</div>
+              <div className="font-semibold">{finding.title || finding.kind.replace(/_/g, " ")}</div>
               <div className="text-xs opacity-75">{Math.round(finding.confidence * 100)}%</div>
             </div>
             <div className="mt-1 text-xs opacity-80">
@@ -155,7 +121,8 @@ function FindingDetail({ finding }: { finding: ReconciliationFinding | null }) {
     <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-lg font-semibold text-slate-900 dark:text-slate-50">{finding.kind.replace(/_/g, " ")}</div>
+          <div className="text-lg font-semibold text-slate-900 dark:text-slate-50">{finding.title || finding.kind.replace(/_/g, " ")}</div>
+          <div className="text-xs uppercase tracking-wide text-slate-400">{finding.kind.replace(/_/g, " ")}</div>
           <div className="text-sm text-slate-500">{finding.sourceFile} - row {finding.sourceRowNumber ?? "-"}</div>
         </div>
         <span className={`rounded border px-2 py-1 text-xs ${severityClass(finding.severity)}`}>{finding.severity}</span>
@@ -197,10 +164,27 @@ function useReviewForTool(kind: ReconciliationToolKind, severity: Reconciliation
   const config = TOOL_CONFIG[kind];
   const workspace = useReconciliationWorkspace();
   const dashboard = useDashboardSharedData();
-  const { data: paymentQueueItems = [], isLoading: paymentQueueLoading } = usePaymentQueueItems({ limit: 5000 }, { staleTime: 120_000 });
   const relevantPackets = React.useMemo(
     () => workspace.packets.filter((packet) => packetMatchesTool(packet, config)),
     [config, workspace.packets],
+  );
+  // Only the payment tool needs ledger/queue rows, and only for the months its
+  // uploaded reports actually cover — so we never request the whole queue.
+  const reportMonths = React.useMemo(() => {
+    if (kind !== "payment") return [];
+    const set = new Set<string>();
+    for (const packet of relevantPackets) {
+      for (const record of packet.records) {
+        const month = record.paymentEvidence.serviceMonth
+          || (record.paymentEvidence.transactionDate ? record.paymentEvidence.transactionDate.slice(0, 7) : "");
+        if (month) set.add(month);
+      }
+    }
+    return Array.from(set);
+  }, [kind, relevantPackets]);
+  const { data: paymentQueueItems = [], isLoading: paymentQueueLoading } = usePaymentQueueItemsForMonths(
+    reportMonths,
+    { enabled: kind === "payment" && reportMonths.length > 0, staleTime: 120_000 },
   );
   const review = React.useMemo<ReconciliationReviewResult>(
     () => buildReconciliationReview(relevantPackets, {
@@ -247,6 +231,13 @@ function ReconciliationToolMain({
     [config.title, filteredFindings],
   );
   const exportSummaryRows = React.useMemo(() => buildReviewSummaryRows(review), [review]);
+  const grantOptions = React.useMemo<ReportUploadGrant[]>(
+    () => (dashboard.grants as Array<Record<string, unknown>>).map((grant) => ({
+      id: String(grant.id ?? ""),
+      name: String(grant.name ?? grant.grantName ?? grant.label ?? grant.title ?? grant.id ?? ""),
+    })).filter((grant) => grant.id || grant.name),
+    [dashboard.grants],
+  );
   const selectedFinding = React.useMemo(
     () => filteredFindings.find((finding) => finding.id === selection?.findingId) ?? filteredFindings[0] ?? null,
     [filteredFindings, selection?.findingId],
@@ -255,8 +246,6 @@ function ReconciliationToolMain({
   React.useEffect(() => {
     if (!selection && selectedFinding) onSelect({ findingId: selectedFinding.id });
   }, [onSelect, selectedFinding, selection]);
-
-  const preferredProfile = filterState.reportType || config.preferredProfiles[0];
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -270,30 +259,21 @@ function ReconciliationToolMain({
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExportOpen(true)} disabled={!filteredFindings.length}>
               Export
             </button>
-            <label className="btn btn-primary btn-sm cursor-pointer">
-              {workspace.reading ? "Reading..." : config.uploadLabel}
-              <input
-                className="sr-only"
-                type="file"
-                accept=".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => {
-                  void workspace.addFile(event.currentTarget.files?.[0] ?? null, preferredProfile);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
           </div>
         </div>
-        {workspace.error ? <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{workspace.error}</div> : null}
-        {workspace.lastPreview ? (
-          <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-300 md:grid-cols-4">
-            <div><span className="font-semibold">Last file:</span> {workspace.lastPreview.fileName}</div>
-            <div><span className="font-semibold">Rows:</span> {workspace.lastPreview.totalRows}</div>
-            <div><span className="font-semibold">Header row:</span> {workspace.lastPreview.headerRowIndex + 1}</div>
-            <div><span className="font-semibold">Best match:</span> {workspace.lastPreview.profileCandidates[0]?.profile.label ?? "-"}</div>
-          </div>
-        ) : null}
       </div>
+
+      <ReportUploadPanel
+        uploads={workspace.uploads}
+        profiles={workspace.profiles}
+        grants={grantOptions}
+        reading={workspace.reading}
+        error={workspace.error}
+        onFiles={(files) => void workspace.addFiles(files)}
+        onUpdateConfig={workspace.updateUploadConfig}
+        onRemove={workspace.removeUpload}
+        onClear={workspace.clearUploads}
+      />
 
       <div className="grid gap-3 md:grid-cols-5">
         <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
@@ -319,8 +299,6 @@ function ReconciliationToolMain({
           <div className="mt-2 text-sm">Errors {review.summary.bySeverity.error} - Warnings {review.summary.bySeverity.warning}</div>
         </div>
       </div>
-
-      <PacketStrip kind={kind} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <FindingList findings={filteredFindings} selection={selection} onSelect={onSelect} />
@@ -355,12 +333,12 @@ function ReconciliationTopbar({
   const profiles = workspace.profiles.filter((profile) => config.preferredProfiles.includes(profile.id));
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select className="input h-8 min-w-64 text-sm" value={value.reportType} onChange={(event) => onChange({ ...value, reportType: event.currentTarget.value })}>
+      <select className="input h-9 min-w-64 px-2 py-1 text-sm leading-5" value={value.reportType} onChange={(event) => onChange({ ...value, reportType: event.currentTarget.value })}>
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>{profile.label}</option>
         ))}
       </select>
-      <select className="input h-8 text-sm" value={value.severity} onChange={(event) => onChange({ ...value, severity: event.currentTarget.value as ReconciliationToolFilterState["severity"] })}>
+      <select className="input h-9 px-2 py-1 text-sm leading-5" value={value.severity} onChange={(event) => onChange({ ...value, severity: event.currentTarget.value as ReconciliationToolFilterState["severity"] })}>
         <option value="all">All severities</option>
         <option value="error">Errors</option>
         <option value="warning">Warnings</option>

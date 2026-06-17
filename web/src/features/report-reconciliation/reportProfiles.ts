@@ -343,12 +343,32 @@ export function buildHeaderIndex(headers: unknown[]): Map<string, { header: stri
   return index;
 }
 
-export function matchProfileHeaders(profile: ReportSourceProfile, headers: unknown[]): { matches: HeaderMatch[]; diagnostics: ReportDiagnostic[] } {
+/**
+ * Per-field manual mapping overrides keyed by field key. A non-negative number
+ * pins the field to that column index; `-1` explicitly unmaps it (ignoring alias
+ * auto-match). Fields absent from the map fall back to alias matching.
+ */
+export type FieldColumnOverrides = Record<string, number>;
+
+export function matchProfileHeaders(
+  profile: ReportSourceProfile,
+  headers: unknown[],
+  overrides?: FieldColumnOverrides,
+): { matches: HeaderMatch[]; diagnostics: ReportDiagnostic[] } {
   const headerIndex = buildHeaderIndex(headers);
   const diagnostics: ReportDiagnostic[] = [];
   const matches = Object.entries(profile.fields).map<HeaderMatch>(([fieldKey, field]) => {
-    const aliases = [fieldKey, ...field.aliases];
-    const found = aliases.map(normalizeHeader).map((alias) => headerIndex.get(alias)).find(Boolean) ?? null;
+    const override = overrides?.[fieldKey];
+    let found: { header: string; index: number } | null;
+    if (override != null && override >= 0) {
+      const index = Math.min(override, Math.max(0, headers.length - 1));
+      found = { header: String(headers[index] ?? `Column ${index + 1}`).trim() || `Column ${index + 1}`, index };
+    } else if (override === -1) {
+      found = null; // explicitly unmapped by the operator
+    } else {
+      const aliases = [fieldKey, ...field.aliases];
+      found = aliases.map(normalizeHeader).map((alias) => headerIndex.get(alias)).find(Boolean) ?? null;
+    }
     if (field.required && !found) {
       diagnostics.push({
         severity: "error",
@@ -383,8 +403,9 @@ export function normalizeReportRow(
   headers: unknown[],
   row: Record<string, unknown> | unknown[],
   source: { sourceType?: string; sourceFile?: string; sourceRowNumber?: number | null } = {},
+  overrides?: FieldColumnOverrides,
 ): NormalizedReportRecord {
-  const { matches, diagnostics } = matchProfileHeaders(profile, headers);
+  const { matches, diagnostics } = matchProfileHeaders(profile, headers, overrides);
   const values = new Map<string, unknown>();
   matches.forEach((match) => values.set(match.fieldKey, readRawValue(row, match)));
 
@@ -409,8 +430,8 @@ export function normalizeReportRow(
       dob: normalizeDate(values.get("dob")),
     },
     enrollmentEvidence: {
-      programId: String(values.get("programId") ?? values.get("providerId") ?? "").trim(),
-      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("grant") ?? "").trim(),
+      programId: String(values.get("programId") ?? values.get("providerId") ?? values.get("serviceProvider") ?? "").trim(),
+      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("grant") ?? "").trim(),
       entryDate: normalizeDate(values.get("entryDate") ?? values.get("projectEntryDate") ?? values.get("dateIdentified")),
       exitDate: normalizeDate(values.get("exitDate") ?? values.get("projectExitDate")),
       destination: String(values.get("destination") ?? "").trim(),
@@ -420,7 +441,7 @@ export function normalizeReportRow(
       amount,
       transactionDate,
       serviceMonth: transactionDate.slice(0, 7),
-      grant: String(values.get("grant") ?? values.get("providerId") ?? "").trim(),
+      grant: String(values.get("grant") ?? values.get("providerId") ?? values.get("serviceProvider") ?? "").trim(),
       reference: String(values.get("reference") ?? "").trim(),
       invoice: String(values.get("invoice") ?? "").trim(),
     },
@@ -435,21 +456,23 @@ export function buildReconciliationPacket({
   rows,
   sourceFile,
   headerRowIndex,
+  fieldOverrides,
 }: {
   profile: ReportSourceProfile;
   headers: unknown[];
   rows: unknown[][];
   sourceFile: string;
   headerRowIndex: number;
+  fieldOverrides?: FieldColumnOverrides;
 }): ReconciliationPacket {
   const normalizedHeaders = headers.map((header) => String(header ?? ""));
-  const headerResult = matchProfileHeaders(profile, normalizedHeaders);
+  const headerResult = matchProfileHeaders(profile, normalizedHeaders, fieldOverrides);
   const records = rows.map((row, index) =>
     normalizeReportRow(profile, normalizedHeaders, row, {
       sourceType: profile.id,
       sourceFile,
       sourceRowNumber: headerRowIndex + index + 2,
-    }),
+    }, fieldOverrides),
   );
   const rowDiagnostics = records.flatMap((record) => record.diagnostics);
   const diagnostics = [...headerResult.diagnostics, ...rowDiagnostics];
@@ -471,4 +494,33 @@ export function buildReconciliationPacket({
       requiredMissingCount: headerResult.diagnostics.filter((diagnostic) => diagnostic.code === "required_header_missing").length,
     },
   };
+}
+
+/** Derive header labels + non-empty data rows for a chosen header row index. */
+export function deriveHeadersAndRows(allRows: unknown[][], headerRowIndex: number) {
+  const safeIndex = Math.min(Math.max(0, headerRowIndex), Math.max(0, allRows.length - 1));
+  const headers = (allRows[safeIndex] ?? []).map((value) => String(value ?? "").trim());
+  const dataRows = allRows
+    .slice(safeIndex + 1)
+    .filter((row) => Array.isArray(row) && row.some((value) => String(value ?? "").trim()));
+  return { headers, dataRows, headerRowIndex: safeIndex };
+}
+
+/**
+ * Distinct grant/provider/project signals seen in a packet's rows. These are the
+ * report-side values matched against dashboard grant names (HMIS service provider,
+ * CE service provider, dashboard project name, etc.). Financial Edge rows usually
+ * lack this, so callers should also consider the file name.
+ */
+export function collectReportGrantSignals(packet: ReconciliationPacket): string[] {
+  const set = new Set<string>();
+  for (const record of packet.records) {
+    const signal = record.paymentEvidence.grant
+      || record.enrollmentEvidence.projectName
+      || record.enrollmentEvidence.programId;
+    const value = String(signal || "").trim();
+    if (value) set.add(value);
+    if (set.size >= 50) break;
+  }
+  return Array.from(set);
 }
