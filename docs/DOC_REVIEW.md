@@ -68,3 +68,9 @@ Before promoting any local-only doc:
 3. Prefer a concise maintained summary over a large historical audit.
 4. Add the promoted filename to `.gitignore` as an explicit unignore.
 5. Add it to the Reviewed Docs list above.
+
+## Sanitized Data Samples
+
+CSV, TXT, and XLSX samples produced from real reports should be sanitized before they are used in reviewed docs, tests, screenshots, or agent handoff. The preferred local tool is Mr.Bacon's `sensitive-data-replacer` arm (`sensid`), installed from `C:\Users\gseyfried\Desktop\New_folder\Mr.Bacon\arms\sensitive-data-replacer` with XLSX support when needed.
+
+Use `_sanitized` or `_safe` filenames, preserve originals as local/private references, and manually review sanitizer output before promoting any sample. Sanitized files should stay ignored unless a specific reviewed sample is intentionally unignored and documented.

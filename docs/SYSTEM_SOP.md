@@ -442,6 +442,7 @@ Before deploying, the maintainer should:
 
 - Run the smallest useful build or test.
 - Confirm no customer data, credentials, screenshots, reports, billing exports, or local-only files are staged for commit.
+- If report/data examples were used during development, confirm work is based on `_sanitized` or `_safe` copies and that any staged sample was manually reviewed.
 - Use the approved deployment scripts rather than raw Firebase commands.
 - Avoid deploying security, role, Jotform, Drive, payment, or budget changes without additional review.
 
@@ -944,6 +945,7 @@ Before deploying:
 - Run `npm run contracts:update` if `contracts/src/` changed.
 - Use safe deploy scripts.
 - Confirm no private data, secrets, local-only docs, generated dumps, billing exports, or screenshots are staged.
+- For CSV/TXT/XLSX examples, use Mr.Bacon's `sensitive-data-replacer` (`sensid`) to create `_sanitized` or `_safe` copies before development or review. Treat sanitizer output as a starting point, then manually inspect before staging.
 
 Before changing data:
 

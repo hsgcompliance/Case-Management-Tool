@@ -1,5 +1,5 @@
 // features/tools/toolsDefs.tsx
-// Tools page widget definitions — shown on /tools
+// Tools page widget definitions shown on /tools.
 import { DASHBOARD_TOOL_DEFS } from "@widgets";
 import type { AnyDashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 import { AssessmentManagerMain } from "./AssessmentManagerTool";
@@ -13,20 +13,29 @@ import {
 } from "./JotformsTool";
 import { EmailDigestMain } from "./EmailDigestTool";
 import { PipelineManagerMain } from "./PipelineManagerTool";
+import {
+  CustomerIdentityReviewMain,
+  CustomerIdentityReviewTopbar,
+  EnrollmentReconciliationMain,
+  EnrollmentReconciliationTopbar,
+  PaymentReconciliationMain,
+  PaymentReconciliationTopbar,
+  createReconciliationFilterState,
+  type ReconciliationToolFilterState,
+} from "@features/report-reconciliation/ReconciliationTools";
 
-// IDs from DASHBOARD_TOOL_DEFS that belong on the Tools page
 const TOOLS_FROM_DASHBOARD_IDS = [
-  "spending",               // → renamed "Invoicing", un-hidden
-  "customer-folders",       // → un-hidden
+  "spending",
+  "customer-folders",
 ];
 
 const fromDashboard = DASHBOARD_TOOL_DEFS
-  .filter((t) => TOOLS_FROM_DASHBOARD_IDS.includes(t.id))
-  .map((t) => ({
-    ...t,
+  .filter((tool) => TOOLS_FROM_DASHBOARD_IDS.includes(tool.id))
+  .map((tool) => ({
+    ...tool,
     hidden: false,
     defaultPinned: true,
-    title: t.id === "spending" ? "Invoicing" : t.title,
+    title: tool.id === "spending" ? "Invoicing" : tool.title,
   }));
 
 const newWidgets: readonly AnyDashboardToolDefinition[] = [
@@ -59,7 +68,30 @@ const newWidgets: readonly AnyDashboardToolDefinition[] = [
     defaultPinned: true,
     Main: EmailDigestMain as AnyDashboardToolDefinition["Main"],
   },
-  // ── Advanced tools — accessible via the overflow menu ────────────────────
+  {
+    id: "enrollment-reconciliation",
+    title: "Enrollment Reconciliation",
+    defaultPinned: true,
+    createFilterState: () => createReconciliationFilterState("enrollment") satisfies ReconciliationToolFilterState,
+    ToolTopbar: EnrollmentReconciliationTopbar as AnyDashboardToolDefinition["ToolTopbar"],
+    Main: EnrollmentReconciliationMain as AnyDashboardToolDefinition["Main"],
+  },
+  {
+    id: "payment-reconciliation",
+    title: "Payment Reconciliation",
+    defaultPinned: true,
+    createFilterState: () => createReconciliationFilterState("payment") satisfies ReconciliationToolFilterState,
+    ToolTopbar: PaymentReconciliationTopbar as AnyDashboardToolDefinition["ToolTopbar"],
+    Main: PaymentReconciliationMain as AnyDashboardToolDefinition["Main"],
+  },
+  {
+    id: "customer-identity-review",
+    title: "Customer Identity Review",
+    defaultPinned: true,
+    createFilterState: () => createReconciliationFilterState("identity") satisfies ReconciliationToolFilterState,
+    ToolTopbar: CustomerIdentityReviewTopbar as AnyDashboardToolDefinition["ToolTopbar"],
+    Main: CustomerIdentityReviewMain as AnyDashboardToolDefinition["Main"],
+  },
   {
     id: "assessment-manager",
     title: "Assessment Manager",
@@ -86,5 +118,5 @@ export const TOOLS_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
 ];
 
 export function getToolsPageToolDef(toolId: string) {
-  return TOOLS_TOOL_DEFS.find((t) => t.id === toolId) ?? null;
+  return TOOLS_TOOL_DEFS.find((tool) => tool.id === toolId) ?? null;
 }

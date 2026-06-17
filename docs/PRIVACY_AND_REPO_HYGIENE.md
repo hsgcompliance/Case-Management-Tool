@@ -19,6 +19,23 @@ Do not commit:
 - `.local-only.md` notes unless they have been reviewed, renamed, and explicitly unignored
 - completed migration harvests, transformed outputs, field maps, and migration one-off scripts
 
+## Sanitizing Local Data Files
+
+When a project needs realistic CSV, TXT, or XLSX examples, sanitize local copies before using them for development, tests, screenshots, docs, or agent handoff. Do not overwrite the original private files unless explicitly instructed.
+
+Preferred local sanitizer:
+
+```powershell
+cd C:\Users\gseyfried\Desktop\New_folder\Mr.Bacon\arms\sensitive-data-replacer
+python -m pip install -e ".[xlsx]"
+sensid path\to\input.csv -o path\to\input_sanitized.csv --seed 42
+sensid path\to\input.xlsx -o path\to\input_sanitized.xlsx --sheet Sheet1 --seed 42
+```
+
+Use `_sanitized` or `_safe` in output filenames and keep safe outputs next to the originals when they are local artifacts. For exports with leading prompt/title rows, pass the correct zero-based `--header-row` so `sensid` can detect name, DOB/date-of-birth, and ID columns.
+
+`sensid` is useful for replacing obvious tabular names, DOBs, and ID-like columns while preserving realistic shapes, but it is not a formal anonymization guarantee. Before committing any sanitized file, still review it manually for customer names, DOBs, HMIS/Caseworthy IDs, addresses, phone numbers, emails, payment details, folder/file IDs, notes, and other indirect identifiers. Sanitized artifacts remain local/ignored unless there is a documented reason to promote a specific safe sample into the repo.
+
 ## Local-Only Docs
 
 Docs ending in `.local-only.md` are intentionally ignored. They may contain stale audits, private identifiers, specific form metadata, local process notes, or old implementation plans. Agents can read them as background context when working locally, but they are not authoritative and should not be pushed as-is.
