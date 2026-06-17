@@ -50,6 +50,7 @@ export function usePaymentQueueItems(
  */
 export function usePaymentQueueItemsForMonths(
   months: string[],
+  query?: Partial<PaymentQueueListReq>,
   opts?: { enabled?: boolean; staleTime?: number; maxMonths?: number; pagesPerMonth?: number }
 ) {
   const sorted = Array.from(new Set(months.filter(Boolean))).sort();
@@ -60,14 +61,14 @@ export function usePaymentQueueItemsForMonths(
     ...RQ_DEFAULTS,
     enabled: (opts?.enabled ?? true) && scoped.length > 0,
     staleTime: opts?.staleTime ?? RQ_DEFAULTS.staleTime,
-    queryKey: qk.paymentQueue.list({ months: scoped }),
+    queryKey: qk.paymentQueue.list({ months: scoped, ...((query as Record<string, unknown>) || {}) }),
     queryFn: async () => {
       const perMonth = await Promise.all(
         scoped.map(async (month) => {
           const out: PaymentQueueItem[] = [];
           let cursor: string | undefined;
           for (let page = 0; page < pagesPerMonth; page += 1) {
-            const res = await PaymentQueue.list({ month, limit: 1000, cursor });
+            const res = await PaymentQueue.list({ ...(query || {}), month, limit: 1000, cursor });
             const items = Array.isArray(res?.items) ? res.items : [];
             out.push(...items);
             if (!res?.hasMore || !items.length) break;

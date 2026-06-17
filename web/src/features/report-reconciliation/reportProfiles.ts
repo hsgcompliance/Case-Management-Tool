@@ -1,5 +1,7 @@
 "use client";
 
+import { parseFinancialEdgeReference } from "./reportParsingEngines";
+
 export type ReportFieldType = "text" | "date" | "money" | "identity" | "grant" | "vendor";
 
 export type ReportFieldProfile = {
@@ -111,6 +113,26 @@ const MONEY_CLEANUP_RE = /[$,\s]/g;
 const WORD_RE = /[a-z0-9]+/g;
 
 export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
+  {
+    id: "rental_assistance_invoice_request",
+    label: "Rental Assistance Invoice Request Workbook",
+    recordKind: "rentalAssistanceInvoiceRequest",
+    active: true,
+    schemaVersion: 1,
+    notes: "Based on multi-sheet rental assistance invoice request workbooks with one worksheet per grant/program.",
+    sourceAliases: ["invoice request", "rental assistance", "service cost", "household", "invoice status"],
+    fields: {
+      includeRow: { required: false, aliases: ["Working", "Include", "Active"] },
+      serviceDate: { required: false, type: "date", aliases: ["Month", "Invoice Date", "Payment Date", "Assistance Start", "Date"] },
+      customerName: { required: true, type: "identity", aliases: ["Household", "Client Name", "Customer", "Customer Name", "Name"] },
+      grant: { required: false, type: "grant", aliases: ["Project Enrollment", "Project", "Grant", "Program"] },
+      serviceName: { required: false, aliases: ["Service Type", "Service", "Description", "Type"] },
+      amount: { required: true, type: "money", aliases: ["Service Cost", "Total Assistance", "Total Service Cost", "Amount", "Cost"] },
+      vendor: { required: false, type: "vendor", aliases: ["Vendor", "Payment made to", "Payee", "Landlord", "Notes/Vendor"] },
+      invoice: { required: false, aliases: ["Invoice Status", "Status", "Notes on status"] },
+      dataEntry: { required: false, aliases: ["Data Entry", "Data Entry (Compliance)", "Entered in CM Dashboard", "Data type"] },
+    },
+  },
   {
     id: "hmis_service_payment_report",
     label: "HMIS Service Provided Report",
@@ -413,7 +435,10 @@ export function normalizeReportRow(
   const lastName = String(values.get("lastName") ?? "").trim();
   const fullName = normalizeCustomerName(values.get("customerName") ?? `${firstName} ${lastName}`);
   const amount = normalizeAmount(values.get("amount"));
-  const transactionDate = normalizeDate(values.get("transactionDate") ?? values.get("serviceStartDate") ?? values.get("dueDate"));
+  const transactionDate = normalizeDate(values.get("transactionDate") ?? values.get("serviceStartDate") ?? values.get("serviceDate") ?? values.get("dueDate"));
+  const serviceName = String(values.get("serviceName") ?? values.get("serviceDescription") ?? "").trim();
+  const reference = String(values.get("reference") ?? serviceName).trim();
+  const parsedReference = profile.id === "financial_edge_project_activity" ? parseFinancialEdgeReference(reference) : null;
 
   return {
     sourceType: source.sourceType || profile.id,
@@ -431,7 +456,7 @@ export function normalizeReportRow(
     },
     enrollmentEvidence: {
       programId: String(values.get("programId") ?? values.get("providerId") ?? values.get("serviceProvider") ?? "").trim(),
-      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("grant") ?? "").trim(),
+      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("grant") ?? serviceName).trim(),
       entryDate: normalizeDate(values.get("entryDate") ?? values.get("projectEntryDate") ?? values.get("dateIdentified")),
       exitDate: normalizeDate(values.get("exitDate") ?? values.get("projectExitDate")),
       destination: String(values.get("destination") ?? "").trim(),
@@ -441,11 +466,14 @@ export function normalizeReportRow(
       amount,
       transactionDate,
       serviceMonth: transactionDate.slice(0, 7),
-      grant: String(values.get("grant") ?? values.get("providerId") ?? values.get("serviceProvider") ?? "").trim(),
-      reference: String(values.get("reference") ?? "").trim(),
-      invoice: String(values.get("invoice") ?? "").trim(),
+      grant: String(values.get("grant") ?? values.get("providerId") ?? values.get("serviceProvider") ?? serviceName).trim(),
+      reference,
+      invoice: String(values.get("invoice") ?? values.get("dataEntry") ?? "").trim(),
     },
-    raw: Array.isArray(row) ? Object.fromEntries(headers.map((header, i) => [String(header || `column_${i + 1}`), row[i]])) : row,
+    raw: {
+      ...(Array.isArray(row) ? Object.fromEntries(headers.map((header, i) => [String(header || `column_${i + 1}`), row[i]])) : row),
+      ...(parsedReference ? { parsedFinancialEdgeReference: parsedReference } : {}),
+    },
     diagnostics,
   };
 }
