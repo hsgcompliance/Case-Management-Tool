@@ -19,6 +19,18 @@ export interface OtherContact {
   role?: string | null;
 }
 
+export interface LinkedWorkbookRef {
+  spreadsheetId?: string;
+  spreadsheetUrl?: string;
+  spreadsheetName?: string;
+  status?: string;
+}
+
+export interface CustomerDrive {
+  folderId?: string;
+  linkedWorkbooks?: { tss?: LinkedWorkbookRef };
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -41,6 +53,7 @@ export interface Customer {
   orgId?: string;
   driveFolderId?: string;
   driveFolders?: DriveFolderRef[];
+  customerDrive?: CustomerDrive;
   meta?: {
     notes?: string;
     driveFolderId?: string;
@@ -74,8 +87,17 @@ function docToCustomer(id: string, d: Record<string, any>): Customer {
     orgId: d.orgId,
     driveFolderId: d.driveFolderId,
     driveFolders: d.driveFolders,
+    customerDrive: d.customerDrive,
     meta: d.meta,
   };
+}
+
+/** The customer's linked TSS workbook URL, if one has been attached. */
+export function getWorkbookLink(customer: Pick<Customer, "customerDrive">): { url: string; name: string } | null {
+  const tss = customer.customerDrive?.linkedWorkbooks?.tss;
+  const url = String(tss?.spreadsheetUrl || "").trim();
+  if (!url) return null;
+  return { url, name: String(tss?.spreadsheetName || "").trim() || "Open workbook" };
 }
 
 function sortByName(a: Customer, b: Customer) {

@@ -17,6 +17,8 @@ export type ReconciliationFindingKind =
   | "exit_date_mismatch"
   | "enrollment_compliance_missing"
   | "payment_missing_dashboard"
+  | "payment_missing_hmis"
+  | "payment_missing_financial_edge"
   | "payment_possible_match"
   | "payment_amount_mismatch"
   | "grant_mapping_review"
@@ -151,6 +153,10 @@ function customerHmisId(customer: Record<string, unknown>) {
   return text(customer.hmisId ?? customer.HMISId ?? customer.hmisClientId ?? customer.clientId);
 }
 
+function customerCaseworthyId(customer: Record<string, unknown>) {
+  return text(customer.caseworthyId ?? customer.caseWorthyId ?? customer.cwId ?? customer.CWID);
+}
+
 function customerDob(customer: Record<string, unknown>) {
   return normalizeDate(customer.dob ?? customer.dateOfBirth ?? customer.birthDate);
 }
@@ -163,14 +169,60 @@ function recordNameKey(record: NormalizedReportRecord) {
   return normalizeCustomerName(record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`);
 }
 
+function namePartsFromCustomer(customer: Record<string, unknown>) {
+  const first = normalizeCustomerName(customer.firstName ?? customer.givenName);
+  const last = normalizeCustomerName(customer.lastName ?? customer.surname);
+  if (first || last) return { first, last };
+  const parts = customerNameKey(customer).split(" ").filter(Boolean);
+  return { first: parts[0] ?? "", last: parts.length > 1 ? parts[parts.length - 1] : "" };
+}
+
+function namePartsFromRecord(record: NormalizedReportRecord) {
+  const first = normalizeCustomerName(record.customerIdentity.firstName);
+  const last = normalizeCustomerName(record.customerIdentity.lastName);
+  if (first || last) return { first, last };
+  const parts = recordNameKey(record).split(" ").filter(Boolean);
+  return { first: parts[0] ?? "", last: parts.length > 1 ? parts[parts.length - 1] : "" };
+}
+
+function editDistance(a: string, b: string) {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = Array.from({ length: b.length + 1 }, () => 0);
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      curr[j] = Math.min(
+        prev[j] + 1,
+        curr[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    for (let j = 0; j <= b.length; j += 1) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function closeSpelling(a: string, b: string) {
+  if (!a || !b) return false;
+  const max = Math.max(a.length, b.length);
+  if (max < 4) return a === b;
+  return editDistance(a, b) <= (max <= 6 ? 1 : 2);
+}
+
 function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
   const byId = new Map<string, Record<string, unknown>>();
+  const byCaseworthy = new Map<string, Record<string, unknown>>();
   const byHmis = new Map<string, Record<string, unknown>>();
   const byNameDob = new Map<string, Record<string, unknown>>();
   const byName = new Map<string, Record<string, unknown>[]>();
   for (const customer of customers) {
     const id = text(customer.id);
     if (id) byId.set(id, customer);
+    const caseworthyId = customerCaseworthyId(customer);
+    if (caseworthyId) byCaseworthy.set(caseworthyId, customer);
     const hmisId = customerHmisId(customer);
     if (hmisId) byHmis.set(hmisId, customer);
     const name = customerNameKey(customer);
@@ -178,21 +230,39 @@ function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
     if (name && dob) byNameDob.set(`${name}|${dob}`, customer);
     if (name) byName.set(name, [...(byName.get(name) ?? []), customer]);
   }
-  return { byId, byHmis, byNameDob, byName };
+  return { byId, byCaseworthy, byHmis, byNameDob, byName, all: customers };
 }
 
 function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof buildCustomerIndexes>) {
   const dashboardId = text(record.customerIdentity.dashboardCustomerId);
   if (dashboardId && indexes.byId.has(dashboardId)) return { customer: indexes.byId.get(dashboardId) ?? null, confidence: 1, method: "dashboard customer ID" };
+  const caseworthyId = text(record.customerIdentity.caseworthyId);
+  if (caseworthyId && indexes.byCaseworthy.has(caseworthyId)) return { customer: indexes.byCaseworthy.get(caseworthyId) ?? null, confidence: 1, method: "Caseworthy ID (CWID)" };
   const hmisId = text(record.customerIdentity.hmisId);
-  if (hmisId && indexes.byHmis.has(hmisId)) return { customer: indexes.byHmis.get(hmisId) ?? null, confidence: 0.95, method: "HMIS ID" };
+  if (hmisId && indexes.byHmis.has(hmisId)) return { customer: indexes.byHmis.get(hmisId) ?? null, confidence: 1, method: "HMIS ID" };
   const name = recordNameKey(record);
   const dob = normalizeDate(record.customerIdentity.dob);
   if (name && dob && indexes.byNameDob.has(`${name}|${dob}`)) {
-    return { customer: indexes.byNameDob.get(`${name}|${dob}`) ?? null, confidence: 0.85, method: "name + DOB" };
+    return { customer: indexes.byNameDob.get(`${name}|${dob}`) ?? null, confidence: 0.97, method: "first + last name + DOB" };
   }
   const nameMatches = name ? indexes.byName.get(name) ?? [] : [];
-  if (nameMatches.length === 1) return { customer: nameMatches[0], confidence: 0.55, method: "name only" };
+  if (nameMatches.length === 1) return { customer: nameMatches[0], confidence: 0.9, method: "first + last name exact; verify DOB" };
+
+  const recordParts = namePartsFromRecord(record);
+  let fuzzy: Record<string, unknown> | null = null;
+  for (const customer of indexes.all) {
+    const customerParts = namePartsFromCustomer(customer);
+    const firstExact = recordParts.first && customerParts.first && recordParts.first === customerParts.first;
+    const lastExact = recordParts.last && customerParts.last && recordParts.last === customerParts.last;
+    if ((firstExact && !lastExact) || (lastExact && !firstExact)) continue;
+    const firstClose = closeSpelling(recordParts.first, customerParts.first);
+    const lastClose = closeSpelling(recordParts.last, customerParts.last);
+    if (firstClose && lastClose) {
+      fuzzy = customer;
+      break;
+    }
+  }
+  if (fuzzy) return { customer: fuzzy, confidence: 0.5, method: "close first + last spelling; manual review required" };
   return { customer: null, confidence: 0, method: "" };
 }
 
@@ -233,6 +303,73 @@ function paymentRowSource(row: Record<string, unknown>) {
   if (source.includes("ledger") || "amountCents" in row || "paid" in row) return "ledger";
   if (source.includes("queue") || "queueStatus" in row) return "payment queue";
   return "dashboard payment";
+}
+
+function reportPaymentKey(record: NormalizedReportRecord) {
+  return [
+    recordNameKey(record),
+    record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate),
+    cents(record.paymentEvidence.amount) ?? "noamount",
+  ].join("|");
+}
+
+function scoreReportPaymentCandidate(source: NormalizedReportRecord, candidate: NormalizedReportRecord) {
+  const sourceName = recordNameKey(source);
+  const candidateName = recordNameKey(candidate);
+  const sourceMonth = source.paymentEvidence.serviceMonth || monthKey(source.paymentEvidence.transactionDate);
+  const candidateMonth = candidate.paymentEvidence.serviceMonth || monthKey(candidate.paymentEvidence.transactionDate);
+  const sourceAmount = cents(source.paymentEvidence.amount);
+  const candidateAmount = cents(candidate.paymentEvidence.amount);
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  let score = 0;
+
+  if (source.customerIdentity.hmisId && candidate.customerIdentity.hmisId && source.customerIdentity.hmisId === candidate.customerIdentity.hmisId) {
+    score += 45;
+    reasons.push("HMIS ID exact");
+  } else if (sourceName && candidateName && sourceName === candidateName) {
+    score += 35;
+    reasons.push("name exact");
+  } else if (sourceName && candidateName && hasTokenOverlap(sourceName, candidateName)) {
+    score += 18;
+    reasons.push("name token overlap");
+  }
+
+  if (sourceMonth && candidateMonth && sourceMonth === candidateMonth) {
+    score += 30;
+    reasons.push("same service month");
+  } else if (sourceMonth && candidateMonth) {
+    warnings.push(`month differs (${sourceMonth} vs ${candidateMonth})`);
+    score -= 15;
+  }
+
+  if (sourceAmount != null && candidateAmount != null) {
+    const diff = Math.abs(sourceAmount - candidateAmount);
+    if (diff <= 1) {
+      score += 35;
+      reasons.push("amount exact");
+    } else if (diff <= 5000) {
+      score += 12;
+      warnings.push(`amount differs by ${(diff / 100).toFixed(2)}`);
+    } else {
+      score -= 25;
+      warnings.push(`amount differs by ${(diff / 100).toFixed(2)}`);
+    }
+  }
+
+  if (hasTokenOverlap(source.paymentEvidence.grant || source.enrollmentEvidence.projectName, candidate.paymentEvidence.grant || candidate.enrollmentEvidence.projectName)) {
+    score += 8;
+    reasons.push("grant/provider overlap");
+  }
+
+  return { record: candidate, score, reasons, warnings, amountDiffCents: sourceAmount != null && candidateAmount != null ? sourceAmount - candidateAmount : null };
+}
+
+function findReportPaymentCandidates(source: NormalizedReportRecord, candidates: NormalizedReportRecord[]) {
+  return candidates
+    .map((candidate) => scoreReportPaymentCandidate(source, candidate))
+    .filter((candidate) => candidate.score >= 45)
+    .sort((a, b) => b.score - a.score);
 }
 
 function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<string, unknown>, customerId?: string) {
@@ -358,6 +495,10 @@ function findingTitle(finding: ReconciliationFinding): string {
       return `${source} evidence not marked complete in dashboard: ${who}`;
     case "payment_missing_dashboard":
       return `${source} payment row missing from dashboard queue/ledger: ${who}`;
+    case "payment_missing_hmis":
+      return `FE payment row missing from HMIS: ${who}`;
+    case "payment_missing_financial_edge":
+      return `${source} payment row missing from FE: ${who}`;
     case "payment_possible_match":
       return `Multiple dashboard payment matches for ${source} row: ${who}`;
     case "payment_amount_mismatch":
@@ -374,6 +515,15 @@ function findingTitle(finding: ReconciliationFinding): string {
 export function buildReconciliationReview(packets: ReconciliationPacket[], dashboard: DashboardData): ReconciliationReviewResult {
   const findings: ReconciliationFinding[] = [];
   const customerIndexes = buildCustomerIndexes(dashboard.customers);
+  const paymentRecords = packets.flatMap((packet) => packet.records.map((record) => ({ packet, record })))
+    .filter(({ record }) => record.paymentEvidence.amount != null);
+  const fePaymentRecords = paymentRecords.filter(({ record }) => sourceSystemFor(record.sourceType, record.recordKind) === "financial_edge");
+  const hmisPaymentRecords = paymentRecords.filter(({ record }) => {
+    const system = sourceSystemFor(record.sourceType, record.recordKind);
+    return system === "hmis" || system === "caseworthy";
+  });
+  const feKeys = new Set(fePaymentRecords.map(({ record }) => reportPaymentKey(record)));
+  const matchedHmisKeys = new Set<string>();
 
   for (const packet of packets) {
     addRecordDiagnostics(findings, packet);
@@ -384,7 +534,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       const customer = match.customer;
       const customerId = customer ? text(customer.id) : "";
       const name = recordNameKey(record);
-      const hasIdentity = Boolean(record.customerIdentity.hmisId || name);
+      const hasIdentity = Boolean(record.customerIdentity.caseworthyId || record.customerIdentity.hmisId || name);
 
       if (!customer && hasIdentity) {
         findings.push({
@@ -403,12 +553,12 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           explanation: [`${sourceLabel} row has a customer identity that was not found in dashboard cached customers.`],
           proposedAction: "Review customer identity and create or link the dashboard customer if appropriate.",
           reportRecord: record,
-          match: { criteria: ["No dashboard customer matched by dashboard ID, HMIS ID, name + DOB, or unique name."] },
+          match: { criteria: ["No dashboard customer matched by dashboard ID, CWID, HMIS ID, exact first + last name, first + last + DOB, or close first + last spelling."] },
         });
         continue;
       }
 
-      if (customer && match.confidence < 0.8) {
+      if (customer && match.confidence < 0.95) {
         findings.push({
           id: findingId("customer_possible_match", record, customerId),
           kind: "customer_possible_match",
@@ -552,6 +702,105 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       }
 
       if (record.paymentEvidence.amount != null) {
+        const isFinancialEdge = sourceSystem === "financial_edge";
+        const isHmisLike = sourceSystem === "hmis" || sourceSystem === "caseworthy";
+        if (!isFinancialEdge && !isHmisLike) continue;
+
+        if (isFinancialEdge) {
+          const hmisCandidates = findReportPaymentCandidates(record, hmisPaymentRecords.map((item) => item.record));
+          const bestHmis = hmisCandidates[0];
+          if (!bestHmis) {
+            findings.push({
+              id: findingId("payment_missing_hmis", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
+              kind: "payment_missing_hmis",
+              sourceSystem,
+              sourceSystemLabel: sourceLabel,
+              severity: "error",
+              confidence: 0.78,
+              sourceFile: record.sourceFile,
+              sourceProfileId: packet.profileId,
+              sourceProfileLabel: packet.profileLabel,
+              sourceRowNumber: record.sourceRowNumber,
+              recordKind: record.recordKind,
+              customerId: customerId || undefined,
+              customerLabel: customer ? customerLabel(customer) : undefined,
+              reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
+              explanation: ["Financial Edge has this payment in the selected date frame, but no HMIS/Caseworthy service row matched by name/ID, amount, and month."],
+              proposedAction: "Enter or correct the HMIS/Caseworthy service/payment row, or document why FE should be corrected.",
+              reportRecord: record,
+              matchedCustomer: customer ?? undefined,
+              match: {
+                criteria: ["FE is source of truth for payment reconciliation.", "No HMIS/Caseworthy row matched by name/ID + service month + amount."],
+                customerMethod: match.method || undefined,
+                customerConfidence: match.confidence || undefined,
+                paymentCandidateCount: 0,
+              },
+            });
+          } else {
+            matchedHmisKeys.add(reportPaymentKey(bestHmis.record));
+            const amountDiff = Number(bestHmis.amountDiffCents);
+            if (Number.isFinite(amountDiff) && Math.abs(amountDiff) > 1) {
+              findings.push({
+                id: findingId("payment_amount_mismatch", record, `hmis:${bestHmis.record.sourceFile}:${bestHmis.record.sourceRowNumber}`),
+                kind: "payment_amount_mismatch",
+                sourceSystem,
+                sourceSystemLabel: sourceLabel,
+                severity: "warning",
+                confidence: Math.min(0.95, bestHmis.score / 100),
+                sourceFile: record.sourceFile,
+                sourceProfileId: packet.profileId,
+                sourceProfileLabel: packet.profileLabel,
+                sourceRowNumber: record.sourceRowNumber,
+                recordKind: record.recordKind,
+                customerId: customerId || undefined,
+                customerLabel: customer ? customerLabel(customer) : undefined,
+                reportValue: String(record.paymentEvidence.amount),
+                dashboardValue: String(bestHmis.record.paymentEvidence.amount ?? ""),
+                explanation: ["Financial Edge and HMIS/Caseworthy appear to describe the same payment, but the amounts differ."],
+                proposedAction: "Correct the HMIS/Caseworthy amount or verify FE needs correction.",
+                reportRecord: record,
+                matchedCustomer: customer ?? undefined,
+                match: {
+                  criteria: ["FE is source of truth for payment reconciliation.", ...bestHmis.reasons, ...bestHmis.warnings],
+                  customerMethod: match.method || undefined,
+                  customerConfidence: match.confidence || undefined,
+                  paymentCandidateCount: hmisCandidates.length,
+                },
+              });
+            }
+          }
+        }
+
+        if (isHmisLike && !feKeys.has(reportPaymentKey(record)) && !matchedHmisKeys.has(reportPaymentKey(record))) {
+          findings.push({
+            id: findingId("payment_missing_financial_edge", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
+            kind: "payment_missing_financial_edge",
+            sourceSystem,
+            sourceSystemLabel: sourceLabel,
+            severity: "warning",
+            confidence: 0.65,
+            sourceFile: record.sourceFile,
+            sourceProfileId: packet.profileId,
+            sourceProfileLabel: packet.profileLabel,
+            sourceRowNumber: record.sourceRowNumber,
+            recordKind: record.recordKind,
+            customerId: customerId || undefined,
+            customerLabel: customer ? customerLabel(customer) : undefined,
+            reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
+            explanation: [`${sourceLabel} has a payment/service row in the selected date frame, but no FE row matched. This is often stale data entry after a cancelled payment.`],
+            proposedAction: "Verify whether the payment was cancelled; remove/correct HMIS/Caseworthy data entry if FE is correct.",
+            reportRecord: record,
+            matchedCustomer: customer ?? undefined,
+            match: {
+              criteria: ["HMIS/Caseworthy row did not match a Financial Edge row by name/ID + service month + amount."],
+              customerMethod: match.method || undefined,
+              customerConfidence: match.confidence || undefined,
+            },
+          });
+          continue;
+        }
+
+        if (!isFinancialEdge) continue;
         const dashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
         const candidates = findPaymentCandidates(record, dashboardPaymentRows, customerId || undefined);
         if (!candidates.length) {

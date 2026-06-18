@@ -17,9 +17,31 @@ export type ReportSourceProfile = {
   recordKind: string;
   active: boolean;
   fields: Record<string, ReportFieldProfile>;
+  excludeRules?: ReportExcludeRule[];
   notes?: string;
   sourceAliases?: string[];
   schemaVersion?: number;
+};
+
+export type ReportExcludeOperator =
+  | "contains"
+  | "not_contains"
+  | "equals"
+  | "not_equals"
+  | "regex"
+  | "not_regex"
+  | "is_blank"
+  | "is_not_blank"
+  | "amount_zero_or_blank";
+
+export type ReportExcludeRule = {
+  id: string;
+  label: string;
+  fieldKey: string;
+  operator: ReportExcludeOperator;
+  value?: string;
+  flags?: string;
+  enabled?: boolean;
 };
 
 export type ReportDiagnosticSeverity = "info" | "warning" | "error";
@@ -81,6 +103,7 @@ export type ReconciliationPacketSummary = {
   recordKind: string;
   totalRows: number;
   normalizedRows: number;
+  excludedRows?: number;
   diagnosticCount: number;
   requiredMissingCount: number;
 };
@@ -152,6 +175,31 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
       serviceCode: { required: false, aliases: ["Service Code", "Code"] },
       serviceDescription: { required: false, aliases: ["Service Code Description", "Service Description", "Description"] },
     },
+    excludeRules: [
+      {
+        id: "hmis_amount_zero_or_blank",
+        label: "Blank or $0 amount",
+        fieldKey: "amount",
+        operator: "amount_zero_or_blank",
+        enabled: true,
+      },
+      {
+        id: "hmis_service_code_case_management",
+        label: "Service code contains case management",
+        fieldKey: "serviceCode",
+        operator: "contains",
+        value: "case management",
+        enabled: true,
+      },
+      {
+        id: "hmis_service_description_case_management",
+        label: "Service description contains case management",
+        fieldKey: "serviceDescription",
+        operator: "contains",
+        value: "case management",
+        enabled: true,
+      },
+    ],
   },
   {
     id: "financial_edge_project_activity",
@@ -168,6 +216,24 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
       amount: { required: true, type: "money", aliases: ["Balance", "Amount", "Transaction Amount", "Debit", "Credit"] },
       providerId: { required: false, type: "grant", aliases: ["Provider Id", "Provider ID", "Project", "Grant"] },
     },
+    excludeRules: [
+      {
+        id: "fe_amount_zero_or_blank",
+        label: "Blank or $0 amount",
+        fieldKey: "amount",
+        operator: "amount_zero_or_blank",
+        enabled: true,
+      },
+      {
+        id: "fe_admin_payroll_allocation_description",
+        label: "Admin, payroll, benefit, or allocation description",
+        fieldKey: "description",
+        operator: "regex",
+        value: "\\b(payroll|wages?|salary|fica|pto|medical insurance|dental|disability|hsa|ad&d|work comp|unemployment|401k|space allocation|communication allocation|allocation)\\b",
+        flags: "i",
+        enabled: true,
+      },
+    ],
   },
   {
     id: "coordinated_entry_by_name_list",
@@ -189,20 +255,45 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
     },
   },
   {
-    id: "caseworthy_service_report",
-    label: "Caseworthy Service Report",
-    recordKind: "caseworthyService",
-    active: false,
+    id: "caseworthy_service_detail",
+    label: "Caseworthy Service — Account Specifics (detail)",
+    recordKind: "caseworthyServiceDetail",
+    active: true,
     schemaVersion: 1,
-    notes: "Placeholder for future Caseworthy service exports once safe sample report shapes are available.",
+    notes: "Caseworthy ClientsServedDetail export: one row per service event per client (with a service description + date). Account/grant comes from the report parameters, not the rows. Auto-detected by caseworthyInterpreter.",
+    sourceAliases: ["caseworthy", "clients served", "service detail", "hrdc"],
     fields: {
-      caseworthyId: { required: false, type: "identity", aliases: ["Caseworthy ID", "CW ID", "Client ID", "Client Id"] },
-      firstName: { required: false, type: "identity", aliases: ["First Name", "Given Name"] },
-      lastName: { required: false, type: "identity", aliases: ["Last Name", "Surname"] },
-      serviceDate: { required: false, type: "date", aliases: ["Service Date", "Date", "Start Date"] },
-      serviceName: { required: false, aliases: ["Service", "Service Name", "Description"] },
-      amount: { required: false, type: "money", aliases: ["Amount", "Cost", "Total"] },
-      grant: { required: false, type: "grant", aliases: ["Grant", "Program", "Project"] },
+      caseworthyId: { required: true, type: "identity", aliases: ["ClientID3", "ClientID", "Client ID", "Client Id"] },
+      lastName: { required: true, type: "identity", aliases: ["LastName2", "LastName", "Last Name", "Surname"] },
+      firstName: { required: true, type: "identity", aliases: ["Textbox98", "FirstName", "First Name", "Given Name"] },
+      dob: { required: false, type: "date", aliases: ["BirthDate2", "BirthDate", "Date of Birth", "DOB"] },
+      serviceName: { required: true, aliases: ["Description2", "Service", "Service Name", "Description"] },
+      serviceDate: { required: true, type: "date", aliases: ["ServiceBeginDate4", "Service Begin Date", "Service Date", "Date"] },
+      caseManager: { required: false, aliases: ["CaseManager2", "Case Manager", "CaseManager"] },
+      amount: { required: true, type: "money", aliases: ["ServiceTotal6", "Service Total", "Amount", "Cost"] },
+      address: { required: false, aliases: ["Textbox47", "Address"] },
+      grant: { required: false, type: "grant", aliases: ["AccountList", "Account", "Grant", "Program"] },
+    },
+  },
+  {
+    id: "caseworthy_service_total",
+    label: "Caseworthy Service — Organization Total (per-client)",
+    recordKind: "caseworthyServiceTotal",
+    active: true,
+    schemaVersion: 1,
+    notes: "Caseworthy ClientsServedTotalDetail export: one row per client with per-client totals plus a repeated org grand total; no service dates. Account/grant comes from the report parameters. Auto-detected by caseworthyInterpreter.",
+    sourceAliases: ["caseworthy", "clients served total", "service total", "hrdc"],
+    fields: {
+      caseworthyId: { required: true, type: "identity", aliases: ["ClientID", "Client ID", "Client Id", "ClientID3"] },
+      lastName: { required: true, type: "identity", aliases: ["LastName", "Last Name", "LastName2", "Surname"] },
+      firstName: { required: true, type: "identity", aliases: ["FirstName", "First Name", "Textbox98", "Given Name"] },
+      dob: { required: false, type: "date", aliases: ["BirthDate", "Date of Birth", "DOB", "BirthDate2"] },
+      program: { required: true, type: "grant", aliases: ["ProgramName1", "Program Name", "Program"] },
+      region: { required: false, aliases: ["RegionName1", "Region"] },
+      caseManager: { required: false, aliases: ["CaseManager", "Case Manager", "CaseManager2"] },
+      amount: { required: true, type: "money", aliases: ["ServiceTotal2", "Service Total", "Amount"] },
+      units: { required: false, aliases: ["Units2", "Units"] },
+      grant: { required: false, type: "grant", aliases: ["AccountList", "Account", "Grant"] },
     },
   },
   {
@@ -295,6 +386,7 @@ export function normalizeReportProfiles(raw: unknown): ReportSourceProfile[] {
       recordKind: String(candidate.recordKind),
       active: candidate.active !== false,
       fields,
+      excludeRules: normalizeExcludeRules(candidate.excludeRules, []),
       notes: candidate.notes,
       sourceAliases: Array.isArray(candidate.sourceAliases) ? candidate.sourceAliases.map(String).filter(Boolean) : [],
       schemaVersion: Number(candidate.schemaVersion || 1),
@@ -420,6 +512,161 @@ function readRawValue(row: Record<string, unknown> | unknown[], match: HeaderMat
   return undefined;
 }
 
+const EXCLUDE_OPERATORS: ReportExcludeOperator[] = [
+  "contains",
+  "not_contains",
+  "equals",
+  "not_equals",
+  "regex",
+  "not_regex",
+  "is_blank",
+  "is_not_blank",
+  "amount_zero_or_blank",
+];
+
+function normalizeRuleText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactRuleText(value: unknown) {
+  return normalizeRuleText(value).replace(/[^a-z0-9]+/g, "");
+}
+
+export function normalizeExcludeRules(raw: unknown, fallback: ReportExcludeRule[] = []): ReportExcludeRule[] {
+  if (!Array.isArray(raw)) return fallback.map((rule) => ({ ...rule }));
+  const rules = raw.flatMap((item, index): ReportExcludeRule[] => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Partial<ReportExcludeRule>;
+    const operator = EXCLUDE_OPERATORS.includes(candidate.operator as ReportExcludeOperator)
+      ? candidate.operator as ReportExcludeOperator
+      : null;
+    if (!candidate.fieldKey || !operator) return [];
+    return [{
+      id: String(candidate.id || `exclude_rule_${index + 1}`),
+      label: String(candidate.label || candidate.id || `Exclude rule ${index + 1}`),
+      fieldKey: String(candidate.fieldKey),
+      operator,
+      value: candidate.value == null ? "" : String(candidate.value),
+      flags: candidate.flags == null ? undefined : String(candidate.flags).replace(/[^dgimsuvy]/g, ""),
+      enabled: candidate.enabled !== false,
+    }];
+  });
+  return rules.length ? rules : fallback.map((rule) => ({ ...rule }));
+}
+
+export function defaultExcludeRulesForProfile(profile: ReportSourceProfile): ReportExcludeRule[] {
+  return normalizeExcludeRules(profile.excludeRules, []);
+}
+
+function excludeRuleMatches(rule: ReportExcludeRule, value: unknown) {
+  const raw = String(value ?? "");
+  const text = normalizeRuleText(raw);
+  const expected = normalizeRuleText(rule.value);
+  const compactText = compactRuleText(raw);
+  const compactExpected = compactRuleText(rule.value);
+  if (rule.operator === "is_blank") return !text;
+  if (rule.operator === "is_not_blank") return Boolean(text);
+  if (rule.operator === "amount_zero_or_blank") {
+    const amount = normalizeAmount(value);
+    return amount == null || Math.abs(amount) < 0.005;
+  }
+  if (rule.operator === "contains") {
+    if (!expected) return false;
+    return text.includes(expected) || Boolean(compactExpected && compactText.includes(compactExpected));
+  }
+  if (rule.operator === "not_contains") {
+    if (!expected) return false;
+    return !text.includes(expected) && !(compactExpected && compactText.includes(compactExpected));
+  }
+  if (rule.operator === "equals") return text === expected;
+  if (rule.operator === "not_equals") return text !== expected;
+  if (rule.operator === "regex" || rule.operator === "not_regex") {
+    if (!rule.value) return false;
+    try {
+      const regex = new RegExp(rule.value, rule.flags || "i");
+      const matched = regex.test(raw);
+      return rule.operator === "regex" ? matched : !matched;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+export type ReportFilterEvaluation = {
+  excluded: boolean;
+  matchedRuleIds: string[];
+  matchedRuleLabels: string[];
+  values: Record<string, unknown>;
+};
+
+export type ReportFilterRow = ReportFilterEvaluation & {
+  row: unknown[];
+  rowIndex: number;
+  sourceRowNumber: number | null;
+};
+
+export function evaluateExcludeRules(
+  profile: ReportSourceProfile,
+  headers: unknown[],
+  row: Record<string, unknown> | unknown[],
+  overrides?: FieldColumnOverrides,
+  rules: ReportExcludeRule[] = defaultExcludeRulesForProfile(profile),
+): ReportFilterEvaluation {
+  const normalizedRules = normalizeExcludeRules(rules, []);
+  const enabledRules = normalizedRules.filter((rule) => rule.enabled !== false);
+  const { matches } = matchProfileHeaders(profile, headers, overrides);
+  const matchMap = new Map(matches.map((match) => [match.fieldKey, match]));
+  const values: Record<string, unknown> = {};
+  for (const rule of enabledRules) {
+    const match = matchMap.get(rule.fieldKey);
+    values[rule.fieldKey] = match ? readRawValue(row, match) : undefined;
+  }
+  const matched = enabledRules.filter((rule) => excludeRuleMatches(rule, values[rule.fieldKey]));
+  return {
+    excluded: matched.length > 0,
+    matchedRuleIds: matched.map((rule) => rule.id),
+    matchedRuleLabels: matched.map((rule) => rule.label),
+    values,
+  };
+}
+
+export function filterReportRows({
+  profile,
+  headers,
+  rows,
+  headerRowIndex,
+  fieldOverrides,
+  excludeRules,
+}: {
+  profile: ReportSourceProfile;
+  headers: unknown[];
+  rows: unknown[][];
+  headerRowIndex: number;
+  fieldOverrides?: FieldColumnOverrides;
+  excludeRules?: ReportExcludeRule[];
+}): { included: ReportFilterRow[]; excluded: ReportFilterRow[]; all: ReportFilterRow[] } {
+  const rules = normalizeExcludeRules(excludeRules, defaultExcludeRulesForProfile(profile));
+  const all = rows.map((row, index) => {
+    const evaluation = evaluateExcludeRules(profile, headers, row, fieldOverrides, rules);
+    return {
+      row,
+      rowIndex: index,
+      sourceRowNumber: headerRowIndex + index + 2,
+      ...evaluation,
+    };
+  });
+  return {
+    included: all.filter((row) => !row.excluded),
+    excluded: all.filter((row) => row.excluded),
+    all,
+  };
+}
+
 export function normalizeReportRow(
   profile: ReportSourceProfile,
   headers: unknown[],
@@ -455,8 +702,8 @@ export function normalizeReportRow(
       dob: normalizeDate(values.get("dob")),
     },
     enrollmentEvidence: {
-      programId: String(values.get("programId") ?? values.get("providerId") ?? values.get("serviceProvider") ?? "").trim(),
-      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("grant") ?? serviceName).trim(),
+      programId: String(values.get("programId") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("program") ?? "").trim(),
+      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("program") ?? values.get("grant") ?? serviceName).trim(),
       entryDate: normalizeDate(values.get("entryDate") ?? values.get("projectEntryDate") ?? values.get("dateIdentified")),
       exitDate: normalizeDate(values.get("exitDate") ?? values.get("projectExitDate")),
       destination: String(values.get("destination") ?? "").trim(),
@@ -485,6 +732,7 @@ export function buildReconciliationPacket({
   sourceFile,
   headerRowIndex,
   fieldOverrides,
+  excludeRules,
 }: {
   profile: ReportSourceProfile;
   headers: unknown[];
@@ -492,14 +740,23 @@ export function buildReconciliationPacket({
   sourceFile: string;
   headerRowIndex: number;
   fieldOverrides?: FieldColumnOverrides;
+  excludeRules?: ReportExcludeRule[];
 }): ReconciliationPacket {
   const normalizedHeaders = headers.map((header) => String(header ?? ""));
   const headerResult = matchProfileHeaders(profile, normalizedHeaders, fieldOverrides);
-  const records = rows.map((row, index) =>
-    normalizeReportRow(profile, normalizedHeaders, row, {
+  const filtered = filterReportRows({
+    profile,
+    headers: normalizedHeaders,
+    rows,
+    headerRowIndex,
+    fieldOverrides,
+    excludeRules,
+  });
+  const records = filtered.included.map((filterRow) =>
+    normalizeReportRow(profile, normalizedHeaders, filterRow.row, {
       sourceType: profile.id,
       sourceFile,
-      sourceRowNumber: headerRowIndex + index + 2,
+      sourceRowNumber: filterRow.sourceRowNumber,
     }, fieldOverrides),
   );
   const rowDiagnostics = records.flatMap((record) => record.diagnostics);
@@ -518,6 +775,7 @@ export function buildReconciliationPacket({
       recordKind: profile.recordKind,
       totalRows: rows.length,
       normalizedRows: records.length,
+      excludedRows: filtered.excluded.length,
       diagnosticCount: diagnostics.length,
       requiredMissingCount: headerResult.diagnostics.filter((diagnostic) => diagnostic.code === "required_header_missing").length,
     },

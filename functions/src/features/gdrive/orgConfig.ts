@@ -109,6 +109,25 @@ function normalizeSheetRef(input: string): NormalizedDriveTarget | null {
   };
 }
 
+/**
+ * Best-effort Drive file-id extractor for template source files. Accepts a bare
+ * id or any Google Workspace URL (Sheets/Docs/Slides/Drive file/folder/?id=) so a
+ * hand-edited org config doc can paste either form. Falls back to the trimmed
+ * input when nothing matches, preserving prior behavior for already-id values.
+ */
+function extractDriveFileId(input: unknown): string {
+  const trimmed = String(input ?? "").trim();
+  if (!trimmed) return "";
+  const byPath =
+    trimmed.match(/\/spreadsheets\/d\/([-\w]{20,})/i)?.[1] ||
+    trimmed.match(/\/document\/d\/([-\w]{20,})/i)?.[1] ||
+    trimmed.match(/\/presentation\/d\/([-\w]{20,})/i)?.[1] ||
+    trimmed.match(/\/file\/d\/([-\w]{20,})/i)?.[1] ||
+    trimmed.match(/\/folders\/([-\w]{20,})/i)?.[1] ||
+    trimmed.match(/[?&]id=([-\w]{20,})/i)?.[1];
+  return byPath || trimmed;
+}
+
 function assertValidRef(
   value: string | null | undefined,
   kind: "folder" | "sheet",
@@ -155,11 +174,12 @@ const VALID_TEMPLATE_TYPES = new Set<string>(["doc", "sheet", "pdf", "folder", "
 function normalizeTemplate(raw: unknown): GDriveTemplate | null {
   const data = asRecord(raw);
   const key = String(data.key ?? "").trim();
-  const fileId = String(data.fileId ?? "").trim();
+  // fileId/variants accept a bare id OR a pasted Drive URL (hand-edited doc).
+  const fileId = extractDriveFileId(data.fileId);
   const alias = String(data.alias ?? "").trim();
   const variantsRaw = asRecord(data.variants);
-  const payer = String(variantsRaw.payer ?? "").trim();
-  const nonpayer = String(variantsRaw.nonpayer ?? "").trim();
+  const payer = extractDriveFileId(variantsRaw.payer);
+  const nonpayer = extractDriveFileId(variantsRaw.nonpayer);
   const hasVariants = !!(payer || nonpayer);
   // A template is valid with either a direct fileId or a payer/non-payer pair.
   if (!key || !alias || (!fileId && !hasVariants)) return null;

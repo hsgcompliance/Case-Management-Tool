@@ -4,7 +4,9 @@ import React from "react";
 import {
   DEFAULT_REPORT_SOURCE_PROFILES,
   buildReconciliationPacket,
+  defaultExcludeRulesForProfile,
   deriveHeadersAndRows,
+  normalizeExcludeRules,
   type ReconciliationPacket,
   type ReportSourceProfile,
 } from "./reportProfiles";
@@ -20,7 +22,8 @@ const ACTIVE_PROFILE_IDS = [
   "rental_assistance_invoice_request",
   "coordinated_entry_by_name_list",
   "hmis_service_payment_report",
-  "caseworthy_service_report",
+  "caseworthy_service_detail",
+  "caseworthy_service_total",
 ] as const;
 
 type ReconciliationWorkspaceValue = {
@@ -57,6 +60,7 @@ function buildPacketForUpload(
 ): ReconciliationPacket {
   const profile = profiles.find((item) => item.id === config.profileId) ?? profiles[0];
   const { headers, dataRows, headerRowIndex } = deriveHeadersAndRows(allRows, config.headerRowIndex);
+  const excludeRules = normalizeExcludeRules(config.excludeRules, defaultExcludeRulesForProfile(profile));
   return buildReconciliationPacket({
     profile,
     headers,
@@ -64,6 +68,7 @@ function buildPacketForUpload(
     sourceFile: fileName,
     headerRowIndex,
     fieldOverrides: config.fieldOverrides,
+    excludeRules,
   });
 }
 
@@ -72,10 +77,12 @@ function uploadSourceLabel(upload: Pick<ReportUpload, "fileName" | "sheetName">)
 }
 
 function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedReportPreview): ReportUpload {
+  const profile = preview.profileCandidates[0]?.profile ?? profiles[0];
   const config: ReportUploadConfig = {
-    profileId: preview.profileCandidates[0]?.profile.id ?? profiles[0]?.id ?? "",
+    profileId: profile?.id ?? "",
     headerRowIndex: preview.headerRowIndex,
     fieldOverrides: {},
+    excludeRules: profile ? defaultExcludeRulesForProfile(profile) : [],
   };
   return {
     id: `${preview.fileName}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
@@ -85,6 +92,8 @@ function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedRepor
     enabled: preview.recommendedEnabled,
     sheetRole: preview.sheetRole,
     sheetReason: preview.sheetReason,
+    reportVariant: preview.reportVariant,
+    reportMetadata: preview.reportMetadata,
     allRows: preview.allRows,
     profileCandidates: preview.profileCandidates.map((candidate) => ({ profile: candidate.profile, score: candidate.score })),
     config,

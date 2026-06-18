@@ -342,6 +342,7 @@ export const endpointsLoose = {
   listCustomerFolderWorkbookCandidates:     { method: 'GET',  path: 'listCustomerFolderWorkbookCandidates' },
   attachCustomerWorkbookCandidate:          { method: 'POST', path: 'attachCustomerWorkbookCandidate' },
   convertCustomerWorkbookXlsx:              { method: 'POST', path: 'convertCustomerWorkbookXlsx' },
+  copyCustomerWorkbookFromTemplate:         { method: 'POST', path: 'copyCustomerWorkbookFromTemplate' },
   getWorkbookData:                          { method: 'GET',  path: 'getWorkbookData' },
   appendCustomerWorkbookRow:                { method: 'POST', path: 'appendCustomerWorkbookRow' },
 

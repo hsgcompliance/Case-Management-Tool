@@ -73,7 +73,12 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
       });
     }
   }
-  if (finding.kind === "payment_missing_dashboard" || finding.kind === "payment_possible_match") {
+  if (
+    finding.kind === "payment_missing_dashboard" ||
+    finding.kind === "payment_missing_hmis" ||
+    finding.kind === "payment_missing_financial_edge" ||
+    finding.kind === "payment_possible_match"
+  ) {
     out.push({
       id: `${finding.id}:payment-review-task`,
       label: "Create payment reconciliation task",
@@ -81,9 +86,13 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
       targetId: finding.customerId,
       sourceValue: finding.reportValue || text(record?.paymentEvidence.reference),
       currentValue: finding.dashboardValue || "(no dashboard match)",
-      proposedValue: "Task for finance review",
+      proposedValue: finding.kind === "payment_missing_hmis"
+        ? "Task for HMIS/Caseworthy entry review"
+        : finding.kind === "payment_missing_financial_edge"
+          ? "Task for stale/cancelled payment data-entry review"
+          : "Task for finance review",
       confidence: finding.confidence,
-      warning: "Payment queue/ledger writes are not enabled from this workbench yet.",
+      warning: "Payment/HMIS writeback is not enabled from this workbench yet.",
     });
   }
   return out;

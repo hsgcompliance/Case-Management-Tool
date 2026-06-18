@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { qk } from "@hooks/queryKeys";
 import type { User } from "firebase/auth";
-import type { TCmActivityCreateBody } from "@hdb/contracts";
+import type { TCmActivity, TCmActivityCreateBody } from "@hdb/contracts";
 
 function resolveOrgId(claims: Record<string, unknown>): string | undefined {
   // Mirror orgIdFromClaims() in functions/src/core/org.ts — supports all claim shapes.
@@ -44,17 +44,67 @@ async function createActivity(user: User, body: TCmActivityCreateBody): Promise<
     endTime: body.endTime ?? null,
     note: body.note ?? null,
     calendarSynced: false,
+    workbookSynced: false,
     createdAt: serverTimestamp(),
   });
   return ref.id;
 }
 
+/**
+ * Flag a session as synced to the customer's TSS workbook. Called after the
+ * progress-note push returns success so the session doc records the outcome
+ * (mirrors calendarSynced/calendarEventId). Non-fatal — a flag write failure
+ * must not undo a successful workbook append.
+ */
+export async function markSessionWorkbookSynced(sessionId: string, rowKey?: string): Promise<void> {
+  await updateDoc(doc(db, "cmActivities", sessionId), {
+    workbookSynced: true,
+    workbookSyncedAt: new Date().toISOString(),
+    ...(rowKey ? { workbookRowKey: rowKey } : {}),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+type OptimisticContext = {
+  key: readonly unknown[];
+  previous: TCmActivity[] | undefined;
+};
+
 export function useCreateActivity(user: User | null) {
   const qc = useQueryClient();
-  return useMutation({
+  return useMutation<string, Error, TCmActivityCreateBody, OptimisticContext | undefined>({
     mutationFn: (body: TCmActivityCreateBody) => createActivity(user!, body),
-    onSuccess: () => {
-      // Invalidate all cmActivities for this user (feed + customer sessions).
+    // Optimistically insert the session into the customer's list so it shows up
+    // immediately — no waiting on the Firestore round-trip or the calendar /
+    // workbook pushes that follow.
+    onMutate: async (body): Promise<OptimisticContext | undefined> => {
+      if (!user) return undefined;
+      const key = qk.cmActivities.byCustomer(user.uid, body.customerId);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<TCmActivity[]>(key);
+      const optimistic = {
+        id: `optimistic-${Date.now()}`,
+        caseManagerId: user.uid,
+        caseManagerName: user.displayName ?? "",
+        customerId: body.customerId,
+        customerName: body.customerName ?? "",
+        type: body.type,
+        date: body.date,
+        startTime: body.startTime ?? undefined,
+        endTime: body.endTime ?? undefined,
+        note: body.note ?? undefined,
+        calendarSynced: false,
+        createdAt: new Date().toISOString(),
+      } as TCmActivity;
+      qc.setQueryData<TCmActivity[]>(key, (old) => [optimistic, ...(old ?? [])]);
+      return { key, previous };
+    },
+    onError: (_err, _body, ctx) => {
+      // Roll back the optimistic insert on failure.
+      if (ctx?.key) qc.setQueryData(ctx.key, ctx.previous);
+    },
+    onSettled: () => {
+      // Reconcile with the server (feed + customer sessions) on success or error.
       qc.invalidateQueries({ queryKey: qk.cmActivities.root });
     },
   });

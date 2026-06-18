@@ -11,6 +11,7 @@ import {
   listFolderCandidates,
   attachWorkbookCandidate,
   convertXlsxAndAttach,
+  copyWorkbookFromTemplate,
 } from "./workbookService";
 import { ScopeMissingError } from "./service";
 import {
@@ -232,6 +233,56 @@ export const convertCustomerWorkbookXlsx = secureHandler(
     // the floor the other workbook endpoints use.
     memory: "512MiB",
     timeoutSeconds: 60,
+  },
+);
+
+// ── POST copyCustomerWorkbookFromTemplate ────────────────────────────────────
+// Copies the org's configured TSS workbook template (payer / non-payer variant)
+// into the customer's existing Drive folder and links it as the TSS workbook.
+// Source file ids are resolved server-side from org config — the client only
+// chooses the variant.
+
+const CopyFromTemplateBody = z.object({
+  customerId: z.string().min(1),
+  variant: z.enum(["payer", "nonpayer"]),
+  enrollmentId: z.string().optional(),
+});
+
+export const copyCustomerWorkbookFromTemplate = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+
+    try {
+      const body = CopyFromTemplateBody.parse(req.body ?? {});
+      const result = await copyWorkbookFromTemplate({
+        customerId: body.customerId,
+        uid,
+        orgId,
+        variant: body.variant,
+        enrollmentId: body.enrollmentId,
+        googleAccessToken: readGoogleAccessToken(req),
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      const isZod = err?.name === "ZodError";
+      const msg = isZod ? "invalid_request" : String(err?.message || "tss_template_copy_failed");
+      const code = isZod ? 400 : Number(err?.code);
+      res.status(isZod ? 400 : (Number.isFinite(code) && code >= 400 && code <= 599 ? code : 500)).json({
+        ok: false,
+        error: msg,
+      });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    // googleapis barrel + files.copy peaks >256MiB → opaque 500. 512 floor.
+    memory: "512MiB",
+    timeoutSeconds: 120,
   },
 );
 

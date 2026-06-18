@@ -13,6 +13,7 @@ export type TriState = "any" | "yes" | "no";
 
 export type CustomerFilters = {
   enabled: boolean;
+  search: string;
   status: "any" | "active" | "inactive";
   includeDeleted: boolean;
   caseload: "any" | "active" | "inactive";
@@ -26,6 +27,7 @@ export type CustomerFilters = {
 
 export type EnrollmentFilters = {
   enabled: boolean;
+  search: string;
   status: "any" | "active" | "closed";
   includeDeleted: boolean;
   exitDate: TriState;
@@ -38,6 +40,7 @@ export type EnrollmentFilters = {
 
 export type GrantFilters = {
   enabled: boolean;
+  search: string;
   status: "any" | "active" | "inactive";
   includeDeleted: boolean;
   grantType: string;
@@ -48,6 +51,7 @@ export type GrantFilters = {
 
 export type PaymentQueueFilters = {
   enabled: boolean;
+  search: string;
   queueStatus: "any" | "pending" | "posted" | "void";
   source: "any" | "credit-card" | "invoice" | "projection" | "unknown";
   matched: "any" | "matched" | "unmatched";
@@ -62,6 +66,7 @@ export type PaymentQueueFilters = {
 
 export type LedgerFilters = {
   enabled: boolean;
+  search: string;
   paidStatus: "any" | "paid" | "unpaid";
   source: "any" | "enrollment" | "manual" | "card" | "migration" | "adjustment" | "system";
   direction: "any" | "charge" | "return";
@@ -87,6 +92,7 @@ export type DatabaseCollectionKey = keyof DatabaseFilterConfig;
 export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
   customers: {
     enabled: true,
+    search: "",
     status: "any",
     includeDeleted: false,
     caseload: "any",
@@ -99,6 +105,7 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
   },
   enrollments: {
     enabled: true,
+    search: "",
     status: "any",
     includeDeleted: false,
     exitDate: "any",
@@ -110,6 +117,7 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
   },
   grants: {
     enabled: true,
+    search: "",
     status: "any",
     includeDeleted: false,
     grantType: "",
@@ -119,6 +127,7 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
   },
   paymentQueue: {
     enabled: true,
+    search: "",
     queueStatus: "any",
     source: "any",
     matched: "any",
@@ -132,6 +141,7 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
   },
   ledger: {
     enabled: true,
+    search: "",
     paidStatus: "any",
     source: "any",
     direction: "any",
@@ -154,6 +164,11 @@ const num = (v: unknown) => {
   return Number.isFinite(n) ? n : null;
 };
 const has = (v: unknown) => str(v).length > 0;
+const includesSearch = (query: string, values: unknown[]) => {
+  const q = lower(query);
+  if (!q) return true;
+  return values.some((value) => lower(value).includes(q));
+};
 
 function isActiveLike(row: Row) {
   if (row.deleted === true) return false;
@@ -171,6 +186,19 @@ function triPass(state: TriState, present: boolean) {
 // ── per-collection predicates ─────────────────────────────────────────────────
 function customerPasses(c: Row, f: CustomerFilters): boolean {
   if (!f.includeDeleted && c.deleted === true) return false;
+  if (!includesSearch(f.search, [
+    c.id,
+    c.firstName,
+    c.lastName,
+    c.fullName,
+    c.name,
+    c.alias,
+    c.hmisId,
+    c.HMISId,
+    c.caseworthyId,
+    c.cwId,
+    c.caseManagerName,
+  ])) return false;
   if (f.status === "active" && !isActiveLike(c)) return false;
   if (f.status === "inactive" && isActiveLike(c)) return false;
   const caseloadActive = c.caseloadActive === true || Number(c.caseloadActive) > 0;
@@ -190,6 +218,18 @@ function customerPasses(c: Row, f: CustomerFilters): boolean {
 
 function enrollmentPasses(e: Row, f: EnrollmentFilters): boolean {
   if (!f.includeDeleted && e.deleted === true) return false;
+  if (!includesSearch(f.search, [
+    e.id,
+    e.customerId,
+    e.customerName,
+    e.name,
+    e.grantId,
+    e.grantName,
+    e.programId,
+    e.programName,
+    e.projectName,
+    e.caseManagerName,
+  ])) return false;
   const hasExit = has(e.exitDate ?? e.endDate ?? e.closedAt);
   const closed = hasExit || !isActiveLike(e);
   if (f.status === "active" && closed) return false;
@@ -209,6 +249,18 @@ function enrollmentPasses(e: Row, f: EnrollmentFilters): boolean {
 
 function grantPasses(g: Row, f: GrantFilters): boolean {
   if (!f.includeDeleted && g.deleted === true) return false;
+  if (!includesSearch(f.search, [
+    g.id,
+    g.name,
+    g.grantName,
+    g.label,
+    g.title,
+    g.type,
+    g.kind,
+    g.grantType,
+    g.category,
+    g.fiscalYear,
+  ])) return false;
   if (f.status === "active" && !isActiveLike(g)) return false;
   if (f.status === "inactive" && isActiveLike(g)) return false;
   if (f.grantType) {
@@ -226,6 +278,21 @@ function grantPasses(g: Row, f: GrantFilters): boolean {
 }
 
 function paymentQueuePasses(p: Row, f: PaymentQueueFilters): boolean {
+  if (!includesSearch(f.search, [
+    p.id,
+    p.customerId,
+    p.customerName,
+    p.customerNameAtSpend,
+    p.vendor,
+    p.merchant,
+    p.payee,
+    p.landlord,
+    p.grantId,
+    p.grantName,
+    p.description,
+    p.note,
+    p.notes,
+  ])) return false;
   if (f.queueStatus !== "any" && lower(p.queueStatus) !== f.queueStatus) return false;
   if (f.source !== "any" && lower(p.source) !== f.source) return false;
   const matched = has(p.grantId);
@@ -245,6 +312,21 @@ function paymentQueuePasses(p: Row, f: PaymentQueueFilters): boolean {
 }
 
 function ledgerPasses(l: Row, f: LedgerFilters): boolean {
+  if (!includesSearch(f.search, [
+    l.id,
+    l.customerId,
+    l.customerName,
+    l.vendor,
+    l.merchant,
+    l.payee,
+    l.landlord,
+    l.grantId,
+    l.grantName,
+    l.description,
+    l.note,
+    l.notes,
+    l.reference,
+  ])) return false;
   if (f.source !== "any" && lower(l.source) !== f.source) return false;
   const paid = l.paid === true || has(l.paidAt) || has(l.origin && typeof l.origin === "object" ? (l.origin as Row).paymentQueueId : null);
   if (f.paidStatus === "paid" && !paid) return false;

@@ -14,7 +14,10 @@ export type ReviewExportDialogProps<T> = {
   rows: T[];
   columns: ExportColumn<T>[];
   filenameBase: string;
+  mainSheetTitle?: string;
   summaryRows?: unknown[][];
+  extraCsvFiles?: Array<{ filenameBase: string; csv: string; label: string }>;
+  extraSheetTabs?: Array<{ title: string; values: unknown[][] }>;
   onClose: () => void;
 };
 
@@ -25,7 +28,10 @@ export function ReviewExportDialog<T>({
   rows,
   columns,
   filenameBase,
+  mainSheetTitle = "Findings",
   summaryRows,
+  extraCsvFiles,
+  extraSheetTabs,
   onClose,
 }: ReviewExportDialogProps<T>) {
   const [exportingSheet, setExportingSheet] = React.useState(false);
@@ -33,8 +39,9 @@ export function ReviewExportDialog<T>({
 
   const download = React.useCallback(() => {
     downloadCsv(csv, filenameBase);
+    for (const file of extraCsvFiles ?? []) downloadCsv(file.csv, file.filenameBase);
     toast(`Downloaded ${rows.length} export rows`, { type: "success" });
-  }, [csv, filenameBase, rows.length]);
+  }, [csv, extraCsvFiles, filenameBase, rows.length]);
 
   const exportSheet = React.useCallback(async () => {
     const accessToken = getGoogleDriveAccessToken();
@@ -46,7 +53,8 @@ export function ReviewExportDialog<T>({
     try {
       const stamp = new Date().toISOString().slice(0, 10);
       const tabs = [
-        { title: "Findings", values: exportColumnsToValues(rows, columns) },
+        { title: mainSheetTitle, values: exportColumnsToValues(rows, columns) },
+        ...(extraSheetTabs ?? []),
         ...(summaryRows?.length ? [{ title: "Summary", values: summaryRows }] : []),
       ];
       const result = await createGoogleSheetWithTabs({
@@ -61,7 +69,7 @@ export function ReviewExportDialog<T>({
     } finally {
       setExportingSheet(false);
     }
-  }, [columns, rows, summaryRows, title]);
+  }, [columns, extraSheetTabs, mainSheetTitle, rows, summaryRows, title]);
 
   return (
     <FullPageModal
@@ -87,6 +95,7 @@ export function ReviewExportDialog<T>({
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
             CSV exports stay local. Google Sheets export requires the existing temporary Drive access path and opens the created Sheet in a new tab.
+            {extraCsvFiles?.length ? ` This export downloads ${extraCsvFiles.length + 1} CSV files.` : ""}
           </div>
         </div>
       }
@@ -95,14 +104,21 @@ export function ReviewExportDialog<T>({
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="text-lg font-semibold text-slate-950">CSV</div>
-              <p className="mt-1 text-sm text-slate-500">Download a local CSV for audit review, filtering, or upload into another workbook.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Download local CSV file{extraCsvFiles?.length ? "s" : ""} for audit review, filtering, or upload into another workbook.
+              </p>
               <button type="button" className="btn btn-primary btn-sm mt-4" onClick={download} disabled={!rows.length}>
-                Download CSV
+                {extraCsvFiles?.length ? `Download ${extraCsvFiles.length + 1} CSVs` : "Download CSV"}
               </button>
+              {extraCsvFiles?.length ? (
+                <div className="mt-3 text-xs text-slate-500">
+                  Includes {extraCsvFiles.map((file) => file.label).join(", ")}.
+                </div>
+              ) : null}
             </section>
             <section className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="text-lg font-semibold text-slate-950">Google Sheets</div>
-              <p className="mt-1 text-sm text-slate-500">Create a Sheet in My Drive and open it in a new browser tab.</p>
+              <p className="mt-1 text-sm text-slate-500">Create one workbook in My Drive and open it in a new browser tab.</p>
               <button type="button" className="btn btn-primary btn-sm mt-4" onClick={() => void exportSheet()} disabled={!rows.length || exportingSheet}>
                 {exportingSheet ? "Creating Sheet..." : "Export To My Drive"}
               </button>

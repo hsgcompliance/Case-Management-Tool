@@ -15,6 +15,7 @@ export {
   listCustomerFolderWorkbookCandidates,
   attachCustomerWorkbookCandidate,
   convertCustomerWorkbookXlsx,
+  copyCustomerWorkbookFromTemplate,
   getWorkbookData,
   appendCustomerWorkbookRow,
 } from "./workbookHttp";
