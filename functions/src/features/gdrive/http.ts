@@ -292,6 +292,8 @@ export const gdriveCreateFolder = secureHandler(
     auth: "viewer",
     methods: ["POST", "OPTIONS"],
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
+    // googleapis barrel OOMs under 256MiB. See gdriveBuildCustomerFolder.
+    memory: "512MiB",
   }
 );
 
@@ -326,7 +328,9 @@ export const gdriveBuildCustomerFolder = secureHandler(
     methods: ["POST", "OPTIONS"],
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
     timeoutSeconds: 120,
-    memory: "256MiB",
+    // googleapis is imported lazily as a full barrel; under 256MiB the instance
+    // OOMs (~268MiB observed) once it copies templates → 500. Match gdriveList.
+    memory: "512MiB",
   },
 );
 
@@ -429,7 +433,8 @@ export const gdriveCopyGrantTemplates = secureHandler(
     methods: ["POST", "OPTIONS"],
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
     timeoutSeconds: 120,
-    memory: "256MiB",
+    // googleapis barrel OOMs under 256MiB once copying templates → 500. See gdriveBuildCustomerFolder.
+    memory: "512MiB",
   },
 );
 
@@ -464,6 +469,8 @@ export const gdriveUpload = secureHandler(
     auth: "user",
     methods: ["POST", "OPTIONS"],
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
+    // googleapis barrel OOMs under 256MiB. See gdriveBuildCustomerFolder.
+    memory: "512MiB",
   }
 );
 

@@ -23,6 +23,12 @@ export const CmActivity = z.object({
   note: z.string().trim().optional(),
   calendarEventId: z.string().trim().optional(),
   calendarSynced: z.boolean().optional(),
+  // Set true once the session has been pushed to the customer's TSS workbook as a
+  // progress-note row (mirrors calendarSynced). workbookRowKey is the appended
+  // row's key returned by appendCustomerWorkbookRow.
+  workbookSynced: z.boolean().optional(),
+  workbookSyncedAt: z.string().optional(),
+  workbookRowKey: z.string().trim().optional(),
   archived: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string().optional(),

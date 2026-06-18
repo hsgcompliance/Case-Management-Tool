@@ -103,6 +103,24 @@ export async function getMissingScopes(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Map the internal token record status to the client-facing permissionStatus
+ * enum (GoogleIntegrationMeta["permissionStatus"]). The raw record status value
+ * ("active") is NOT a member of that enum — clients key off "connected". This is
+ * the single source of truth so the status endpoint and the public metadata
+ * always agree (web tolerates either, mobile keys strictly off this value).
+ */
+export function recordStatusToPermissionStatus(
+  status: GoogleTokenRecord["status"],
+): GoogleIntegrationMeta["permissionStatus"] {
+  switch (status) {
+    case "active":   return "connected";
+    case "revoked":  return "revoked";
+    case "error":    return "error";
+    default:         return "needs_reconnect";
+  }
+}
+
 export function tokenToPublicMeta(record: GoogleTokenRecord): GoogleIntegrationMeta {
   return {
     connected: record.status === "active",
@@ -113,10 +131,6 @@ export function tokenToPublicMeta(record: GoogleTokenRecord): GoogleIntegrationM
     accessTokenExpiresAt: record.accessTokenExpiresAt
       ? new Date(record.accessTokenExpiresAt).toISOString()
       : undefined,
-    permissionStatus: record.status === "active"
-      ? "connected"
-      : record.status === "revoked"
-        ? "revoked"
-        : "needs_reconnect",
+    permissionStatus: recordStatusToPermissionStatus(record.status),
   };
 }

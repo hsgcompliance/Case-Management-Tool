@@ -13,19 +13,23 @@
 
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import api from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
 import { useGoogleIntegrationStatus, useGoogleIntegrationConnect } from "@hooks/useGoogleIntegrations";
+import { useResolvedDriveConfig } from "@hooks/useResolvedDriveConfig";
 import { qk } from "@hooks/queryKeys";
 import {
   getGoogleDriveAccessToken,
   setGoogleDriveTokenPersistence,
 } from "@lib/googleDriveAccessToken";
+import { isGoogleReauthError, GOOGLE_REAUTH_ISSUE } from "@lib/googleAuthError";
 import { toast } from "@lib/toast";
 import { WorkbookSheetModal } from "./WorkbookSheetModal";
 import { WorkbookLinkControls } from "./WorkbookLinkControls";
 import type { WorkbookLinkIssue } from "./WorkbookLinkControls";
 import { WorkbookStructuredView } from "./WorkbookStructuredView";
 import { DriveAuthBanner } from "@entities/gdrive/DriveAuthBanner";
+import { isScopeError, type ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
 
 type WorkbookView = "sheet" | "structured";
 
@@ -152,6 +156,105 @@ function StatusBar({
   );
 }
 
+// ── Create-from-template control ────────────────────────────────────────────────
+
+function apiIssueOf(resp: unknown, fallback: string): WorkbookLinkIssue {
+  const r = resp && typeof resp === "object" ? (resp as Record<string, unknown>) : {};
+  return {
+    error:              typeof r.error === "string" ? r.error : fallback,
+    category:           typeof r.category === "string" ? r.category : undefined,
+    hint:               typeof r.hint === "string" ? r.hint : undefined,
+    missingPermissions: Array.isArray(r.missingPermissions) ? (r.missingPermissions as string[]) : undefined,
+    reconnectService:   typeof r.reconnectService === "string" ? r.reconnectService : undefined,
+  };
+}
+
+/**
+ * "Create from TSS template" — copies the org's configured TSS workbook template
+ * (payer / non-payer variant) into the customer's folder and links it. Shown only
+ * when a folder is linked and the org has a usable tss_workbook template.
+ */
+function WorkbookTemplateCreate({
+  customerId,
+  enrollmentId,
+  hasVariants,
+  onLinked,
+  onAuthIssue,
+}: {
+  customerId: string;
+  enrollmentId?: string;
+  hasVariants: boolean;
+  onLinked: () => void;
+  onAuthIssue?: (issue: WorkbookLinkIssue) => void;
+}) {
+  const [variant, setVariant] = React.useState<"payer" | "nonpayer">("nonpayer");
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const surfaceAuthIssue = React.useCallback((issue: WorkbookLinkIssue): boolean => {
+    if (!onAuthIssue) return false;
+    if (isGoogleReauthError(issue.error)) { onAuthIssue({ ...GOOGLE_REAUTH_ISSUE }); return true; }
+    if (isScopeError(issue)) { onAuthIssue(issue as ScopeErrorPayload); return true; }
+    return false;
+  }, [onAuthIssue]);
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const tok = getGoogleDriveAccessToken();
+      const resp = (await (api as any).postWith(
+        "copyCustomerWorkbookFromTemplate",
+        { customerId, variant, ...(enrollmentId ? { enrollmentId } : {}) },
+        tok ? { "x-drive-access-token": tok } : undefined,
+      )) as Record<string, unknown>;
+      if (resp?.ok) {
+        toast("TSS workbook created from template.", { type: "success" });
+        onLinked();
+      } else {
+        const issue = apiIssueOf(resp, "Failed to create workbook from template");
+        if (!surfaceAuthIssue(issue)) setError(issue.error || "Failed to create workbook from template");
+      }
+    } catch (e: unknown) {
+      const issue = apiIssueOf(e, String((e as Error)?.message || "Failed to create workbook from template"));
+      if (!surfaceAuthIssue(issue)) setError(issue.error || "Failed to create workbook from template");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+      <div className="text-xs font-semibold text-slate-600">Create from TSS template</div>
+      <div className="flex flex-wrap items-center gap-2">
+        {hasVariants ? (
+          <select
+            className="input min-w-0 flex-1 text-sm"
+            value={variant}
+            onChange={(e) => setVariant(e.currentTarget.value as "payer" | "nonpayer")}
+            disabled={busy}
+          >
+            <option value="nonpayer">Non-payer (not Medicaid / not sure)</option>
+            <option value="payer">Payer (Medicaid enrolled)</option>
+          </select>
+        ) : null}
+        <button
+          type="button"
+          className="btn btn-sm btn-primary shrink-0"
+          disabled={busy}
+          onClick={() => void run()}
+        >
+          {busy ? "Creating…" : "Copy template"}
+        </button>
+      </div>
+      {error ? <div className="text-xs text-red-600">{error}</div> : null}
+      <div className="text-[11px] text-slate-400">
+        Copies the template into this customer&apos;s Drive folder and links it as their workbook.
+      </div>
+    </div>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type WorkbookPanelProps = {
@@ -178,6 +281,20 @@ export function WorkbookPanel({
 
   const { folderId, tssWorkbook } = resolveFolderAndWorkbook(model);
   const hasWorkbook = !!(tssWorkbook?.spreadsheetId);
+
+  // TSS template availability — drives the "Create from TSS template" action shown
+  // when no workbook is linked. Only usable when the org's tss_workbook template
+  // actually carries a source file id (env fallback is empty until configured).
+  const { templates: driveTemplates } = useResolvedDriveConfig();
+  const tssTemplate = React.useMemo(
+    () => driveTemplates.find((t) => t.role === "tssWorkbook"),
+    [driveTemplates],
+  );
+  const tssTemplateReady = !!(
+    tssTemplate &&
+    (tssTemplate.variants?.payer || tssTemplate.variants?.nonpayer || tssTemplate.fileId)
+  );
+  const tssTemplateHasVariants = !!(tssTemplate?.variants?.payer || tssTemplate?.variants?.nonpayer);
 
   const [tokenPresent,        setTokenPresent]        = React.useState(() => !!getGoogleDriveAccessToken());
   const [connectingTemporary, setConnectingTemporary] = React.useState(false);
@@ -412,6 +529,16 @@ export function WorkbookPanel({
             connectingTemporary={connectingTemporary}
             reauthorizing={driveConnect.isPending}
             issue={{ error: "drive_not_connected" }}
+          />
+        ) : null}
+
+        {!isViewer && folderId && tssTemplateReady ? (
+          <WorkbookTemplateCreate
+            customerId={customerId}
+            enrollmentId={enrollmentId}
+            hasVariants={tssTemplateHasVariants}
+            onLinked={invalidateCustomer}
+            onAuthIssue={setAuthIssue}
           />
         ) : null}
 

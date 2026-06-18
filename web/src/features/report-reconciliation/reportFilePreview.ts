@@ -5,6 +5,7 @@ import {
   normalizeHeader,
   type ReportSourceProfile,
 } from "./reportProfiles";
+import { interpretCaseworthyReport } from "./caseworthyInterpreter";
 
 export type ParsedReportPreview = {
   fileName: string;
@@ -20,6 +21,10 @@ export type ParsedReportPreview = {
   allRows: unknown[][];
   totalRows: number;
   profileCandidates: ReturnType<typeof detectLikelyReportProfiles>;
+  /** Human label for an auto-detected report variant (e.g. Caseworthy account-detail vs org-total). */
+  reportVariant?: string;
+  /** Parameter-block metadata captured from envelope reports (account/grant, date range, org…). */
+  reportMetadata?: Record<string, string>;
 };
 
 type ZipEntry = {
@@ -116,33 +121,60 @@ function buildPreview(
   sheetName?: string,
 ): ParsedReportPreview {
   const sourceName = `${fileName} ${sheetName || ""}`;
-  const headerRowIndex = findHeaderRow(rows, profiles, sourceName);
-  const headers = (rows[headerRowIndex] ?? []).map((value) => String(value ?? "").trim());
-  const dataRows = rows.slice(headerRowIndex + 1).filter((row) => row.some((value) => String(value ?? "").trim()));
+  // Envelope reports (Caseworthy Clients Served) wrap the data table in parameter
+  // blocks top + bottom; the interpreter pins the real header row, trims the
+  // trailing footer block, detects the variant, and surfaces the parameter metadata.
+  const caseworthy = interpretCaseworthyReport(rows, sourceName);
+  const effectiveRows = caseworthy ? rows.slice(0, caseworthy.dataEndRow) : rows;
+  const headerRowIndex = caseworthy ? caseworthy.headerRowIndex : findHeaderRow(effectiveRows, profiles, sourceName);
+  const headers = (effectiveRows[headerRowIndex] ?? []).map((value) => String(value ?? "").trim());
+  const dataRows = effectiveRows.slice(headerRowIndex + 1).filter((row) => row.some((value) => String(value ?? "").trim()));
   const profileCandidates = detectLikelyReportProfiles(profiles, headers, sourceName);
+  if (caseworthy) {
+    // Guarantee the detected variant profile is the default even if scoring is close.
+    const idx = profileCandidates.findIndex((candidate) => candidate.profile.id === caseworthy.profileId);
+    if (idx > 0) profileCandidates.unshift(profileCandidates.splice(idx, 1)[0]);
+  }
   const sheetText = normalizeHeader(`${sheetName || ""} ${rows.slice(0, 3).flat().join(" ")}`);
   const helperSheet = /\b(guide|budget|summary|data entry guide|instructions?)\b/.test(sheetText);
   const bestScore = profileCandidates[0]?.score ?? 0;
-  const recommendedEnabled = !helperSheet && bestScore >= 30 && dataRows.length > 0;
+  const recommendedEnabled = Boolean(caseworthy) || (!helperSheet && bestScore >= 30 && dataRows.length > 0);
   // Keep the full grid (capped) including leading title rows so the operator can re-pick the header row.
-  const allRows = rows.slice(0, headerRowIndex + 1 + maxRows);
+  const allRows = effectiveRows.slice(0, headerRowIndex + 1 + maxRows);
+  const reportMetadata = caseworthy
+    ? {
+        variant: caseworthy.variantLabel,
+        account: caseworthy.metadata.account,
+        grants: caseworthy.metadata.grantTokens.join(", "),
+        org: caseworthy.metadata.org,
+        program: caseworthy.metadata.program,
+        service: caseworthy.metadata.service,
+        dateRange: [caseworthy.metadata.dateRangeFrom, caseworthy.metadata.dateRangeTo].filter(Boolean).join(" → "),
+        runBy: caseworthy.metadata.runBy,
+        runAt: caseworthy.metadata.runAt,
+      }
+    : undefined;
   return {
     fileName,
     fileType,
     sheetName,
     recommendedEnabled,
     sheetRole: recommendedEnabled ? "data" : "helper",
-    sheetReason: recommendedEnabled
-      ? `Detected ${profileCandidates[0]?.profile.label || "report data"} with ${dataRows.length} data rows.`
-      : helperSheet
-        ? "Looks like a workbook guide, budget, summary, or helper sheet."
-        : "No strong report profile match was detected.",
+    sheetReason: caseworthy
+      ? `Caseworthy ${caseworthy.variantLabel}${caseworthy.metadata.account ? ` · ${caseworthy.metadata.account}` : ""} — ${dataRows.length} rows.`
+      : recommendedEnabled
+        ? `Detected ${profileCandidates[0]?.profile.label || "report data"} with ${dataRows.length} data rows.`
+        : helperSheet
+          ? "Looks like a workbook guide, budget, summary, or helper sheet."
+          : "No strong report profile match was detected.",
     headerRowIndex,
     headers,
     sampleRows: dataRows.slice(0, maxRows),
     allRows,
     totalRows: dataRows.length,
     profileCandidates,
+    reportVariant: caseworthy?.variantLabel,
+    reportMetadata,
   };
 }
 

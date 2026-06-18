@@ -8,7 +8,11 @@ import * as logger from "firebase-functions/logger";
 import admin from "../../core/admin";
 import { isoNow } from "../../core";
 import { getDriveClient } from "./service";
+import { getOrgGDriveConfig } from "./orgConfig";
 import { markTokenRevoked } from "../google/oauthClient";
+
+/** Org-config template key that designates the TSS workbook source file(s). */
+const TSS_WORKBOOK_TEMPLATE_KEY = "tss_workbook";
 
 const SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet";
 // xlsx/xls files are Drive-hosted Office files — still embeddable in Sheets
@@ -38,6 +42,30 @@ async function getCustomerDoc(customerId: string): Promise<Record<string, unknow
   const snap = await admin.firestore().collection("customers").doc(customerId).get();
   if (!snap.exists) return null;
   return snap.data() as Record<string, unknown>;
+}
+
+/** Resolve the customer's primary Drive folder id (customerDrive → legacy meta). */
+function resolveCustomerFolderId(doc: Record<string, unknown>): string {
+  const cDrive = doc.customerDrive as Record<string, unknown> | null | undefined;
+  const meta = doc.meta as Record<string, unknown> | null | undefined;
+  const metaFolders = Array.isArray(meta?.driveFolders)
+    ? (meta?.driveFolders as Array<Record<string, unknown>>)
+    : [];
+  return (
+    String(cDrive?.folderId || "").trim() ||
+    String(meta?.driveFolderId || "").trim() ||
+    String(metaFolders[0]?.id || "").trim()
+  );
+}
+
+/** "{last}, {first} TSS Workbook" — mirrors the build-folder doc-name convention. */
+function buildWorkbookCopyName(doc: Record<string, unknown>): string {
+  const first = String(doc.firstName || "").trim();
+  const last = String(doc.lastName || "").trim();
+  const base = last && first
+    ? `${last}, ${first}`
+    : String(doc.name || "").trim() || "Customer";
+  return `${base} TSS Workbook`.replace(/\s{2,}/g, " ").trim().slice(0, 255);
 }
 
 export type WorkbookMeta = {
@@ -381,4 +409,101 @@ export async function convertXlsxAndAttach(args: {
     .set({ customerDrive: { linkedWorkbooks: { tss: workbook } } }, { merge: true });
 
   return { workbook, converted: true };
+}
+
+/**
+ * Copies the org's configured TSS workbook template (payer / non-payer variant)
+ * into the customer's existing Drive folder and links the copy as the customer's
+ * TSS workbook. Used by the "Create from TSS template" action on the workbook
+ * panel when no workbook is linked yet.
+ *
+ * Source file ids come from the org Drive config's `tss_workbook` template (NOT
+ * the client) so staff can only copy the org-sanctioned template. Folder-surface
+ * write → standard writable Drive client (user OAuth preferred).
+ */
+export async function copyWorkbookFromTemplate(args: {
+  customerId: string;
+  uid: string;
+  orgId: string;
+  variant: "payer" | "nonpayer";
+  enrollmentId?: string;
+  googleAccessToken?: string;
+}): Promise<{ workbook: WorkbookMeta; copiedFromTemplateId: string }> {
+  const { customerId, uid, orgId, variant, enrollmentId, googleAccessToken } = args;
+
+  const customerDoc = await getCustomerDoc(customerId);
+  if (!customerDoc) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+
+  const folderId = resolveCustomerFolderId(customerDoc);
+  if (!folderId) throw Object.assign(new Error("customer_folder_missing"), { code: 400 });
+
+  // Resolve the source template file id from org config (authoritative).
+  const config = await getOrgGDriveConfig(orgId);
+  const template = (config.templates || []).find((t) => t.key === TSS_WORKBOOK_TEMPLATE_KEY);
+  if (!template) throw Object.assign(new Error("tss_template_not_configured"), { code: 400 });
+  const variantId = template.variants
+    ? String((variant === "payer" ? template.variants.payer : template.variants.nonpayer) || "").trim()
+    : "";
+  const sourceId = variantId || String(template.fileId || "").trim();
+  if (!sourceId) {
+    throw Object.assign(new Error(`tss_template_${variant}_missing`), { code: 400 });
+  }
+
+  const drive = await getDriveClient({
+    userUid: uid,
+    googleAccessToken,
+    requireWritable: true,
+    requiredScopes: [DRIVE_SCOPE],
+  });
+
+  const name = buildWorkbookCopyName(customerDoc);
+
+  let copied;
+  try {
+    copied = await drive.files.copy({
+      fileId: sourceId,
+      requestBody: { name, parents: [folderId] },
+      fields: "id,name,webViewLink",
+      supportsAllDrives: true,
+    });
+  } catch (err: any) {
+    const httpStatus = Number(err?.response?.status ?? err?.code);
+    const apiMessage =
+      err?.response?.data?.error?.message ||
+      err?.errors?.[0]?.message ||
+      err?.message ||
+      "copy_failed";
+    const reasons = Array.isArray(err?.response?.data?.error?.errors)
+      ? err.response.data.error.errors.map((e: any) => String(e?.reason || "")).filter(Boolean)
+      : [];
+    logger.error("workbook_tss_template_copy_failed", {
+      customerId, sourceId, folderId, variant, status: err?.response?.status, code: err?.code, apiMessage, reasons,
+    });
+    throw Object.assign(new Error(`tss_template_copy_failed: ${apiMessage}`), {
+      code: Number.isFinite(httpStatus) && httpStatus >= 400 && httpStatus <= 599 ? httpStatus : 502,
+    });
+  }
+
+  const newId = String(copied.data?.id || "").trim();
+  if (!newId) throw Object.assign(new Error("tss_template_copy_failed"), { code: 500 });
+
+  const now = isoNow();
+  const workbook: WorkbookMeta = {
+    spreadsheetId: newId,
+    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${newId}/edit`,
+    spreadsheetName: String(copied.data?.name || name).trim() || name,
+    status: "linked",
+    linkedAt: now,
+    updatedAt: now,
+    linkedBy: uid,
+    ...(enrollmentId ? { linkedEnrollmentId: enrollmentId } : {}),
+  };
+
+  await admin
+    .firestore()
+    .collection("customers")
+    .doc(customerId)
+    .set({ customerDrive: { linkedWorkbooks: { tss: workbook } } }, { merge: true });
+
+  return { workbook, copiedFromTemplateId: sourceId };
 }

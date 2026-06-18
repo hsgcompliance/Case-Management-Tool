@@ -22,7 +22,14 @@ import {
 import { secureHandler } from "../../core/http";
 import type { AuthedRequest } from "../../core/requestContext";
 import { isoNow } from "../../core";
-import { readToken, writeToken, clearToken, writePublicMeta, tokenToPublicMeta } from "./tokenStore";
+import {
+  readToken,
+  writeToken,
+  clearToken,
+  writePublicMeta,
+  tokenToPublicMeta,
+  recordStatusToPermissionStatus,
+} from "./tokenStore";
 import { exchangeCode, getGoogleEmail, revokeToken } from "./oauthClient";
 import type { GoogleService, GoogleTokenRecord } from "./types";
 
@@ -324,7 +331,11 @@ function makeGetStatus(service: GoogleService) {
         accessTokenExpiresAt: record.accessTokenExpiresAt
           ? new Date(record.accessTokenExpiresAt).toISOString()
           : null,
-        permissionStatus: record.status,
+        // Map to the client-facing enum ("connected"/"needs_reconnect"/…). The raw
+        // record status ("active") is NOT a member of GooglePermissionStatus, so a
+        // strict `permissionStatus === "connected"` check (mobile) would otherwise
+        // always read as disconnected even with a live token.
+        permissionStatus: recordStatusToPermissionStatus(record.status),
       });
     },
     { auth: "user", methods: ["GET", "POST", "OPTIONS"], secrets: GOOGLE_SECRETS, memory: "512MiB" },

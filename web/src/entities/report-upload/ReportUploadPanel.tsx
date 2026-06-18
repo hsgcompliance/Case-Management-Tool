@@ -3,10 +3,16 @@
 import React from "react";
 import {
   collectReportGrantSignals,
+  defaultExcludeRulesForProfile,
   deriveHeadersAndRows,
+  filterReportRows,
   matchProfileHeaders,
+  normalizeExcludeRules,
+  normalizeReportRow,
   type FieldColumnOverrides,
   type ReconciliationPacket,
+  type ReportExcludeOperator,
+  type ReportExcludeRule,
   type ReportSourceProfile,
 } from "@features/report-reconciliation/reportProfiles";
 import {
@@ -31,6 +37,7 @@ export type ReportUploadConfig = {
   profileId: string;
   headerRowIndex: number;
   fieldOverrides: FieldColumnOverrides;
+  excludeRules: ReportExcludeRule[];
 };
 
 export type ReportUpload = {
@@ -41,6 +48,10 @@ export type ReportUpload = {
   enabled?: boolean;
   sheetRole?: "data" | "helper";
   sheetReason?: string;
+  /** Auto-detected report variant label (e.g. Caseworthy account-detail vs org-total). */
+  reportVariant?: string;
+  /** Parameter-block metadata captured from envelope reports (account/grant, date range, org…). */
+  reportMetadata?: Record<string, string>;
   allRows: unknown[][];
   profileCandidates: { profile: ReportSourceProfile; score: number }[];
   config: ReportUploadConfig;
@@ -63,6 +74,7 @@ export type ReportUploadPanelProps = {
   onRemove: (id: string) => void;
   onClear: () => void;
   toolKind?: "enrollment" | "payment" | "identity";
+  databaseConfig?: React.ReactNode;
 };
 
 const ACCEPT = ".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -186,11 +198,13 @@ function Dropzone({ reading, onFiles }: { reading: boolean; onFiles: ReportUploa
 
 function UploadsList({
   uploads,
+  selectedId,
   onConfigure,
   onRemove,
   onClear,
 }: {
   uploads: ReportUpload[];
+  selectedId: string;
   onConfigure: (id: string) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
@@ -198,10 +212,26 @@ function UploadsList({
   if (!uploads.length) {
     return <div className="mt-3 text-center text-xs text-slate-400">No reports uploaded yet.</div>;
   }
+  const enabledCount = uploads.filter((upload) => upload.enabled !== false).length;
+  const dataSheetCount = uploads.filter((upload) => upload.enabled !== false && upload.sheetRole !== "helper").length;
+  const requiredMissingCount = uploads.reduce((total, upload) => total + (upload.enabled === false ? 0 : upload.packet.summary.requiredMissingCount), 0);
+  const helperCount = uploads.filter((upload) => upload.sheetRole === "helper").length;
   return (
     <div className="mt-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Uploaded reports ({uploads.length})</div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Uploaded reports ({uploads.length})</div>
+          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+            <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">{enabledCount} enabled</span>
+            <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">{dataSheetCount} data sheets</span>
+            {helperCount ? <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">{helperCount} helper/skipped</span> : null}
+            {requiredMissingCount ? (
+              <span className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800">{requiredMissingCount} required mappings missing</span>
+            ) : (
+              <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-700">required mappings ready</span>
+            )}
+          </div>
+        </div>
         <button type="button" className="btn btn-ghost btn-xs" onClick={onClear}>Clear all</button>
       </div>
       <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
@@ -209,10 +239,16 @@ function UploadsList({
           const profile = upload.profileCandidates[0]?.profile;
           const requiredMissing = upload.packet.summary.requiredMissingCount;
           const label = upload.sheetName || upload.fileName;
+          const active = upload.id === selectedId;
           return (
             <div
               key={upload.id}
-              className="group mb-[-1px] flex max-w-[260px] items-center gap-2 rounded-t-md border border-slate-200 bg-white px-3 py-2 text-left text-xs hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900"
+              className={[
+                "group mb-[-1px] flex max-w-[260px] items-center gap-2 rounded-t-md border px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-900",
+                active
+                  ? "border-slate-900 bg-slate-50 dark:border-slate-100 dark:bg-slate-900"
+                  : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950",
+              ].join(" ")}
               title={`${upload.fileName}${upload.sheetName ? ` / ${upload.sheetName}` : ""}`}
             >
               <button
@@ -275,6 +311,233 @@ function HeaderRowPicker({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+const EXCLUDE_OPERATOR_LABELS: Record<ReportExcludeOperator, string> = {
+  contains: "contains",
+  not_contains: "does not contain",
+  equals: "equals",
+  not_equals: "does not equal",
+  regex: "matches regex",
+  not_regex: "does not match regex",
+  is_blank: "is blank",
+  is_not_blank: "is not blank",
+  amount_zero_or_blank: "amount is blank or $0",
+};
+
+const EXCLUDE_OPERATORS = Object.keys(EXCLUDE_OPERATOR_LABELS) as ReportExcludeOperator[];
+
+function ExcludeRulesEditor({
+  profile,
+  rules,
+  onChange,
+}: {
+  profile: ReportSourceProfile;
+  rules: ReportExcludeRule[];
+  onChange: (rules: ReportExcludeRule[]) => void;
+}) {
+  const normalizedRules = normalizeExcludeRules(rules, defaultExcludeRulesForProfile(profile));
+  const updateRule = (index: number, patch: Partial<ReportExcludeRule>) => {
+    onChange(normalizedRules.map((rule, i) => i === index ? { ...rule, ...patch } : rule));
+  };
+  const addRule = () => {
+    const firstField = Object.keys(profile.fields)[0] || "amount";
+    onChange([
+      ...normalizedRules,
+      {
+        id: `custom_exclude_${Date.now()}`,
+        label: "Custom exclude",
+        fieldKey: firstField,
+        operator: "contains",
+        value: "",
+        enabled: true,
+      },
+    ]);
+  };
+  const fieldKeys = Object.keys(profile.fields);
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Exclude filters</div>
+          <div className="text-[11px] text-slate-500">Rows matching any enabled rule are removed before reconciliation.</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => onChange(defaultExcludeRulesForProfile(profile))}>Reset defaults</button>
+          <button type="button" className="btn btn-primary btn-xs" onClick={addRule}>Add filter</button>
+        </div>
+      </div>
+      <div className="max-h-72 space-y-2 overflow-y-auto rounded border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
+        {normalizedRules.length ? normalizedRules.map((rule, index) => {
+          const needsValue = !["is_blank", "is_not_blank", "amount_zero_or_blank"].includes(rule.operator);
+          return (
+            <div key={rule.id} className="grid gap-2 rounded border border-slate-200 p-2 text-xs dark:border-slate-800 lg:grid-cols-[auto_minmax(120px,1fr)_minmax(120px,1fr)_minmax(130px,1fr)_minmax(140px,1.2fr)_70px_auto]">
+              <label className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={rule.enabled !== false}
+                  onChange={(event) => updateRule(index, { enabled: event.currentTarget.checked })}
+                />
+                <span>on</span>
+              </label>
+              <input
+                className="input h-8 px-2 text-xs"
+                value={rule.label}
+                onChange={(event) => updateRule(index, { label: event.currentTarget.value })}
+                aria-label="Filter label"
+              />
+              <select
+                className="input h-8 px-2 text-xs"
+                value={rule.fieldKey}
+                onChange={(event) => updateRule(index, { fieldKey: event.currentTarget.value })}
+              >
+                {fieldKeys.map((fieldKey) => <option key={fieldKey} value={fieldKey}>{fieldKey}</option>)}
+              </select>
+              <select
+                className="input h-8 px-2 text-xs"
+                value={rule.operator}
+                onChange={(event) => updateRule(index, { operator: event.currentTarget.value as ReportExcludeOperator })}
+              >
+                {EXCLUDE_OPERATORS.map((operator) => <option key={operator} value={operator}>{EXCLUDE_OPERATOR_LABELS[operator]}</option>)}
+              </select>
+              <input
+                className="input h-8 px-2 text-xs"
+                value={rule.value || ""}
+                disabled={!needsValue}
+                onChange={(event) => updateRule(index, { value: event.currentTarget.value })}
+                placeholder={rule.operator.includes("regex") ? "regex pattern" : "value"}
+              />
+              <input
+                className="input h-8 px-2 text-xs"
+                value={rule.flags || ""}
+                disabled={!rule.operator.includes("regex")}
+                onChange={(event) => updateRule(index, { flags: event.currentTarget.value })}
+                placeholder="flags"
+              />
+              <button type="button" className="btn btn-ghost btn-xs" onClick={() => onChange(normalizedRules.filter((_, i) => i !== index))}>
+                Remove
+              </button>
+            </div>
+          );
+        }) : (
+          <div className="text-center text-[11px] text-slate-400">No exclude filters configured.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdvancedConfigPreview({
+  upload,
+  profile,
+  headers,
+  dataRows,
+  rules,
+  onClose,
+}: {
+  upload: ReportUpload;
+  profile: ReportSourceProfile;
+  headers: string[];
+  dataRows: unknown[][];
+  rules: ReportExcludeRule[];
+  onClose: () => void;
+}) {
+  const [rowMode, setRowMode] = React.useState<"included" | "excluded">("included");
+  const [viewMode, setViewMode] = React.useState<"raw" | "normalized">("raw");
+  const filtered = React.useMemo(() => filterReportRows({
+    profile,
+    headers,
+    rows: dataRows,
+    headerRowIndex: upload.config.headerRowIndex,
+    fieldOverrides: upload.config.fieldOverrides,
+    excludeRules: rules,
+  }), [dataRows, headers, profile, rules, upload.config.fieldOverrides, upload.config.headerRowIndex]);
+  const visibleRows = (rowMode === "included" ? filtered.included : filtered.excluded).slice(0, 200);
+  const normalizedRows = React.useMemo(() => visibleRows.map((row) => normalizeReportRow(profile, headers, row.row, {
+    sourceFile: upload.fileName,
+    sourceRowNumber: row.sourceRowNumber,
+    sourceType: profile.id,
+  }, upload.config.fieldOverrides)), [headers, profile, upload.config.fieldOverrides, upload.fileName, visibleRows]);
+  const rawHeaders = headers.slice(0, 14);
+  const normalizedHeaders = ["Row", "Name", "Client ID", "Date", "Amount", "Grant/Provider", "Reference", "Exclude reason"];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-3 dark:border-slate-800">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">Advanced config preview</div>
+            <div className="truncate text-xs text-slate-500">{upload.fileName}{upload.sheetName ? ` / ${upload.sheetName}` : ""} - {profile.label}</div>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 p-3 text-xs dark:border-slate-800">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={["btn btn-xs", rowMode === "included" ? "btn-primary" : "btn-ghost"].join(" ")} onClick={() => setRowMode("included")}>
+              Included ({filtered.included.length})
+            </button>
+            <button type="button" className={["btn btn-xs", rowMode === "excluded" ? "btn-primary" : "btn-ghost"].join(" ")} onClick={() => setRowMode("excluded")}>
+              Excluded ({filtered.excluded.length})
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={["btn btn-xs", viewMode === "raw" ? "btn-primary" : "btn-ghost"].join(" ")} onClick={() => setViewMode("raw")}>Raw upload rows</button>
+            <button type="button" className={["btn btn-xs", viewMode === "normalized" ? "btn-primary" : "btn-ghost"].join(" ")} onClick={() => setViewMode("normalized")}>Normalized mapping rows</button>
+          </div>
+        </div>
+        <div className="overflow-auto p-3">
+          <table className="min-w-full border-collapse text-left text-xs">
+            <thead className="sticky top-0 bg-slate-100 text-[11px] uppercase text-slate-500 dark:bg-slate-900">
+              <tr>
+                {(viewMode === "raw" ? ["Row", ...rawHeaders, "Exclude reason"] : normalizedHeaders).map((header) => (
+                  <th key={header} className="border border-slate-200 px-2 py-1 dark:border-slate-800">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.length ? visibleRows.map((filterRow, index) => {
+                const normalized = normalizedRows[index];
+                return (
+                  <tr key={`${filterRow.sourceRowNumber}-${index}`} className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-950 dark:even:bg-slate-900/50">
+                    {viewMode === "raw" ? (
+                      <>
+                        <td className="border border-slate-200 px-2 py-1 font-mono text-[11px] dark:border-slate-800">{filterRow.sourceRowNumber}</td>
+                        {rawHeaders.map((header, headerIndex) => (
+                          <td key={`${header}-${headerIndex}`} className="max-w-[220px] truncate border border-slate-200 px-2 py-1 dark:border-slate-800" title={String(filterRow.row[headerIndex] ?? "")}>
+                            {String(filterRow.row[headerIndex] ?? "")}
+                          </td>
+                        ))}
+                        <td className="max-w-[260px] truncate border border-slate-200 px-2 py-1 text-amber-700 dark:border-slate-800" title={filterRow.matchedRuleLabels.join(", ")}>
+                          {filterRow.matchedRuleLabels.join(", ")}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="border border-slate-200 px-2 py-1 font-mono text-[11px] dark:border-slate-800">{filterRow.sourceRowNumber}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.customerIdentity.fullName || `${normalized.customerIdentity.firstName} ${normalized.customerIdentity.lastName}`.trim()}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.customerIdentity.hmisId || normalized.customerIdentity.caseworthyId}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.transactionDate || normalized.enrollmentEvidence.entryDate}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.amount ?? ""}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.grant || normalized.enrollmentEvidence.projectName}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.reference}</td>
+                        <td className="border border-slate-200 px-2 py-1 text-amber-700 dark:border-slate-800">{filterRow.matchedRuleLabels.join(", ")}</td>
+                      </>
+                    )}
+                  </tr>
+                );
+              }) : (
+                <tr>
+                  <td className="border border-slate-200 px-3 py-8 text-center text-slate-400 dark:border-slate-800" colSpan={viewMode === "raw" ? rawHeaders.length + 2 : normalizedHeaders.length}>
+                    No rows in this view.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {visibleRows.length >= 200 ? <div className="mt-2 text-[11px] text-slate-500">Showing first 200 rows.</div> : null}
+        </div>
       </div>
     </div>
   );
@@ -369,6 +632,8 @@ function ConfigureTab({
   toolKind?: ReportUploadPanelProps["toolKind"];
 }) {
   const [sheetPage, setSheetPage] = React.useState(0);
+  const [configTool, setConfigTool] = React.useState<"header" | "fields" | "grants" | "excludes">("fields");
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const selected = uploads.find((upload) => upload.id === selectedId) ?? uploads[0] ?? null;
   if (!selected) {
     return <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950">Upload a report to configure its mapping.</div>;
@@ -380,6 +645,18 @@ function ConfigureTab({
   const missingRequired = diagnostics.filter((diagnostic) => diagnostic.code === "required_header_missing");
   const grantRows = reportGrantRows(selected, grants);
   const toolWarning = toolKind ? likelyBetterTool(selected.config.profileId, toolKind) : "";
+  const excludeRules = normalizeExcludeRules(selected.config.excludeRules, defaultExcludeRulesForProfile(profile));
+  const filterCounts = React.useMemo(() => {
+    const filtered = filterReportRows({
+      profile,
+      headers,
+      rows: dataRows,
+      headerRowIndex: selected.config.headerRowIndex,
+      fieldOverrides: selected.config.fieldOverrides,
+      excludeRules,
+    });
+    return { included: filtered.included.length, excluded: filtered.excluded.length };
+  }, [dataRows, excludeRules, headers, profile, selected.config.fieldOverrides, selected.config.headerRowIndex]);
   const visibleSheetTabs = React.useMemo(() => {
     const workbookSheets = selected.workbookKey ? uploads.filter((upload) => upload.workbookKey === selected.workbookKey) : uploads;
     const pageSize = 8;
@@ -470,7 +747,13 @@ function ConfigureTab({
             <select
               className="input h-9 w-full px-2 py-1 text-sm leading-5"
               value={profile.id}
-              onChange={(event) => onUpdateConfig(selected.id, { profileId: event.currentTarget.value })}
+              onChange={(event) => {
+                const nextProfile = profiles.find((item) => item.id === event.currentTarget.value) ?? profile;
+                onUpdateConfig(selected.id, {
+                  profileId: nextProfile.id,
+                  excludeRules: defaultExcludeRulesForProfile(nextProfile),
+                });
+              }}
             >
               {profiles.map((item) => (
                 <option key={item.id} value={item.id}>{item.label}</option>
@@ -479,6 +762,19 @@ function ConfigureTab({
             {selected.profileCandidates.length ? (
               <div className="mt-1 text-[11px] text-slate-500">
                 Best guess: {selected.profileCandidates[0]?.profile.label} (score {selected.profileCandidates[0]?.score})
+              </div>
+            ) : null}
+            {selected.reportMetadata && Object.values(selected.reportMetadata).some(Boolean) ? (
+              <div className="mt-2 rounded border border-sky-200 bg-sky-50 p-2 text-[11px] dark:border-sky-900 dark:bg-sky-950/30">
+                <div className="mb-1 font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Report parameters</div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+                  {Object.entries(selected.reportMetadata).filter(([, value]) => value).map(([key, value]) => (
+                    <React.Fragment key={key}>
+                      <dt className="capitalize text-slate-500">{key}</dt>
+                      <dd className="truncate text-slate-700 dark:text-slate-200" title={value}>{value}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
               </div>
             ) : null}
             <div className="mt-2 flex flex-wrap gap-2">
@@ -490,19 +786,54 @@ function ConfigureTab({
               <button type="button" className="btn btn-ghost btn-xs" onClick={() => downloadRowsAsCsv(selected)}>
                 Download sheet CSV
               </button>
+              <button type="button" className="btn btn-primary btn-xs" onClick={() => setAdvancedOpen(true)}>
+                Advanced config
+              </button>
             </div>
             {toolWarning ? (
               <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{toolWarning}</div>
             ) : null}
+            <div className="mt-3">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Config tool</div>
+              <div className="grid grid-cols-2 gap-1 text-xs">
+                {([
+                  ["header", "Header row"],
+                  ["fields", missingRequired.length ? `Field map (${missingRequired.length})` : "Field map"],
+                  ["grants", `Grants (${grantRows.length})`],
+                  ["excludes", `Exclude filters (${filterCounts.excluded})`],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={[
+                      "rounded border px-2 py-1 text-left",
+                      configTool === key
+                        ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+                        : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:text-slate-300",
+                    ].join(" ")}
+                    onClick={() => setConfigTool(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-2 text-[11px] text-slate-500">
+                {filterCounts.included} included / {filterCounts.excluded} excluded after filters.
+              </div>
+            </div>
           </div>
-          <HeaderRowPicker
-            allRows={selected.allRows}
-            headerRowIndex={selected.config.headerRowIndex}
-            onChange={(index) => onUpdateConfig(selected.id, { headerRowIndex: index })}
-          />
         </div>
 
         <div className="space-y-3">
+          {configTool === "header" ? (
+            <HeaderRowPicker
+              allRows={selected.allRows}
+              headerRowIndex={selected.config.headerRowIndex}
+              onChange={(index) => onUpdateConfig(selected.id, { headerRowIndex: index })}
+            />
+          ) : null}
+
+          {configTool === "fields" ? (
           <div>
             <div className="mb-1 flex items-center justify-between">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Field → column mapping</div>
@@ -541,7 +872,9 @@ function ConfigureTab({
               })}
             </div>
           </div>
+          ) : null}
 
+          {configTool === "grants" ? (
           <div>
             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Grants parsed &amp; matched ({grantRows.length})</div>
             <div className="max-h-40 space-y-1 overflow-y-auto rounded border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
@@ -561,8 +894,17 @@ function ConfigureTab({
               )}
             </div>
           </div>
+          ) : null}
 
-          {selected.config.profileId === "financial_edge_project_activity" ? (
+          {configTool === "excludes" ? (
+            <ExcludeRulesEditor
+              profile={profile}
+              rules={excludeRules}
+              onChange={(nextRules) => onUpdateConfig(selected.id, { excludeRules: nextRules })}
+            />
+          ) : null}
+
+          {configTool === "fields" && selected.config.profileId === "financial_edge_project_activity" ? (
             <div>
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">FE reference extraction test</div>
               <div className="max-h-44 space-y-2 overflow-y-auto rounded border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
@@ -584,6 +926,16 @@ function ConfigureTab({
           ) : null}
         </div>
       </div>
+      {advancedOpen ? (
+        <AdvancedConfigPreview
+          upload={selected}
+          profile={profile}
+          headers={headers}
+          dataRows={dataRows}
+          rules={excludeRules}
+          onClose={() => setAdvancedOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -602,8 +954,9 @@ export function ReportUploadPanel({
   onRemove,
   onClear,
   toolKind,
+  databaseConfig,
 }: ReportUploadPanelProps) {
-  const [tab, setTab] = React.useState<"upload" | "configure">("upload");
+  const [tab, setTab] = React.useState<"upload" | "configure" | "database">("upload");
   const [selectedId, setSelectedId] = React.useState("");
 
   const configure = (id: string) => {
@@ -616,7 +969,8 @@ export function ReportUploadPanel({
       <div className="mb-3 inline-flex rounded-lg border border-slate-200 p-0.5 text-sm dark:border-slate-800">
         {([
           ["upload", `Upload${uploads.length ? ` (${uploads.length})` : ""}`],
-          ["configure", "Configure"],
+          ["configure", "Configure Upload"],
+          ...(databaseConfig ? [["database", "Configure Database"] as const] : []),
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -636,21 +990,23 @@ export function ReportUploadPanel({
         <div>
           <Dropzone reading={reading} onFiles={onFiles} />
           {error ? <div className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
-          <UploadsList uploads={uploads} onConfigure={configure} onRemove={onRemove} onClear={onClear} />
+          <UploadsList uploads={uploads} selectedId={selectedId} onConfigure={configure} onRemove={onRemove} onClear={onClear} />
         </div>
-      ) : (
+      ) : tab === "configure" ? (
         <ConfigureTab
           uploads={uploads}
           profiles={profiles}
           grants={grants}
           selectedId={selectedId}
           onSelect={setSelectedId}
-              onUpdateConfig={onUpdateConfig}
-              onApplyConfigToWorkbook={onApplyConfigToWorkbook}
-              onSetUploadEnabled={onSetUploadEnabled}
-              onSetWorkbookEnabled={onSetWorkbookEnabled}
-              toolKind={toolKind}
-            />
+          onUpdateConfig={onUpdateConfig}
+          onApplyConfigToWorkbook={onApplyConfigToWorkbook}
+          onSetUploadEnabled={onSetUploadEnabled}
+          onSetWorkbookEnabled={onSetWorkbookEnabled}
+          toolKind={toolKind}
+        />
+      ) : (
+        <div>{databaseConfig}</div>
       )}
     </div>
   );

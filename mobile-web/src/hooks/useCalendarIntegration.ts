@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { User } from "firebase/auth";
 import { GoogleIntegrations, type CalendarPostEventInput } from "@/lib/googleIntegrations";
+import { openGoogleConnectPopup } from "@/lib/oauthPopup";
 import { qk } from "@/hooks/queryKeys";
 
 export interface CalendarStatus {
@@ -22,7 +23,12 @@ function normalizeStatus(resp: Partial<CalendarStatus>): CalendarStatus {
   const permissionStatus = resp.permissionStatus ?? "disconnected";
   return {
     ...resp,
-    connected: resp.connected === true && permissionStatus === "connected",
+    // Match the web app exactly: a live token reads as connected when EITHER the
+    // backend's `connected` flag is true OR permissionStatus is "connected". The
+    // previous strict AND could never be satisfied because the status endpoint
+    // returned the raw record status ("active"), not "connected" — which is why
+    // mobile showed "disconnected" while web showed "connected" for the same user.
+    connected: resp.connected === true || permissionStatus === "connected",
     needsReconnect: permissionStatus === "needs_reconnect" || permissionStatus === "revoked",
     permissionStatus,
   };
@@ -42,6 +48,13 @@ export function useCalendarIntegration(user: User | null) {
 
   const connectMutation = useMutation({
     mutationFn: () => GoogleIntegrations.connect("googleCalendar"),
+  });
+
+  const connectPopupMutation = useMutation({
+    mutationFn: () => openGoogleConnectPopup("googleCalendar"),
+    // Refetch regardless of outcome — the user may have connected even if the
+    // popup was closed before our message arrived.
+    onSettled: () => qc.invalidateQueries({ queryKey: qKey }),
   });
 
   const disconnectMutation = useMutation({
@@ -65,6 +78,8 @@ export function useCalendarIntegration(user: User | null) {
     isLoading: statusQuery.isLoading,
     connect: () => connectMutation.mutateAsync(),
     connecting: connectMutation.isPending,
+    connectViaPopup: () => connectPopupMutation.mutateAsync(),
+    connectingViaPopup: connectPopupMutation.isPending,
     disconnect: () => disconnectMutation.mutateAsync(),
     disconnecting: disconnectMutation.isPending,
     postEvent: postEventMutation.mutateAsync,
@@ -89,6 +104,11 @@ export function useDriveIntegration(user: User | null) {
     mutationFn: () => GoogleIntegrations.connect("googleDrive"),
   });
 
+  const connectPopupMutation = useMutation({
+    mutationFn: () => openGoogleConnectPopup("googleDrive"),
+    onSettled: () => qc.invalidateQueries({ queryKey: qKey }),
+  });
+
   const disconnectMutation = useMutation({
     mutationFn: () => GoogleIntegrations.disconnect("googleDrive"),
     onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
@@ -105,6 +125,8 @@ export function useDriveIntegration(user: User | null) {
     isLoading: statusQuery.isLoading,
     connect: () => connectMutation.mutateAsync(),
     connecting: connectMutation.isPending,
+    connectViaPopup: () => connectPopupMutation.mutateAsync(),
+    connectingViaPopup: connectPopupMutation.isPending,
     disconnect: () => disconnectMutation.mutateAsync(),
     disconnecting: disconnectMutation.isPending,
     invalidate: () => qc.invalidateQueries({ queryKey: qKey }),
