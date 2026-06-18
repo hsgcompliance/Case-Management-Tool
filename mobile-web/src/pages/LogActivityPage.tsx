@@ -218,11 +218,13 @@ export function LogActivityPage() {
   const [endTime, setEndTime] = useState("");
   const [note, setNote] = useState("");
 
-  // Calendar toggle — default from pref, only if connected
+  // Calendar toggle — requires a connection AND a start time (calendar events
+  // need a time; an all-day "session" isn't useful). Default-on only when a
+  // time is present, and force off whenever the time is cleared.
   const [addToCalendar, setAddToCalendar] = useState(false);
   useEffect(() => {
-    setAddToCalendar(connected && prefs.calendarDefault);
-  }, [connected, prefs.calendarDefault]);
+    setAddToCalendar(connected && prefs.calendarDefault && !!startTime);
+  }, [connected, prefs.calendarDefault, startTime]);
 
   // Push-to-workbook toggle — default from pref, only if Drive connected
   const [pushToWorkbook, setPushToWorkbook] = useState(false);
@@ -283,36 +285,36 @@ export function LogActivityPage() {
 
     const destination = preCustomerId ? `/customers/${preCustomerId}` : "/";
 
-    // 2. Optionally post to calendar (non-blocking)
-    if (addToCalendar && connected) {
+    // 2. Optionally post to calendar — requires a start time. Non-blocking, and
+    //    crucially independent of the workbook push below: a calendar failure
+    //    must NOT skip the progress-note push. We capture the error and surface
+    //    it after both attempts.
+    let calendarError: { error: string; needsReconnect: boolean } | null = null;
+    if (addToCalendar && connected && startTime) {
       try {
         await postEvent({
           customerName: customer.name,
           type,
           date,
-          startTime: startTime || undefined,
+          startTime,
           endTime: endTime || undefined,
           note: note.trim() || undefined,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
-        const isReconnect = msg.includes("calendar_needs_reconnect") || needsReconnect;
-        setSyncWarning({ error: msg, needsReconnect: isReconnect, navigateTo: destination });
-        return;
+        calendarError = { error: msg, needsReconnect: msg.includes("calendar_needs_reconnect") || needsReconnect };
       }
     }
 
-    // 3. Optionally push to the customer's TSS workbook (non-blocking).
-    if (pushToWorkbook) {
-      if (!drive.connected) {
-        // Setting on but Drive not set up → notify + link to settings (session is saved).
-        setWorkbookNotice({
-          message: "Connect Google Drive in Settings to push notes to the workbook.",
-          showSettings: true,
-          navigateTo: destination,
-        });
-        return;
-      }
+    // 3. Optionally push to the customer's TSS workbook (independent of calendar).
+    let workbookError: { message: string; showSettings: boolean } | null = null;
+    if (pushToWorkbook && !drive.connected) {
+      // Setting on but Drive not set up → notify + link to settings (session is saved).
+      workbookError = {
+        message: "Connect Google Drive in Settings to push notes to the workbook.",
+        showSettings: true,
+      };
+    } else if (pushToWorkbook) {
       try {
         // Push the FULL progress note. The Summary cell is built to read as a
         // self-contained note — modality + the case note, signed with the case
@@ -348,31 +350,49 @@ export function LogActivityPage() {
         });
         if (!resp.ok) {
           const linkable = resp.error === "google_not_connected" || resp.error === "workbook_not_linked";
-          setWorkbookNotice({
+          workbookError = {
             message: resp.error === "workbook_not_linked"
               ? "No workbook is linked to this customer yet."
               : `Couldn't push to the workbook (${resp.error ?? "error"}).`,
             showSettings: linkable,
-            navigateTo: destination,
-          });
-          return;
-        }
-        // Push succeeded → flag the session doc as synced to the workbook.
-        try {
-          await markSessionWorkbookSynced(sessionId, resp.rowKey);
-          void qc.invalidateQueries({ queryKey: qk.cmActivities.root });
-        } catch {
-          // Non-fatal: the note is in the workbook even if the flag write failed.
+          };
+        } else {
+          // Push succeeded → flag the session doc as synced to the workbook.
+          try {
+            await markSessionWorkbookSynced(sessionId, resp.rowKey);
+            void qc.invalidateQueries({ queryKey: qk.cmActivities.root });
+          } catch {
+            // Non-fatal: the note is in the workbook even if the flag write failed.
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
-        setWorkbookNotice({
+        workbookError = {
           message: `Couldn't push to the workbook: ${msg}`,
           showSettings: msg.includes("google_not_connected"),
-          navigateTo: destination,
-        });
-        return;
+        };
       }
+    }
+
+    // 4. Surface failures (the session itself is already saved). The workbook
+    //    notice takes the sheet; a calendar failure is appended to its message.
+    //    Either notice navigates to the destination when dismissed.
+    if (workbookError) {
+      const calNote = calendarError ? " Calendar sync also failed — check Settings." : "";
+      setWorkbookNotice({
+        message: workbookError.message + calNote,
+        showSettings: workbookError.showSettings,
+        navigateTo: destination,
+      });
+      return;
+    }
+    if (calendarError) {
+      setSyncWarning({
+        error: calendarError.error,
+        needsReconnect: calendarError.needsReconnect,
+        navigateTo: destination,
+      });
+      return;
     }
 
     navigate(destination, { replace: true });
@@ -483,19 +503,22 @@ export function LogActivityPage() {
           <span className="text-lg flex-shrink-0">📅</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-800">Add to Google Calendar</p>
-            {!connected && (
+            {!connected ? (
               <p className="text-xs text-slate-400 mt-0.5">
                 {needsReconnect ? "Connection expired — reconnect to sync." : "Connect to sync sessions to your calendar."}
               </p>
-            )}
+            ) : !startTime ? (
+              <p className="text-xs text-slate-400 mt-0.5">Enter a start time to add to calendar.</p>
+            ) : null}
           </div>
           {connected ? (
             <button
               type="button"
               role="switch"
               aria-checked={addToCalendar}
+              disabled={!startTime}
               onClick={() => setAddToCalendar((v) => !v)}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors disabled:opacity-40 ${
                 addToCalendar ? "bg-indigo-600" : "bg-slate-200"
               }`}
             >

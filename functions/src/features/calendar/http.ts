@@ -61,5 +61,9 @@ export const calendarPostEvent = secureHandler(
     auth: "user",
     methods: ["POST", "OPTIONS"],
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET],
+    // The lazy monolithic `googleapis` import peaks >256MiB → the worker is OOM
+    // killed and Cloud Run returns an opaque 500 before createCalendarEvent can
+    // respond. 512 is the floor every other googleapis-backed handler uses.
+    memory: "512MiB",
   },
 );

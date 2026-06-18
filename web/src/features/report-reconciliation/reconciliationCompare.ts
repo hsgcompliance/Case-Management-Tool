@@ -105,6 +105,22 @@ function sourceId(label: string) {
   return label.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase() || "source";
 }
 
+function packetSourceMetas(packets: ReconciliationPacket[]) {
+  const labelCounts = new Map<string, number>();
+  for (const packet of packets) labelCounts.set(packet.sourceFile, (labelCounts.get(packet.sourceFile) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return packets.map((packet, index) => {
+    const duplicateCount = labelCounts.get(packet.sourceFile) ?? 0;
+    const nextSeen = (seen.get(packet.sourceFile) ?? 0) + 1;
+    seen.set(packet.sourceFile, nextSeen);
+    const suffix = duplicateCount > 1 ? ` #${nextSeen}` : "";
+    return {
+      id: `report:${sourceId(`${packet.sourceFile}:${packet.profileId}:${packet.headerRowIndex}:${index}`)}`,
+      label: `${packet.sourceFile}${suffix}`,
+    };
+  });
+}
+
 function customerMaps(customers: Array<Record<string, unknown>>) {
   const byId = new Map<string, Record<string, unknown>>();
   const byCwid = new Map<string, Record<string, unknown>>();
@@ -193,15 +209,15 @@ function findCustomerForRecord(record: NormalizedReportRecord, maps: ReturnType<
   return { customer: null, confidence: 0, reason: "No CWID/HMIS/exact-name/fuzzy-name match" };
 }
 
-function reportPaymentUnit(packet: ReconciliationPacket, record: NormalizedReportRecord, index: number): PaymentUnit | null {
+function reportPaymentUnit(packet: ReconciliationPacket, source: { id: string; label: string }, record: NormalizedReportRecord, index: number): PaymentUnit | null {
   if (record.paymentEvidence.amount == null) return null;
   const name = record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`.trim();
   const date = record.paymentEvidence.transactionDate || record.paymentEvidence.serviceMonth;
   const amount = record.paymentEvidence.amount;
   return {
     id: `${packet.sourceFile}:${record.sourceRowNumber ?? index}`,
-    sourceId: `report:${sourceId(packet.sourceFile)}`,
-    sourceLabel: packet.sourceFile,
+    sourceId: source.id,
+    sourceLabel: source.label,
     sourceKind: "report",
     sourceProfileId: packet.profileId,
     name,
@@ -359,9 +375,11 @@ function mergeStatus(current: CompareCellStatus, next: CompareCellStatus): Compa
 function buildPaymentCompareRows(packets: ReconciliationPacket[], database: DatabaseRows): { sources: CompareSource[]; rows: CompareRow[] } {
   const maps = customerMaps(database.customers);
   const units: PaymentUnit[] = [];
-  for (const packet of packets) {
+  const packetSources = packetSourceMetas(packets);
+  for (const [packetIndex, packet] of packets.entries()) {
+    const source = packetSources[packetIndex];
     packet.records.forEach((record, index) => {
-      const unit = reportPaymentUnit(packet, record, index);
+      const unit = reportPaymentUnit(packet, source, record, index);
       if (unit) units.push(unit);
     });
   }
@@ -532,6 +550,7 @@ function buildEnrollmentCompareRows(
   const maps = customerMaps(database.customers);
   const sources = new Map<string, CompareSource>();
   const rows = new Map<string, CompareRow>();
+  const packetSources = packetSourceMetas(packets);
   const put = (key: string, cell: CompareCell, base: Partial<CompareRow>) => {
     sources.set(cell.sourceId, { id: cell.sourceId, label: cell.sourceLabel, kind: cell.sourceId.startsWith("report:") ? "report" : "database" });
     const row = rows.get(key) ?? {
@@ -551,14 +570,15 @@ function buildEnrollmentCompareRows(
     rows.set(key, row);
   };
 
-  for (const packet of packets) {
+  for (const [packetIndex, packet] of packets.entries()) {
+    const reportSource = packetSources[packetIndex];
     for (const record of packet.records) {
       if (!record.enrollmentEvidence.projectName && !record.enrollmentEvidence.entryDate && !record.enrollmentEvidence.exitDate && granularity !== "service") continue;
       const key = enrollmentKeyFromRecord(record, granularity);
       const name = record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`.trim();
       put(key, {
-        sourceId: `report:${sourceId(packet.sourceFile)}`,
-        sourceLabel: packet.sourceFile,
+        sourceId: reportSource.id,
+        sourceLabel: reportSource.label,
         status: "matched",
         value: [record.enrollmentEvidence.projectName || record.paymentEvidence.grant, record.enrollmentEvidence.entryDate, record.enrollmentEvidence.exitDate].filter(Boolean).join(" / ") || "present",
         row: record.raw,
@@ -629,15 +649,17 @@ function buildCustomerExitCompareRows(packets: ReconciliationPacket[], database:
   const maps = customerMaps(database.customers);
   const sources = new Map<string, CompareSource>();
   const rows = new Map<string, CompareRow>();
-  for (const packet of packets) {
+  const packetSources = packetSourceMetas(packets);
+  for (const [packetIndex, packet] of packets.entries()) {
+    const reportSource = packetSources[packetIndex];
     for (const record of packet.records) {
       const name = record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`.trim();
       if (!name && !record.customerIdentity.hmisId && !record.customerIdentity.caseworthyId) continue;
       const match = findCustomerForRecord(record, maps);
       const matched = match.customer;
       const key = identityKeyFromValues(record.customerIdentity.caseworthyId, record.customerIdentity.hmisId, name);
-      const reportSourceId = `report:${sourceId(packet.sourceFile)}`;
-      sources.set(reportSourceId, { id: reportSourceId, label: packet.sourceFile, kind: "report" });
+      const reportSourceId = reportSource.id;
+      sources.set(reportSourceId, { id: reportSourceId, label: reportSource.label, kind: "report" });
       sources.set("database:customers", { id: "database:customers", label: "Dashboard customers", kind: "database" });
       rows.set(key, {
         id: `customer:${key}`,
@@ -654,7 +676,7 @@ function buildCustomerExitCompareRows(packets: ReconciliationPacket[], database:
           actionHint: matched ? "Review active/inactive and IDs" : "Create customer, assign CM, link IDs/folder",
         },
         cells: [
-          { sourceId: reportSourceId, sourceLabel: packet.sourceFile, status: "matched", value: "present", row: record.raw },
+          { sourceId: reportSourceId, sourceLabel: reportSource.label, status: "matched", value: "present", row: record.raw },
           { sourceId: "database:customers", sourceLabel: "Dashboard customers", status: matched ? "matched" : "missing", value: matched ? "present" : "missing", row: matched },
         ],
         matchReasons: [match.reason],

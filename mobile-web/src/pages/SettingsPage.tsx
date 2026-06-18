@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
@@ -204,7 +204,7 @@ export function SettingsPage() {
               : "bg-amber-50 text-amber-700 border border-amber-200"
           }`}
         >
-          <span>{calendarBanner === "connected" ? "âœ“" : "âš ï¸"}</span>
+          <span>{calendarBanner === "connected" ? "✓" : "⚠️"}</span>
           <span>
             {calendarBanner === "connected"
               ? `${bannerService === "googleDrive" ? "Google Drive" : "Google Calendar"} connected successfully.`
@@ -217,7 +217,7 @@ export function SettingsPage() {
             onClick={() => setCalendarBanner(null)}
             className="ml-auto text-xs opacity-60 hover:opacity-100"
           >
-            âœ•
+            ✕
           </button>
         </div>
       )}
@@ -232,7 +232,7 @@ export function SettingsPage() {
           </div>
         )}
         <div>
-          <p className="font-semibold text-slate-900">{user?.displayName ?? "â€”"}</p>
+          <p className="font-semibold text-slate-900">{user?.displayName ?? "—"}</p>
           <p className="text-xs text-slate-400">{user?.email}</p>
         </div>
       </div>
@@ -241,7 +241,7 @@ export function SettingsPage() {
       <div className="mx-4 mb-5 bg-white rounded-xl border border-slate-100 shadow-sm divide-y divide-slate-100">
         {/* Time format */}
         <div className="flex items-center gap-3 px-4 py-4">
-          <span className="text-lg">ðŸ•</span>
+          <span className="text-lg">🕐</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-800">Time Format</p>
             <p className="text-xs text-slate-400 mt-0.5">How times display in the log form</p>
@@ -270,7 +270,7 @@ export function SettingsPage() {
 
         {/* Time interval */}
         <div className="flex items-center gap-3 px-4 py-4">
-          <span className="text-lg">â±</span>
+          <span className="text-lg">⏱</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-800">Time Step</p>
             <p className="text-xs text-slate-400 mt-0.5">Snap interval when dragging</p>
@@ -352,7 +352,7 @@ export function SettingsPage() {
           onClick={handleClearAppCache}
           className="w-full flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50 transition-colors"
         >
-          <span className="text-lg">ðŸ—‘ï¸</span>
+          <span className="text-lg">🗑️</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-800">Clear app data</p>
             <p className="text-xs text-slate-400 mt-0.5">Refreshes cached customer and grant data</p>
@@ -367,10 +367,10 @@ export function SettingsPage() {
           onClick={() => void clearWebsiteCache()}
           className="w-full flex items-center gap-3 px-4 py-4 text-left active:bg-slate-50 transition-colors"
         >
-          <span className="text-lg">ðŸ”„</span>
+          <span className="text-lg">🔄</span>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-800">Clear website cache</p>
-            <p className="text-xs text-slate-400 mt-0.5">Removes cached app files and reloads â€” you'll stay signed in</p>
+            <p className="text-xs text-slate-400 mt-0.5">Removes cached app files and reloads — you'll stay signed in</p>
           </div>
         </button>
       </div>
@@ -381,12 +381,12 @@ export function SettingsPage() {
           onClick={handleSignOut}
           className="w-full flex items-center gap-3 px-4 py-4 text-left active:bg-red-50 transition-colors"
         >
-          <span className="text-lg">ðŸšª</span>
+          <span className="text-lg">🚪</span>
           <span className="text-sm font-medium text-red-600">Sign Out</span>
         </button>
       </div>
 
-      <p className="text-center text-xs text-slate-400 mt-4">HDB Mobile Â· v0.1.0</p>
+      <p className="text-center text-xs text-slate-400 mt-4">HDB Mobile · v0.1.0</p>
     </div>
   );
 }
