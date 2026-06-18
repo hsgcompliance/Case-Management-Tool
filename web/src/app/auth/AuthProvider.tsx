@@ -72,8 +72,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const inflight = useRef<Promise<StaffProfile | null> | null>(null);
   const FETCH_DEBOUNCE_MS = 5000;
 
+  // Last-known-good profile + the uid it belongs to. Used to (a) preserve a
+  // valid profile across transient /users/me failures and (b) skip redundant
+  // refetches on normal (often cross-tab) token refresh events.
+  const profileRef = useRef<StaffProfile | null>(null);
+  const profileUidRef = useRef<string | null>(null);
+
   const assignProfile = (raw: any | null) => {
     if (!raw) {
+      profileRef.current = null;
+      profileUidRef.current = null;
       setProfile(null);
       return;
     }
@@ -103,12 +111,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       roles = ["unverified"];
     }
 
-    setProfile({
+    const next = {
       ...raw,
       roles,
       role: roles[0],
       topRole: topRole || roles[0],
-    });
+    };
+    profileRef.current = next;
+    profileUidRef.current = String(raw.uid || auth.currentUser?.uid || "") || null;
+    setProfile(next);
   };
 
   const fetchProfile = async (reason: string, force = false, seedUser?: User | null) => {
@@ -127,7 +138,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         log("fetchProfile start", reason);
         const res = await UsersClient.me();           // { ok, user }
         const me = (res as any)?.user ?? null;
-        assignProfile(me);
+        if (me) {
+          assignProfile(me);
+        } else if (!profileRef.current) {
+          // Cold start with no profile yet: reflect the empty result.
+          assignProfile(null);
+        }
+        // Otherwise preserve the last-known-good profile across a transient
+        // empty/failed response (multi-tab token churn, App Check timing).
         return me;
       } finally {
         lastFetchMs.current = Date.now();
@@ -171,7 +189,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         syncGoogleDriveAccessTokenOwner(u.uid);
 
-        try { await u.getIdToken(true); } catch {}
+        // Warm the cached ID token (no forced refresh). The Firebase SDK still
+        // performs its own ~hourly refresh; forcing one on every auth event
+        // triggers cross-tab onIdTokenChanged storms. Forced refresh is still
+        // used for real 401 retry flows (api client) and explicit reloads.
+        try { await u.getIdToken(); } catch {}
         try { await appCheckReadyPromise; } catch {}
 
         try {
@@ -215,7 +237,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               } catch {}
             }
 
-            assignProfile(null);
+            // Preserve a previously loaded profile across transient failures
+            // (network/App Check timing, multi-tab token churn). Only clear when
+            // we have no valid profile yet, so we don't unmount the app on a blip.
+            if (!profileRef.current) assignProfile(null);
         } finally {
           if (!cancelled) setBooting(false);
         }
@@ -223,6 +248,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       unsubId = onIdTokenChanged(auth, async (u) => {
         if (!u) return;
+        // A token change for the same signed-in user when we already hold a
+        // valid profile is a normal (often cross-tab / hourly) refresh — skip the
+        // refetch so background tabs don't churn the profile and remount the app.
+        if (profileRef.current && profileUidRef.current === u.uid) return;
+        try { await appCheckReadyPromise; } catch {}
         try { await fetchProfile("id-token-changed"); } catch {}
       });
     });
