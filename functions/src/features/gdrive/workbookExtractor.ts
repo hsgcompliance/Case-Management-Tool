@@ -585,9 +585,15 @@ function extractDataTable(
   let consecutiveBlank = 0;
 
   for (let r = dataStart; r < MAX_SCAN_ROWS; r++) {
-    // Stop at next anchor (scan the whole row for the anchor text).
+    // Stop at next anchor (scan the whole row for the anchor text). Match the
+    // anchor exactly OR as a leading whole-word group, so a configured anchor
+    // like "Plan Reviews" still stops on a header cell that carries a trailing
+    // qualifier — e.g. "Plan Reviews (≥ every 120 days and upon change)".
     if (nextAnchorId) {
-      const rowHasAnchor = (grid[r] ?? []).some((c) => tss.smartHeaderId(c) === nextAnchorId);
+      const rowHasAnchor = (grid[r] ?? []).some((c) => {
+        const id = tss.smartHeaderId(c);
+        return id === nextAnchorId || id.startsWith(`${nextAnchorId}_`);
+      });
       if (rowHasAnchor) break;
     }
 
