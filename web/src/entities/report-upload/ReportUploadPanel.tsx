@@ -460,7 +460,8 @@ function AdvancedConfigPreview({
     sourceFile: upload.fileName,
     sourceRowNumber: row.sourceRowNumber,
     sourceType: profile.id,
-  }, upload.config.fieldOverrides)), [headers, profile, upload.config.fieldOverrides, upload.fileName, visibleRows]);
+    sourceGrant: upload.sheetName ? `${upload.fileName} / ${upload.sheetName}` : upload.fileName,
+  }, upload.config.fieldOverrides)), [headers, profile, upload.config.fieldOverrides, upload.fileName, upload.sheetName, visibleRows]);
   const rawHeaders = headers.slice(0, 14);
   const normalizedHeaders = ["Row", "Name", "Client ID", "Date", "Amount", "Grant/Provider", "Reference", "Exclude reason"];
   return (

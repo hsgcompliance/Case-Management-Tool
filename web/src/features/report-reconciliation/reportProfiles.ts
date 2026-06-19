@@ -229,7 +229,16 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
         label: "Admin, payroll, benefit, or allocation description",
         fieldKey: "description",
         operator: "regex",
-        value: "\\b(payroll|wages?|salary|fica|pto|medical insurance|dental|disability|hsa|ad&d|work comp|unemployment|401k|space allocation|communication allocation|allocation)\\b",
+        value: "\\b(beginning balance|payroll|wages?|salary|fica|pto|medical insurance|dental|disability|hsa|ad\\s*&\\s*d|work comp|unemployment|401k|space allocation|communication allocation|allocation)\\b",
+        flags: "i",
+        enabled: true,
+      },
+      {
+        id: "fe_admin_payroll_allocation_reference",
+        label: "Admin, payroll, benefit, or allocation reference",
+        fieldKey: "reference",
+        operator: "regex",
+        value: "\\b(beginning balance|payroll|wages?|salary|fica|pto|medical insurance|dental|disability|hsa|ad\\s*&\\s*d|work comp|unemployment|401k|space allocation|communication allocation|allocation)\\b",
         flags: "i",
         enabled: true,
       },
@@ -333,6 +342,28 @@ export function normalizeCustomerName(input: unknown): string {
     .replace(/[^a-z0-9'\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function namePartsFromReportName(input: unknown) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return { firstName: "", lastName: "" };
+  if (raw.includes(",")) {
+    const [last, first] = raw.split(",").map((part) => part.trim());
+    return { firstName: first || "", lastName: last || "" };
+  }
+  const parts = raw.replace(/\./g, " ").split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] ?? "",
+    lastName: parts.length > 1 ? parts[parts.length - 1] : "",
+  };
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 export function normalizeAmount(input: unknown): number | null {
@@ -671,7 +702,7 @@ export function normalizeReportRow(
   profile: ReportSourceProfile,
   headers: unknown[],
   row: Record<string, unknown> | unknown[],
-  source: { sourceType?: string; sourceFile?: string; sourceRowNumber?: number | null } = {},
+  source: { sourceType?: string; sourceFile?: string; sourceRowNumber?: number | null; sourceGrant?: string } = {},
   overrides?: FieldColumnOverrides,
 ): NormalizedReportRecord {
   const { matches, diagnostics } = matchProfileHeaders(profile, headers, overrides);
@@ -686,6 +717,13 @@ export function normalizeReportRow(
   const serviceName = String(values.get("serviceName") ?? values.get("serviceDescription") ?? "").trim();
   const reference = String(values.get("reference") ?? serviceName).trim();
   const parsedReference = profile.id === "financial_edge_project_activity" ? parseFinancialEdgeReference(reference) : null;
+  const parsedFeName = profile.id === "financial_edge_project_activity"
+    ? String(parsedReference?.fields.staffPrefix || parsedReference?.fields.customerName || "").replace(/\./g, " ").replace(/\s+/g, " ").trim()
+    : "";
+  const reportNameValue = firstText(values.get("customerName"), parsedFeName);
+  const sourceGrant = String(source.sourceGrant ?? "").trim();
+  const reportGrant = firstText(values.get("grant"), values.get("providerId"), values.get("serviceProvider"), sourceGrant, serviceName);
+  const reportNameParts = namePartsFromReportName(reportNameValue);
 
   return {
     sourceType: source.sourceType || profile.id,
@@ -696,14 +734,14 @@ export function normalizeReportRow(
       dashboardCustomerId: String(values.get("customerId") ?? "").trim(),
       hmisId: String(values.get("hmisId") ?? values.get("clientId") ?? "").trim(),
       caseworthyId: String(values.get("caseworthyId") ?? "").trim(),
-      firstName,
-      lastName,
-      fullName,
+      firstName: firstName || reportNameParts.firstName,
+      lastName: lastName || reportNameParts.lastName,
+      fullName: fullName || normalizeCustomerName(reportNameValue),
       dob: normalizeDate(values.get("dob")),
     },
     enrollmentEvidence: {
-      programId: String(values.get("programId") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("program") ?? "").trim(),
-      projectName: String(values.get("projectName") ?? values.get("providerId") ?? values.get("serviceProvider") ?? values.get("program") ?? values.get("grant") ?? serviceName).trim(),
+      programId: firstText(values.get("programId"), values.get("providerId"), values.get("serviceProvider"), values.get("program"), sourceGrant),
+      projectName: firstText(values.get("projectName"), values.get("providerId"), values.get("serviceProvider"), values.get("program"), reportGrant),
       entryDate: normalizeDate(values.get("entryDate") ?? values.get("projectEntryDate") ?? values.get("dateIdentified")),
       exitDate: normalizeDate(values.get("exitDate") ?? values.get("projectExitDate")),
       destination: String(values.get("destination") ?? "").trim(),
@@ -713,7 +751,7 @@ export function normalizeReportRow(
       amount,
       transactionDate,
       serviceMonth: transactionDate.slice(0, 7),
-      grant: String(values.get("grant") ?? values.get("providerId") ?? values.get("serviceProvider") ?? serviceName).trim(),
+      grant: reportGrant,
       reference,
       invoice: String(values.get("invoice") ?? values.get("dataEntry") ?? "").trim(),
     },
@@ -733,6 +771,7 @@ export function buildReconciliationPacket({
   headerRowIndex,
   fieldOverrides,
   excludeRules,
+  sourceGrant,
 }: {
   profile: ReportSourceProfile;
   headers: unknown[];
@@ -741,6 +780,7 @@ export function buildReconciliationPacket({
   headerRowIndex: number;
   fieldOverrides?: FieldColumnOverrides;
   excludeRules?: ReportExcludeRule[];
+  sourceGrant?: string;
 }): ReconciliationPacket {
   const normalizedHeaders = headers.map((header) => String(header ?? ""));
   const headerResult = matchProfileHeaders(profile, normalizedHeaders, fieldOverrides);
@@ -757,6 +797,7 @@ export function buildReconciliationPacket({
       sourceType: profile.id,
       sourceFile,
       sourceRowNumber: filterRow.sourceRowNumber,
+      sourceGrant,
     }, fieldOverrides),
   );
   const rowDiagnostics = records.flatMap((record) => record.diagnostics);
