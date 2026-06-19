@@ -423,7 +423,8 @@ export async function parseReportFilePreviews(
   const lowerName = file.name.toLowerCase();
   if (lowerName.endsWith(".xlsx") || XLSX_MIME_RE.test(file.type)) {
     const sheets = await readXlsxSheets(file);
-    return sheets.map((sheet) => buildPreview(file.name, "xlsx", sheet.rows, profiles, maxRows, sheet.sheetName));
+    const singleSheet = sheets.length === 1;
+    return sheets.map((sheet) => buildPreview(file.name, "xlsx", sheet.rows, profiles, maxRows, singleSheet ? undefined : sheet.sheetName));
   }
   return [await parseReportFilePreview(file, profiles, opts)];
 }

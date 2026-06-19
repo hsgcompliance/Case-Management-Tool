@@ -69,6 +69,7 @@ function buildPacketForUpload(
     headerRowIndex,
     fieldOverrides: config.fieldOverrides,
     excludeRules,
+    sourceGrant: fileName,
   });
 }
 
