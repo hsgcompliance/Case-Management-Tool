@@ -2110,6 +2110,40 @@ function CompareWorkspaceModal({
   );
 }
 
+function textValue(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function numberValue(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isBillableOrBudgetGrant(grant: Record<string, unknown>) {
+  const budget = grant.budget && typeof grant.budget === "object" ? grant.budget as Record<string, unknown> : {};
+  const totals = budget.totals && typeof budget.totals === "object" ? budget.totals as Record<string, unknown> : {};
+  const lineItems = Array.isArray(budget.lineItems) ? budget.lineItems : [];
+  const total = numberValue(budget.total ?? totals.total ?? grant.budgetTotal ?? grant.totalBudget);
+  const projected = numberValue(totals.projected ?? totals.projectedTotal ?? totals.projectedSpend);
+  const spent = numberValue(totals.spent ?? totals.spentTotal ?? totals.actualSpend);
+  const hasBudget = lineItems.length > 0 || [total, projected, spent].some((value) => value != null && Math.abs(value) > 0);
+  const label = [
+    grant.cardType,
+    grant.type,
+    grant.kind,
+    grant.grantType,
+    grant.category,
+    grant.name,
+    grant.grantName,
+    grant.label,
+  ].map(textValue).join(" ").toLowerCase();
+  return hasBudget || /\b(billable|budget)\b/.test(label);
+}
+
+function rowGrantId(row: Record<string, unknown>) {
+  return textValue(row.grantId ?? row.grantID ?? row.programId ?? row.projectId);
+}
+
 function useReviewForTool(kind: ReconciliationToolKind, filterState: ReconciliationToolFilterState) {
   const config = TOOL_CONFIG[kind];
   const workspace = useReconciliationWorkspace();
@@ -2163,6 +2197,16 @@ function useReviewForTool(kind: ReconciliationToolKind, filterState: Reconciliat
     }),
     [filterState.databaseFilters.ledger.grantId, filterState.databaseFilters.ledger.source],
   );
+  const eligiblePaymentGrants = React.useMemo(
+    () => kind === "payment"
+      ? (dashboard.grants as Array<Record<string, unknown>>).filter(isBillableOrBudgetGrant)
+      : dashboard.grants as Array<Record<string, unknown>>,
+    [dashboard.grants, kind],
+  );
+  const eligiblePaymentGrantIds = React.useMemo(
+    () => new Set(eligiblePaymentGrants.map((grant) => textValue(grant.id)).filter(Boolean)),
+    [eligiblePaymentGrants],
+  );
   const { data: paymentQueueItems = [], isLoading: paymentQueueLoading } = usePaymentQueueItemsForMonths(
     paymentQueueMonths,
     paymentQueueQuery,
@@ -2173,15 +2217,22 @@ function useReviewForTool(kind: ReconciliationToolKind, filterState: Reconciliat
     ledgerQuery,
     { enabled: kind === "payment" && filterState.databaseFilters.ledger.enabled && ledgerMonths.length > 0, staleTime: 120_000 },
   );
-  const filteredDatabase = React.useMemo(
-    () => applyDatabaseFilters(filterState.databaseFilters, {
+  const filteredDatabase = React.useMemo(() => {
+    const scopedPaymentQueueItems = kind === "payment"
+      ? (paymentQueueItems as Array<Record<string, unknown>>).filter((row) => eligiblePaymentGrantIds.has(rowGrantId(row)))
+      : paymentQueueItems as Array<Record<string, unknown>>;
+    const scopedLedgerEntries = kind === "payment"
+      ? (ledgerEntries as Array<Record<string, unknown>>).filter((row) => eligiblePaymentGrantIds.has(rowGrantId(row)))
+      : ledgerEntries as Array<Record<string, unknown>>;
+    return applyDatabaseFilters(filterState.databaseFilters, {
       customers: dashboard.customers as Array<Record<string, unknown>>,
       enrollments: dashboard.enrollments as Array<Record<string, unknown>>,
-      grants: dashboard.grants as Array<Record<string, unknown>>,
-      paymentQueueItems: paymentQueueItems as Array<Record<string, unknown>>,
-      ledger: ledgerEntries as Array<Record<string, unknown>>,
-    }),
-    [dashboard.customers, dashboard.enrollments, dashboard.grants, filterState.databaseFilters, ledgerEntries, paymentQueueItems],
+      grants: eligiblePaymentGrants,
+      paymentQueueItems: scopedPaymentQueueItems,
+      ledger: scopedLedgerEntries,
+    });
+  },
+    [dashboard.customers, dashboard.enrollments, eligiblePaymentGrantIds, eligiblePaymentGrants, filterState.databaseFilters, kind, ledgerEntries, paymentQueueItems],
   );
   const review = React.useMemo<ReconciliationReviewResult>(
     () => buildReconciliationReview(relevantPackets, {

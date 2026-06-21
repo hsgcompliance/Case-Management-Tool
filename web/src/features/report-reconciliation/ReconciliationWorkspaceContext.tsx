@@ -61,6 +61,7 @@ function buildPacketForUpload(
   const profile = profiles.find((item) => item.id === config.profileId) ?? profiles[0];
   const { headers, dataRows, headerRowIndex } = deriveHeadersAndRows(allRows, config.headerRowIndex);
   const excludeRules = normalizeExcludeRules(config.excludeRules, defaultExcludeRulesForProfile(profile));
+  const sourceGrant = [...(config.manualGrantSignals ?? []), fileName].map((value) => String(value || "").trim()).filter(Boolean).join(" | ");
   return buildReconciliationPacket({
     profile,
     headers,
@@ -69,7 +70,7 @@ function buildPacketForUpload(
     headerRowIndex,
     fieldOverrides: config.fieldOverrides,
     excludeRules,
-    sourceGrant: fileName,
+    sourceGrant,
   });
 }
 
@@ -84,6 +85,7 @@ function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedRepor
     headerRowIndex: preview.headerRowIndex,
     fieldOverrides: {},
     excludeRules: profile ? defaultExcludeRulesForProfile(profile) : [],
+    manualGrantSignals: [],
   };
   return {
     id: `${preview.fileName}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,

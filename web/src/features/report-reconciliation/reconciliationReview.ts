@@ -555,7 +555,6 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           reportRecord: record,
           match: { criteria: ["No dashboard customer matched by dashboard ID, CWID, HMIS ID, exact first + last name, first + last + DOB, or close first + last spelling."] },
         });
-        continue;
       }
 
       if (customer && match.confidence < 0.95) {
