@@ -218,6 +218,20 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
     },
     excludeRules: [
       {
+        id: "fe_blank_account",
+        label: "Blank account",
+        fieldKey: "account",
+        operator: "is_blank",
+        enabled: true,
+      },
+      {
+        id: "fe_blank_description",
+        label: "Blank description",
+        fieldKey: "description",
+        operator: "is_blank",
+        enabled: true,
+      },
+      {
         id: "fe_amount_zero_or_blank",
         label: "Blank or $0 amount",
         fieldKey: "amount",
@@ -226,19 +240,28 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
       },
       {
         id: "fe_admin_payroll_allocation_description",
-        label: "Admin, payroll, benefit, or allocation description",
+        label: "Payroll or allocation description",
         fieldKey: "description",
         operator: "regex",
-        value: "\\b(beginning balance|payroll|wages?|salary|fica|pto|medical insurance|dental|disability|hsa|ad\\s*&\\s*d|work comp|unemployment|401k|space allocation|communication allocation|allocation)\\b",
+        value: "\\b(payroll|allocation)\\b",
         flags: "i",
         enabled: true,
       },
       {
         id: "fe_admin_payroll_allocation_reference",
-        label: "Admin, payroll, benefit, or allocation reference",
+        label: "Payroll or allocation reference",
         fieldKey: "reference",
         operator: "regex",
-        value: "\\b(beginning balance|payroll|wages?|salary|fica|pto|medical insurance|dental|disability|hsa|ad\\s*&\\s*d|work comp|unemployment|401k|space allocation|communication allocation|allocation)\\b",
+        value: "\\b(payroll|allocation)\\b",
+        flags: "i",
+        enabled: true,
+      },
+      {
+        id: "fe_beginning_balance_reference",
+        label: "Beginning balance reference",
+        fieldKey: "reference",
+        operator: "contains",
+        value: "beginning balance",
         flags: "i",
         enabled: true,
       },
@@ -653,11 +676,16 @@ export function evaluateExcludeRules(
   const { matches } = matchProfileHeaders(profile, headers, overrides);
   const matchMap = new Map(matches.map((match) => [match.fieldKey, match]));
   const values: Record<string, unknown> = {};
+  const mappedFields = new Set<string>();
   for (const rule of enabledRules) {
     const match = matchMap.get(rule.fieldKey);
+    if (match && (match.sourceIndex != null || match.sourceHeader)) mappedFields.add(rule.fieldKey);
     values[rule.fieldKey] = match ? readRawValue(row, match) : undefined;
   }
-  const matched = enabledRules.filter((rule) => excludeRuleMatches(rule, values[rule.fieldKey]));
+  const matched = enabledRules.filter((rule) => {
+    if ((rule.operator === "is_blank" || rule.operator === "amount_zero_or_blank") && !mappedFields.has(rule.fieldKey)) return false;
+    return excludeRuleMatches(rule, values[rule.fieldKey]);
+  });
   return {
     excluded: matched.length > 0,
     matchedRuleIds: matched.map((rule) => rule.id),
