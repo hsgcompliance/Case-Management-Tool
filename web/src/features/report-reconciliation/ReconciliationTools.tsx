@@ -9,6 +9,7 @@ import FullPageModal from "@entities/ui/FullPageModal";
 import type { ExportColumn } from "@entities/ui/dashboardStyle/SmartExportButton";
 import { usePaymentQueueItemsForMonths } from "@hooks/usePaymentQueue";
 import { useLedgerEntriesForMonths } from "@hooks/useLedger";
+import { usePatchCustomers, useUpsertCustomers } from "@hooks/useCustomers";
 import DatabaseFilterPanel from "@entities/database-filters/DatabaseFilterPanel";
 import {
   DEFAULT_DATABASE_FILTER_CONFIG,
@@ -17,6 +18,8 @@ import {
   type DatabaseFilterConfig,
 } from "@entities/database-filters/databaseFilters";
 import { qk } from "@hooks/queryKeys";
+import { toast } from "@lib/toast";
+import type { CustomersPatchReq, CustomersUpsertReq } from "@types";
 import { type ReconciliationPacket } from "./reportProfiles";
 import { ReportUploadPanel, type ReportUploadGrant } from "@entities/report-upload/ReportUploadPanel";
 import {
@@ -220,15 +223,58 @@ function FindingList({
   );
 }
 
-function ActionPreviewList({ actions }: { actions: ReconciliationActionPreview[] }) {
+function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActionPreview[]; onApplied?: () => void }) {
+  const patchCustomers = usePatchCustomers();
+  const upsertCustomers = useUpsertCustomers();
+  const queryClient = useQueryClient();
+  const [runningId, setRunningId] = React.useState("");
+
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: qk.customers.root }),
+      queryClient.invalidateQueries({ queryKey: qk.dashboard.root }),
+    ]);
+    onApplied?.();
+  };
+
+  const applyAction = async (action: ReconciliationActionPreview) => {
+    if (!action.executable) return;
+    setRunningId(action.id);
+    try {
+      if (action.kind === "push_hmis_id" || action.kind === "push_cw_id" || action.kind === "push_dob") {
+        if (!action.targetId || !action.patch) throw new Error("Customer patch action is missing its target or patch.");
+        await patchCustomers.mutateAsync({ id: action.targetId, patch: action.patch } as CustomersPatchReq);
+        await refresh();
+        toast(`${action.label} applied.`, { type: "success" });
+      } else if (action.kind === "create_customer") {
+        if (!action.create) throw new Error("Create customer action is missing its payload.");
+        await upsertCustomers.mutateAsync([action.create] as CustomersUpsertReq);
+        await refresh();
+        toast("Customer created.", { type: "success" });
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : `Failed to apply ${action.label}.`, { type: "error" });
+    } finally {
+      setRunningId("");
+    }
+  };
+
   if (!actions.length) return null;
+  const busy = patchCustomers.isPending || upsertCustomers.isPending || Boolean(runningId);
   return (
     <div className="mt-4 rounded border border-sky-200 bg-sky-50 p-3 dark:border-sky-900 dark:bg-sky-950/40">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Database update previews</div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Database actions</div>
       <div className="space-y-2">
         {actions.map((action) => (
           <div key={action.id} className="rounded border border-white/70 bg-white p-2 text-xs dark:border-slate-800 dark:bg-slate-950">
-            <div className="font-semibold text-slate-800 dark:text-slate-100">{action.label}</div>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="font-semibold text-slate-800 dark:text-slate-100">{action.label}</div>
+              {action.executable ? (
+                <button type="button" className="btn btn-primary btn-xs" onClick={() => applyAction(action)} disabled={busy}>
+                  {runningId === action.id ? "Applying..." : "Apply"}
+                </button>
+              ) : null}
+            </div>
             <div className="mt-1 grid gap-1 sm:grid-cols-3">
               <div><span className="text-slate-400">Target:</span> {action.target}{action.targetId ? `/${action.targetId}` : ""}</div>
               <div><span className="text-slate-400">Current:</span> {action.currentValue}</div>

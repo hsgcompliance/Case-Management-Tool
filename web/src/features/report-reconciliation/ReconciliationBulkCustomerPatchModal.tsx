@@ -46,7 +46,7 @@ export function buildBulkHmisCustomerPatchRows(findings: ReconciliationFinding[]
   const rawRows: HmisPatchRow[] = [];
   for (const finding of findings) {
     for (const action of buildActionPreviews(finding)) {
-      if (action.target !== "customers" || action.label !== "Push HMIS ID to Customer doc") continue;
+      if (action.target !== "customers" || action.kind !== "push_hmis_id") continue;
       const customerId = text(action.targetId);
       const proposedHmisId = text(action.proposedValue);
       if (!customerId || !proposedHmisId) continue;
