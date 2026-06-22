@@ -62,6 +62,7 @@ type PaymentUnit = {
   sourceProfileId?: string;
   name: string;
   nameKey: string;
+  initialNameKey: string;
   identityKey: string;
   grantKey: string;
   date: string;
@@ -165,6 +166,12 @@ function nameParts(value: unknown) {
   return { first: parts[0] ?? "", last: parts.length > 1 ? parts[parts.length - 1] : "" };
 }
 
+function firstInitialLastKey(value: unknown) {
+  const parts = nameParts(value);
+  if (!parts.first || !parts.last) return "";
+  return `namefi:${parts.first.slice(0, 1)}|${parts.last}`;
+}
+
 function editDistance(a: string, b: string) {
   if (a === b) return 0;
   if (!a) return b.length;
@@ -222,7 +229,8 @@ function reportPaymentUnit(packet: ReconciliationPacket, source: { id: string; l
     sourceProfileId: packet.profileId,
     name,
     nameKey: normalizeCustomerName(name),
-    identityKey: identityKeyFromValues(record.customerIdentity.caseworthyId, record.customerIdentity.hmisId, name),
+    initialNameKey: firstInitialLastKey(name),
+    identityKey: identityKeyFromValues(record.customerIdentity.caseworthyId, record.customerIdentity.hmisId, ""),
     grantKey: bestGrantKey(record.paymentEvidence.grant, record.enrollmentEvidence.projectName, record.enrollmentEvidence.programId, packet.sourceFile),
     date,
     month: record.paymentEvidence.serviceMonth || monthOf(date),
@@ -248,7 +256,8 @@ function databasePaymentUnit(source: "paymentQueue" | "ledger", row: Record<stri
     sourceKind: "database",
     name,
     nameKey: normalizeCustomerName(name),
-    identityKey: identityKeyFromValues(customerCaseworthyId(customer), customerHmisId(customer), name),
+    initialNameKey: firstInitialLastKey(name),
+    identityKey: identityKeyFromValues(customerCaseworthyId(customer), customerHmisId(customer), ""),
     grantKey,
     date,
     month: text(row.month) || monthOf(row.dueDate ?? row.transactionDate ?? row.postedAt ?? row.date),
@@ -296,6 +305,7 @@ function budgetLineItemUnits(grants: Array<Record<string, unknown>>): PaymentUni
           sourceKind: "database",
           name: "",
           nameKey: "",
+          initialNameKey: "",
           identityKey: "",
           grantKey,
           date: "",
@@ -316,11 +326,11 @@ function budgetLineItemUnits(grants: Array<Record<string, unknown>>): PaymentUni
 }
 
 function exactPaymentKey(unit: PaymentUnit) {
-  return [unit.identityKey || unit.nameKey || "unknown", unit.month || unit.date || "nodate", unit.amountCents ?? "noamount"].join("|");
+  return [unit.identityKey || unit.initialNameKey || unit.nameKey || "unknown", unit.month || unit.date || "nodate", unit.amountCents ?? "noamount"].join("|");
 }
 
 function loosePaymentKey(unit: PaymentUnit) {
-  return [unit.identityKey || unit.nameKey || "unknown", unit.month || unit.date || "nodate"].join("|");
+  return [unit.identityKey || unit.initialNameKey || unit.nameKey || "unknown", unit.month || unit.date || "nodate"].join("|");
 }
 
 function amountMonthGrantKey(unit: PaymentUnit) {
@@ -515,8 +525,8 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
         };
       }),
       matchReasons: [
-        method === "identity" ? "Exact CWID/HMIS when available, otherwise normalized first + last name, plus service month/date + amount." : "",
-        method === "identity_month" ? "Name/ID and service month matched across sources; amount is reviewed separately." : "",
+        method === "identity" ? "Exact CWID/HMIS when available, otherwise first-initial + last name or normalized first + last name, plus service month/date + amount." : "",
+        method === "identity_month" ? "Name/ID or first-initial + last name and service month matched across sources; amount is reviewed separately." : "",
         method === "amount_grant" ? "Customer identity was weak or absent; amount, service month/date, and grant/category lined up across report and database rows." : "",
         method === "unique_amount" ? "Customer identity and grant/category were weak; this amount/month had exactly one report row and one database row." : "",
         method === "budget_rollup" ? "Grant budget projected/spent line-item rollup matched the external paid/service amount; confirm the exact payment event before writeback." : "",

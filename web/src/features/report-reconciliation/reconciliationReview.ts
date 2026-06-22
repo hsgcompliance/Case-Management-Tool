@@ -212,6 +212,18 @@ function namePartsFromRecord(record: NormalizedReportRecord) {
   return { first: parts[0] ?? "", last: parts.length > 1 ? parts[parts.length - 1] : "" };
 }
 
+function namesMatchByFirstInitialAndLast(left: { first: string; last: string }, right: { first: string; last: string }) {
+  if (!left.first || !left.last || !right.first || !right.last) return false;
+  if (left.last !== right.last) return false;
+  if (left.first === right.first) return true;
+  return left.first.length === 1 && right.first.startsWith(left.first)
+    || right.first.length === 1 && left.first.startsWith(right.first);
+}
+
+function recordsMatchByFirstInitialAndLast(left: NormalizedReportRecord, right: NormalizedReportRecord) {
+  return namesMatchByFirstInitialAndLast(namePartsFromRecord(left), namePartsFromRecord(right));
+}
+
 function editDistance(a: string, b: string) {
   if (a === b) return 0;
   if (!a) return b.length;
@@ -368,6 +380,9 @@ function scoreReportPaymentCandidate(source: NormalizedReportRecord, candidate: 
   } else if (sourceName && candidateName && sourceName === candidateName) {
     score += 35;
     reasons.push("name exact");
+  } else if (recordsMatchByFirstInitialAndLast(source, candidate)) {
+    score += 34;
+    reasons.push("first initial + last name match");
   } else if (sourceName && candidateName && hasTokenOverlap(sourceName, candidateName)) {
     score += 18;
     reasons.push("name token overlap");
@@ -742,6 +757,8 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         const isFinancialEdge = sourceSystem === "financial_edge";
         const isHmisLike = sourceSystem === "hmis" || sourceSystem === "caseworthy";
         if (!isFinancialEdge && !isHmisLike) continue;
+        let hmisBridgeMatch: ReturnType<typeof findCustomer> | null = null;
+        let hmisBridgeRecord: NormalizedReportRecord | null = null;
 
         if (isFinancialEdge) {
           const hmisCandidates = findReportPaymentCandidates(record, hmisPaymentRecords.map((item) => item.record));
@@ -775,8 +792,12 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             });
           } else {
             matchedHmisKeys.add(reportPaymentKey(bestHmis.record));
+            hmisBridgeRecord = bestHmis.record;
+            hmisBridgeMatch = findCustomer(bestHmis.record, customerIndexes);
             const amountDiff = Number(bestHmis.amountDiffCents);
             if (Number.isFinite(amountDiff) && Math.abs(amountDiff) > 1) {
+              const effectiveCustomer = customer ?? hmisBridgeMatch?.customer ?? null;
+              const effectiveCustomerId = effectiveCustomer ? text(effectiveCustomer.id) : "";
               findings.push({
                 id: findingId("payment_amount_mismatch", record, `hmis:${bestHmis.record.sourceFile}:${bestHmis.record.sourceRowNumber}`),
                 kind: "payment_amount_mismatch",
@@ -789,18 +810,23 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
                 sourceProfileLabel: packet.profileLabel,
                 sourceRowNumber: record.sourceRowNumber,
                 recordKind: record.recordKind,
-                customerId: customerId || undefined,
-                customerLabel: customer ? customerLabel(customer) : undefined,
+                customerId: effectiveCustomerId || undefined,
+                customerLabel: effectiveCustomer ? customerLabel(effectiveCustomer) : undefined,
                 reportValue: String(record.paymentEvidence.amount),
                 dashboardValue: String(bestHmis.record.paymentEvidence.amount ?? ""),
                 explanation: ["Financial Edge and HMIS/Caseworthy appear to describe the same payment, but the amounts differ."],
                 proposedAction: "Correct the HMIS/Caseworthy amount or verify FE needs correction.",
                 reportRecord: record,
-                matchedCustomer: customer ?? undefined,
+                matchedCustomer: effectiveCustomer ?? undefined,
                 match: {
-                  criteria: ["FE is source of truth for payment reconciliation.", ...bestHmis.reasons, ...bestHmis.warnings],
-                  customerMethod: match.method || undefined,
-                  customerConfidence: match.confidence || undefined,
+                  criteria: [
+                    "FE is source of truth for payment reconciliation.",
+                    ...bestHmis.reasons,
+                    ...(hmisBridgeMatch?.customer && !customer ? [`Dashboard customer resolved through matched HMIS row by ${hmisBridgeMatch.method}.`] : []),
+                    ...bestHmis.warnings,
+                  ],
+                  customerMethod: match.method || hmisBridgeMatch?.method || undefined,
+                  customerConfidence: match.confidence || hmisBridgeMatch?.confidence || undefined,
                   paymentCandidateCount: hmisCandidates.length,
                 },
               });
@@ -838,8 +864,15 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         }
 
         if (!isFinancialEdge) continue;
+        const effectiveCustomer = customer ?? hmisBridgeMatch?.customer ?? null;
+        const effectiveCustomerId = effectiveCustomer ? text(effectiveCustomer.id) : "";
+        const effectiveCustomerMethod = match.method || hmisBridgeMatch?.method || "";
+        const effectiveCustomerConfidence = match.confidence || hmisBridgeMatch?.confidence || 0;
+        const bridgeCriteria = hmisBridgeRecord && hmisBridgeMatch?.customer && !customer
+          ? [`FE row matched HMIS/Caseworthy row by payment evidence, then dashboard customer resolved from HMIS row by ${hmisBridgeMatch.method}.`]
+          : [];
         const dashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
-        const candidates = findPaymentCandidates(record, dashboardPaymentRows, customerId || undefined);
+        const candidates = findPaymentCandidates(record, dashboardPaymentRows, effectiveCustomerId || customerId || undefined);
         if (!candidates.length) {
           findings.push({
             id: findingId("payment_missing_dashboard", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
@@ -853,20 +886,21 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             sourceProfileLabel: packet.profileLabel,
             sourceRowNumber: record.sourceRowNumber,
             recordKind: record.recordKind,
-            customerId: customerId || undefined,
-            customerLabel: customer ? customerLabel(customer) : undefined,
+            customerId: effectiveCustomerId || customerId || undefined,
+            customerLabel: effectiveCustomer ? customerLabel(effectiveCustomer) : customer ? customerLabel(customer) : undefined,
             reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
             explanation: [`${sourceLabel} payment/service row did not match cached dashboard payment queue or ledger rows by customer, amount, and month.`],
             proposedAction: "Review for missing payment schedule, unmatched FE transaction, or mapping issue.",
             reportRecord: record,
-            matchedCustomer: customer ?? undefined,
+            matchedCustomer: effectiveCustomer ?? customer ?? undefined,
             match: {
               criteria: [
-                customer ? `Customer matched by ${match.method}.` : "No dashboard customer match was available for payment matching.",
+                effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "No dashboard customer match was available for payment matching.",
+                ...bridgeCriteria,
                 "No payment queue or ledger row matched amount and service month.",
               ],
-              customerMethod: match.method || undefined,
-              customerConfidence: match.confidence || undefined,
+              customerMethod: effectiveCustomerMethod || undefined,
+              customerConfidence: effectiveCustomerConfidence || undefined,
               paymentCandidateCount: 0,
             },
           });
@@ -886,23 +920,24 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               sourceProfileLabel: packet.profileLabel,
               sourceRowNumber: record.sourceRowNumber,
               recordKind: record.recordKind,
-              customerId: customerId || undefined,
-              customerLabel: customer ? customerLabel(customer) : undefined,
+              customerId: effectiveCustomerId || customerId || undefined,
+              customerLabel: effectiveCustomer ? customerLabel(effectiveCustomer) : customer ? customerLabel(customer) : undefined,
               reportValue: String(record.paymentEvidence.amount),
               dashboardValue: String((rowCents(best) ?? 0) / 100),
               explanation: [`Best ${String((best as Record<string, unknown>)._matchSource || "dashboard payment")} match has the same customer/month context but a different amount.`],
               proposedAction: "Review source of truth before updating payment queue or ledger.",
               reportRecord: record,
-              matchedCustomer: customer ?? undefined,
+              matchedCustomer: effectiveCustomer ?? customer ?? undefined,
               matchedPaymentCandidates: candidates.slice(0, 5),
               match: {
                 criteria: [
-                  customer ? `Customer matched by ${match.method}.` : "Payment matched without a confirmed dashboard customer.",
+                  effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "Payment matched without a confirmed dashboard customer.",
+                  ...bridgeCriteria,
                   ...((best as Record<string, unknown>)._matchReasons as string[] ?? []),
                   ...((best as Record<string, unknown>)._matchWarnings as string[] ?? []),
                 ],
-                customerMethod: match.method || undefined,
-                customerConfidence: match.confidence || undefined,
+                customerMethod: effectiveCustomerMethod || undefined,
+                customerConfidence: effectiveCustomerConfidence || undefined,
                 paymentCandidateCount: candidates.length,
               },
             });
@@ -919,21 +954,22 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             sourceProfileLabel: packet.profileLabel,
             sourceRowNumber: record.sourceRowNumber,
             recordKind: record.recordKind,
-            customerId: customerId || undefined,
-            customerLabel: customer ? customerLabel(customer) : undefined,
+            customerId: effectiveCustomerId || customerId || undefined,
+            customerLabel: effectiveCustomer ? customerLabel(effectiveCustomer) : customer ? customerLabel(customer) : undefined,
             explanation: [`Found ${candidates.length} possible dashboard payment matches by customer, amount, and month.`],
             proposedAction: "Review candidate payment match manually.",
             reportRecord: record,
-            matchedCustomer: customer ?? undefined,
+            matchedCustomer: effectiveCustomer ?? customer ?? undefined,
             matchedPaymentCandidates: candidates.slice(0, 5),
             match: {
               criteria: [
-                customer ? `Customer matched by ${match.method}.` : "Payment matched without a confirmed dashboard customer.",
+                effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "Payment matched without a confirmed dashboard customer.",
+                ...bridgeCriteria,
                 `Found ${candidates.length} scored queue/ledger candidates.`,
                 ...(((candidates[0] as Record<string, unknown>)._matchReasons as string[] | undefined) ?? []),
               ],
-              customerMethod: match.method || undefined,
-              customerConfidence: match.confidence || undefined,
+              customerMethod: effectiveCustomerMethod || undefined,
+              customerConfidence: effectiveCustomerConfidence || undefined,
               paymentCandidateCount: candidates.length,
             },
           });
