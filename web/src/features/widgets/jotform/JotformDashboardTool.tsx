@@ -63,6 +63,21 @@ function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+function flattenSearchValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) return value.map(flattenSearchValue).filter(Boolean).join(" ");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, child]) => `${key} ${flattenSearchValue(child)}`)
+      .filter(Boolean)
+      .join(" ");
+  }
+  return "";
+}
+
 function readSyncStage(error: unknown): string {
   const meta = asObject(asObject(error).meta);
   const response = meta.response ?? error;
@@ -687,6 +702,10 @@ function useJotformDashboardData(filterState: JotformDashboardFilterState, selec
         summary.formAlias,
         summary.formTitle,
         ...fields.map((field) => `${field.label} ${field.value}`),
+        flattenSearchValue((submission as any).answers),
+        flattenSearchValue((submission as any).rawAnswers),
+        flattenSearchValue((submission as any).raw),
+        flattenSearchValue((submission as any).metadata),
       ].join(" ").toLowerCase();
       return haystack.includes(search);
     });
@@ -1103,12 +1122,18 @@ export const JotformDashboardMain: DashboardToolDefinition<JotformDashboardFilte
 
   const colWidth = fs.submissionsColWidth ?? 360;
   const collapsed = colWidth === 0;
+  const hasSelectedSubmission = !!selectedSubmission;
+  const listIsFullWidth = !collapsed && !hasSelectedSubmission;
 
   return (
     <div className="flex h-full min-h-0 gap-0 p-3">
       <div
-        className="min-h-0 flex-shrink-0 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-150"
-        style={{ width: collapsed ? 0 : colWidth, padding: collapsed ? 0 : 12, borderWidth: collapsed ? 0 : undefined }}
+        className={`min-h-0 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-150 ${listIsFullWidth ? "flex-1" : "flex-shrink-0"}`}
+        style={{
+          width: collapsed ? 0 : listIsFullWidth ? undefined : colWidth,
+          padding: collapsed ? 0 : 12,
+          borderWidth: collapsed ? 0 : undefined,
+        }}
       >
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <div className="text-sm font-semibold text-slate-900">{String(selectedForm.title || selectedForm.id || "-")}</div>
@@ -1202,13 +1227,14 @@ export const JotformDashboardMain: DashboardToolDefinition<JotformDashboardFilte
         </div>
       </div>
 
-      {!collapsed ? (
+      {!collapsed && hasSelectedSubmission ? (
         <ResizeDivider
           currentWidth={colWidth}
           onWidthChange={(w) => onFilterChange?.({ ...fs, submissionsColWidth: w })}
         />
       ) : null}
 
+      {hasSelectedSubmission ? (
       <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         {!selectedSubmission ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
@@ -1296,6 +1322,7 @@ export const JotformDashboardMain: DashboardToolDefinition<JotformDashboardFilte
           </div>
         )}
       </div>
+      ) : null}
     </div>
   );
 };

@@ -2,10 +2,16 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useGrants } from "@hooks/useGrants";
 import { useJotformFormQuestions } from "@hooks/useJotform";
+import { useJotformSubmissionsLite, useSyncJotformSelection } from "@hooks/useJotform";
 import { usePipelineUpsert, usePipelinePreview, usePipeline } from "@hooks/useBudgetPipeline";
+import { usePaymentQueueItems, usePatchPaymentQueueItem, usePostPaymentQueueToLedger, type PaymentQueueItem } from "@hooks/usePaymentQueue";
+import { qk } from "@hooks/queryKeys";
+import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
 import { toast } from "@lib/toast";
+import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import type {
   TBudgetPipeline,
   TPipelineCondition,
@@ -21,9 +27,19 @@ import {
 } from "@hdb/contracts";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { HelpButton } from "@entities/help/HelpButton";
+import GrantSelect from "@entities/selectors/GrantSelect";
+import LineItemSelect from "@entities/selectors/LineItemSelect";
+import { SpendDetailModal, type SpendRow } from "@features/widgets/spending/SpendDetailModal";
 import { RuleTreeEditor } from "./components/RuleTreeEditor";
 import { PreviewTable } from "./components/PreviewTable";
 import { NORMALIZED_FIELDS, type PipelineFieldDef } from "./fieldDefs";
+import {
+  inNullableDateRange,
+  ledgerPostBlockers,
+  matchesSourceFilter,
+  rowSourceType,
+  type MatchingSourceFilter,
+} from "./matchingModalUtils";
 
 const SOURCE_FORMS = [
   { key: "creditCard", label: "Credit Card", title: "Line Items Card Checkout", id: LINE_ITEMS_FORM_IDS.creditCard },
@@ -213,14 +229,6 @@ function toPipelineFields(
   }));
 }
 
-function fmtDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
-  } catch {
-    return iso;
-  }
-}
-
 const HIDDEN_GLOBAL_KEYS_BY_SOURCE: Record<SourceFormKey, Set<string>> = {
   creditCard: new Set(["merchant", "expenseType", "program", "customer", "purpose", "amount", "isFlex"]),
   invoice: new Set(["program", "billedTo", "project", "amount"]),
@@ -258,6 +266,573 @@ function StatusBadge({ status }: { status: TPipelineStatus }) {
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${colors[status]}`}>{status}</span>;
 }
 
+function textValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join(" ");
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).map(textValue).filter(Boolean).join(" ");
+  }
+  return "";
+}
+
+function queueSearchText(item: PaymentQueueItem, submission?: Record<string, unknown>): string {
+  return [
+    item.id,
+    item.submissionId,
+    item.formTitle,
+    item.source,
+    item.merchant,
+    item.program,
+    item.billedTo,
+    item.project,
+    item.expenseType,
+    item.serviceType,
+    item.descriptor,
+    item.purpose,
+    item.notes,
+    item.note,
+    item.customer,
+    item.card,
+    item.cardBucket,
+    item.grantId,
+    item.lineItemId,
+    textValue(item.transactionFields),
+    textValue(item.rawAnswers),
+    textValue((submission as any)?.answers),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function queueItemToSpendRow(item: PaymentQueueItem): SpendRow {
+  const source = rowSourceType(item);
+  const date = String(item.dueDate || item.createdAt || item.postedAt || "").slice(0, 10);
+  const title = String(item.merchant || item.descriptor || item.purpose || item.formTitle || item.id || "Spend row");
+  return {
+    id: item.id,
+    kind: source === "invoice" ? "queue-invoice" : "queue-credit-card",
+    sourceLabel: source === "invoice" ? "Invoice" : "Card",
+    title,
+    subtitle: String(item.submissionId || item.paymentId || item.id || ""),
+    date,
+    month: String(item.month || date.slice(0, 7)),
+    amountCents: Math.round(Number(item.amount || 0) * 100),
+    completed: item.queueStatus === "posted",
+    workflowState: item.queueStatus === "posted" ? "closed" : "open",
+    workflowReason: String(item.queueStatus || "pending"),
+    grantId: String(item.grantId || ""),
+    lineItemId: String(item.lineItemId || ""),
+    customerId: String(item.customerId || ""),
+    creditCardId: String(item.creditCardId || ""),
+    creditCardName: String(item.card || ""),
+    cardBucket: String(item.cardBucket || ""),
+    taskToken: String(item.id || ""),
+    linkedLedgerId: String(item.ledgerEntryId || "") || undefined,
+    paymentQueueItem: item,
+  };
+}
+
+function BulkGrantDesignationModal({
+  open,
+  previewResult,
+  defaultGrantId,
+  defaultLineItemId,
+  onClose,
+}: {
+  open: boolean;
+  previewResult: TBudgetPipelinePreviewResult | null;
+  defaultGrantId: string | null;
+  defaultLineItemId: string | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const { grantNameById, customerNameById, grants } = useDashboardSharedData();
+  const patchQueue = usePatchPaymentQueueItem();
+  const postQueue = usePostPaymentQueueToLedger();
+  const syncSelection = useSyncJotformSelection();
+  const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(previewResult?.matched.map((item) => item.id) ?? []));
+  const [targetGrantId, setTargetGrantId] = useState(defaultGrantId ?? "");
+  const [targetLineItemId, setTargetLineItemId] = useState(defaultLineItemId ?? "");
+  const [showOnlyPreview, setShowOnlyPreview] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<MatchingSourceFilter>("all");
+  const [submissionScope, setSubmissionScope] = useState<"cached" | "pullAll" | "pullDateRange">("cached");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [selectedQueueId, setSelectedQueueId] = useState<string>("");
+  const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
+  const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const creditCardQueueQ = usePaymentQueueItems(
+    { source: "credit-card", queueStatus: "pending", limit: 500 },
+    { enabled: open, staleTime: 20_000 },
+  );
+  const invoiceQueueQ = usePaymentQueueItems(
+    { source: "invoice", queueStatus: "pending", limit: 500 },
+    { enabled: open, staleTime: 20_000 },
+  );
+  const creditCardSubmissionsQ = useJotformSubmissionsLite(
+    { formId: LINE_ITEMS_FORM_IDS.creditCard, limit: 500 },
+    { enabled: open, staleTime: 20_000 },
+  );
+  const invoiceSubmissionsQ = useJotformSubmissionsLite(
+    { formId: LINE_ITEMS_FORM_IDS.invoice, limit: 500 },
+    { enabled: open, staleTime: 20_000 },
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedIds(new Set(previewResult?.matched.map((item) => item.id) ?? []));
+    setTargetGrantId(defaultGrantId ?? "");
+    setTargetLineItemId(defaultLineItemId ?? "");
+    setShowOnlyPreview(true);
+    setSourceFilter("all");
+    setSubmissionScope("cached");
+    setStartDate("");
+    setEndDate("");
+    setSelectedQueueId("");
+    setDirtyIds(new Set());
+    setReviewedIds(new Set());
+    setExcludedIds(new Set());
+    setConfirmCloseOpen(false);
+    setDetailOpen(false);
+  }, [defaultGrantId, defaultLineItemId, open, previewResult]);
+
+  const previewIds = useMemo(
+    () => new Set(previewResult?.matched.map((item) => item.id) ?? []),
+    [previewResult],
+  );
+  const conflictIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of previewResult?.perItem ?? []) {
+      if (item.conflictPipelineIds.length > 0) ids.add(item.itemId);
+    }
+    return ids;
+  }, [previewResult]);
+  const lineItemLookup = useMemo(() => {
+    const map = new Map<string, { grantName: string; lineItemLabel: string }>();
+    for (const grant of grants as Array<Record<string, any>>) {
+      const grantId = String(grant?.id || "");
+      const grantName = String(grant?.name || grantId);
+      const lineItems = Array.isArray((grant as any)?.budget?.lineItems) ? (grant as any).budget.lineItems : [];
+      for (const li of lineItems) {
+        const lineItemId = String(li?.id || "");
+        if (grantId && lineItemId) map.set(`${grantId}:${lineItemId}`, { grantName, lineItemLabel: String(li?.label || lineItemId) });
+      }
+    }
+    return map;
+  }, [grants]);
+  const submissionsById = useMemo(() => {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const submission of [...(creditCardSubmissionsQ.data ?? []), ...(invoiceSubmissionsQ.data ?? [])] as Array<Record<string, unknown>>) {
+      const id = String((submission as any).submissionId || (submission as any).id || "");
+      if (id) map.set(id, submission);
+    }
+    return map;
+  }, [creditCardSubmissionsQ.data, invoiceSubmissionsQ.data]);
+  const queueRows = useMemo(() => {
+    const byId = new Map<string, PaymentQueueItem>();
+    for (const item of [...(creditCardQueueQ.data ?? []), ...(invoiceQueueQ.data ?? [])]) byId.set(item.id, item);
+    return Array.from(byId.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  }, [creditCardQueueQ.data, invoiceQueueQ.data]);
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return queueRows.filter((item) => {
+      if (showOnlyPreview && previewIds.size > 0 && !previewIds.has(item.id)) return false;
+      if (!matchesSourceFilter(item, sourceFilter)) return false;
+      if (!inNullableDateRange(item, startDate, endDate)) return false;
+      if (excludedIds.has(item.id)) return false;
+      const submission = submissionsById.get(String(item.submissionId || ""));
+      return !q || queueSearchText(item, submission).includes(q);
+    });
+  }, [excludedIds, previewIds, queueRows, search, showOnlyPreview, sourceFilter, startDate, endDate, submissionsById]);
+
+  if (!open) return null;
+
+  const loading = creditCardQueueQ.isLoading || invoiceQueueQ.isLoading || creditCardSubmissionsQ.isLoading || invoiceSubmissionsQ.isLoading;
+  const selectedCount = selectedIds.size;
+  const canApply = selectedCount > 0 && (!targetGrantId || !!targetLineItemId) && !applying;
+  const selectedQueueItem = queueRows.find((item) => item.id === selectedQueueId) || null;
+  const detailRow = selectedQueueItem ? queueItemToSpendRow(selectedQueueItem) : null;
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectVisible = () => setSelectedIds(new Set(visibleRows.map((row) => row.id)));
+  const selectedRows = queueRows.filter((row) => selectedIds.has(row.id));
+
+  function requestClose() {
+    if (dirtyIds.size > 0) setConfirmCloseOpen(true);
+    else onClose();
+  }
+
+  async function refreshSubmissions() {
+    if (submissionScope === "cached") {
+      await Promise.all([
+        creditCardQueueQ.refetch(),
+        invoiceQueueQ.refetch(),
+        creditCardSubmissionsQ.refetch(),
+        invoiceSubmissionsQ.refetch(),
+      ]);
+      return;
+    }
+    try {
+      await syncSelection.mutateAsync({
+        mode: "formIds",
+        formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
+        limit: 500,
+        maxPages: submissionScope === "pullAll" ? 25 : 10,
+        includeRaw: true,
+        ...(submissionScope === "pullDateRange" && startDate ? { since: startDate } : {}),
+      });
+      await Promise.all([creditCardQueueQ.refetch(), invoiceQueueQ.refetch(), creditCardSubmissionsQ.refetch(), invoiceSubmissionsQ.refetch()]);
+      toast("Submission list refreshed.", { type: "success" });
+    } catch {
+      toast("Could not refresh Jotform submissions.", { type: "error" });
+    }
+  }
+
+  function assignDraftToSelected() {
+    if (!selectedIds.size) return;
+    if (targetGrantId && !targetLineItemId) {
+      toast("Select a line item before assigning a grant.", { type: "error" });
+      return;
+    }
+    setDirtyIds((prev) => new Set([...prev, ...selectedIds]));
+    toast(`${selectedIds.size} selected row${selectedIds.size === 1 ? "" : "s"} staged for allocation.`, { type: "success" });
+  }
+
+  async function applyClassification() {
+    if (!canApply) return false;
+    setApplying(true);
+    try {
+      const ids = Array.from(selectedIds);
+      for (const id of ids) {
+        await patchQueue.mutateAsync({
+          id,
+          body: targetGrantId
+            ? { grantId: targetGrantId, lineItemId: targetLineItemId, okUnassigned: false, localModificationReason: "Bulk grant designation from budget pipeline preview" }
+            : { grantId: null, lineItemId: null, okUnassigned: true, localModificationReason: "Bulk marked no grant from budget pipeline preview" },
+        });
+      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.pipeline.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+      ]);
+      toast(`Updated ${ids.length} queue row${ids.length === 1 ? "" : "s"}.`, { type: "success" });
+      setDirtyIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      return true;
+    } catch {
+      toast("Bulk grant designation failed.", { type: "error" });
+      return false;
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  function markReviewed() {
+    setReviewedIds((prev) => new Set([...prev, ...selectedIds]));
+  }
+
+  function excludeSelected() {
+    setExcludedIds((prev) => new Set([...prev, ...selectedIds]));
+    setSelectedIds(new Set());
+  }
+
+  async function postSelectedToLedger() {
+    const blocked = selectedRows
+      .map((item) => ({
+        item,
+        blockers: ledgerPostBlockers(item, {
+          unsaved: dirtyIds.has(item.id),
+          conflict: conflictIds.has(item.id),
+          duplicate: !!item.ledgerEntryId,
+        }),
+      }))
+      .filter((entry) => entry.blockers.length > 0);
+    if (blocked.length > 0) {
+      toast(`Cannot post ${blocked.length} selected row${blocked.length === 1 ? "" : "s"}: ${blocked[0].blockers.join(", ")}.`, { type: "error" });
+      return;
+    }
+    if (!selectedRows.length) return;
+    setApplying(true);
+    try {
+      for (const row of selectedRows) await postQueue.mutateAsync({ id: row.id });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.pipeline.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+      ]);
+      toast(`Posted ${selectedRows.length} row${selectedRows.length === 1 ? "" : "s"} to ledger.`, { type: "success" });
+    } catch {
+      toast("Post to ledger failed.", { type: "error" });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onClick={requestClose}>
+      <div className="grid h-[min(900px,calc(100vh-40px))] w-full max-w-[1480px] grid-rows-[50px_1fr_48px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+          <div className="flex items-center gap-2">
+            <div className="text-lg font-bold text-slate-900 dark:text-slate-100">Advanced Pipeline Matching</div>
+            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">Filter Preview - Match Review</span>
+            {dirtyIds.size > 0 ? <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Unsaved allocation</span> : null}
+          </div>
+          <button type="button" className="btn btn-xs btn-ghost" onClick={requestClose}>Close</button>
+        </div>
+
+        <div className="grid min-h-0 grid-cols-[320px_minmax(680px,1fr)_340px] bg-slate-50 dark:bg-slate-900/40">
+          <aside className="min-h-0 overflow-hidden border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+            <div className="border-b border-slate-200 p-3 dark:border-slate-700">
+              <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Form Submissions</div>
+              <div className="grid grid-cols-3 gap-1 rounded-md border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800">
+                {([
+                  ["invoice", "Invoices"],
+                  ["card", "Cards"],
+                  ["all", "All"],
+                ] as const).map(([key, label]) => (
+                  <button key={key} type="button" className={`rounded px-2 py-1.5 text-xs font-semibold ${sourceFilter === key ? "bg-white text-slate-900 shadow-sm dark:bg-slate-950 dark:text-white" : "text-slate-500"}`} onClick={() => setSourceFilter(key)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="mt-3 block text-[11px] font-semibold uppercase text-slate-500">Submission Scope</label>
+              <select className="select w-full" value={submissionScope} onChange={(e) => setSubmissionScope(e.currentTarget.value as typeof submissionScope)}>
+                <option value="cached">Cached Only</option>
+                <option value="pullAll">Pull All Submissions</option>
+                <option value="pullDateRange">Pull Date Range</option>
+              </select>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="relative">
+                  <label className="block text-[11px] font-semibold uppercase text-slate-500">Start Date</label>
+                  <input className="input pr-8" type="date" value={startDate} onChange={(e) => setStartDate(e.currentTarget.value)} />
+                  {startDate ? <button type="button" className="absolute bottom-1 right-1 h-6 w-6 rounded text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => setStartDate("")}>x</button> : null}
+                </div>
+                <div className="relative">
+                  <label className="block text-[11px] font-semibold uppercase text-slate-500">End Date</label>
+                  <input className="input pr-8" type="date" value={endDate} onChange={(e) => setEndDate(e.currentTarget.value)} />
+                  {endDate ? <button type="button" className="absolute bottom-1 right-1 h-6 w-6 rounded text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => setEndDate("")}>x</button> : null}
+                </div>
+              </div>
+              <button type="button" className="btn btn-sm mt-3 w-full" disabled={syncSelection.isPending} onClick={() => void refreshSubmissions()}>
+                {syncSelection.isPending ? "Refreshing..." : "Refresh Submission List"}
+              </button>
+            </div>
+            <div className="min-h-0 overflow-auto">
+              <table className="w-full table-fixed text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:bg-slate-900">
+                  <tr><th className="w-14 px-2 py-2">Type</th><th className="px-2 py-2">Vendor / Submitter</th><th className="w-24 px-2 py-2 text-right">Amount</th><th className="w-8 px-2 py-2" /></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {visibleRows.map((item) => {
+                    const type = rowSourceType(item);
+                    const active = selectedQueueId === item.id;
+                    return (
+                      <tr key={`source-${item.id}`} className={`cursor-pointer ${active ? "bg-sky-50 dark:bg-sky-950/30" : selectedIds.has(item.id) ? "bg-slate-50 text-slate-500 dark:bg-slate-900" : "hover:bg-slate-50 dark:hover:bg-slate-900"}`} onClick={() => { setSelectedQueueId(item.id); setSelectedIds((prev) => new Set(prev).add(item.id)); setDetailOpen(true); }}>
+                        <td className="px-2 py-2 text-xs">{type === "invoice" ? "Inv" : "Card"}</td>
+                        <td className="min-w-0 px-2 py-2">
+                          <div className="truncate font-semibold text-slate-900 dark:text-slate-100">{String(item.merchant || item.descriptor || item.formTitle || "Spend row")}</div>
+                          <div className="truncate text-xs text-slate-500">{fmtDateOrDash(item.createdAt || item.dueDate)} - {String(item.purchaser || item.customer || item.submissionId || "")}</div>
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono text-xs">{fmtCurrencyUSD(item.amount)}</td>
+                        <td className="px-2 py-2 text-xs">{selectedIds.has(item.id) ? "OK" : ">"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </aside>
+
+          <section className="min-w-0 min-h-0 overflow-hidden bg-white dark:bg-slate-950">
+            <div className="flex h-12 items-center justify-between border-b border-slate-200 px-3 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <strong className="text-sm text-slate-800 dark:text-slate-200">Matching Rows</strong>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600">{selectedCount} selected</span>
+                <span className="text-xs text-slate-400">Rows originate from current budget pipeline filter logic.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" className="btn btn-xs" onClick={assignDraftToSelected}>Match Selected</button>
+                <button type="button" className="btn btn-xs" disabled={!canApply} onClick={() => void applyClassification()}>{applying ? "Saving..." : "Assign/Reallocate Grant"}</button>
+                <button type="button" className="btn btn-xs btn-ghost" onClick={markReviewed}>Mark Reviewed</button>
+                <button type="button" className="btn btn-xs btn-ghost" onClick={excludeSelected}>Exclude</button>
+                <button type="button" className="btn btn-xs btn-primary" disabled={applying || selectedRows.length === 0} onClick={() => void postSelectedToLedger()}>Post to Ledger</button>
+              </div>
+            </div>
+            <div className="grid gap-3 border-b border-slate-200 p-3 dark:border-slate-700 lg:grid-cols-[1.2fr_1fr_1fr_auto]">
+              <input className="input" placeholder="Search all pulled Jotform/queue fields" value={search} onChange={(e) => setSearch(e.currentTarget.value)} />
+              <GrantSelect value={targetGrantId || null} onChange={(next) => { setTargetGrantId(String(next || "")); setTargetLineItemId(""); }} includeUnassigned mode="grant" placeholderLabel="No Grant Classification" />
+              <LineItemSelect grantId={targetGrantId || null} value={targetLineItemId || null} onChange={(next) => setTargetLineItemId(String(next || ""))} disabled={!targetGrantId} inputClassName="w-full" />
+              <button type="button" className="btn btn-xs btn-ghost" onClick={selectVisible}>Select visible</button>
+            </div>
+            <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700">
+              <div>{loading ? "Loading pulled Jotforms..." : `${visibleRows.length} visible of ${queueRows.length} pending rows - ${submissionsById.size} cached submissions`}</div>
+              <label className="inline-flex items-center gap-1"><input type="checkbox" checked={showOnlyPreview} onChange={(e) => setShowOnlyPreview(e.currentTarget.checked)} /> Preview matches only</label>
+            </div>
+            <div className="min-h-0 overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+              <tr>
+                <th className="w-10 px-3 py-2" />
+                <th className="w-24 px-3 py-2">Date</th>
+                <th className="px-3 py-2">Vendor</th>
+                <th className="px-3 py-2">Description</th>
+                <th className="px-3 py-2">Amount</th>
+                <th className="px-3 py-2">Source</th>
+                <th className="px-3 py-2">Grant</th>
+                <th className="px-3 py-2">Confidence</th>
+                <th className="px-3 py-2">Allocation</th>
+                <th className="px-3 py-2">Ledger</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {visibleRows.map((item) => {
+                const submission = submissionsById.get(String(item.submissionId || ""));
+                const checked = selectedIds.has(item.id);
+                const conflict = conflictIds.has(item.id);
+                const reviewed = reviewedIds.has(item.id);
+                const blockers = ledgerPostBlockers(item, { unsaved: dirtyIds.has(item.id), conflict, duplicate: !!item.ledgerEntryId });
+                const confidence = conflict ? "Conflict" : previewIds.has(item.id) ? "Matched" : "Possible";
+                const allocation = dirtyIds.has(item.id) ? "Unsaved" : reviewed ? "Reviewed" : item.grantId && item.lineItemId ? "Saved" : "Draft";
+                const ledger = blockers.length ? "Blocked" : item.queueStatus === "posted" ? "Posted" : "Ready";
+                return (
+                  <tr
+                    key={item.id}
+                    className={`${checked ? "bg-sky-50 dark:bg-sky-950/30" : "bg-white dark:bg-slate-950"} ${conflict ? "shadow-[inset_3px_0_0_#dc2626]" : ""} cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900`}
+                    onClick={() => setSelectedQueueId(item.id)}
+                    onDoubleClick={() => setDetailOpen(true)}
+                  >
+                    <td className="px-3 py-2 align-top">
+                      <input type="checkbox" checked={checked} onChange={() => toggleOne(item.id)} onClick={(e) => e.stopPropagation()} />
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs">{fmtDateOrDash(item.createdAt || item.dueDate)}</td>
+                    <td className="px-3 py-2 align-top">
+                      <div className="font-medium text-slate-900 dark:text-slate-100">{String(item.merchant || item.descriptor || item.formTitle || "Jotform spend")}</div>
+                      <div className="text-xs text-slate-500">{String(item.source || "")} - {String(item.submissionId || item.id)}</div>
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs text-slate-600 dark:text-slate-400">
+                      <div className="line-clamp-2">{String(item.purpose || item.notes || item.note || item.descriptor || (submission as any)?.formTitle || "-")}</div>
+                      <div className="mt-0.5 text-slate-400">{String(item.program || item.project || item.billedTo || item.customer || "")}</div>
+                    </td>
+                    <td className="px-3 py-2 align-top tabular-nums text-slate-700 dark:text-slate-300">
+                      {fmtCurrencyUSD(item.amount)}
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs">
+                      {rowSourceType(item) === "invoice" ? "Invoice" : "Card"}
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs text-slate-600 dark:text-slate-400">
+                      <div>{grantNameById.get(String(item.grantId || "")) || String(item.grantId || "unassigned")}</div>
+                      <div>{String(item.lineItemId || "")}</div>
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs">
+                      <span className={conflict ? "rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-700" : previewIds.has(item.id) ? "rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700" : "rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700"}>{confidence}</span>
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs">
+                      <span className={dirtyIds.has(item.id) ? "rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700" : reviewed || (item.grantId && item.lineItemId) ? "rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700" : "rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600"}>{allocation}</span>
+                    </td>
+                    <td className="px-3 py-2 align-top text-xs" title={blockers.join(", ")}>
+                      <span className={ledger === "Blocked" ? "rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-700" : ledger === "Ready" ? "rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-700" : "rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600"}>{ledger}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!loading && visibleRows.length === 0 ? (
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-500">No pending pulled spending rows match this view.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+            </div>
+          </section>
+
+          <aside className="min-h-0 overflow-hidden border-l border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+            <div className="border-b border-slate-200 p-3 dark:border-slate-700">
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Adjust Payment</div>
+              <div className="mt-1 text-xs text-slate-500">Uses the existing invoice/card payment detail flow.</div>
+            </div>
+            <div className="min-h-0 overflow-auto p-3">
+              {selectedQueueItem ? (
+                <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">{String(selectedQueueItem.merchant || selectedQueueItem.descriptor || selectedQueueItem.formTitle || "Spend item")}</div>
+                      <div className="text-xs text-slate-500">{String(selectedQueueItem.submissionId || selectedQueueItem.id)}</div>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{fmtCurrencyUSD(selectedQueueItem.amount)}</span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <div><span className="font-semibold text-slate-500">Source:</span> {rowSourceType(selectedQueueItem) === "invoice" ? "Invoice submission" : "Credit card documentation"}</div>
+                    <div><span className="font-semibold text-slate-500">Current grant:</span> {grantNameById.get(String(selectedQueueItem.grantId || "")) || String(selectedQueueItem.grantId || "unassigned")}</div>
+                    <div><span className="font-semibold text-slate-500">Line item:</span> {String(selectedQueueItem.lineItemId || "-")}</div>
+                    <div><span className="font-semibold text-slate-500">Risk:</span> {ledgerPostBlockers(selectedQueueItem, { unsaved: dirtyIds.has(selectedQueueItem.id), conflict: conflictIds.has(selectedQueueItem.id), duplicate: !!selectedQueueItem.ledgerEntryId }).join(", ") || "Ready"}</div>
+                  </div>
+                  <button type="button" className="btn btn-sm btn-primary mt-3 w-full" onClick={() => setDetailOpen(true)}>
+                    Open Payment Detail
+                  </button>
+                  <button type="button" className="btn btn-sm mt-2 w-full" disabled={!canApply || !selectedIds.has(selectedQueueItem.id)} onClick={() => void applyClassification()}>
+                    Save Spend Item Allocation
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
+                  Select a source submission or matched spend row to adjust it.
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 dark:border-slate-700 dark:bg-slate-900">
+          <button type="button" className="btn btn-sm btn-ghost" onClick={requestClose}>Cancel Session</button>
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn btn-sm" disabled={!canApply} onClick={() => void applyClassification()}>Save Draft</button>
+            <button type="button" className="btn btn-sm" onClick={() => dirtyIds.size ? setConfirmCloseOpen(true) : onClose()}>Save and Close</button>
+            <button type="button" className="btn btn-sm btn-primary" disabled={selectedRows.length === 0 || applying} onClick={() => void postSelectedToLedger()}>Post All Ready to Ledger</button>
+          </div>
+        </div>
+
+        {confirmCloseOpen ? (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+            <div className="w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-950">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-900">Unsaved Changes</div>
+              <div className="px-4 py-4 text-sm text-slate-600 dark:text-slate-300">
+                Save spend item allocation before closing? {dirtyIds.size} row{dirtyIds.size === 1 ? " has" : "s have"} unsaved grant allocation changes.
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
+                <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirmCloseOpen(false)}>Cancel</button>
+                <button type="button" className="btn btn-sm text-rose-700" onClick={onClose}>Close Without Saving</button>
+                <button type="button" className="btn btn-sm btn-primary" disabled={!canApply} onClick={async () => { if (await applyClassification()) onClose(); }}>Save and Close</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <SpendDetailModal
+          row={detailRow}
+          isOpen={detailOpen && !!detailRow}
+          onClose={() => { setDetailOpen(false); void Promise.all([creditCardQueueQ.refetch(), invoiceQueueQ.refetch()]); }}
+          grantNameById={grantNameById}
+          lineItemLookup={lineItemLookup}
+          customerNameById={customerNameById}
+        />
+      </div>
+    </div>
+  );
+}
+
 type Props = {
   pipelineId?: string | null;
   onBack?: () => void;
@@ -279,6 +854,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeSourceKey, setActiveSourceKey] = useState<SourceFormKey>("creditCard");
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
 
   useEffect(() => {
     if (!existingPipeline) return;
@@ -337,7 +913,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
         },
       },
     }));
-  }, [selectedSource.id, selectedSource.title, selectedSourceKey]);
+  }, [selectedSource, selectedSourceKey]);
 
   const selectSourceForm = useCallback((key: SourceFormKey) => {
     setActiveSourceKey(key);
@@ -601,8 +1177,21 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
 
         <hr className="border-slate-200 dark:border-slate-700" />
 
-        <PreviewTable result={previewResult} isLoading={isPreviewLoading} onRun={handlePreview} />
+        <PreviewTable
+          result={previewResult}
+          isLoading={isPreviewLoading}
+          onRun={handlePreview}
+          onAdvanced={() => setBulkModalOpen(true)}
+        />
       </main>
+
+      <BulkGrantDesignationModal
+        open={bulkModalOpen}
+        previewResult={previewResult}
+        defaultGrantId={draft.grantId}
+        defaultLineItemId={draft.lineItemId}
+        onClose={() => setBulkModalOpen(false)}
+      />
     </div>
   );
 }

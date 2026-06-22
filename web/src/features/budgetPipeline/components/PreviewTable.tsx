@@ -11,9 +11,10 @@ type Props = {
   result: TBudgetPipelinePreviewResult | null;
   isLoading: boolean;
   onRun: () => void;
+  onAdvanced?: () => void;
 };
 
-export function PreviewTable({ result, isLoading, onRun }: Props) {
+export function PreviewTable({ result, isLoading, onRun, onAdvanced }: Props) {
   const perItemMap = React.useMemo(() => {
     if (!result) return new Map<string, TBudgetPipelinePreviewResult["perItem"][number]>();
     return new Map(result.perItem.map((p) => [p.itemId, p]));
@@ -26,6 +27,11 @@ export function PreviewTable({ result, isLoading, onRun }: Props) {
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
           Preview Matching Transactions
         </h3>
+        {result && onAdvanced ? (
+          <button type="button" onClick={onAdvanced} className="btn btn-sm btn-ghost">
+            Advanced
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onRun}

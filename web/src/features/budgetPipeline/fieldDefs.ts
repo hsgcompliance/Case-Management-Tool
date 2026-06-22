@@ -28,6 +28,12 @@ export type PipelineFieldDef = {
 };
 
 export const NORMALIZED_FIELDS: PipelineFieldDef[] = [
+  {
+    key: "wideGrantText",
+    label: "Any Grant Field (Wide)",
+    type: "text",
+    description: "Wide match across program, billed-to, project, descriptor/service, expense type, card, merchant, customer, purpose, notes, and live transaction fields.",
+  },
   { key: "merchant", label: "Merchant", type: "text", sampleValues: ["Amazon", "Walmart"], description: "Normalized vendor/merchant value on the split payment object." },
   { key: "expenseType", label: "Expense Type", type: "text", sampleValues: ["Supplies", "Food"], description: "High-level expense category after extraction." },
   { key: "program", label: "Program", type: "text", description: "Legacy normalized program field. Prefer live transaction fields when available." },
