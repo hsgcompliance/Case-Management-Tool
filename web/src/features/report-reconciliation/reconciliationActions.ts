@@ -3,9 +3,11 @@
 import type { ReconciliationFinding } from "./reconciliationReview";
 
 export type ReconciliationActionTarget = "customers" | "customerEnrollments" | "paymentQueue" | "ledger" | "userTasks";
+export type ReconciliationActionKind = "push_hmis_id" | "push_cw_id" | "push_dob" | "create_customer" | "review_provider_mapping" | "create_payment_review_task";
 
 export type ReconciliationActionPreview = {
   id: string;
+  kind: ReconciliationActionKind;
   label: string;
   target: ReconciliationActionTarget;
   targetId?: string;
@@ -14,6 +16,9 @@ export type ReconciliationActionPreview = {
   proposedValue: string;
   confidence: number;
   warning?: string;
+  executable?: boolean;
+  patch?: Record<string, unknown>;
+  create?: Record<string, unknown>;
 };
 
 function text(value: unknown) {
@@ -28,6 +33,13 @@ function currentCustomerValue(finding: ReconciliationFinding, ...keys: string[])
   return "";
 }
 
+function splitName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
 export function buildActionPreviews(finding: ReconciliationFinding): ReconciliationActionPreview[] {
   const record = finding.reportRecord;
   const out: ReconciliationActionPreview[] = [];
@@ -36,10 +48,11 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
     const hmisId = text(record.customerIdentity.hmisId);
     const currentHmisId = currentCustomerValue(finding, "hmisId", "HMISId", "hmisClientId", "clientId");
     const currentCaseworthyId = currentCustomerValue(finding, "caseworthyId", "caseWorthyId", "cwId", "CWID");
-    const canPreviewIdentityPatch = finding.confidence >= 0.75;
+    const canPreviewIdentityPatch = finding.kind === "customer_possible_match" && finding.confidence >= 0.75;
     if (canPreviewIdentityPatch && hmisId && hmisId !== currentHmisId) {
       out.push({
         id: `${finding.id}:push-hmis-id`,
+        kind: "push_hmis_id",
         label: "Push HMIS ID to Customer doc",
         target: "customers",
         targetId: customerId,
@@ -48,13 +61,16 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
         proposedValue: hmisId,
         confidence: finding.confidence,
         warning: currentHmisId ? "Customer already has an HMIS ID; review before replacing or adding another external ID." : undefined,
+        executable: true,
+        patch: { hmisId },
       });
     }
     const caseworthyId = text(record.customerIdentity.caseworthyId);
     if (canPreviewIdentityPatch && caseworthyId && caseworthyId !== currentCaseworthyId) {
       out.push({
         id: `${finding.id}:push-caseworthy-id`,
-        label: "Push Caseworthy ID to Customer doc",
+        kind: "push_cw_id",
+        label: "Push CW ID to Customer doc",
         target: "customers",
         targetId: customerId,
         sourceValue: caseworthyId,
@@ -62,6 +78,62 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
         proposedValue: caseworthyId,
         confidence: finding.confidence,
         warning: currentCaseworthyId ? "Customer already has a CW/Caseworthy ID; review before replacing or adding another external ID." : undefined,
+        executable: true,
+        patch: { cwId: caseworthyId },
+      });
+    }
+    const reportDob = text(record.customerIdentity.dob);
+    const currentDob = currentCustomerValue(finding, "dob", "dateOfBirth", "birthDate");
+    if (canPreviewIdentityPatch && reportDob && reportDob !== currentDob) {
+      out.push({
+        id: `${finding.id}:push-dob`,
+        kind: "push_dob",
+        label: "Push DOB to Customer doc",
+        target: "customers",
+        targetId: customerId,
+        sourceValue: reportDob,
+        currentValue: currentDob || "(blank)",
+        proposedValue: reportDob,
+        confidence: finding.confidence,
+        warning: currentDob ? "Customer already has a different DOB; review source identity before replacing it." : undefined,
+        executable: true,
+        patch: { dob: reportDob },
+      });
+    }
+  }
+  if (record && finding.kind === "customer_missing" && !customerId && !finding.matchedCustomer) {
+    const identity = record.customerIdentity;
+    const parsed = splitName(identity.fullName || `${identity.firstName} ${identity.lastName}`.trim());
+    const firstName = text(identity.firstName) || parsed.firstName;
+    const lastName = text(identity.lastName) || parsed.lastName;
+    if (firstName && lastName) {
+      const hmisId = text(identity.hmisId);
+      const cwId = text(identity.caseworthyId);
+      const dob = text(identity.dob);
+      const name = `${firstName} ${lastName}`.trim();
+      out.push({
+        id: `${finding.id}:create-customer`,
+        kind: "create_customer",
+        label: "Create Customer",
+        target: "customers",
+        sourceValue: name,
+        currentValue: "(missing)",
+        proposedValue: [name, dob ? `DOB ${dob}` : "", hmisId ? `HMIS ${hmisId}` : "", cwId ? `CW ${cwId}` : ""].filter(Boolean).join(" | "),
+        confidence: finding.confidence,
+        warning: !dob ? "DOB is blank; review before creating if the source has DOB elsewhere." : undefined,
+        executable: true,
+        create: {
+          firstName,
+          lastName,
+          name,
+          dob: dob || null,
+          hmisId: hmisId || null,
+          cwId: cwId || null,
+          active: true,
+          status: "active",
+          deleted: false,
+          enrolled: false,
+        },
       });
     }
   }
@@ -71,6 +143,7 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
     if (provider && provider !== currentProvider) {
       out.push({
         id: `${finding.id}:review-provider-mapping`,
+        kind: "review_provider_mapping",
         label: "Preview enrollment/provider mapping correction",
         target: "customerEnrollments",
         targetId: finding.enrollmentId,
@@ -90,6 +163,7 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
   ) {
     out.push({
       id: `${finding.id}:payment-review-task`,
+      kind: "create_payment_review_task",
       label: "Create payment reconciliation task",
       target: "userTasks",
       targetId: finding.customerId,
