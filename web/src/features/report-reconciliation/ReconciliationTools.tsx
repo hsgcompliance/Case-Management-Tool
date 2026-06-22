@@ -412,7 +412,7 @@ function openFindingReviewTab(finding: ReconciliationFinding) {
       },
       {
         title: "Matched customer doc",
-        html: htmlKeyValueRows(finding.matchedCustomer, ["id", "firstName", "lastName", "fullName", "dob", "dateOfBirth", "hmisId", "HMISId", "caseworthyId", "active", "status", "caseManagerId", "assignedToUid"], 100),
+        html: htmlKeyValueRows(finding.matchedCustomer, ["id", "firstName", "lastName", "fullName", "dob", "dateOfBirth", "hmisId", "HMISId", "cwId", "CWID", "caseworthyId", "caseWorthyId", "active", "status", "caseManagerId", "assignedToUid"], 100),
       },
       {
         title: "Matched enrollment doc",
@@ -836,7 +836,7 @@ function FindingDetail({ finding }: { finding: ReconciliationFinding | null }) {
           <KeyValueBlock
             title="Customer fields"
             row={finding.matchedCustomer}
-            preferred={["id", "firstName", "lastName", "fullName", "dob", "dateOfBirth", "hmisId", "HMISId", "caseworthyId", "active", "status", "caseManagerId", "assignedToUid"]}
+            preferred={["id", "firstName", "lastName", "fullName", "dob", "dateOfBirth", "hmisId", "HMISId", "cwId", "CWID", "caseworthyId", "caseWorthyId", "active", "status", "caseManagerId", "assignedToUid"]}
           />
         </DetailSection>
         <DetailSection title="Normalized Report Row" defaultOpen>

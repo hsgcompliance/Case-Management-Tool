@@ -20,8 +20,12 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function currentCustomerValue(finding: ReconciliationFinding, key: string) {
-  return text(finding.matchedCustomer?.[key]);
+function currentCustomerValue(finding: ReconciliationFinding, ...keys: string[]) {
+  for (const key of keys) {
+    const value = text(finding.matchedCustomer?.[key]);
+    if (value) return value;
+  }
+  return "";
 }
 
 export function buildActionPreviews(finding: ReconciliationFinding): ReconciliationActionPreview[] {
@@ -30,29 +34,34 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
   const customerId = text(finding.customerId || finding.matchedCustomer?.id);
   if (record && customerId) {
     const hmisId = text(record.customerIdentity.hmisId);
-    if (hmisId && hmisId !== currentCustomerValue(finding, "hmisId") && hmisId !== currentCustomerValue(finding, "HMISId")) {
+    const currentHmisId = currentCustomerValue(finding, "hmisId", "HMISId", "hmisClientId", "clientId");
+    const currentCaseworthyId = currentCustomerValue(finding, "caseworthyId", "caseWorthyId", "cwId", "CWID");
+    const canPreviewIdentityPatch = finding.confidence >= 0.75;
+    if (canPreviewIdentityPatch && hmisId && hmisId !== currentHmisId) {
       out.push({
         id: `${finding.id}:push-hmis-id`,
         label: "Push HMIS ID to Customer doc",
         target: "customers",
         targetId: customerId,
         sourceValue: hmisId,
-        currentValue: currentCustomerValue(finding, "hmisId") || currentCustomerValue(finding, "HMISId") || "(blank)",
+        currentValue: currentHmisId || "(blank)",
         proposedValue: hmisId,
         confidence: finding.confidence,
+        warning: currentHmisId ? "Customer already has an HMIS ID; review before replacing or adding another external ID." : undefined,
       });
     }
     const caseworthyId = text(record.customerIdentity.caseworthyId);
-    if (caseworthyId && caseworthyId !== currentCustomerValue(finding, "caseworthyId")) {
+    if (canPreviewIdentityPatch && caseworthyId && caseworthyId !== currentCaseworthyId) {
       out.push({
         id: `${finding.id}:push-caseworthy-id`,
         label: "Push Caseworthy ID to Customer doc",
         target: "customers",
         targetId: customerId,
         sourceValue: caseworthyId,
-        currentValue: currentCustomerValue(finding, "caseworthyId") || "(blank)",
+        currentValue: currentCaseworthyId || "(blank)",
         proposedValue: caseworthyId,
         confidence: finding.confidence,
+        warning: currentCaseworthyId ? "Customer already has a CW/Caseworthy ID; review before replacing or adding another external ID." : undefined,
       });
     }
   }

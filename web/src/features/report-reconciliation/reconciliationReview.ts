@@ -161,6 +161,33 @@ function customerDob(customer: Record<string, unknown>) {
   return normalizeDate(customer.dob ?? customer.dateOfBirth ?? customer.birthDate);
 }
 
+function dateParts(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  return { year: match[1], month: match[2], day: match[3] };
+}
+
+function dobAwareNameConfidence(recordDob: string, dashboardDob: string) {
+  if (!recordDob && !dashboardDob) return { confidence: 0.9, methodSuffix: "verify DOB" };
+  if (!recordDob) return { confidence: 0.88, methodSuffix: "report DOB blank" };
+  if (!dashboardDob) return { confidence: 0.82, methodSuffix: "dashboard DOB blank" };
+  if (recordDob === dashboardDob) return { confidence: 0.97, methodSuffix: "DOB exact" };
+
+  const report = dateParts(recordDob);
+  const dashboard = dateParts(dashboardDob);
+  if (!report || !dashboard) return { confidence: 0.55, methodSuffix: "DOB could not be compared" };
+  if (report.month === dashboard.month && report.day === dashboard.day) {
+    return { confidence: 0.86, methodSuffix: "DOB month/day match; verify year" };
+  }
+  if (report.month === dashboard.month && report.year === dashboard.year) {
+    return { confidence: 0.72, methodSuffix: "DOB month/year match; verify day" };
+  }
+  if (report.day === dashboard.day) {
+    return { confidence: 0.62, methodSuffix: "DOB day matches only; review carefully" };
+  }
+  return { confidence: 0.35, methodSuffix: "DOB conflicts" };
+}
+
 function customerNameKey(customer: Record<string, unknown>) {
   return normalizeCustomerName(customerLabel(customer));
 }
@@ -246,7 +273,11 @@ function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof
     return { customer: indexes.byNameDob.get(`${name}|${dob}`) ?? null, confidence: 0.97, method: "first + last name + DOB" };
   }
   const nameMatches = name ? indexes.byName.get(name) ?? [] : [];
-  if (nameMatches.length === 1) return { customer: nameMatches[0], confidence: 0.9, method: "first + last name exact; verify DOB" };
+  if (nameMatches.length === 1) {
+    const matched = nameMatches[0];
+    const dobMatch = dobAwareNameConfidence(dob, customerDob(matched));
+    return { customer: matched, confidence: dobMatch.confidence, method: `first + last name exact; ${dobMatch.methodSuffix}` };
+  }
 
   const recordParts = namePartsFromRecord(record);
   let fuzzy: Record<string, unknown> | null = null;
@@ -262,7 +293,14 @@ function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof
       break;
     }
   }
-  if (fuzzy) return { customer: fuzzy, confidence: 0.5, method: "close first + last spelling; manual review required" };
+  if (fuzzy) {
+    const dobMatch = dobAwareNameConfidence(dob, customerDob(fuzzy));
+    return {
+      customer: fuzzy,
+      confidence: Math.min(0.5, dobMatch.confidence),
+      method: `close first + last spelling; ${dobMatch.methodSuffix}; manual review required`,
+    };
+  }
   return { customer: null, confidence: 0, method: "" };
 }
 
