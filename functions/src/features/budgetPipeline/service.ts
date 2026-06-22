@@ -23,7 +23,64 @@ function round2(n: number): number {
 
 // ─── Field extraction ─────────────────────────────────────────────────────────
 
+const WIDE_GRANT_TEXT_FIELDS = [
+  'program_raw',
+  'program',
+  'billed_to_raw',
+  'billedTo',
+  'project_raw',
+  'project',
+  'descriptor',
+  'serviceType',
+  'otherService',
+  'expense_type_raw',
+  'expenseType',
+  'paymentMethod',
+  'serviceScope',
+  'wex',
+  'card',
+  'cardBucket',
+  'merchant',
+  'customer',
+  'purpose',
+  'notes',
+  'note',
+  'source',
+  'formTitle',
+] as const;
+
+function stringifySearchValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(stringifySearchValue).filter(Boolean).join(' ');
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if ('answer' in obj) return stringifySearchValue(obj.answer);
+    if ('prettyFormat' in obj) return stringifySearchValue(obj.prettyFormat);
+    if ('text' in obj) return stringifySearchValue(obj.text);
+  }
+  return '';
+}
+
+function getWideGrantText(item: Record<string, unknown>): string {
+  const parts = WIDE_GRANT_TEXT_FIELDS.map((field) => stringifySearchValue(item[field]));
+  const transactionFields = item.transactionFields as Record<string, unknown> | undefined;
+  if (transactionFields && typeof transactionFields === 'object') {
+    for (const value of Object.values(transactionFields)) {
+      parts.push(stringifySearchValue(value));
+    }
+  }
+  return parts.filter(Boolean).join(' ').toLowerCase();
+}
+
 function getFieldValue(item: Record<string, unknown>, field: string): unknown {
+  if (field === 'wideGrantText' || field === 'bucket_text') {
+    return getWideGrantText(item);
+  }
   if (field.startsWith('tx:')) {
     const transactionFields = item.transactionFields as Record<string, unknown> | undefined;
     return transactionFields?.[field] ?? '';
@@ -55,7 +112,9 @@ function evalCondition(
   const op = cond.operator as TPipelineOperator;
   const condVal = cond.value;
   const cStr = String(condVal ?? '').toLowerCase().trim();
-  const fieldLabel = cond.field.startsWith('raw:') ? `raw:${cond.field.slice(4)}` : cond.field;
+  const fieldLabel = cond.field === 'wideGrantText' || cond.field === 'bucket_text'
+    ? 'Any grant field (wide)'
+    : cond.field.startsWith('raw:') ? `raw:${cond.field.slice(4)}` : cond.field;
   const empty = !fStr;
 
   switch (op) {
