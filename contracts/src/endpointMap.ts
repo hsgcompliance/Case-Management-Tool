@@ -680,7 +680,7 @@ export type CalendarPostEventReq = {
   activityId?: string;
 };
 export type CalendarPostEventResp =
-  | Ok<{ eventId: string }>
+  | Ok<{ eventId: string; alreadySynced?: boolean }>
   | (TGoogleEndpointError & {
       code?:
         | "calendar_not_connected"

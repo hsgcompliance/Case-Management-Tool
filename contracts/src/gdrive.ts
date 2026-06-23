@@ -41,6 +41,12 @@ export type TGDriveTemplate = {
   description?: string;
   defaultChecked?: boolean;
   variants?: TGDriveTemplateVariants;
+  /**
+   * Build role for the copied file. "tssWorkbook" flags the template whose copy
+   * is auto-linked as the customer's TSS workbook on build. Explicit and stored,
+   * so it no longer relies on the template key matching "tss_workbook".
+   */
+  role?: string;
 };
 
 export type TGDriveBuildSettings = {
@@ -65,6 +71,7 @@ const GDriveTemplateSchema = z
     description: z.string().max(500).optional(),
     defaultChecked: z.boolean().optional(),
     variants: GDriveTemplateVariantsSchema.optional(),
+    role: z.string().max(40).optional(),
   })
   .refine(
     (t) =>

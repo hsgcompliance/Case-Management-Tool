@@ -3,6 +3,7 @@ import {db, isoNow, removeUndefinedDeep} from '../../core';
 import {writeLedgerEntry} from '../ledger/service';
 import {recordCustomerSpend, recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
 import {primarySubtype} from '../payments/utils';
+import {autoAllocatePaymentQueueItem} from '../budgetPipeline/service';
 import {
   type TPaymentQueueItem,
   type TPaymentQueueListBody,
@@ -28,6 +29,7 @@ const LOCAL_RECONCILE_FIELDS = [
   'cardBucket',
   'grantId',
   'lineItemId',
+  'pipelineId',
   'customerId',
   'enrollmentId',
   'creditCardId',
@@ -370,7 +372,8 @@ export async function patchPaymentQueueItem(
   if (patch.grantId !== undefined) mark('grantId', patch.grantId);
   if (patch.lineItemId !== undefined) mark('lineItemId', patch.lineItemId);
   // Manual re-classification supersedes pipeline auto-attribution.
-  if (patch.grantId !== undefined || patch.lineItemId !== undefined) update.pipelineId = null;
+  if (patch.pipelineId !== undefined) mark('pipelineId', patch.pipelineId);
+  else if (patch.grantId !== undefined || patch.lineItemId !== undefined) update.pipelineId = null;
   if (patch.customerId !== undefined) mark('customerId', patch.customerId);
   if (patch.enrollmentId !== undefined) mark('enrollmentId', patch.enrollmentId);
   if (patch.creditCardId !== undefined) mark('creditCardId', patch.creditCardId);
@@ -948,6 +951,7 @@ export async function upsertPaymentQueueItems(
   const existingMap = new Map(existingSnaps.map((s) => [s.id, s]));
 
   const batch = db.batch();
+  const allocationCandidates: Array<{id: string; data: Record<string, unknown>}> = [];
 
   for (const {extracted, orgId} of items) {
     const ref = db.collection(COLLECTION).doc(extracted.id);
@@ -1018,7 +1022,15 @@ export async function upsertPaymentQueueItems(
     };
 
     batch.set(ref, removeUndefinedDeep(doc) as any, {merge: false});
+    if (doc.queueStatus === 'pending' && !doc.grantId && doc.orgId) {
+      allocationCandidates.push({id: doc.id, data: doc as unknown as Record<string, unknown>});
+    }
   }
 
   await batch.commit();
+  await Promise.all(
+      allocationCandidates.map(({id, data}) =>
+        autoAllocatePaymentQueueItem(id, data, {writer: 'upsertPaymentQueueItems:pipeline'}).catch(() => null),
+      ),
+  );
 }

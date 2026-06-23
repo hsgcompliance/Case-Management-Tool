@@ -1,12 +1,30 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import type { User } from "firebase/auth";
 import { useAuth } from "@/hooks/useAuth";
 import { useCustomer, useOrgCustomers, usePatchCustomer, useMarkCustomerInactive, getWorkbookLink, type Customer, type DriveFolderRef } from "@/hooks/useCustomers";
 import { useCustomerEnrollments, type Enrollment } from "@/hooks/useCustomerEnrollments";
 import { useCustomerSessions } from "@/hooks/useCustomerSessions";
 import { useWorkbookData } from "@/hooks/useWorkbookData";
 import { useDriveIntegration } from "@/hooks/useCalendarIntegration";
+import { useSessionSync } from "@/hooks/useSessionSync";
+import { useCreateActivity } from "@/hooks/useCreateActivity";
+import { useEditActivity, useDeleteActivity, type SessionEditFields } from "@/hooks/useEditActivity";
+import { SyncChip, SyncButton } from "@/components/SyncControls";
+import { CustomerFolderSection } from "@/components/CustomerFolderSection";
+import { DATE_RANGE_CHIPS, type DateRangeKey } from "@/lib/dateRange";
+import { listOutbox, removeOutbox, subscribeOutbox, type OutboxEntry } from "@/lib/sessionOutbox";
+import type { SyncState } from "@/lib/sessionSync";
+import { GoogleIntegrations } from "@/lib/googleIntegrations";
+import { tss } from "@hdb/contracts";
 import type { TCmActivity, TCmActivityType, tss as TssNS } from "@hdb/contracts";
+
+const SESSION_TYPE_OPTIONS: { value: TCmActivityType; label: string; emoji: string }[] = [
+  { value: "in-person",  label: "In Person",   emoji: "🤝" },
+  { value: "phone",      label: "Phone",        emoji: "📞" },
+  { value: "data-entry", label: "Data Entry",   emoji: "💻" },
+  { value: "other",      label: "On Behalf of", emoji: "📋" },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,42 +66,6 @@ function populationColors(pop?: string): { bg: string; text: string } {
     case "individual": return { bg: "bg-emerald-100", text: "text-emerald-700" };
     default:           return { bg: "bg-slate-100",   text: "text-slate-500" };
   }
-}
-
-// ─── Drive ────────────────────────────────────────────────────────────────────
-
-const DRIVE_FOLDER_ID_RE = /^[-\w]{20,}$/;
-
-function parseDriveFolderId(value: unknown): string {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  const byFolders = text.match(/\/folders\/([-\w]{20,})/i)?.[1];
-  if (byFolders) return byFolders;
-  const byQuery = text.match(/[?&]id=([-\w]{20,})/i)?.[1];
-  if (byQuery) return byQuery;
-  return DRIVE_FOLDER_ID_RE.test(text) ? text : "";
-}
-
-function folderUrl(idOrUrl: unknown): string {
-  const text = String(idOrUrl ?? "").trim();
-  if (/^https?:\/\//i.test(text)) return text;
-  const id = parseDriveFolderId(text);
-  return id ? `https://drive.google.com/drive/folders/${id}` : "";
-}
-
-function getDriveLink(customer: Customer): { url: string; label: string } | null {
-  const meta = customer.meta ?? {};
-  const folders: DriveFolderRef[] = [
-    ...(Array.isArray(meta.driveFolders) ? meta.driveFolders : []),
-    ...(Array.isArray(customer.driveFolders) ? customer.driveFolders : []),
-  ];
-  const folder = folders.find((f) => folderUrl(f?.url) || folderUrl(f?.id));
-  const url =
-    folderUrl(folder?.url) || folderUrl(folder?.id) ||
-    folderUrl(meta.driveFolderId) || folderUrl(customer.driveFolderId);
-  if (!url) return null;
-  const label = String(folder?.alias || folder?.name || "").trim() || "Open Drive folder";
-  return { url, label };
 }
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -198,31 +180,225 @@ function EnrollmentCard({ enrollment }: { enrollment: Enrollment }) {
   );
 }
 
-function SessionCard({ activity }: { activity: TCmActivity }) {
+function sessionTimeStr(a: { startTime?: string; endTime?: string }): string | null {
+  return a.startTime ? (a.endTime ? `${a.startTime} – ${a.endTime}` : a.startTime) : null;
+}
+
+function SessionRow({
+  activity,
+  syncState,
+  syncing,
+  onSync,
+  onOpen,
+}: {
+  activity: TCmActivity;
+  syncState: SyncState;
+  syncing: boolean;
+  onSync: () => void;
+  onOpen: () => void;
+}) {
   const typeLabel = TYPE_LABELS[activity.type] ?? activity.type;
   const typeColor = TYPE_COLORS[activity.type] ?? "bg-slate-100 text-slate-600";
-  const dateStr = fmtDate(activity.date);
-  const timeStr =
-    activity.startTime
-      ? activity.endTime
-        ? `${activity.startTime} – ${activity.endTime}`
-        : activity.startTime
-      : null;
+  const timeStr = sessionTimeStr(activity);
+  const chipKind = syncing ? "syncing" : syncState.pending ? "pending" : "synced";
 
   return (
-    <div className="rounded-xl border border-slate-100 bg-white p-3.5">
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full text-left rounded-xl border border-slate-100 bg-white p-3.5 active:bg-slate-50 transition-colors"
+    >
       <div className="flex items-center gap-2 mb-1.5">
         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${typeColor}`}>{typeLabel}</span>
-        <span className="text-xs text-slate-400">{dateStr}</span>
         {timeStr && <span className="text-xs text-slate-400">{timeStr}</span>}
-        {activity.workbookSynced && (
-          <span className="ml-auto text-xs font-medium text-emerald-600" title="Pushed to workbook">📓 ✓</span>
-        )}
+        <span className="ml-auto flex items-center gap-2">
+          <SyncChip kind={chipKind} />
+        </span>
       </div>
-      {activity.note && (
-        <p className="text-sm text-slate-700 leading-snug">{activity.note}</p>
+      {activity.note && <p className="text-sm text-slate-700 leading-snug line-clamp-2">{activity.note}</p>}
+      {syncState.actionable && (
+        <div className="mt-2.5 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-amber-600">
+            {[syncState.needsCalendar && "calendar", syncState.needsWorkbook && "workbook"].filter(Boolean).join(" + ")} pending
+          </span>
+          <SyncButton onClick={onSync} busy={syncing} label="Sync" />
+        </div>
       )}
+    </button>
+  );
+}
+
+function DraftRow({
+  draft,
+  syncing,
+  onSync,
+  onDiscard,
+}: {
+  draft: OutboxEntry;
+  syncing: boolean;
+  onSync: () => void;
+  onDiscard: () => void;
+}) {
+  const typeLabel = TYPE_LABELS[draft.body.type] ?? draft.body.type;
+  const timeStr = sessionTimeStr(draft.body);
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{typeLabel}</span>
+        <span className="text-xs text-slate-400">{fmtDate(draft.body.date)}</span>
+        {timeStr && <span className="text-xs text-slate-400">{timeStr}</span>}
+        <span className="ml-auto"><SyncChip kind={syncing ? "syncing" : "offline"} /></span>
+      </div>
+      {draft.body.note && <p className="text-sm text-slate-700 leading-snug line-clamp-2">{draft.body.note}</p>}
+      <div className="mt-2.5 flex items-center justify-between gap-2">
+        <button type="button" onClick={onDiscard} className="text-[11px] font-semibold text-slate-400 active:text-red-600">
+          Discard
+        </button>
+        <SyncButton onClick={onSync} busy={syncing} label="Sync now" busyLabel="Saving…" />
+      </div>
     </div>
+  );
+}
+
+function SessionEditSheet({
+  session,
+  use24h,
+  onClose,
+  onSave,
+  onDelete,
+  saving,
+  deleting,
+}: {
+  session: TCmActivity;
+  use24h: boolean;
+  onClose: () => void;
+  onSave: (fields: SessionEditFields, updateWorkbook: boolean) => void;
+  onDelete: () => void;
+  saving: boolean;
+  deleting: boolean;
+}) {
+  const [type, setType] = useState<TCmActivityType>(session.type);
+  const [date, setDate] = useState(session.date);
+  const [startTime, setStartTime] = useState(session.startTime ?? "");
+  const [endTime, setEndTime] = useState(session.endTime ?? "");
+  const [note, setNote] = useState(session.note ?? "");
+  const [updateWorkbook, setUpdateWorkbook] = useState(false); // optional, default false
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const wasWorkbookSynced = session.workbookSynced === true;
+  void use24h;
+
+  const save = () =>
+    onSave(
+      { type, date, startTime: startTime || undefined, endTime: endTime || undefined, note: note.trim() || undefined },
+      updateWorkbook,
+    );
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div className="fixed bottom-0 inset-x-0 z-50 bg-white rounded-t-2xl shadow-2xl pb-safe-bottom max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full bg-slate-200" />
+        </div>
+        <div className="px-5 pt-2 pb-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-900">Edit Session</h2>
+            <button type="button" onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:bg-slate-200">
+              <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Type */}
+          <div className="grid grid-cols-2 gap-2">
+            {SESSION_TYPE_OPTIONS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setType(t.value)}
+                className={`rounded-xl border-2 px-3 py-2.5 text-sm font-medium flex items-center gap-2 transition-colors ${
+                  type === t.value ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                <span>{t.emoji}</span>{t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Date */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+            />
+          </div>
+
+          {/* Times */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Start</label>
+              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">End</label>
+              <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+            </div>
+          </div>
+
+          {/* Note */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Case Note</label>
+            <textarea rows={4} value={note} onChange={(e) => setNote(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 resize-none" />
+          </div>
+
+          {/* Optional workbook re-push (append-only → appends a corrected row) */}
+          {wasWorkbookSynced && (
+            <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+              <input type="checkbox" checked={updateWorkbook} onChange={(e) => setUpdateWorkbook(e.target.checked)} className="mt-0.5 h-4 w-4 accent-indigo-600" />
+              <span className="text-xs text-slate-600">
+                Update the progress note in the workbook
+                <span className="block text-[11px] text-slate-400">Appends a corrected note dated today. Calendar updates automatically.</span>
+              </span>
+            </label>
+          )}
+
+          <button type="button" onClick={save} disabled={saving || deleting}
+            className="w-full rounded-xl bg-indigo-600 py-3.5 text-sm font-semibold text-white active:bg-indigo-700 disabled:opacity-50 transition-colors">
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+
+          {/* Delete */}
+          {!confirmingDelete ? (
+            <button type="button" onClick={() => setConfirmingDelete(true)} disabled={saving || deleting}
+              className="w-full text-sm font-semibold text-red-600 active:text-red-800 py-1 disabled:opacity-50">
+              Delete session
+            </button>
+          ) : (
+            <div className="rounded-xl border border-red-100 bg-red-50/60 p-3 space-y-2">
+              <p className="text-xs text-red-800">Delete this session? Any calendar event or workbook note already pushed stays in place.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={onDelete} disabled={deleting}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 text-sm font-semibold text-white active:bg-red-700 disabled:opacity-50">
+                  {deleting ? "Deleting…" : "Confirm delete"}
+                </button>
+                <button type="button" onClick={() => setConfirmingDelete(false)} disabled={deleting}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 active:bg-slate-50">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -428,7 +604,6 @@ function CaseManagementTab({
 type Tab = "info" | "cm" | "enrollments" | "plan" | "sessions";
 
 function InfoTab({ customer, activeEnrollments }: { customer: Customer; activeEnrollments: Enrollment[] }) {
-  const driveLink = getDriveLink(customer);
   const age = calcAge(customer.dob);
   const markInactive = useMarkCustomerInactive(customer.id);
   const [confirmingInactive, setConfirmingInactive] = useState(false);
@@ -471,32 +646,8 @@ function InfoTab({ customer, activeEnrollments }: { customer: Customer; activeEn
         </div>
       )}
 
-      {/* Drive folder */}
-      {driveLink ? (
-        <a
-          href={driveLink.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 active:bg-slate-50 transition-colors"
-        >
-          <DriveIcon />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-slate-900">Google Drive</p>
-            <p className="text-xs text-slate-500 truncate">{driveLink.label}</p>
-          </div>
-          <svg className="w-4 h-4 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
-        </a>
-      ) : (
-        <div className="flex items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-white/50 px-4 py-3.5">
-          <DriveIcon muted />
-          <div>
-            <p className="text-sm font-medium text-slate-400">No Drive folder linked</p>
-            <p className="text-xs text-slate-400">Set up in the web app</p>
-          </div>
-        </div>
-      )}
+      {/* Drive folder — link an indexed folder, build a new one, or paste a link */}
+      <CustomerFolderSection customer={customer} />
 
       {/* Mark inactive */}
       {customer.active !== false && (
@@ -590,27 +741,123 @@ function EnrollmentsTab({ enrollments, loading }: { enrollments: Enrollment[]; l
   );
 }
 
-function SessionsTab({
-  sessions,
-  loading,
-  customerId,
-  customerName,
-}: {
-  sessions: TCmActivity[];
-  loading: boolean;
-  customerId: string;
-  customerName: string;
-}) {
+// Outbox drafts for this customer, kept in sync with localStorage changes.
+function useOutboxDrafts(uid: string | undefined, customerId: string): OutboxEntry[] {
+  const [drafts, setDrafts] = useState<OutboxEntry[]>([]);
+  useEffect(() => {
+    const update = () => setDrafts(listOutbox(uid).filter((d) => d.body.customerId === customerId));
+    update();
+    return subscribeOutbox(update);
+  }, [uid, customerId]);
+  return drafts;
+}
+
+function LoadMoreTrigger({ onVisible }: { onVisible: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) onVisible(); },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onVisible]);
+  return <div ref={ref} className="h-1" />;
+}
+
+function SessionsTab({ customer, user }: { customer: Customer; user: User | null }) {
   const navigate = useNavigate();
-  const grouped = groupByDate(sessions);
+  const [range, setRange] = useState<DateRangeKey>("month");
+
+  const q = useCustomerSessions(user?.uid, customer.id, range);
+  const sessions = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+
+  const customerHasWorkbook = !!getWorkbookLink(customer);
+  const sync = useSessionSync(user, { customerHasWorkbook });
+  const drafts = useOutboxDrafts(user?.uid, customer.id);
+  const createActivity = useCreateActivity(user);
+  const editActivity = useEditActivity();
+  const deleteActivity = useDeleteActivity();
+
+  const [editing, setEditing] = useState<TCmActivity | null>(null);
+  const [syncingDraftId, setSyncingDraftId] = useState<string | null>(null);
+
+  const grouped = useMemo(() => groupByDate(sessions), [sessions]);
+  const pendingCount = sync.pendingCount(sessions) + drafts.length;
+
+  async function flushDraft(draft: OutboxEntry) {
+    if (!user) return;
+    setSyncingDraftId(draft.localId);
+    try {
+      const id = await createActivity.mutateAsync(draft.body);
+      const session: TCmActivity = {
+        id,
+        orgId: customer.orgId ?? "",
+        caseManagerId: user.uid,
+        caseManagerName: user.displayName ?? "",
+        customerId: draft.body.customerId,
+        customerName: draft.body.customerName,
+        type: draft.body.type,
+        date: draft.body.date,
+        startTime: draft.body.startTime,
+        endTime: draft.body.endTime,
+        note: draft.body.note,
+        calendarSynced: false,
+        workbookSynced: false,
+        createdAt: new Date().toISOString(),
+      };
+      await sync.syncOne(session, {
+        linkedGoals: draft.intent.linkedGoals,
+        only: { calendar: draft.intent.calendar, workbook: draft.intent.workbook },
+      });
+      removeOutbox(user.uid, draft.localId);
+    } finally {
+      setSyncingDraftId(null);
+    }
+  }
+
+  async function handleSyncAll() {
+    for (const d of [...drafts]) await flushDraft(d);
+    await sync.syncAll(sessions);
+  }
+
+  async function handleSaveEdit(fields: SessionEditFields, updateWorkbook: boolean) {
+    if (!editing) return;
+    const updated = await editActivity.mutateAsync({ session: editing, fields, updateWorkbook });
+    // Smart re-sync: calendar updates in place; workbook re-pushes only if asked.
+    if (sync.calendarConnected || sync.driveConnected) {
+      await sync.syncOne(updated, { useTodayDate: true });
+    }
+    setEditing(null);
+  }
+
+  async function handleDelete() {
+    if (!editing) return;
+    await deleteActivity.mutateAsync(editing.id);
+    setEditing(null);
+  }
 
   return (
     <div className="p-4 flex flex-col gap-4">
+      {editing && (
+        <SessionEditSheet
+          session={editing}
+          use24h={false}
+          onClose={() => setEditing(null)}
+          onSave={handleSaveEdit}
+          onDelete={handleDelete}
+          saving={editActivity.isPending}
+          deleting={deleteActivity.isPending}
+        />
+      )}
+
       {/* New session button */}
       <button
         type="button"
         onClick={() =>
-          navigate(`/log?customerId=${customerId}&customerName=${encodeURIComponent(customerName)}`)
+          navigate(`/log?customerId=${customer.id}&customerName=${encodeURIComponent(customer.name)}`)
         }
         className="w-full rounded-2xl bg-indigo-600 py-3.5 text-sm font-semibold text-white flex items-center justify-center gap-2 active:bg-indigo-700 transition-colors shadow-sm"
       >
@@ -620,26 +867,83 @@ function SessionsTab({
         Log New Session
       </button>
 
-      {loading ? (
+      {/* Sync all */}
+      {pendingCount > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3.5 py-2.5">
+          <span className="text-xs font-medium text-amber-700">
+            {pendingCount} session{pendingCount !== 1 ? "s" : ""} need{pendingCount === 1 ? "s" : ""} syncing
+          </span>
+          <SyncButton onClick={() => void handleSyncAll()} busy={sync.syncAllRunning} label="Sync all" busyLabel="Syncing…" />
+        </div>
+      )}
+
+      {/* Date filter chips */}
+      <div className="flex gap-2 overflow-x-auto scrollbar-none -mx-1 px-1">
+        {DATE_RANGE_CHIPS.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => setRange(chip.key)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-full border flex-shrink-0 transition-colors ${
+              range === chip.key ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200"
+            }`}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Offline drafts (always shown, newest first) */}
+      {drafts.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {drafts.map((d) => (
+            <DraftRow
+              key={d.localId}
+              draft={d}
+              syncing={syncingDraftId === d.localId}
+              onSync={() => void flushDraft(d)}
+              onDiscard={() => user && removeOutbox(user.uid, d.localId)}
+            />
+          ))}
+        </div>
+      )}
+
+      {q.isLoading ? (
         <div className="flex flex-col gap-2">
           {[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-white rounded-xl animate-pulse" />)}
         </div>
-      ) : grouped.length === 0 ? (
+      ) : grouped.length === 0 && drafts.length === 0 ? (
         <div className="text-center py-8">
-          <p className="text-slate-400 text-sm">No sessions logged yet</p>
-          <p className="text-slate-400 text-xs mt-1">Tap the button above to add the first one</p>
+          <p className="text-slate-400 text-sm">No sessions in this range</p>
+          <p className="text-slate-400 text-xs mt-1">Try a wider filter or log a new session</p>
         </div>
       ) : (
-        grouped.map(({ date, items }) => (
-          <section key={date}>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
-              {fmtDate(date)}
-            </p>
-            <div className="flex flex-col gap-2">
-              {items.map((a) => <SessionCard key={a.id} activity={a} />)}
+        <>
+          {grouped.map(({ date, items }) => (
+            <section key={date}>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{fmtDate(date)}</p>
+              <div className="flex flex-col gap-2">
+                {items.map((a) => (
+                  <SessionRow
+                    key={a.id}
+                    activity={a}
+                    syncState={sync.stateFor(a)}
+                    syncing={sync.isSyncing(a.id)}
+                    onSync={() => void sync.syncOne(a)}
+                    onOpen={() => setEditing(a)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {q.hasNextPage && !q.isFetchingNextPage && <LoadMoreTrigger onVisible={() => void q.fetchNextPage()} />}
+          {q.isFetchingNextPage && (
+            <div className="flex justify-center py-4">
+              <div className="w-5 h-5 rounded-full border-2 border-indigo-300 border-t-indigo-600 animate-spin" />
             </div>
-          </section>
-        ))
+          )}
+        </>
       )}
     </div>
   );
@@ -670,7 +974,7 @@ function goalStatusColor(status: string): string {
   }
 }
 
-function GoalCard({ row }: { row: TssNS.TssExtractedRow }) {
+function GoalCard({ row, n, onEdit }: { row: TssNS.TssExtractedRow; n: number; onEdit?: () => void }) {
   const goal = cellText(row, "goalSmart");
   const objective = cellText(row, "objective");
   const status = cellText(row, "status");
@@ -681,9 +985,14 @@ function GoalCard({ row }: { row: TssNS.TssExtractedRow }) {
   return (
     <div className="rounded-xl border border-slate-100 bg-white p-3.5">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-900 leading-snug flex-1 whitespace-pre-wrap">
-          {goal || "—"}
-        </p>
+        <div className="flex items-start gap-2 flex-1 min-w-0">
+          <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-slate-100 text-[10px] font-bold text-slate-500">
+            {n}
+          </span>
+          <p className="text-sm font-semibold text-slate-900 leading-snug flex-1 whitespace-pre-wrap">
+            {goal || "—"}
+          </p>
+        </div>
         {status && (
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${goalStatusColor(status)}`}>
             {status}
@@ -698,7 +1007,141 @@ function GoalCard({ row }: { row: TssNS.TssExtractedRow }) {
           {tier && <span><span className="text-slate-400">Tier:</span> {tier}</span>}
         </div>
       )}
+      {onEdit && (
+        <div className="mt-2.5 flex justify-end">
+          <button type="button" onClick={onEdit} className="text-xs font-semibold text-indigo-600 active:text-indigo-800">
+            Edit
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+// Writable goal fields, sourced from the TSS config so labels/dropdowns stay in
+// sync with the contract. (Org overrides aren't applied here — baseline fields.)
+const GOAL_FIELDS = (tss.TSS_GOALS_ENTITY.fields ?? []).filter(
+  (f) => f.dataType !== "computed" && f.write?.enabled !== false,
+);
+
+function goalFieldOptions(field: TssNS.TssSmartHeaderConfig): string[] {
+  const id = field.optionSourceId;
+  if (!id) return [];
+  const list = (tss.TSS_DROPDOWN_LISTS as Record<string, { values?: string[] }>)[id];
+  return Array.isArray(list?.values) ? list!.values : [];
+}
+
+function GoalEditSheet({
+  customerId,
+  goalRow,
+  onClose,
+  onSaved,
+}: {
+  customerId: string;
+  /** null → add a new goal; otherwise edit this extracted row in place. */
+  goalRow: TssNS.TssExtractedRow | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = !!goalRow;
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    if (goalRow) {
+      for (const f of GOAL_FIELDS) {
+        const c = goalRow.values?.[f.id];
+        init[f.id] = c ? String(c.displayValue ?? c.value ?? "").trim() : "";
+      }
+    }
+    return init;
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const setField = (id: string, v: string) => setValues((cur) => ({ ...cur, [id]: v }));
+  const missingRequired = GOAL_FIELDS.some((f) => f.required && !String(values[f.id] || "").trim());
+
+  async function save() {
+    if (missingRequired) { setError("Fill in the required fields."); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: Record<string, string> = {};
+      for (const f of GOAL_FIELDS) {
+        const v = String(values[f.id] ?? "").trim();
+        // Edit sends every field (empty clears); add sends only filled fields.
+        if (isEdit) payload[f.id] = v;
+        else if (v) payload[f.id] = v;
+      }
+      const resp = await GoogleIntegrations.pushWorkbookRow({
+        customerId,
+        entityId: "goals",
+        values: payload,
+        ...(isEdit ? { mode: "update" as const, rowKey: goalRow!.rowKey } : { mode: "insert" as const }),
+      });
+      if (!resp.ok) { setError(resp.error || "Could not save the goal."); return; }
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the goal.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div className="fixed bottom-0 inset-x-0 z-50 bg-white rounded-t-2xl shadow-2xl pb-safe-bottom max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 rounded-full bg-slate-200" /></div>
+        <div className="px-5 pt-2 pb-6 space-y-3.5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-900">{isEdit ? "Edit Goal" : "Add Goal"}</h2>
+            <button type="button" onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:bg-slate-200">
+              <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {GOAL_FIELDS.map((f) => {
+            const label = f.display?.label ?? f.expected;
+            const value = values[f.id] ?? "";
+            const opts = goalFieldOptions(f);
+            const base = "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+            return (
+              <div key={f.id} className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500">
+                  {label}{f.required ? <span className="text-red-500"> *</span> : null}
+                </label>
+                {f.dataType === "select" && opts.length ? (
+                  <select className={base} value={value} onChange={(e) => setField(f.id, e.target.value)} disabled={saving}>
+                    <option value="">—</option>
+                    {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : f.dataType === "date" ? (
+                  <input type="date" className={base} value={value} onChange={(e) => setField(f.id, e.target.value)} disabled={saving} />
+                ) : f.dataType === "longText" ? (
+                  <textarea rows={2} className={`${base} resize-none`} value={value} onChange={(e) => setField(f.id, e.target.value)} disabled={saving} />
+                ) : (
+                  <input type="text" className={base} value={value} onChange={(e) => setField(f.id, e.target.value)} disabled={saving} />
+                )}
+              </div>
+            );
+          })}
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          {!isEdit && (
+            <p className="text-[11px] text-slate-400">
+              Adds a new row to the goals table — the sections below it are pushed down, never overwritten.
+            </p>
+          )}
+
+          <button type="button" onClick={() => void save()} disabled={saving || missingRequired}
+            className="w-full rounded-xl bg-indigo-600 py-3.5 text-sm font-semibold text-white active:bg-indigo-700 disabled:opacity-50 transition-colors">
+            {saving ? "Saving…" : isEdit ? "Save changes" : "Add goal"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -779,6 +1222,9 @@ function PlanTab({ customer }: { customer: Customer }) {
   const drive = useDriveIntegration(user ?? null);
   const link = getWorkbookLink(customer);
 
+  // Goal add/edit sheet. { row: null } = add; { row } = edit that goal in place.
+  const [goalEdit, setGoalEdit] = useState<{ row: TssNS.TssExtractedRow | null } | null>(null);
+
   const handleConnect = async () => {
     const res = await drive.connectViaPopup();
     if (res.result === "connected") void wb.refetch();
@@ -843,32 +1289,65 @@ function PlanTab({ customer }: { customer: Customer }) {
 
   const goals = findEntity(data.extract, "goals");
   const notes = findEntity(data.extract, "progressNotes");
+  const goalRows = goals?.rows ?? [];
+  const canEditGoals = drive.connected;
   const openLabel = link?.name || data.extract.spreadsheetName || "Open workbook";
   const openUrl = link?.url || `https://docs.google.com/spreadsheets/d/${data.extract.spreadsheetId}/edit`;
 
   return (
     <div className="p-4 flex flex-col gap-5">
+      {goalEdit && (
+        <GoalEditSheet
+          customerId={customer.id}
+          goalRow={goalEdit.row}
+          onClose={() => setGoalEdit(null)}
+          onSaved={() => { setGoalEdit(null); void wb.refetch(); }}
+        />
+      )}
+
       <WorkbookOpenLink url={openUrl} label={openLabel} />
-      <PlanSection title="Goals" entity={goals} renderRow={(r) => <GoalCard row={r} />} />
+
+      {/* Goals */}
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Goals{goalRows.length > 0 && <span className="ml-1.5 text-slate-300">{goalRows.length}</span>}
+          </p>
+          {canEditGoals && (
+            <button
+              type="button"
+              onClick={() => setGoalEdit({ row: null })}
+              className="text-xs font-semibold text-indigo-600 active:text-indigo-800 flex items-center gap-1"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              Add goal
+            </button>
+          )}
+        </div>
+        {goalRows.length === 0 ? (
+          <p className="text-sm text-slate-400 italic py-1">No goals recorded yet.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {goalRows.map((r, i) => (
+              <GoalCard
+                key={r.rowKey}
+                row={r}
+                n={i + 1}
+                onEdit={canEditGoals ? () => setGoalEdit({ row: r }) : undefined}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
       <PlanSection title="Progress Notes" entity={notes} renderRow={(r) => <NoteCard row={r} />} />
     </div>
   );
 }
 
 // ─── Drive icon ───────────────────────────────────────────────────────────────
-
-function DriveIcon({ muted = false }: { muted?: boolean }) {
-  return (
-    <svg className={`w-8 h-8 flex-shrink-0 ${muted ? "opacity-30" : ""}`} viewBox="0 0 87.3 78" aria-hidden>
-      <path fill="#0066da" d="M6.6 66.85 3.05 60.91l-3-5.19L29.3 10.3 41.43 31.4z" />
-      <path fill="#00ac47" d="M50.86 31.4l12.13-21.1L87.3 55.72l-3 5.19-3.55 5.94z" />
-      <path fill="#ea4335" d="M43.65 19.69l-14.35-9.39h56.7L70.45 47.8z" />
-      <path fill="#00832d" d="M73.04 66.85H14.25l-7.65-5.94h73.76l-7.32 5.94z" />
-      <path fill="#2684fc" d="M43.65 19.69 29.3 10.3h-8.69l14.35 9.39z" />
-      <path fill="#ffba00" d="M43.65 19.69l26.8 28.11 3.56-5.5-14.23-22.61z" />
-    </svg>
-  );
-}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -880,7 +1359,6 @@ export function CustomerDetailPage() {
 
   const { data: customer, isLoading: loadingCustomer } = useCustomer(id);
   const { data: enrollments = [], isLoading: loadingEnrollments } = useCustomerEnrollments(id);
-  const { data: sessions = [], isLoading: loadingSessions } = useCustomerSessions(user?.uid, id);
 
   const pop = populationColors(customer?.population);
 
@@ -918,7 +1396,7 @@ export function CustomerDetailPage() {
     { id: "cm", label: "CM" },
     { id: "enrollments", label: "Programs", count: enrollments.length || undefined },
     { id: "plan", label: "Plan" },
-    { id: "sessions", label: "Sessions", count: sessions.length || undefined },
+    { id: "sessions", label: "Sessions" },
   ];
 
   return (
@@ -985,14 +1463,7 @@ export function CustomerDetailPage() {
           <EnrollmentsTab enrollments={enrollments} loading={loadingEnrollments} />
         )}
         {activeTab === "plan" && <PlanTab customer={customer} />}
-        {activeTab === "sessions" && (
-          <SessionsTab
-            sessions={sessions}
-            loading={loadingSessions}
-            customerId={customer.id}
-            customerName={customer.name}
-          />
-        )}
+        {activeTab === "sessions" && <SessionsTab customer={customer} user={user} />}
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { collection, addDoc, doc, updateDoc, serverTimestamp } from "firebase/fi
 import { db } from "@/lib/firebase";
 import { qk } from "@hooks/queryKeys";
 import type { User } from "firebase/auth";
-import type { TCmActivity, TCmActivityCreateBody } from "@hdb/contracts";
+import type { TCmActivityCreateBody } from "@hdb/contracts";
 
 function resolveOrgId(claims: Record<string, unknown>): string | undefined {
   // Mirror orgIdFromClaims() in functions/src/core/org.ts — supports all claim shapes.
@@ -65,46 +65,15 @@ export async function markSessionWorkbookSynced(sessionId: string, rowKey?: stri
   });
 }
 
-type OptimisticContext = {
-  key: readonly unknown[];
-  previous: TCmActivity[] | undefined;
-};
-
 export function useCreateActivity(user: User | null) {
   const qc = useQueryClient();
-  return useMutation<string, Error, TCmActivityCreateBody, OptimisticContext | undefined>({
+  return useMutation<string, Error, TCmActivityCreateBody>({
     mutationFn: (body: TCmActivityCreateBody) => createActivity(user!, body),
-    // Optimistically insert the session into the customer's list so it shows up
-    // immediately — no waiting on the Firestore round-trip or the calendar /
-    // workbook pushes that follow.
-    onMutate: async (body): Promise<OptimisticContext | undefined> => {
-      if (!user) return undefined;
-      const key = qk.cmActivities.byCustomer(user.uid, body.customerId);
-      await qc.cancelQueries({ queryKey: key });
-      const previous = qc.getQueryData<TCmActivity[]>(key);
-      const optimistic = {
-        id: `optimistic-${Date.now()}`,
-        caseManagerId: user.uid,
-        caseManagerName: user.displayName ?? "",
-        customerId: body.customerId,
-        customerName: body.customerName ?? "",
-        type: body.type,
-        date: body.date,
-        startTime: body.startTime ?? undefined,
-        endTime: body.endTime ?? undefined,
-        note: body.note ?? undefined,
-        calendarSynced: false,
-        createdAt: new Date().toISOString(),
-      } as TCmActivity;
-      qc.setQueryData<TCmActivity[]>(key, (old) => [optimistic, ...(old ?? [])]);
-      return { key, previous };
-    },
-    onError: (_err, _body, ctx) => {
-      // Roll back the optimistic insert on failure.
-      if (ctx?.key) qc.setQueryData(ctx.key, ctx.previous);
-    },
+    // The customer sessions list and the feed are paginated infinite queries keyed
+    // by date-range, so we reconcile by invalidating the whole cmActivities tree
+    // (cheap — RQ refetches only mounted queries) rather than hand-patching one
+    // page's cache. The submit lock + navigation cover the brief refetch window.
     onSettled: () => {
-      // Reconcile with the server (feed + customer sessions) on success or error.
       qc.invalidateQueries({ queryKey: qk.cmActivities.root });
     },
   });

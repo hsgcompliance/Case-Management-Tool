@@ -10,6 +10,8 @@ export {
 } from "./http";
 export { gdriveCustomerFolderIndex } from "./customerFolderIndex";
 export { gdriveCustomerFolderSync } from "./customerFolderSync";
+export { customerFolderIndexSync, customerFolderIndexRefresh } from "./folderIndexSync";
+export { customerFolderLink } from "./customerFolderLink";
 export {
   attachCustomerWorkbookByUrl,
   listCustomerFolderWorkbookCandidates,

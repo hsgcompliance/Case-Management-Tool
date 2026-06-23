@@ -82,7 +82,8 @@ function mapConfigTemplate(t: TGDriveTemplate, defaultKeys: string[] | undefined
     fileId: t.fileId || "",
     ...(hasVariants ? { variants: { payer, nonpayer } } : {}),
     defaultChecked,
-    role: roleForKey(t.key),
+    // Explicit config role wins; fall back to the legacy key for older configs.
+    role: t.role || roleForKey(t.key),
   };
 }
 

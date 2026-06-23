@@ -29,6 +29,31 @@ export const calendarPostEvent = secureHandler(
     const uid = req.user!.uid!;
     const body = CalendarPostEventBody.parse(req.body);
 
+    // Look up the session's existing calendar link for two behaviors:
+    //   • idempotency — already synced + has an event id → return it (no dup).
+    //   • in-place update — has an event id but NOT synced (an edit re-sync) →
+    //     patch that event instead of inserting a second one.
+    // Only the owning case manager is trusted here; a different uid falls through.
+    let existingEventId = "";
+    if (body.activityId) {
+      try {
+        const snap = await admin.firestore().collection("cmActivities").doc(body.activityId).get();
+        const data = snap.data();
+        const owned = !data?.caseManagerId || data.caseManagerId === uid;
+        const eventId = typeof data?.calendarEventId === "string" ? data.calendarEventId : "";
+        if (owned && eventId) {
+          if (data?.calendarSynced === true) {
+            res.json({ ok: true, eventId, alreadySynced: true });
+            return;
+          }
+          existingEventId = eventId; // re-sync → update in place below
+        }
+      } catch (err) {
+        // Non-fatal: fall through and create the event if the lookup fails.
+        logger.warn("calendarPostEvent: session lookup failed", { activityId: body.activityId, err });
+      }
+    }
+
     const label = TYPE_LABEL[body.type] ?? body.type;
     const result = await createCalendarEvent(uid, {
       summary: `${label} - ${body.customerName}`,
@@ -36,6 +61,7 @@ export const calendarPostEvent = secureHandler(
       date: body.date,
       startTime: body.startTime,
       endTime: body.endTime,
+      ...(existingEventId ? { eventId: existingEventId } : {}),
     });
 
     if (!result.ok) {

@@ -56,9 +56,17 @@ export const GoogleIntegrations = {
   postCalendarEvent: (body: CalendarPostEventInput) =>
     callFunction<RespOf<"calendarPostEvent">>("calendarPostEvent", body),
 
-  // Append a progress-note row to the customer's linked TSS workbook (strict
-  // per-user server OAuth on the backend; caller sends customerId + values only).
-  pushWorkbookRow: (body: { customerId: string; entityId: string; values: Record<string, string> }) =>
+  // Write a row to the customer's linked TSS workbook (strict per-user server
+  // OAuth on the backend). mode: "append" (default, progress notes), "insert"
+  // (new row that shifts the table below down — e.g. adding a goal), or "update"
+  // (overwrite the row at rowKey — e.g. editing a goal in place).
+  pushWorkbookRow: (body: {
+    customerId: string;
+    entityId: string;
+    values: Record<string, string>;
+    mode?: "append" | "insert" | "update";
+    rowKey?: string;
+  }) =>
     callFunction<{ ok: boolean; error?: string; rowKey?: string }>("appendCustomerWorkbookRow", body),
 
   // Read-only native extraction of the customer's linked TSS workbook (goals,
@@ -66,5 +74,32 @@ export const GoogleIntegrations = {
   // workbook is linked, so callers fall back to the open-in-Sheets link.
   getWorkbookData: (customerId: string) =>
     callFunction<WorkbookDataResponse>("getWorkbookData", { customerId }, { method: "GET" }),
+
+  // ── Customer folders ──────────────────────────────────────────────────────
+
+  // Link an existing Drive folder (by id or URL) to a customer.
+  linkCustomerFolder: (body: { customerId: string; folderId?: string; folderUrl?: string; folderName?: string }) =>
+    callFunction<{ ok: boolean; folderId?: string; error?: string }>("customerFolderLink", body),
+
+  // Build a new customer folder from templates and (when customerId is set)
+  // link it + its TSS workbook atomically. Needs Drive connected (writable).
+  buildCustomerFolder: (body: {
+    name: string;
+    parentId: string;
+    templates: Array<{ fileId: string; name: string; role?: string }>;
+    subfolders: string[];
+    customerId: string;
+  }) =>
+    callFunction<{
+      ok: boolean;
+      folder?: { id: string; name: string; url: string; workbook?: { spreadsheetId: string; url: string; name: string }; warnings?: unknown[] };
+      linked?: boolean;
+      linkError?: string;
+      error?: string;
+    }>("gdriveBuildCustomerFolder", body),
+
+  // Re-sync the cached folder index from the org's index sheet (on-demand).
+  refreshFolderIndex: () =>
+    callFunction<{ ok: boolean; count?: number; deleted?: number; error?: string }>("customerFolderIndexRefresh", {}),
 };
 

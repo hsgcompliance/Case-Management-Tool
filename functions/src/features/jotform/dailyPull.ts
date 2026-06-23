@@ -1,15 +1,10 @@
 // functions/src/features/jotform/dailyPull.ts
 //
-// Midnight (America/Denver) incremental pull of new spending-form submissions.
+// Midnight (America/Denver) incremental pull of spending-form submissions.
 //
-// Strategy ("sort new + existing by date, pull new, run pipeline"):
-//   For each spending form, self-derive the owning org(s) from existing
-//   submissions, compute the latest createdAt we already have (high-water mark,
-//   minus a 1-day overlap for boundary safety), then pull only newer submissions
-//   from the Jotform API via the canonical `syncJotformSubmissions` path. That
-//   path upserts jotformSubmissions + extracts, and the create-trigger
-//   (onPaymentQueueItemCreate) classifies — so new spend flows end-to-end with
-//   no admin action. Upsert is idempotent, so the overlap re-pull is harmless.
+// The paymentQueue collection is the normalized transaction store. This job
+// keeps it current by upserting new or edited Jotform submissions through the
+// canonical sync path, which re-extracts paymentQueue items idempotently.
 
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
@@ -39,19 +34,35 @@ async function orgsForForm(formId: string): Promise<string[]> {
   return [...orgs];
 }
 
-/** Latest createdAt we already have for (org, form), minus an overlap window. */
-async function sinceForForm(formId: string, orgId: string): Promise<string | undefined> {
+async function latestIsoForField(formId: string, orgId: string, field: string): Promise<string | null> {
   const snap = await db
     .collection("jotformSubmissions")
     .where("orgId", "==", orgId)
     .where("formId", "==", formId)
-    .orderBy("createdAt", "desc")
+    .orderBy(field, "desc")
     .limit(1)
+    .select(field)
     .get();
-  const latest = snap.docs[0]?.data()?.createdAt;
-  if (!latest) return undefined; // no prior submissions → full pull (most-recent pages)
+  const latest = snap.docs[0]?.data()?.[field];
+  if (!latest) return null;
   const d = new Date(String(latest));
-  if (Number.isNaN(d.getTime())) return undefined;
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** Latest created/updated timestamp for (org, form), minus an overlap window. */
+async function sinceForForm(formId: string, orgId: string): Promise<string | undefined> {
+  const candidates = await Promise.all([
+    latestIsoForField(formId, orgId, "createdAt"),
+    latestIsoForField(formId, orgId, "jotformCreatedAt"),
+    latestIsoForField(formId, orgId, "jotformUpdatedAt"),
+  ]);
+  const latestMs = Math.max(
+    ...candidates
+      .map((value) => (value ? new Date(value).getTime() : NaN))
+      .filter((value) => Number.isFinite(value))
+  );
+  if (!Number.isFinite(latestMs)) return undefined;
+  const d = new Date(latestMs);
   d.setUTCDate(d.getUTCDate() - OVERLAP_DAYS);
   return d.toISOString();
 }
@@ -85,7 +96,7 @@ export const jotformDailyPull = onSchedule(
         try {
           const since = await sinceForForm(formId, orgId);
           const out = await syncJotformSubmissions(
-            { formId, since, limit: PAGE_LIMIT, maxPages: MAX_PAGES, includeRaw: false },
+            { formId, since, limit: PAGE_LIMIT, maxPages: MAX_PAGES, includeRaw: false, orderBy: "updated_at" },
             SYSTEM_CALLER,
             orgId,
           );

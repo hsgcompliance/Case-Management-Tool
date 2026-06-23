@@ -36,6 +36,13 @@ export type GDriveTemplate = {
   description?: string;
   defaultChecked?: boolean;
   variants?: GDriveTemplateVariants;
+  /**
+   * Build role for the copied file. "tssWorkbook" flags the template whose copy
+   * is auto-linked as the customer's TSS workbook (buildCustomerFolder keys off
+   * this). Explicit and storable, so it no longer depends on the magic key
+   * "tss_workbook" — though that key is still honored as a fallback by clients.
+   */
+  role?: string;
 };
 
 export type GDriveBuildSettings = {
@@ -186,6 +193,9 @@ function normalizeTemplate(raw: unknown): GDriveTemplate | null {
   const type = VALID_TEMPLATE_TYPES.has(String(data.type ?? ""))
     ? (String(data.type) as GDriveTemplateType)
     : "other";
+  // Explicit role if stored; otherwise infer the TSS workbook from the legacy
+  // key so existing configs keep auto-linking the workbook on build.
+  const role = String(data.role ?? "").trim() || (key === "tss_workbook" ? "tssWorkbook" : "");
   return {
     key,
     fileId,
@@ -195,6 +205,7 @@ function normalizeTemplate(raw: unknown): GDriveTemplate | null {
     ...(data.description ? { description: String(data.description) } : {}),
     ...(data.defaultChecked != null ? { defaultChecked: !!data.defaultChecked } : {}),
     ...(hasVariants ? { variants: { payer, nonpayer } } : {}),
+    ...(role ? { role } : {}),
   };
 }
 

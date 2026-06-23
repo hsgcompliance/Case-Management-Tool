@@ -30,4 +30,7 @@ export const GDriveBuildCustomerFolderBody = z.object({
     .optional()
     .default([]),
   subfolders: z.array(z.string().min(1).max(255)).optional().default([]),
+  // When present, the built folder is linked to this customer (folder ref +
+  // auto-linked TSS workbook) and upserted into the cached index, atomically.
+  customerId: z.string().min(1).optional(),
 });

@@ -216,6 +216,7 @@ export const PaymentQueuePatchBody = z.object({
   cardBucket: z.enum(['Youth', 'Housing', 'MAD', '']).optional(),
   grantId: z.string().nullable().optional(),
   lineItemId: z.string().nullable().optional(),
+  pipelineId: z.string().nullable().optional(),
   customerId: z.string().nullable().optional(),
   enrollmentId: z.string().nullable().optional(),
   creditCardId: z.string().nullable().optional(),

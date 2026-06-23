@@ -11,6 +11,8 @@ import { useCalendarIntegration, useDriveIntegration } from "@/hooks/useCalendar
 import { useCustomer, getWorkbookLink } from "@/hooks/useCustomers";
 import { useWorkbookData, type WorkbookDataState } from "@/hooks/useWorkbookData";
 import { GoogleIntegrations } from "@/lib/googleIntegrations";
+import { enqueueOutbox, isOnline } from "@/lib/sessionOutbox";
+import { buildProgressNoteValues, staffInitials } from "@/lib/sessionSync";
 import type { CustomerOption } from "@/components/CustomerPicker";
 import type { TCmActivityType } from "@hdb/contracts";
 
@@ -23,13 +25,6 @@ const TYPES: { value: TCmActivityType; label: string; emoji: string }[] = [
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
-}
-
-/** "2026-06-18" → "6/18/2026" for the in-note signature line. */
-function prettyDate(iso: string): string {
-  const [y, m, d] = String(iso || "").split("-").map((n) => Number(n));
-  if (!y || !m || !d) return iso;
-  return `${m}/${d}/${y}`;
 }
 
 /**
@@ -47,14 +42,6 @@ function goalsFromWorkbook(data: WorkbookDataState | undefined): { n: number; la
     const label = cell ? String(cell.displayValue ?? cell.value ?? "").trim() : "";
     return { n: i + 1, label: label || `Goal ${i + 1}` };
   });
-}
-
-/** Initials from a display name: "Griffin Seyfried" → "GS"; single token → first 2 chars. */
-function staffInitials(name?: string | null): string {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 // ─── Calendar sync failure sheet ─────────────────────────────────────────────
@@ -260,30 +247,51 @@ export function LogActivityPage() {
   // tap can't create a duplicate session. (The notice sheets are click-through.)
   const [submitting, setSubmitting] = useState(false);
 
+  // Online status — drives the offline hint + "Save offline" affordance.
+  const [online, setOnline] = useState(isOnline());
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting || !customer) return;
+    if (submitting || !customer || !user) return;
     setSubmitting(true);
+
+    const destination = preCustomerId ? `/customers/${preCustomerId}` : "/";
+    const body = {
+      customerId: customer.id,
+      customerName: customer.name,
+      type,
+      date,
+      startTime: startTime || undefined,
+      endTime: endTime || undefined,
+      note: note.trim() || undefined,
+    };
+    const intent = { calendar: addToCalendar, workbook: pushToWorkbook, linkedGoals };
+
+    // Offline → queue to the local outbox. It shows up as an unsynced draft on the
+    // customer's Sessions tab and can be synced (created + pushed) when back online.
+    if (!isOnline()) {
+      enqueueOutbox(user.uid, body, intent);
+      navigate(destination, { replace: true });
+      return;
+    }
 
     // 1. Save the session — optimistic, never blocked by calendar/workbook.
     let sessionId: string;
     try {
-      sessionId = await createActivity.mutateAsync({
-        customerId: customer.id,
-        customerName: customer.name,
-        type,
-        date,
-        startTime: startTime || undefined,
-        endTime: endTime || undefined,
-        note: note.trim() || undefined,
-      });
+      sessionId = await createActivity.mutateAsync(body);
     } catch {
-      // Nothing was saved — release the lock so the user can retry.
-      setSubmitting(false);
+      // Network failure mid-save → fall back to the outbox so nothing is lost.
+      enqueueOutbox(user.uid, body, intent);
+      navigate(destination, { replace: true });
       return;
     }
-
-    const destination = preCustomerId ? `/customers/${preCustomerId}` : "/";
 
     // 2. Optionally post to calendar — requires a start time. Non-blocking, and
     //    crucially independent of the workbook push below: a calendar failure
@@ -292,6 +300,8 @@ export function LogActivityPage() {
     let calendarError: { error: string; needsReconnect: boolean } | null = null;
     if (addToCalendar && connected && startTime) {
       try {
+        // Pass the session id so the backend dedupes: a re-submit can't create a
+        // second event, and it stamps calendarEventId/calendarSynced on the doc.
         await postEvent({
           customerName: customer.name,
           type,
@@ -299,7 +309,9 @@ export function LogActivityPage() {
           startTime,
           endTime: endTime || undefined,
           note: note.trim() || undefined,
+          activityId: sessionId,
         });
+        void qc.invalidateQueries({ queryKey: qk.cmActivities.root });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         calendarError = { error: msg, needsReconnect: msg.includes("calendar_needs_reconnect") || needsReconnect };
@@ -316,37 +328,20 @@ export function LogActivityPage() {
       };
     } else if (pushToWorkbook) {
       try {
-        // Push the FULL progress note. The Summary cell is built to read as a
-        // self-contained note — modality + the case note, signed with the case
-        // manager's initials and the service date. We ALSO fill the dedicated
-        // Date / Staff name / Staff initial columns, but the TSS payer and
-        // non-payer layouts each omit one of the staff columns, so embedding the
-        // signature in the Summary guarantees the attribution is never lost.
-        const modalityLabel = TYPES.find((t) => t.value === type)?.label ?? "";
-        const trimmedNote = note.trim();
-        const staffName = (user?.displayName ?? "").trim();
-        const staffInitial = staffInitials(user?.displayName);
-
-        const noteBody = [modalityLabel, trimmedNote].filter(Boolean).join(" — ");
-        const signature = [staffInitial, prettyDate(date)].filter(Boolean).join(" · ");
-        const summary = [noteBody, signature ? `— ${signature}` : ""].filter(Boolean).join("\n");
-
-        // Linked Plan Goal — written as "Goal #1, Goal #3" for the goals the note
-        // addresses (goals are referenced by their 1-based position in the sheet).
-        const linkedPlanGoal = linkedGoals.map((n) => `Goal #${n}`).join(", ");
+        // Build the progress-note row with the SAME shared helper the sync engine
+        // (per-row Sync, Sync all, offline-draft flush) uses, so a session's first
+        // push and any later re-push are byte-identical — no format drift.
+        const values = buildProgressNoteValues({
+          session: { type, date, startTime: startTime || undefined, endTime: endTime || undefined, note: note.trim() || undefined },
+          staffName: (user?.displayName ?? "").trim(),
+          staffInitial: staffInitials(user?.displayName),
+          linkedGoals,
+        });
 
         const resp = await GoogleIntegrations.pushWorkbookRow({
           customerId: customer.id,
           entityId: "progressNotes",
-          values: {
-            progressDate: date,
-            ...(startTime ? { startTime } : {}),
-            ...(endTime ? { endTime } : {}),
-            ...(summary ? { summary } : {}),
-            ...(linkedPlanGoal ? { linkedPlanGoal } : {}),
-            ...(staffName ? { staffName } : {}),
-            ...(staffInitial ? { staffInitial } : {}),
-          },
+          values,
         });
         if (!resp.ok) {
           const linkable = resp.error === "google_not_connected" || resp.error === "workbook_not_linked";
@@ -643,12 +638,19 @@ export function LogActivityPage() {
           <p className="text-xs text-red-500">Failed to save. Please try again.</p>
         )}
 
+        {!online && (
+          <p className="text-xs text-amber-600 flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            You're offline — this session will be saved locally and synced later.
+          </p>
+        )}
+
         <button
           type="submit"
           disabled={!customer || submitting}
           className="w-full rounded-xl bg-indigo-600 px-4 py-4 text-base font-semibold text-white shadow-sm active:bg-indigo-700 disabled:opacity-40 transition-colors"
         >
-          {submitting ? "Saving…" : "Save Session"}
+          {submitting ? "Saving…" : online ? "Save Session" : "Save offline"}
         </button>
 
         <button
