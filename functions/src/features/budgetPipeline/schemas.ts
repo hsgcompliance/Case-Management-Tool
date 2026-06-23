@@ -124,7 +124,7 @@ export const BudgetPipelinePreviewBody = z.object({
   excludeTree: PipelineRuleNode.nullable().optional(),
   pipelineId: z.string().optional(),
   month: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
+  limit: z.coerce.number().int().min(1).max(5000).default(100),
 });
 export type TBudgetPipelinePreviewBody = z.infer<typeof BudgetPipelinePreviewBody>;
 

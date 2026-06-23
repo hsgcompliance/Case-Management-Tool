@@ -446,21 +446,23 @@ export async function previewBudgetPipeline(
   orgId: string,
   body: TBudgetPipelinePreviewBody,
 ) {
-  // Load paymentQueue items: only pending, scoped to org
+  // Load normalized transactions from paymentQueue. Pending rows are projected;
+  // posted rows are spent; void rows are excluded below.
   let q = db
     .collection(QUEUE_COLLECTION)
-    .where('orgId', '==', orgId)
-    .where('queueStatus', '==', 'pending') as FirebaseFirestore.Query;
+    .where('orgId', '==', orgId) as FirebaseFirestore.Query;
 
   if (body.sourceFormId) q = q.where('formId', '==', body.sourceFormId);
   if (body.month) q = q.where('month', '==', body.month);
   q = q.limit(body.limit);
 
   const snap = await q.get();
-  const items: Array<Record<string, unknown> & {id: string}> = snap.docs.map((d) => ({
-    ...(d.data() as Record<string, unknown>),
-    id: d.id,
-  }));
+  const items: Array<Record<string, unknown> & {id: string}> = snap.docs
+    .map((d): Record<string, unknown> & {id: string} => {
+      const data = d.data() as Record<string, unknown>;
+      return {...data, id: d.id};
+    })
+    .filter((item) => String(item.queueStatus || '') !== 'void');
 
   // Evaluate each item
   const matched: Array<Record<string, unknown> & {id: string}> = [];
@@ -517,6 +519,8 @@ export async function previewBudgetPipeline(
   }
 
   const totalAmount = matched.reduce((s, item) => s + Number(item.amount ?? 0), 0);
+  const projected = matched.filter((item) => String(item.queueStatus || '') !== 'posted');
+  const posted = matched.filter((item) => String(item.queueStatus || '') === 'posted');
 
 
   return {
@@ -535,6 +539,10 @@ export async function previewBudgetPipeline(
       queueStatus: String(item.queueStatus ?? ''),
     })),
     totalAmount,
+    projectedAmount: projected.reduce((s, item) => s + Number(item.amount ?? 0), 0),
+    postedAmount: posted.reduce((s, item) => s + Number(item.amount ?? 0), 0),
+    projectedCount: projected.length,
+    postedCount: posted.length,
     matchCount: matched.length,
     perItem,
     conflicts,
@@ -646,4 +654,47 @@ export function matchesPipeline(
   pipeline: TBudgetPipeline,
 ): boolean {
   return evaluatePipelineForItem(item, pipeline).matched;
+}
+
+export async function autoAllocatePaymentQueueItem(
+  itemId: string,
+  data: Record<string, unknown>,
+  opts: { force?: boolean; writer?: string } = {},
+): Promise<{ pipelineId: string | null; allocated: boolean }> {
+  if (!data) return {pipelineId: null, allocated: false};
+  if (data.queueStatus !== 'pending') return {pipelineId: null, allocated: false};
+  if (!opts.force && data.grantId) return {pipelineId: null, allocated: false};
+  if (!data.orgId) return {pipelineId: null, allocated: false};
+
+  const orgId = String(data.orgId);
+  const snap = await db
+    .collection(COLLECTION)
+    .where('orgId', '==', orgId)
+    .where('status', '==', 'active')
+    .orderBy('createdAt', 'asc')
+    .get();
+
+  if (snap.empty) return {pipelineId: null, allocated: false};
+
+  const item = {...data, id: itemId};
+  for (const pDoc of snap.docs) {
+    const pipeline = pDoc.data() as TBudgetPipeline;
+    if (!matchesPipeline(item, pipeline)) continue;
+
+    const patch: Record<string, unknown> = {
+      updatedAtISO: isoNow(),
+      'system.lastWriter': opts.writer ?? `autoAllocatePaymentQueueItem:pipeline:${pDoc.id}`,
+      'system.lastWriteAt': isoNow(),
+    };
+    if (pipeline.grantId) patch.grantId = pipeline.grantId;
+    if (pipeline.lineItemId) patch.lineItemId = pipeline.lineItemId;
+    if (patch.grantId || patch.lineItemId) {
+      patch.pipelineId = pDoc.id;
+      await db.collection(QUEUE_COLLECTION).doc(itemId).update(patch);
+      return {pipelineId: pDoc.id, allocated: true};
+    }
+    break;
+  }
+
+  return {pipelineId: null, allocated: false};
 }
