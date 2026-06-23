@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useCmActivitiesFeed, type ActivityFeedFilters } from "@/hooks/useCmActivitiesFeed";
 import { useArchiveActivity } from "@/hooks/useArchiveActivity";
+import { DATE_RANGE_CHIPS, type DateRangeKey } from "@/lib/dateRange";
 import type { TCmActivity, TCmActivityType } from "@hdb/contracts";
 
 // ─── Activity Detail Bottom Sheet ─────────────────────────────────────────────
@@ -317,11 +318,13 @@ export function ActivityFeedPage() {
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TCmActivityType | "all">("all");
+  const [rangeFilter, setRangeFilter] = useState<DateRangeKey>("month");
   const [selected, setSelected] = useState<TCmActivity | null>(null);
   const archive = useArchiveActivity(user?.uid);
 
   const feedFilters: ActivityFeedFilters = {
     type: typeFilter !== "all" ? typeFilter : undefined,
+    range: rangeFilter,
   };
 
   const {
@@ -405,6 +408,24 @@ export function ActivityFeedPage() {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Date range chips */}
+        <div className="px-4 pb-2 flex gap-2 overflow-x-auto scrollbar-none">
+          {DATE_RANGE_CHIPS.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => setRangeFilter(chip.key)}
+              className={`text-sm font-medium px-3 py-1.5 rounded-full border flex-shrink-0 transition-colors ${
+                rangeFilter === chip.key
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-500 border-slate-200"
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
         </div>
 
         {/* Type filter pills */}

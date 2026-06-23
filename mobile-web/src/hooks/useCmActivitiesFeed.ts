@@ -6,12 +6,14 @@ import {
 import { db } from "@/lib/firebase";
 import { qk } from "@hooks/queryKeys";
 import { RQ_LIVE } from "@hooks/base";
+import { rangeBounds, type DateRangeKey } from "@/lib/dateRange";
 import type { TCmActivity, TCmActivityType } from "@hdb/contracts";
 
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 50;
 
 export interface ActivityFeedFilters {
   type?: TCmActivityType;
+  range?: DateRangeKey;
 }
 
 function tsToISO(ts: unknown): string {
@@ -36,6 +38,9 @@ function docToActivity(doc: DocumentSnapshot): TCmActivity {
     note: d.note ?? undefined,
     calendarEventId: d.calendarEventId ?? undefined,
     calendarSynced: d.calendarSynced,
+    workbookSynced: d.workbookSynced ?? undefined,
+    workbookSyncedAt: d.workbookSyncedAt ?? undefined,
+    workbookRowKey: d.workbookRowKey ?? undefined,
     archived: d.archived ?? undefined,
     createdAt: tsToISO(d.createdAt),
     updatedAt: d.updatedAt ? tsToISO(d.updatedAt) : undefined,
@@ -53,12 +58,15 @@ async function fetchPage(
   filters: ActivityFeedFilters,
   cursor: DocumentSnapshot | null,
 ): Promise<Page> {
+  const bounds = rangeBounds(filters.range ?? "all");
   const constraints: Parameters<typeof query>[1][] = [
     where("caseManagerId", "==", uid),
-    orderBy("date", "desc"),
-    orderBy("createdAt", "desc"),
-    limit(PAGE_SIZE),
   ];
+  if (bounds) {
+    constraints.push(where("date", ">=", bounds.start));
+    constraints.push(where("date", "<=", bounds.end));
+  }
+  constraints.push(orderBy("date", "desc"), orderBy("createdAt", "desc"), limit(PAGE_SIZE));
   if (filters.type) constraints.push(where("type", "==", filters.type));
   if (cursor) constraints.push(startAfter(cursor));
 
@@ -69,7 +77,7 @@ async function fetchPage(
 
 export function useCmActivitiesFeed(uid: string | undefined, filters: ActivityFeedFilters = {}) {
   return useInfiniteQuery<Page, Error, { pages: Page[] }, unknown[], DocumentSnapshot | null>({
-    queryKey: [...qk.cmActivities.feed(uid ?? "", filters.type)],
+    queryKey: [...qk.cmActivities.feed(uid ?? "", filters.type), filters.range ?? "all"],
     queryFn: ({ pageParam }) => fetchPage(uid!, filters, pageParam ?? null),
     initialPageParam: null,
     getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.lastDoc : undefined,

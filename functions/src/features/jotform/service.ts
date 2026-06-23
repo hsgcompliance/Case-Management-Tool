@@ -1335,7 +1335,7 @@ function mapJotformApiSubmission(sub: JotformSubmissionApi, formId: string, incl
 export async function syncJotformSubmissions(body: unknown, caller: Claims, targetOrg: string) {
   assertTargetOrgAllowed(caller, targetOrg);
 
-  const { formId, since, limit = 50, maxPages = 1, startOffset, includeRaw } = body as any;
+  const { formId, since, limit = 50, maxPages = 1, startOffset, includeRaw, orderBy } = body as any;
 
   const pageLimit = Math.max(1, Math.min(1000, Number(limit) || 50));
   const pageMax = Math.max(1, Math.min(25, Number(maxPages) || 1));
@@ -1360,6 +1360,7 @@ export async function syncJotformSubmissions(body: unknown, caller: Claims, targ
       content = await jotformFetch<JotformSubmissionApi[]>(`/form/${formId}/submissions`, {
         limit: pageLimit,
         offset,
+        ...(orderBy ? { orderby: String(orderBy) } : {}),
         ...(sinceIso ? { date: sinceIso } : {}),
       });
     } catch (error) {

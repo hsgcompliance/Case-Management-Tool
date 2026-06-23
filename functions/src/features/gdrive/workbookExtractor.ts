@@ -759,10 +759,16 @@ export class WorkbookEntityNotWritableError extends Error {
 }
 
 /**
- * Append a row to a dataTable entity (Slice A: progress notes). Strict per-user
- * server OAuth so the write is attributed to the signed-in user. Append-only:
- * we locate the first empty data row of the resolved table and write the mapped
- * fields there — never editing existing rows.
+ * Write a row to a dataTable entity. Strict per-user server OAuth so the write is
+ * attributed to the signed-in user. Three modes:
+ *   • "append" (default) — write into the first empty data row of the table
+ *     (progress notes: reuses pre-formatted blank template rows at the bottom).
+ *   • "insert" — insert a brand-new sheet row inside the table (inheriting the
+ *     row above's formatting) and write into it. Use for tables that have OTHER
+ *     content directly below them (e.g. Goals → "Plan Reviews"): inserting shifts
+ *     everything below down, so the following table is never overwritten.
+ *   • "update" — overwrite an existing row identified by `rowKey` ("row-N"), e.g.
+ *     editing a goal in place. Empty values clear the cell.
  */
 export async function appendWorkbookRow(args: {
   customerId: string;
@@ -770,8 +776,12 @@ export async function appendWorkbookRow(args: {
   orgId: string;
   entityId: string;
   values: Record<string, string>;
+  mode?: "append" | "insert" | "update";
+  /** Required for mode "update": the "row-N" key from extraction. */
+  rowKey?: string;
 }): Promise<{ rowKey: string; spreadsheetId: string }> {
   const { customerId, uid, orgId, entityId, values } = args;
+  const mode = args.mode ?? "append";
 
   // 1. Resolve workbook + config (same path as extraction).
   const snap = await admin.firestore().collection("customers").doc(customerId).get();
@@ -808,6 +818,8 @@ export async function appendWorkbookRow(args: {
 
   const sheetTitle = resolveSheetTitle(cfg, range.sheetId, sheets);
   if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
+  const numericSheetId = sheets.find((s) => s.title === sheetTitle)?.sheetId;
+  if (numericSheetId == null) throw new WorkbookEntityNotWritableError("sheet_not_found");
   const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
 
   // 4. Resolve the layout to append into. For stacked notes, target the LAST
@@ -835,36 +847,78 @@ export async function appendWorkbookRow(args: {
   const contentCols = contentColumns(fields, colMap);
   const nextAnchorId = range.dataEnd?.nextAnchorText ? tss.smartHeaderId(range.dataEnd.nextAnchorText) : null;
 
+  // Scan the table body: find the last content row and where the NEXT table
+  // begins (the anchor row, e.g. "Plan Reviews" below Goals).
   let lastContent = -1;
+  let anchorRow = -1;
   for (let r = start; r < MAX_SCAN_ROWS; r++) {
-    if (nextAnchorId && (grid[r] ?? []).some((c) => tss.smartHeaderId(c) === nextAnchorId)) break;
+    if (nextAnchorId && (grid[r] ?? []).some((c) => {
+      const id = tss.smartHeaderId(c);
+      return id === nextAnchorId || id.startsWith(`${nextAnchorId}_`);
+    })) { anchorRow = r; break; }
     if (rowHasContent(grid, r, contentCols)) lastContent = r;
   }
-  const insertRow = lastContent >= 0 ? lastContent + 1 : start;
-  if (insertRow >= MAX_SCAN_ROWS) throw new WorkbookEntityNotWritableError("table_full");
+
+  // 4b. Resolve the 0-based target row per mode.
+  let targetRow: number;
+  let didInsert = false;
+  if (mode === "update") {
+    const m = /^row-(\d+)$/.exec(String(args.rowKey || ""));
+    if (!m) throw new WorkbookEntityNotWritableError("invalid_row_key");
+    targetRow = Number(m[1]) - 1; // "row-N" is 1-based
+    // Guard: only overwrite a row that is genuinely inside this table's body, so
+    // a stale key can never clobber the header or the table below.
+    if (targetRow < start || (anchorRow >= 0 && targetRow >= anchorRow) || targetRow >= MAX_SCAN_ROWS) {
+      throw new WorkbookEntityNotWritableError("row_out_of_range");
+    }
+  } else {
+    targetRow = lastContent >= 0 ? lastContent + 1 : start;
+    if (targetRow >= MAX_SCAN_ROWS) throw new WorkbookEntityNotWritableError("table_full");
+
+    // "insert" — push a fresh row in so the table below (anchor) is never
+    // overwritten. The new row inherits the formatting of the row above it.
+    if (mode === "insert") {
+      await sheetsApi.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            insertDimension: {
+              range: { sheetId: numericSheetId, dimension: "ROWS", startIndex: targetRow, endIndex: targetRow + 1 },
+              inheritFromBefore: targetRow > 0,
+            },
+          }],
+        },
+      });
+      didInsert = true;
+    }
+  }
 
   // 5. Write ONLY the cells the user provided — one per mapped field — so we
-  //    never overwrite formula cells (e.g. Total Time) or unrelated columns
-  //    that sit between our fields. Per-cell batchUpdate, not a range fill.
+  //    never overwrite formula cells or unrelated columns between our fields.
+  //    "update" writes empty values too (clears a field); append/insert skip
+  //    blanks (no need to stamp empty cells into a brand-new row).
   const data: Array<{ range: string; values: string[][] }> = [];
   for (const field of fields) {
     const col = colMap.get(field.id);
     if (col == null) continue;
+    if (!(field.id in values)) continue;
     const v = values[field.id];
-    if (v == null || !String(v).length) continue;
+    if (mode !== "update" && (v == null || !String(v).length)) continue;
     data.push({
-      range: `${quoteTitle(sheetTitle)}!${idxToCol(col)}${insertRow + 1}`,
-      values: [[String(v)]],
+      range: `${quoteTitle(sheetTitle)}!${idxToCol(col)}${targetRow + 1}`,
+      values: [[v == null ? "" : String(v)]],
     });
   }
-  if (!data.length) throw new WorkbookEntityNotWritableError("no_values_provided");
+  if (!data.length && !didInsert) throw new WorkbookEntityNotWritableError("no_values_provided");
 
-  await sheetsApi.spreadsheets.values.batchUpdate({
-    spreadsheetId,
-    requestBody: { valueInputOption: "USER_ENTERED", data },
-  });
+  if (data.length) {
+    await sheetsApi.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: "USER_ENTERED", data },
+    });
+  }
 
-  return { rowKey: `row-${insertRow + 1}`, spreadsheetId };
+  return { rowKey: `row-${targetRow + 1}`, spreadsheetId };
 }
 
 export { ScopeMissingError };

@@ -296,6 +296,10 @@ const AppendRowBody = z.object({
   customerId: z.string().min(1),
   entityId: z.string().min(1),
   values: z.record(z.string(), z.string()),
+  // "append" (default, progress notes) | "insert" (new row, e.g. goals — shifts
+  // the table below down) | "update" (overwrite the row identified by rowKey).
+  mode: z.enum(["append", "insert", "update"]).optional(),
+  rowKey: z.string().optional(),
 });
 
 export const appendCustomerWorkbookRow = secureHandler(
@@ -306,12 +310,18 @@ export const appendCustomerWorkbookRow = secureHandler(
 
     try {
       const body = AppendRowBody.parse(req.body ?? {});
+      if (body.mode === "update" && !body.rowKey) {
+        res.status(400).json({ ok: false, error: "row_key_required" });
+        return;
+      }
       const result = await appendWorkbookRow({
         customerId: body.customerId,
         uid,
         orgId,
         entityId: body.entityId,
         values: body.values,
+        mode: body.mode,
+        rowKey: body.rowKey,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {

@@ -14,6 +14,8 @@ export interface CalendarEventInput {
   startTime?: string; // HH:MM
   endTime?: string;   // HH:MM
   timeZone?: string;
+  /** When set, update this existing event in place instead of inserting a new one. */
+  eventId?: string;
 }
 
 export type CalendarEventResult =
@@ -44,22 +46,50 @@ export async function createCalendarEvent(
 
     if (event.startTime) {
       const endTime = event.endTime ?? bumpHour(event.startTime);
+      // When the end is not after the start (e.g. a 23:30 start auto-bumped to
+      // 00:30, or an explicit overnight session), the end belongs on the next
+      // day — otherwise Google rejects the event (end must be after start).
+      const endDate = endTime <= event.startTime ? addOneDay(event.date) : event.date;
       startObj = { dateTime: `${event.date}T${event.startTime}:00`, timeZone: tz };
-      endObj   = { dateTime: `${event.date}T${endTime}:00`,           timeZone: tz };
+      endObj   = { dateTime: `${endDate}T${endTime}:00`,             timeZone: tz };
     } else {
       startObj = { date: event.date };
       endObj   = { date: event.date };
     }
 
-    const { data } = await calendar.events.insert({
-      calendarId: "primary",
-      requestBody: {
-        summary: event.summary,
-        description: event.description ?? "",
-        start: startObj,
-        end: endObj,
-      },
-    });
+    const requestBody = {
+      summary: event.summary,
+      description: event.description ?? "",
+      start: startObj,
+      end: endObj,
+    };
+
+    // Update the existing event in place when an id is supplied (edit re-sync) —
+    // so editing a session never spawns a duplicate event. If the event was
+    // deleted in Google Calendar, patch 404s and we fall back to inserting.
+    let eventId = "";
+    if (event.eventId) {
+      try {
+        const { data } = await calendar.events.patch({
+          calendarId: "primary",
+          eventId: event.eventId,
+          requestBody,
+        });
+        eventId = data.id ?? event.eventId;
+      } catch (patchErr: any) {
+        const status = patchErr?.code ?? patchErr?.response?.status;
+        if (status !== 404 && status !== 410) throw patchErr;
+        // 404/410 → the event is gone; fall through to insert a fresh one.
+      }
+    }
+
+    if (!eventId) {
+      const { data } = await calendar.events.insert({
+        calendarId: "primary",
+        requestBody,
+      });
+      eventId = data.id ?? "";
+    }
 
     // Update lastSyncAt in public metadata
     const record = await readToken(uid, "googleCalendar");
@@ -68,7 +98,7 @@ export async function createCalendarEvent(
       await writePublicMeta(uid, "googleCalendar", { ...meta, lastSyncAt: isoNow() });
     }
 
-    return { ok: true, eventId: data.id ?? "" };
+    return { ok: true, eventId };
   } catch (err: any) {
     logger.warn("Calendar event create failed", { uid, err: String(err) });
 
@@ -103,4 +133,11 @@ export async function createCalendarEvent(
 function bumpHour(time: string): string {
   const [h, m] = time.split(":").map(Number);
   return `${String((h + 1) % 24).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`;
+}
+
+/** "2026-06-22" → "2026-06-23" (handles month/year rollover via UTC math). */
+function addOneDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }

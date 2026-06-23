@@ -32,6 +32,7 @@ export type PaymentQueueItem = Record<string, unknown> & {
   descriptor?: string;
   grantId?: string | null;
   lineItemId?: string | null;
+  pipelineId?: string | null;
   customerId?: string | null;
   enrollmentId?: string | null;
   creditCardId?: string | null;
@@ -82,6 +83,7 @@ export type PaymentQueuePatchReq = {
   cardBucket?: "Youth" | "Housing" | "MAD" | "";
   grantId?: string | null;
   lineItemId?: string | null;
+  pipelineId?: string | null;
   customerId?: string | null;
   enrollmentId?: string | null;
   creditCardId?: string | null;

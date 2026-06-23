@@ -39,6 +39,7 @@ import {
 import { buildActionPreviews, type ReconciliationActionPreview } from "./reconciliationActions";
 import ReconciliationBulkCustomerPatchModal, { buildBulkHmisCustomerPatchRows } from "./ReconciliationBulkCustomerPatchModal";
 import ReconciliationBulkCustomerImportModal, { buildBulkCustomerImportRows } from "./ReconciliationBulkCustomerImportModal";
+import ReconciliationBulkEnrollmentModal, { buildBulkEnrollmentRows } from "./ReconciliationBulkEnrollmentModal";
 import {
   buildReconciliationCompare,
   type CompareCellStatus,
@@ -993,21 +994,39 @@ function buildQueueRows(findings: ReconciliationFinding[]): QueueRow[] {
 function ActionQueuePanel({
   selectedFindings,
   customers,
+  grants,
+  enrollments,
   onClear,
   onApplyCustomerPatches,
   onCreateCustomers,
+  onBulkEnroll,
 }: {
   selectedFindings: ReconciliationFinding[];
   customers: Array<Record<string, unknown>>;
+  grants: Array<Record<string, unknown>>;
+  enrollments: Array<Record<string, unknown>>;
   onClear: () => void;
   onApplyCustomerPatches: () => void;
   onCreateCustomers: () => void;
+  onBulkEnroll: () => void;
 }) {
   const queueRows = React.useMemo(() => buildQueueRows(selectedFindings), [selectedFindings]);
   const hmisPatchRows = React.useMemo(() => buildBulkHmisCustomerPatchRows(selectedFindings), [selectedFindings]);
   const importRows = React.useMemo(() => buildBulkCustomerImportRows(selectedFindings, customers), [customers, selectedFindings]);
+  const enrollmentRows = React.useMemo(
+    () => buildBulkEnrollmentRows(
+      selectedFindings,
+      grants.map((grant) => ({
+        id: String(grant.id ?? ""),
+        name: String(grant.name ?? grant.grantName ?? grant.label ?? grant.title ?? grant.id ?? ""),
+      })).filter((grant) => grant.id || grant.name),
+      enrollments,
+    ),
+    [enrollments, grants, selectedFindings],
+  );
   const hmisEligibleCount = hmisPatchRows.filter((row) => !row.blocked).length;
   const importEligibleCount = importRows.filter((row) => !row.blocked).length;
+  const enrollmentEligibleCount = enrollmentRows.filter((row) => !row.blocked).length;
   const readyCount = queueRows.filter((row) => !row.blocked).length;
   const reviewCount = queueRows.length - readyCount;
   const byTarget = React.useMemo(() => {
@@ -1029,6 +1048,15 @@ function ActionQueuePanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={!enrollmentRows.length}
+            title={enrollmentRows.length ? "Open enrollment create/date review for selected enrollment findings." : "No selected findings have enrollment create or date update actions."}
+            onClick={onBulkEnroll}
+          >
+            Bulk enroll{enrollmentEligibleCount ? ` (${enrollmentEligibleCount})` : ""}
+          </button>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -2335,6 +2363,7 @@ function ReconciliationToolMain({
   const [exportOpen, setExportOpen] = React.useState(false);
   const [bulkCustomerPatchOpen, setBulkCustomerPatchOpen] = React.useState(false);
   const [bulkCustomerImportOpen, setBulkCustomerImportOpen] = React.useState(false);
+  const [bulkEnrollmentOpen, setBulkEnrollmentOpen] = React.useState(false);
   const [compareOpen, setCompareOpen] = React.useState(false);
   const [refreshingCollection, setRefreshingCollection] = React.useState<DatabaseCollectionKey | null>(null);
   const [selectedFindingIds, setSelectedFindingIds] = React.useState<Set<string>>(new Set());
@@ -2443,6 +2472,9 @@ function ReconciliationToolMain({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCompareOpen(true)} disabled={!relevantPackets.length}>
+              Open compare
+            </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExportOpen(true)} disabled={!filteredFindings.length}>
               Export
             </button>
@@ -2506,9 +2538,12 @@ function ReconciliationToolMain({
       <ActionQueuePanel
         selectedFindings={selectedFindings}
         customers={database.customers}
+        grants={database.grants}
+        enrollments={database.enrollments}
         onClear={() => setSelectedFindingIds(new Set())}
         onApplyCustomerPatches={() => setBulkCustomerPatchOpen(true)}
         onCreateCustomers={() => setBulkCustomerImportOpen(true)}
+        onBulkEnroll={() => setBulkEnrollmentOpen(true)}
       />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
@@ -2526,18 +2561,6 @@ function ReconciliationToolMain({
           />
         </div>
         <FindingDetail finding={visibleSelectedFinding} />
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Matched row compare</div>
-            <div className="text-xs text-slate-500">Open the dense side-by-side compare workspace for reports and filtered database rows.</div>
-          </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCompareOpen(true)} disabled={!relevantPackets.length}>
-            Open compare
-          </button>
-        </div>
       </div>
 
       <ReviewExportDialog
@@ -2563,6 +2586,15 @@ function ReconciliationToolMain({
         findings={selectedFindings}
         customers={database.customers}
         onClose={() => setBulkCustomerImportOpen(false)}
+        onApplied={() => setSelectedFindingIds(new Set())}
+      />
+
+      <ReconciliationBulkEnrollmentModal
+        isOpen={bulkEnrollmentOpen}
+        findings={selectedFindings}
+        grants={grantOptions}
+        enrollments={database.enrollments}
+        onClose={() => setBulkEnrollmentOpen(false)}
         onApplied={() => setSelectedFindingIds(new Set())}
       />
 

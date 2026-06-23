@@ -22,6 +22,9 @@ import {
 import { z } from "zod";
 import { tss } from "@hdb/contracts";
 import { getOrgGDriveConfig, patchOrgGDriveConfig } from "./orgConfig";
+import { linkFolderToCustomer } from "./customerFolderLink";
+import { upsertFolderIndexEntry } from "./folderIndexCache";
+import { isoNow } from "../../core";
 
 // -- Scope error helper --------------------------------------------------------
 
@@ -300,13 +303,59 @@ export const gdriveCreateFolder = secureHandler(
 export const gdriveBuildCustomerFolder = secureHandler(
   async (req, res) => {
     const body = GDriveBuildCustomerFolderBody.parse(req.body ?? {});
+    const uid = String((req as any).user?.uid || "");
     try {
       const folder = await buildCustomerFolder({
         ...body,
         googleAccessToken: readGoogleAccessToken(req),
-        userUid: String((req as any).user?.uid || ""),
+        userUid: uid,
       });
-      res.status(200).json({ ok: true, folder });
+
+      // Atomically link to the customer (folder ref + auto-linked TSS workbook)
+      // and seed the cached index, so the new folder is usable immediately
+      // without waiting for the nightly index sync.
+      let linked = false;
+      if (body.customerId) {
+        const orgId = requireOrg((req as any).user);
+        try {
+          await linkFolderToCustomer({
+            customerId: body.customerId,
+            orgId,
+            folderId: folder.id,
+            folderUrl: folder.url,
+            folderName: folder.name,
+          });
+          if (folder.workbook?.spreadsheetId) {
+            await db.collection("customers").doc(body.customerId).set(
+              {
+                customerDrive: {
+                  linkedWorkbooks: {
+                    tss: {
+                      spreadsheetId: folder.workbook.spreadsheetId,
+                      spreadsheetUrl: folder.workbook.url,
+                      spreadsheetName: folder.workbook.name,
+                      status: "linked",
+                      linkedAt: isoNow(),
+                      updatedAt: isoNow(),
+                      linkedBy: uid,
+                    },
+                  },
+                },
+                updatedAt: FieldValue.serverTimestamp(),
+              },
+              { merge: true },
+            );
+          }
+          await upsertFolderIndexEntry(orgId, { id: folder.id, name: folder.name, url: folder.url, status: "active" }, body.customerId);
+          linked = true;
+        } catch (linkErr: any) {
+          // The folder exists; surface the link failure but don't 500 the build.
+          res.status(200).json({ ok: true, folder, linked: false, linkError: String(linkErr?.message || linkErr) });
+          return;
+        }
+      }
+
+      res.status(200).json({ ok: true, folder, linked });
     } catch (e: any) {
       if (e instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(e)); return; }
       const msg = String(e?.message || e || "gdrive_build_failed");

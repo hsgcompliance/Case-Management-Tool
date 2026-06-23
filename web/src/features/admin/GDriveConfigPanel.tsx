@@ -106,6 +106,8 @@ function typeBadgeClass(type: TGDriveTemplateType): string {
 // Template form (add / edit)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const TSS_WORKBOOK_ROLE = "tssWorkbook";
+
 type TemplateDraft = {
   key: string;
   fileInput: string; // URL or ID
@@ -118,6 +120,9 @@ type TemplateDraft = {
   useVariants: boolean;
   payerInput: string;
   nonpayerInput: string;
+  // When true the copied file is auto-linked as the customer's TSS workbook on
+  // build (role = "tssWorkbook"). Replaces the implicit key === "tss_workbook".
+  isTssWorkbook: boolean;
 };
 
 function blankTemplateDraft(): TemplateDraft {
@@ -131,6 +136,7 @@ function blankTemplateDraft(): TemplateDraft {
     useVariants: false,
     payerInput: "",
     nonpayerInput: "",
+    isTssWorkbook: false,
   };
 }
 
@@ -145,6 +151,8 @@ function draftFromTemplate(t: TGDriveTemplate): TemplateDraft {
     useVariants: !!t.variants,
     payerInput: t.variants?.payer ?? "",
     nonpayerInput: t.variants?.nonpayer ?? "",
+    // Honor the explicit role; fall back to the legacy key for existing configs.
+    isTssWorkbook: t.role === TSS_WORKBOOK_ROLE || t.key === "tss_workbook",
   };
 }
 
@@ -272,6 +280,22 @@ function TemplateForm({
           onChange={(e) => onChange({ ...draft, defaultChecked: e.currentTarget.checked })}
         />
         Check this template by default in Build Folder dialog
+      </label>
+
+      <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 rounded border-slate-300"
+          checked={draft.isTssWorkbook}
+          onChange={(e) => onChange({ ...draft, isTssWorkbook: e.currentTarget.checked })}
+        />
+        <span>
+          This is the TSS workbook
+          <span className="block text-xs text-slate-500">
+            The copied sheet is auto-linked as the customer&apos;s workbook when a folder is built.
+            Set this on the payer / non-payer workbook template.
+          </span>
+        </span>
       </label>
 
       <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -542,6 +566,7 @@ export default function GDriveConfigPanel() {
       ...(templateDraft.description.trim() ? { description: templateDraft.description.trim() } : {}),
       defaultChecked: templateDraft.defaultChecked,
       ...(hasVariants ? { variants: { payer, nonpayer } } : {}),
+      ...(templateDraft.isTssWorkbook ? { role: TSS_WORKBOOK_ROLE } : {}),
     };
     if (editingTemplateKey) {
       setDraft((d) => ({
@@ -777,6 +802,11 @@ export default function GDriveConfigPanel() {
                           {tmpl.variants && (
                             <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
                               payer / non-payer
+                            </span>
+                          )}
+                          {(tmpl.role === TSS_WORKBOOK_ROLE || tmpl.key === "tss_workbook") && (
+                            <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                              TSS workbook
                             </span>
                           )}
                         </div>

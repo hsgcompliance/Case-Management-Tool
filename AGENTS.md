@@ -80,6 +80,18 @@ npm run deploy:functions -- --start-at=<functionName> --no-build
 npm run deploy:reset-functions-hosting
 ```
 
+### Windows: clear the Next build cache before a web build/deploy
+On Windows the `next build` step intermittently fails with
+`EPERM: operation not permitted, rename '...\.next\cache\webpack\...\N.pack_' -> '...N.pack'`
+(a stale webpack cache-pack lock). It compiles fine, then dies during "Generating
+static pages". Before building or deploying web hosting, clear the cache and use a
+long timeout:
+```powershell
+Remove-Item -Recurse -Force web\.next\cache -ErrorAction SilentlyContinue
+npm run deploy:hosting        # or build:web
+```
+A clean re-run succeeds; the error is a flaky file lock, not a code failure.
+
 ### Contracts (when schema changes)
 ```powershell
 npm run contracts:update   # build + vendor into functions/ and web/

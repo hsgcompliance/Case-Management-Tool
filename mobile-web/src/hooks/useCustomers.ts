@@ -28,6 +28,7 @@ export interface LinkedWorkbookRef {
 
 export interface CustomerDrive {
   folderId?: string;
+  folderUrl?: string;
   linkedWorkbooks?: { tss?: LinkedWorkbookRef };
 }
 
@@ -98,6 +99,50 @@ export function getWorkbookLink(customer: Pick<Customer, "customerDrive">): { ur
   const url = String(tss?.spreadsheetUrl || "").trim();
   if (!url) return null;
   return { url, name: String(tss?.spreadsheetName || "").trim() || "Open workbook" };
+}
+
+const FOLDER_ID_RE = /^[-\w]{20,}$/;
+
+function folderUrlFrom(idOrUrl: unknown): string {
+  const text = String(idOrUrl ?? "").trim();
+  if (/^https?:\/\//i.test(text)) return text;
+  const id =
+    text.match(/\/folders\/([-\w]{20,})/i)?.[1] ||
+    text.match(/[?&]id=([-\w]{20,})/i)?.[1] ||
+    (FOLDER_ID_RE.test(text) ? text : "");
+  return id ? `https://drive.google.com/drive/folders/${id}` : "";
+}
+
+/** The customer's linked Drive folder, in the canonical resolution order. */
+export function getCustomerDriveFolder(
+  customer: Pick<Customer, "customerDrive" | "driveFolderId" | "driveFolders" | "meta">,
+): { url: string; label: string } | null {
+  const cd = customer.customerDrive;
+  const meta = customer.meta ?? {};
+  const folders: DriveFolderRef[] = [
+    ...(Array.isArray(meta.driveFolders) ? meta.driveFolders : []),
+    ...(Array.isArray(customer.driveFolders) ? customer.driveFolders : []),
+  ];
+  const folder = folders.find((f) => folderUrlFrom(f?.url) || folderUrlFrom(f?.id));
+  const url =
+    folderUrlFrom(cd?.folderUrl) ||
+    folderUrlFrom(cd?.folderId) ||
+    folderUrlFrom(folder?.url) ||
+    folderUrlFrom(folder?.id) ||
+    folderUrlFrom(meta.driveFolderId) ||
+    folderUrlFrom(customer.driveFolderId);
+  if (!url) return null;
+  const label = String(folder?.alias || folder?.name || "").trim() || "Open Drive folder";
+  return { url, label };
+}
+
+/** "Last, First_CWID" — the GAS folder-name convention used when building. */
+export function buildCustomerFolderName(customer: Pick<Customer, "firstName" | "lastName" | "name" | "cwId" | "hmisId">): string {
+  const first = String(customer.firstName || "").trim();
+  const last = String(customer.lastName || "").trim();
+  const base = last && first ? `${last}, ${first}` : String(customer.name || "").trim() || "Customer";
+  const cwid = String(customer.cwId || customer.hmisId || "").trim();
+  return (cwid ? `${base}_${cwid}` : base).replace(/\s{2,}/g, " ").trim().slice(0, 255);
 }
 
 function sortByName(a: Customer, b: Customer) {
