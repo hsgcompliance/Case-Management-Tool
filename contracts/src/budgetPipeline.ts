@@ -138,7 +138,7 @@ export const BudgetPipelinePreviewBody = z.object({
   excludeTree: PipelineRuleNode.nullable().optional(),
   pipelineId: z.string().optional(),
   month: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
+  limit: z.coerce.number().int().min(1).max(5000).default(100),
 });
 export type TBudgetPipelinePreviewBody = z.infer<typeof BudgetPipelinePreviewBody>;
 
@@ -167,6 +167,10 @@ export type TPreviewMatchedRow = {
 export type TBudgetPipelinePreviewResult = {
   matched: TPreviewMatchedRow[];
   totalAmount: number;
+  projectedAmount?: number;
+  postedAmount?: number;
+  projectedCount?: number;
+  postedCount?: number;
   matchCount: number;
   perItem: TPreviewItemResult[];
   conflicts: Array<{ pipelineId: string; pipelineName: string; itemIds: string[] }>;
