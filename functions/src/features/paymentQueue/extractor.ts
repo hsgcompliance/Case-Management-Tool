@@ -365,6 +365,26 @@ function toMonth(iso: string): string {
   return iso && iso.length >= 7 ? iso.slice(0, 7) : "";
 }
 
+/**
+ * Resolve the submission's OWN timestamp as an ISO string, tolerant of every
+ * shape the submission object takes across call sites:
+ *   - raw Jotform API submission:          `created_at` / `updated_at`
+ *   - mapped submission (camelCase):        `createdAt`
+ *   - normalized `jotformSubmissions` doc:  `jotformCreatedAt` / `jotformUpdatedAt`
+ * Returns "" only when no usable submission timestamp exists, so callers keep
+ * `new Date()` strictly as an absolute last resort — never the normal fallback.
+ */
+function submissionTimestampISO(sub: AnyObj): string {
+  return (
+    toISO(sub.created_at) ||
+    toISO(sub.createdAt) ||
+    toISO(sub.jotformCreatedAt) ||
+    toISO(sub.updated_at) ||
+    toISO(sub.jotformUpdatedAt) ||
+    ""
+  );
+}
+
 function canonicalCard(v: unknown): string {
   const s = asText(v).trim().toLowerCase();
   if (s === "mad card") return "MAD Card";
@@ -479,7 +499,7 @@ function extractCreditCard(
   const createdAt =
     (returnSubmission ? toISO(getAns(answers, CC_SCHEMA.globals.returnDateTime)) : "") ||
     toISO(getAns(answers, CC_SCHEMA.globals.checkoutDateTime)) ||
-    toISO(sub.created_at) ||
+    submissionTimestampISO(sub) ||
     new Date().toISOString();
   const month = toMonth(createdAt);
 
