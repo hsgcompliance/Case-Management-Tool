@@ -1,11 +1,12 @@
 // functions/src/features/ledger/index.ts
-export { 
-  ledgerList, 
-  ledgerCreate, 
+export {
+  ledgerList,
+  ledgerCreate,
   ledgerClassify,
   ledgerAutoAssign,
-  ledgerGetById, 
-  ledgerBalance, 
+  ledgerBulkAdjust,
+  ledgerGetById,
+  ledgerBalance,
   ledgerDelete } from "./http";
 export { 
   writeLedgerEntry, 

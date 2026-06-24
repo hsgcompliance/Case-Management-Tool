@@ -5,6 +5,7 @@ import {
   LedgerCreateBody,
   LedgerClassifyBody,
   LedgerAutoAssignBody,
+  LedgerBulkAdjustBody,
   LedgerGetByIdParams,
   LedgerBalanceQuery,
   type TLedgerEntry,
@@ -14,10 +15,13 @@ import {
   writeLedgerEntry,
   classifyLedgerEntries,
   autoAssignLedgerEntries,
+  bulkAdjustLedgerEntries,
   getLedgerEntryById,
   fetchEntriesForBalance,
   computeLedgerBalances,
 } from "./service";
+import { recomputeGrantBudgetFromLedger } from "../grants/budgetRecompute";
+import { recomputeCustomerSpendForGrant } from "../grants/lineItemCaps";
 
 /* ============================================================================
    GET|POST /ledgerList
@@ -147,6 +151,59 @@ export const ledgerAutoAssign = secureHandler(
     return;
   },
   { auth: "user", requireOrg: true, methods: ["POST", "OPTIONS"] }
+);
+
+/* ============================================================================
+   POST /ledgerBulkAdjust  (admin only)
+   Directly edit existing ledger entries in place (no reversal + respend), then
+   recompute each affected grant's budget once.
+============================================================================ */
+
+export const ledgerBulkAdjust = secureHandler(
+  async (req, res): Promise<void> => {
+    const body = LedgerBulkAdjustBody.parse(req.body || {});
+    const caller = (req as any).user || {};
+    const callerOrg = orgIdFromClaims(caller);
+    if (!callerOrg) {
+      res.status(400).json({ ok: false, error: "org_required" });
+      return;
+    }
+
+    const result = await bulkAdjustLedgerEntries(callerOrg, body.items, {
+      reason: body.reason ?? null,
+      dryRun: body.dryRun,
+      user: {
+        uid: caller?.uid || null,
+        email: caller?.email || null,
+        name: caller?.name || caller?.displayName || null,
+      },
+    });
+
+    // One budget + cap recompute per affected grant, after all ledger writes land.
+    const grantsRecomputed: string[] = [];
+    if (!result.dryRun) {
+      for (const grantId of result.affectedGrantIds) {
+        try {
+          const r = await recomputeGrantBudgetFromLedger(grantId);
+          await recomputeCustomerSpendForGrant({ grantId }).catch(() => null);
+          if (r.recomputed) grantsRecomputed.push(grantId);
+        } catch {
+          /* non-fatal per grant */
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      updated: result.updated,
+      skipped: result.skipped,
+      failed: result.failed,
+      results: result.results,
+      grantsRecomputed,
+      dryRun: result.dryRun,
+    });
+  },
+  { auth: "admin", requireOrg: true, methods: ["POST", "OPTIONS"], memory: "512MiB", timeoutSeconds: 300, concurrency: 4 }
 );
 
 /* ============================================================================

@@ -335,6 +335,25 @@ export type GrantsAdminReconcileBudgetReq = TGrantsAdminReconcileBudgetBody;
 export type GrantsAdminReconcileBudgetResp = TGrantsAdminReconcileBudgetResp;
 
 /* ============================================================================
+   Grant Budget Manager
+============================================================================ */
+import type {
+  TGrantBudgetManagerLoadBody,
+  TGrantBudgetManagerLoadResp,
+  TGrantBudgetManagerSaveBody,
+  TGrantBudgetManagerSaveResp,
+  TGrantBudgetManagerReconcileBody,
+  TGrantBudgetManagerReconcileResp,
+} from "./grantBudgetManager";
+
+export type GrantBudgetManagerLoadReq = TGrantBudgetManagerLoadBody;
+export type GrantBudgetManagerLoadResp = TGrantBudgetManagerLoadResp;
+export type GrantBudgetManagerSaveReq = TGrantBudgetManagerSaveBody;
+export type GrantBudgetManagerSaveResp = TGrantBudgetManagerSaveResp;
+export type GrantBudgetManagerReconcileReq = TGrantBudgetManagerReconcileBody;
+export type GrantBudgetManagerReconcileResp = TGrantBudgetManagerReconcileResp;
+
+/* ============================================================================
    Jotform
 ============================================================================ */
 import type {
@@ -1053,6 +1072,10 @@ export interface EndpointMap {
   grantsAdminClearPayments: { req: GrantsAdminClearPaymentsReq; resp: GrantsAdminClearPaymentsResp };
   grantsAdminClearEnrollments: { req: GrantsAdminClearEnrollmentsReq; resp: GrantsAdminClearEnrollmentsResp };
   grantsAdminReconcileBudget: { req: GrantsAdminReconcileBudgetReq; resp: GrantsAdminReconcileBudgetResp };
+
+  grantBudgetManagerLoad: { req: GrantBudgetManagerLoadReq; resp: GrantBudgetManagerLoadResp };
+  grantBudgetManagerSave: { req: GrantBudgetManagerSaveReq; resp: GrantBudgetManagerSaveResp };
+  grantBudgetManagerReconcile: { req: GrantBudgetManagerReconcileReq; resp: GrantBudgetManagerReconcileResp };
 
   // JOTFORM
   jotformSubmissionsUpsert: { req: JotformSubmissionsUpsertReq; resp: JotformSubmissionsUpsertResp };
