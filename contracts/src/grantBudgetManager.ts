@@ -1,0 +1,125 @@
+import { z } from "./core";
+import type { Ok } from "./http";
+
+export const GrantBudgetManagerSourceType = z.enum(["ledger", "paymentQueue", "newProjection"]);
+export type TGrantBudgetManagerSourceType = z.infer<typeof GrantBudgetManagerSourceType>;
+
+export const GrantBudgetManagerSaveMode = z.enum(["preview", "applyOpen", "applyAll"]);
+export type TGrantBudgetManagerSaveMode = z.infer<typeof GrantBudgetManagerSaveMode>;
+
+export const GrantBudgetManagerOriginal = z
+  .object({
+    grantId: z.string().nullable().optional(),
+    lineItemId: z.string().nullable().optional(),
+    customerId: z.string().nullable().optional(),
+    caseManagerId: z.string().nullable().optional(),
+    amount: z.number().nullable().optional(),
+    date: z.string().nullable().optional(),
+    serviceDate: z.string().nullable().optional(),
+    paymentDate: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    memo: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    vendor: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    updatedAt: z.string().nullable().optional(),
+  })
+  .passthrough();
+export type TGrantBudgetManagerOriginal = z.infer<typeof GrantBudgetManagerOriginal>;
+
+export const GrantBudgetManagerRow = z
+  .object({
+    rowId: z.string().min(1),
+    sourceType: GrantBudgetManagerSourceType,
+    sourceId: z.string().optional().default(""),
+    ledgerItemId: z.string().nullable().optional(),
+    paymentQueueItemId: z.string().nullable().optional(),
+    grantId: z.string().min(1),
+    lineItemId: z.string().nullable().optional(),
+    customerId: z.string().nullable().optional(),
+    customerName: z.string().nullable().optional(),
+    caseManagerId: z.string().nullable().optional(),
+    caseManagerName: z.string().nullable().optional(),
+    amount: z.coerce.number(),
+    date: z.string().nullable().optional(),
+    serviceDate: z.string().nullable().optional(),
+    paymentDate: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    memo: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    vendor: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    isWritable: z.boolean().optional().default(false),
+    lockedReason: z.string().nullable().optional(),
+    rowState: z.enum(["clean", "changed", "new", "deleted"]).optional().default("clean"),
+    original: GrantBudgetManagerOriginal.optional(),
+  })
+  .passthrough();
+export type TGrantBudgetManagerRow = z.infer<typeof GrantBudgetManagerRow>;
+
+export const GrantBudgetManagerLineItem = z.object({
+  grantId: z.string(),
+  id: z.string(),
+  label: z.string(),
+  typeLabel: z.string().optional().default(""),
+  budget: z.number().optional().default(0),
+  locked: z.boolean().optional().default(false),
+});
+export type TGrantBudgetManagerLineItem = z.infer<typeof GrantBudgetManagerLineItem>;
+
+export const GrantBudgetManagerRollup = z.object({
+  grantId: z.string(),
+  lineItemId: z.string().nullable().optional(),
+  budget: z.number().default(0),
+  spent: z.number().default(0),
+  projected: z.number().default(0),
+  total: z.number().default(0),
+  remaining: z.number().default(0),
+});
+export type TGrantBudgetManagerRollup = z.infer<typeof GrantBudgetManagerRollup>;
+
+export const GrantBudgetManagerLoadBody = z.object({
+  grantIds: z.array(z.string().min(1)).min(1).max(50),
+});
+export type TGrantBudgetManagerLoadBody = z.infer<typeof GrantBudgetManagerLoadBody>;
+
+export type TGrantBudgetManagerLoadResp = Ok<{
+  grants: Array<Record<string, unknown>>;
+  lineItems: TGrantBudgetManagerLineItem[];
+  rows: TGrantBudgetManagerRow[];
+  rollups: TGrantBudgetManagerRollup[];
+  loadedAt: string;
+}>;
+
+export const GrantBudgetManagerSaveBody = z.object({
+  mode: GrantBudgetManagerSaveMode,
+  grantIds: z.array(z.string().min(1)).min(1).max(50),
+  rows: z.array(GrantBudgetManagerRow).max(5000),
+  reason: z.string().trim().optional(),
+  loadedAt: z.string().trim().optional(),
+});
+export type TGrantBudgetManagerSaveBody = z.infer<typeof GrantBudgetManagerSaveBody>;
+
+export type TGrantBudgetManagerSaveResp = Ok<{
+  dryRun: boolean;
+  updated: number;
+  created: number;
+  removed: number;
+  skipped: Array<{ rowId: string; sourceId?: string | null; reason: string }>;
+  failed: Array<{ rowId: string; sourceId?: string | null; error: string }>;
+  grantsRecomputed: string[];
+  rollups: TGrantBudgetManagerRollup[];
+}>;
+
+export const GrantBudgetManagerReconcileBody = z.object({
+  grantIds: z.array(z.string().min(1)).min(1).max(50),
+});
+export type TGrantBudgetManagerReconcileBody = z.infer<typeof GrantBudgetManagerReconcileBody>;
+
+export type TGrantBudgetManagerReconcileResp = Ok<{
+  affectedGrantIds: string[];
+  before: TGrantBudgetManagerRollup[];
+  after: TGrantBudgetManagerRollup[];
+  skipped: Array<{ grantId: string; reason: string }>;
+  failed: Array<{ grantId: string; error: string }>;
+}>;

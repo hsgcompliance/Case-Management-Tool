@@ -2,24 +2,40 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@entities/ui/Modal";
+import { toApiError } from "@client/api";
 import { fmtMDY, safeISODate10, toISODate } from "@lib/date";
+import { toast } from "@lib/toast";
+import { useGrantBudgetManagerLoad, useSaveGrantBudgetManager } from "@hooks/useGrantBudgetManager";
+import type { TGrantBudgetManagerRow } from "@types";
 
 type SortDirection = "asc" | "desc";
 type SandboxScale = "tight" | "compact" | "regular" | "large";
-type SandboxSortKey = "date" | "amount" | "customer" | "lineItem" | "type" | "note" | "sourceStatus" | "sandboxChange";
+type SandboxSortKey = "grant" | "date" | "amount" | "customer" | "caseManager" | "lineItem" | "sourceType" | "type" | "note" | "sourceStatus" | "sandboxChange";
 type SandboxRowState = "clean" | "changed" | "new" | "deleted";
-type EditableField = "date" | "amountCents" | "customerLabel" | "lineItemId" | "budgetTypeLabel" | "noteText";
+type EditableField = "date" | "amountCents" | "customerLabel" | "caseManagerLabel" | "lineItemId" | "budgetTypeLabel" | "noteText";
 
 export type GrantBudgetSandboxSeedRow = {
   sourceId: string;
   sourceKind: string;
+  sourceType?: "ledger" | "paymentQueue" | "newProjection";
+  ledgerItemId?: string | null;
+  paymentQueueItemId?: string | null;
   grantId: string;
+  grantName?: string;
   lineItemId: string;
   date: string;
   amountCents: number;
+  customerId?: string | null;
   customerLabel: string;
+  caseManagerId?: string | null;
+  caseManagerLabel?: string;
   budgetTypeLabel: string;
   noteText: string;
+  vendor?: string | null;
+  category?: string | null;
+  isWritable?: boolean;
+  lockedReason?: string | null;
+  original?: TGrantBudgetManagerRow["original"];
   rentCertDueOn?: string;
   statusLabel: string;
 };
@@ -40,7 +56,9 @@ type SandboxRow = GrantBudgetSandboxSeedRow & {
 type BlankDraft = {
   date: string;
   amount: string;
+  grantId: string;
   customerLabel: string;
+  caseManagerLabel: string;
   lineItemId: string;
   budgetTypeLabel: string;
   noteText: string;
@@ -55,7 +73,9 @@ type ContextMenuState = {
 const EMPTY_DRAFT: BlankDraft = {
   date: "",
   amount: "",
+  grantId: "",
   customerLabel: "",
+  caseManagerLabel: "",
   lineItemId: "",
   budgetTypeLabel: "",
   noteText: "",
@@ -141,6 +161,8 @@ function normalizeDate(value: string) {
 function rowSearchText(row: SandboxRow, lineItemLabel: string) {
   return [
     row.customerLabel,
+    row.caseManagerLabel,
+    row.grantName,
     row.budgetTypeLabel,
     row.noteText,
     row.rentCertDueOn,
@@ -154,7 +176,9 @@ function hasDraftValue(draft: BlankDraft) {
   return Boolean(
     draft.date ||
     draft.amount ||
+    draft.grantId ||
     draft.customerLabel.trim() ||
+    draft.caseManagerLabel.trim() ||
     draft.lineItemId ||
     draft.budgetTypeLabel.trim() ||
     draft.noteText.trim(),
@@ -174,7 +198,9 @@ function isChanged(row: SandboxRow) {
   return (
     row.date !== row.original.date ||
     row.amountCents !== row.original.amountCents ||
+    row.grantId !== row.original.grantId ||
     row.customerLabel !== row.original.customerLabel ||
+    row.caseManagerLabel !== row.original.caseManagerLabel ||
     row.lineItemId !== row.original.lineItemId ||
     row.budgetTypeLabel !== row.original.budgetTypeLabel ||
     row.noteText !== row.original.noteText
@@ -244,11 +270,13 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
       sandboxId: `new:${now}:${Math.random().toString(36).slice(2, 7)}`,
       sourceId: "",
       sourceKind: "sandbox",
-      grantId: "",
+      sourceType: "newProjection",
+      grantId: String(draft.grantId || "").trim(),
       lineItemId,
       date,
       amountCents,
       customerLabel: String(draft.customerLabel || "").trim(),
+      caseManagerLabel: String(draft.caseManagerLabel || "").trim(),
       budgetTypeLabel: String(draft.budgetTypeLabel || lineItem?.typeLabel || "").trim() || "N/A",
       noteText: String(draft.noteText || "").trim(),
       rentCertDueOn: "",
@@ -257,11 +285,13 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
       original: {
         sourceId: "",
         sourceKind: "sandbox",
-        grantId: "",
+        sourceType: "newProjection",
+        grantId: String(draft.grantId || "").trim(),
         lineItemId,
         date,
         amountCents: 0,
         customerLabel: "",
+        caseManagerLabel: "",
         budgetTypeLabel: "N/A",
         noteText: "",
         rentCertDueOn: "",
@@ -288,6 +318,7 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
           sourceKind: "sandbox",
           amountCents: 0,
           date: source.date,
+          caseManagerLabel: source.caseManagerLabel,
           statusLabel: "New",
         },
       };
@@ -310,11 +341,13 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
         sandboxId: `new:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`,
         sourceId: "",
         sourceKind: "sandbox",
+        sourceType: "newProjection",
         grantId: source?.grantId || "",
         lineItemId: source?.lineItemId || "",
         date,
         amountCents: 0,
         customerLabel: "",
+        caseManagerLabel: "",
         budgetTypeLabel: lineItem?.typeLabel || "N/A",
         noteText: "",
         rentCertDueOn: "",
@@ -328,6 +361,7 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
           date,
           amountCents: 0,
           customerLabel: "",
+          caseManagerLabel: "",
           budgetTypeLabel: "N/A",
           noteText: "",
           rentCertDueOn: "",
@@ -449,6 +483,9 @@ function SandboxContextMenu({
 export function GrantBudgetSandboxModal({
   isOpen,
   onClose,
+  grantIds,
+  readOnly = false,
+  canSave = false,
   grantId,
   grantName,
   seedRows: seed,
@@ -458,6 +495,9 @@ export function GrantBudgetSandboxModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
+  grantIds?: string[];
+  readOnly?: boolean;
+  canSave?: boolean;
   grantId: string;
   grantName: string;
   seedRows: GrantBudgetSandboxSeedRow[];
@@ -465,8 +505,53 @@ export function GrantBudgetSandboxModal({
   currency: (n: number) => string;
   onOpenPayment?: (sourceId: string) => void;
 }) {
-  const { rows, updateRow, duplicateRow, addBlankRow, addRowBelow, removeRow, restoreRow, resetScenario } = useLocalSandboxScenario(seed, lineItems);
+  const managerGrantIds = useMemo(
+    () => Array.from(new Set((grantIds || []).map((id) => String(id || "").trim()).filter(Boolean))),
+    [grantIds],
+  );
+  const managerMode = managerGrantIds.length > 0;
+  const managerQ = useGrantBudgetManagerLoad(managerGrantIds, { enabled: isOpen && managerMode });
+  const saveManager = useSaveGrantBudgetManager();
+  const loadedRows = managerQ.data?.ok ? managerQ.data.rows : [];
+  const activeSeed = useMemo<GrantBudgetSandboxSeedRow[]>(() => {
+    if (!managerMode) return seed;
+    return loadedRows.map((row) => ({
+      sourceId: row.sourceId || row.ledgerItemId || row.paymentQueueItemId || row.rowId,
+      sourceKind: row.sourceType,
+      sourceType: row.sourceType,
+      ledgerItemId: row.ledgerItemId || null,
+      paymentQueueItemId: row.paymentQueueItemId || null,
+      grantId: row.grantId,
+      grantName: String((row as Record<string, unknown>).grantName || row.grantId),
+      lineItemId: String(row.lineItemId || ""),
+      date: String(row.date || row.serviceDate || row.paymentDate || ""),
+      amountCents: Math.round(Number(row.amount || 0) * 100),
+      customerId: row.customerId || null,
+      customerLabel: String(row.customerName || row.customerId || ""),
+      caseManagerId: row.caseManagerId || null,
+      caseManagerLabel: String(row.caseManagerName || row.caseManagerId || ""),
+      budgetTypeLabel: String(row.category || ""),
+      noteText: String(row.description || row.memo || ""),
+      vendor: row.vendor || null,
+      category: row.category || null,
+      isWritable: row.isWritable !== false,
+      lockedReason: row.lockedReason || null,
+      original: row.original,
+      statusLabel: String(row.status || row.sourceType),
+    }));
+  }, [loadedRows, managerMode, seed]);
+  const activeLineItems = useMemo<GrantBudgetSandboxLineItem[]>(() => {
+    if (!managerMode) return lineItems;
+    return (managerQ.data?.ok ? managerQ.data.lineItems : []).map((item) => ({
+      id: item.id,
+      label: `${managerGrantIds.length > 1 ? `${item.grantId} - ` : ""}${item.label}`,
+      typeLabel: item.typeLabel || "",
+      budgetCents: Math.round(Number(item.budget || 0) * 100),
+    }));
+  }, [lineItems, managerGrantIds.length, managerMode, managerQ.data]);
+  const { rows, updateRow, duplicateRow, addBlankRow, addRowBelow, removeRow, restoreRow, resetScenario } = useLocalSandboxScenario(activeSeed, activeLineItems);
   const [lineItemFilter, setLineItemFilter] = useState("all");
+  const [grantFilter, setGrantFilter] = useState("all");
   const [search, setSearch] = useState("");
   const deferredSearch = React.useDeferredValue(search);
   const [showDeleted, setShowDeleted] = useState(false);
@@ -475,6 +560,8 @@ export function GrantBudgetSandboxModal({
   const [editingCell, setEditingCell] = useState<{ rowId: string; field: EditableField; value: string } | null>(null);
   const [blankDraft, setBlankDraft] = useState<BlankDraft>(EMPTY_DRAFT);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [saveMode, setSaveMode] = useState<"preview" | "applyOpen" | "applyAll">("preview");
+  const [saveResult, setSaveResult] = useState<Awaited<ReturnType<typeof saveManager.mutateAsync>> | null>(null);
   const blankRowRef = React.useRef<HTMLTableRowElement | null>(null);
   const blankFirstInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -484,19 +571,27 @@ export function GrantBudgetSandboxModal({
     setSearch("");
     setShowDeleted(false);
     setSort({ key: "date", direction: "desc" });
+    setGrantFilter("all");
     setScale("compact");
     setEditingCell(null);
     setBlankDraft(EMPTY_DRAFT);
     setContextMenu(null);
+    setSaveMode("preview");
+    setSaveResult(null);
     resetScenario();
   }, [isOpen, resetScenario]);
 
-  const lineItemById = useMemo(() => new Map(lineItems.map((item) => [item.id, item])), [lineItems]);
+  const lineItemById = useMemo(() => new Map(activeLineItems.map((item) => [item.id, item])), [activeLineItems]);
+  const grantsInSandbox = useMemo(() => {
+    const fromRows = activeSeed.map((row) => ({ id: row.grantId, label: row.grantName || row.grantId })).filter((row) => row.id);
+    const byId = new Map(fromRows.map((row) => [row.id, row]));
+    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [activeSeed]);
   const contextRow = useMemo(() => rows.find((row) => row.sandboxId === contextMenu?.rowId) ?? null, [contextMenu?.rowId, rows]);
 
   const originalTotalCents = useMemo(
-    () => seed.reduce((sum, row) => sum + row.amountCents, 0),
-    [seed],
+    () => activeSeed.reduce((sum, row) => sum + row.amountCents, 0),
+    [activeSeed],
   );
 
   const visibleRows = useMemo(() => {
@@ -504,6 +599,7 @@ export function GrantBudgetSandboxModal({
     return rows
       .filter((row) => {
         if (!showDeleted && row.rowState === "deleted") return false;
+        if (grantFilter !== "all" && row.grantId !== grantFilter) return false;
         if (lineItemFilter !== "all" && row.lineItemId !== lineItemFilter) return false;
         if (!normalizedSearch) return true;
         const lineItemLabel = lineItemById.get(row.lineItemId)?.label || "";
@@ -515,15 +611,18 @@ export function GrantBudgetSandboxModal({
         const result =
           sort.key === "date" ? compareText(a.date, b.date)
           : sort.key === "amount" ? a.amountCents - b.amountCents
+          : sort.key === "grant" ? compareText(a.grantName || a.grantId, b.grantName || b.grantId)
           : sort.key === "customer" ? compareText(a.customerLabel, b.customerLabel)
+          : sort.key === "caseManager" ? compareText(a.caseManagerLabel, b.caseManagerLabel)
           : sort.key === "lineItem" ? compareText(aLine, bLine)
+          : sort.key === "sourceType" ? compareText(a.sourceType || a.sourceKind, b.sourceType || b.sourceKind)
           : sort.key === "type" ? compareText(a.budgetTypeLabel, b.budgetTypeLabel)
           : sort.key === "note" ? compareText(a.noteText, b.noteText)
           : sort.key === "sourceStatus" ? compareText(a.statusLabel, b.statusLabel)
           : compareText(a.rowState, b.rowState);
         return applyDirection(result, sort.direction);
       });
-  }, [deferredSearch, lineItemById, lineItemFilter, rows, showDeleted, sort.direction, sort.key]);
+  }, [deferredSearch, grantFilter, lineItemById, lineItemFilter, rows, showDeleted, sort.direction, sort.key]);
 
   const draftAmountCents = hasDraftValue(blankDraft) ? centsFromAmountInput(blankDraft.amount || "0") : 0;
   const draftLineItemId = String(blankDraft.lineItemId || "").trim();
@@ -535,14 +634,14 @@ export function GrantBudgetSandboxModal({
   const pendingChangeCount = rows.filter((row) => row.rowState !== "clean").length;
   const scaleConfig = SCALE_CONFIG[scale];
   const totalBudgetCents = useMemo(
-    () => lineItems.reduce((sum, item) => sum + item.budgetCents, 0),
-    [lineItems],
+    () => activeLineItems.reduce((sum, item) => sum + item.budgetCents, 0),
+    [activeLineItems],
   );
   const budgetSummaryRows = useMemo(() => {
-    return lineItems
+    return activeLineItems
       .filter((item) => lineItemFilter === "all" || item.id === lineItemFilter)
       .map((item) => {
-        const originalSpendCents = sumRowAmounts(seed, item.id);
+        const originalSpendCents = sumRowAmounts(activeSeed, item.id);
         const sandboxSpendCents = sumRowAmounts(rows, item.id) + (draftLineItemId === item.id ? draftAmountCents : 0);
         return {
           id: item.id,
@@ -555,7 +654,7 @@ export function GrantBudgetSandboxModal({
           sandboxRemainingCents: item.budgetCents - sandboxSpendCents,
         };
       });
-  }, [draftAmountCents, draftLineItemId, lineItemFilter, lineItems, rows, seed]);
+  }, [activeLineItems, activeSeed, draftAmountCents, draftLineItemId, lineItemFilter, rows]);
 
   const toggleSort = useCallback((key: SandboxSortKey) => {
     setSort((prev) => ({
@@ -613,6 +712,10 @@ export function GrantBudgetSandboxModal({
 
   const commitBlankDraft = () => {
     if (!hasDraftValue(blankDraft)) return;
+    if (managerMode && !blankDraft.grantId) {
+      toast("Choose a grant before adding a new projection.", { type: "error" });
+      return;
+    }
     addBlankRow(blankDraft);
     setBlankDraft(EMPTY_DRAFT);
   };
@@ -646,9 +749,86 @@ export function GrantBudgetSandboxModal({
     </button>
   );
 
+  const toManagerRows = useCallback((): TGrantBudgetManagerRow[] => rows
+    .filter((row) => row.rowState !== "clean")
+    .map((row) => ({
+      rowId: row.sourceId || row.sandboxId,
+      sourceType: row.sourceType || (row.rowState === "new" ? "newProjection" : "ledger"),
+      sourceId: row.sourceId || "",
+      ledgerItemId: row.ledgerItemId || (row.sourceType === "ledger" ? row.sourceId : null),
+      paymentQueueItemId: row.paymentQueueItemId || (row.sourceType === "paymentQueue" ? row.sourceId : null),
+      grantId: row.grantId || grantId,
+      lineItemId: row.lineItemId || null,
+      customerId: row.customerId || null,
+      customerName: row.customerLabel || null,
+      caseManagerId: row.caseManagerId || null,
+      caseManagerName: row.caseManagerLabel || null,
+      amount: row.amountCents / 100,
+      date: row.date || null,
+      serviceDate: row.date || null,
+      paymentDate: row.sourceType === "ledger" ? row.date || null : null,
+      description: row.noteText || null,
+      memo: row.noteText || null,
+      category: row.category || row.budgetTypeLabel || null,
+      vendor: row.vendor || null,
+      status: row.statusLabel || null,
+      isWritable: row.isWritable !== false,
+      lockedReason: row.lockedReason || null,
+      rowState: row.rowState,
+      original: row.original || {
+        grantId: row.original.grantId,
+        lineItemId: row.original.lineItemId,
+        customerId: row.original.customerId || null,
+        caseManagerId: row.original.caseManagerId || null,
+        amount: row.original.amountCents / 100,
+        date: row.original.date,
+        description: row.original.noteText,
+        category: row.original.budgetTypeLabel,
+        vendor: row.original.vendor || null,
+        status: row.original.statusLabel,
+        updatedAt: row.original.original?.updatedAt || null,
+      },
+    })), [grantId, rows]);
+
+  const saveChanges = useCallback(async () => {
+    if (!managerMode || !canSave || readOnly) return;
+    const payloadRows = toManagerRows();
+    if (!payloadRows.length) {
+      toast("No Budget Manager changes to save.", { type: "warn" });
+      return;
+    }
+    try {
+      const result = await saveManager.mutateAsync({
+        mode: saveMode,
+        grantIds: managerGrantIds,
+        rows: payloadRows,
+        loadedAt: managerQ.data?.ok ? managerQ.data.loadedAt : undefined,
+        reason: "Budget Manager edit",
+      });
+      setSaveResult(result);
+      if (result.ok) {
+        const issues = (result.skipped?.length || 0) + (result.failed?.length || 0);
+        toast(
+          saveMode === "preview"
+            ? `Preview complete${issues ? ` with ${issues} issue${issues === 1 ? "" : "s"}` : ""}.`
+            : `Budget Manager save complete${issues ? ` with ${issues} issue${issues === 1 ? "" : "s"}` : ""}.`,
+          { type: issues ? "warning" : "success" },
+        );
+      }
+      if (saveMode !== "preview") {
+        resetScenario();
+        void managerQ.refetch();
+      }
+    } catch (error: unknown) {
+      toast(toApiError(error, "Budget Manager save failed.").error, { type: "error" });
+    }
+  }, [canSave, managerGrantIds, managerMode, managerQ, readOnly, resetScenario, saveManager, saveMode, toManagerRows]);
+
+  const hasUnsavedChanges = pendingChangeCount > 0 || hasDraftValue(blankDraft);
+
   const renderEditableCell = (row: SandboxRow, field: EditableField, display: React.ReactNode, className = "") => {
     const active = editingCell?.rowId === row.sandboxId && editingCell.field === field;
-    const editable = field === "date" || field === "amountCents" || field === "noteText" || row.rowState === "new";
+    const editable = !readOnly && row.isWritable !== false && (field === "date" || field === "amountCents" || field === "noteText" || row.rowState === "new");
     if (active) {
       if (field === "lineItemId") {
         return (
@@ -666,7 +846,7 @@ export function GrantBudgetSandboxModal({
             autoFocus
           >
             <option value="">Unassigned</option>
-            {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            {activeLineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
         );
       }
@@ -703,25 +883,74 @@ export function GrantBudgetSandboxModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      onBeforeClose={() => {
+        if (!hasUnsavedChanges) return true;
+        return window.confirm("Discard unsaved Budget Manager changes?");
+      }}
       widthClass="max-w-[96vw]"
-      title={<span>Budget Sandbox{grantName ? ` - ${grantName}` : ""}</span>}
+      title={<span>{managerMode ? "Budget Manager" : "Budget Sandbox"}{grantName && !managerMode ? ` - ${grantName}` : managerMode ? ` - ${managerGrantIds.length} grant${managerGrantIds.length === 1 ? "" : "s"}` : ""}</span>}
       footer={
         <div className="flex w-full items-center justify-between gap-3">
           <div className="text-xs text-slate-500">
-            Local scratch only. {pendingChangeCount} pending change{pendingChangeCount === 1 ? "" : "s"}.
+            {managerMode ? (readOnly ? "Read-only view." : "Save required to apply changes.") : "Local scratch only."} {pendingChangeCount} pending change{pendingChangeCount === 1 ? "" : "s"}.
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={resetScenario}>Undo All Changes</button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+            {managerMode && canSave && !readOnly ? (
+              <>
+                <select className="input h-8 text-xs" value={saveMode} onChange={(e) => setSaveMode(e.currentTarget.value as typeof saveMode)}>
+                  <option value="preview">Preview Only</option>
+                  <option value="applyOpen">Apply Open Items</option>
+                  <option value="applyAll">Apply All Source Rows</option>
+                </select>
+                <button type="button" className="btn btn-primary btn-sm" disabled={saveManager.isPending || !pendingChangeCount} onClick={() => void saveChanges()}>
+                  {saveManager.isPending ? "Saving..." : saveMode === "preview" ? "Preview" : "Save"}
+                </button>
+              </>
+            ) : null}
+            {!readOnly && <button type="button" className="btn btn-ghost btn-sm" onClick={resetScenario}>Undo All Changes</button>}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+              if (hasUnsavedChanges && !window.confirm("Discard unsaved Budget Manager changes?")) return;
+              onClose();
+            }}>Close</button>
           </div>
         </div>
       }
     >
       <div className="space-y-3" data-grant-id={grantId}>
-        <div className="grid gap-2 lg:grid-cols-[180px_minmax(180px,1fr)_auto_auto_auto]">
+        {managerQ.isLoading && managerMode ? (
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500">Loading Budget Manager rows...</div>
+        ) : null}
+        {managerQ.error && managerMode ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">Failed to load Budget Manager rows.</div>
+        ) : null}
+        {saveResult?.ok && ((saveResult.skipped?.length || 0) > 0 || (saveResult.failed?.length || 0) > 0) ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="font-semibold">Save Results</div>
+            <div className="mt-1 flex flex-wrap gap-3">
+              <span>{saveResult.skipped.length} skipped</span>
+              <span>{saveResult.failed.length} failed</span>
+              <span>{saveResult.created} created</span>
+              <span>{saveResult.updated} updated</span>
+            </div>
+            <div className="mt-2 max-h-24 overflow-auto">
+              {[...saveResult.skipped.map((x) => `${x.sourceId || x.rowId}: ${x.reason}`), ...saveResult.failed.map((x) => `${x.sourceId || x.rowId}: ${x.error}`)].slice(0, 20).map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="grid gap-2 lg:grid-cols-[180px_180px_minmax(180px,1fr)_auto_auto_auto]">
+          {managerMode && grantsInSandbox.length > 1 ? (
+            <select className="input h-9 text-sm" value={grantFilter} onChange={(e) => setGrantFilter(e.currentTarget.value)}>
+              <option value="all">All grants</option>
+              {grantsInSandbox.map((grant) => <option key={grant.id} value={grant.id}>{grant.label}</option>)}
+            </select>
+          ) : (
+            <div />
+          )}
           <select className="input h-9 text-sm" value={lineItemFilter} onChange={(e) => setLineItemFilter(e.currentTarget.value)}>
             <option value="all">All line items</option>
-            {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            {activeLineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           <input
             className="input h-9 text-sm"
@@ -774,9 +1003,12 @@ export function GrantBudgetSandboxModal({
           <table className={`w-full border-separate ${scaleConfig.table}`} style={{ borderSpacing: 0 }}>
             <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500">
               <tr>
+                {managerMode && <th className={`${scaleConfig.header} font-medium`}>{headerButton("grant", "Grant")}</th>}
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("sourceType", "Source")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("date", "Date")}</th>
                 <th className={`${scaleConfig.header} text-right font-medium`}>{headerButton("amount", "Amount", "text-right")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("customer", "Customer")}</th>
+                <th className={`${scaleConfig.header} font-medium`}>{headerButton("caseManager", "Case Manager")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("lineItem", "Line Item")}</th>
                 <th className={`${scaleConfig.header} font-medium`}>Rent Cert Due</th>
                 <th className={`${scaleConfig.header} font-medium`}>{headerButton("note", "Note")}</th>
@@ -804,9 +1036,16 @@ export function GrantBudgetSandboxModal({
                     data-sandbox-row-id={row.sandboxId}
                     className={`border-b border-slate-100 transition-colors ${rowClass}`}
                   >
+                    {managerMode && <td className={`max-w-[180px] border-b border-slate-100 ${scaleConfig.cell}`}><span className="block truncate">{row.grantName || row.grantId}</span></td>}
+                    <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>
+                      <span className={`rounded px-1.5 py-0.5 font-semibold uppercase ${scaleConfig.badge} ${sourceStatusClass(row.sourceType || row.sourceKind)}`}>
+                        {row.sourceType === "paymentQueue" ? "Payment Queue" : row.sourceType === "newProjection" ? "New Projection" : row.sourceType || row.sourceKind}
+                      </span>
+                    </td>
                     <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "date", row.date ? fmtMDY(row.date) : "-")}</td>
                     <td className={`w-28 border-b border-slate-100 text-right font-mono ${scaleConfig.cell}`}>{renderEditableCell(row, "amountCents", currency(row.amountCents / 100), "text-right font-mono")}</td>
                     <td className={`max-w-[180px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "customerLabel", row.customerLabel || "-")}</td>
+                    <td className={`max-w-[180px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "caseManagerLabel", row.caseManagerLabel || "-")}</td>
                     <td className={`max-w-[190px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "lineItemId", lineItem?.label || "Unassigned")}</td>
                     <td className={`w-28 border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>{row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "—"}</td>
                     <td className={`max-w-[260px] border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "noteText", row.noteText || "-")}</td>
@@ -823,14 +1062,23 @@ export function GrantBudgetSandboxModal({
                   </tr>
                 );
               })}
+              {!readOnly && (
               <tr className="bg-white" ref={blankRowRef}>
+                {managerMode && <td className={scaleConfig.cell}>
+                  <select className={`input min-w-36 ${scaleConfig.input}`} value={blankDraft.grantId} onChange={(e) => updateBlankDraft({ grantId: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown}>
+                    <option value="">Grant</option>
+                    {grantsInSandbox.map((grant) => <option key={grant.id} value={grant.id}>{grant.label}</option>)}
+                  </select>
+                </td>}
+                <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>New Projection</td>
                 <td className={scaleConfig.cell}><input ref={blankFirstInputRef} className={`input w-28 ${scaleConfig.input}`} type="date" value={blankDraft.date} onChange={(e) => updateBlankDraft({ date: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
                 <td className={scaleConfig.cell}><input className={`input w-24 text-right ${scaleConfig.input}`} type="number" placeholder="0.00" value={blankDraft.amount} onChange={(e) => updateBlankDraft({ amount: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
                 <td className={scaleConfig.cell}><input className={`input min-w-36 ${scaleConfig.input}`} placeholder="Customer" value={blankDraft.customerLabel} onChange={(e) => updateBlankDraft({ customerLabel: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
+                <td className={scaleConfig.cell}><input className={`input min-w-36 ${scaleConfig.input}`} placeholder="Case manager" value={blankDraft.caseManagerLabel} onChange={(e) => updateBlankDraft({ caseManagerLabel: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown} /></td>
                 <td className={scaleConfig.cell}>
                   <select className={`input min-w-36 ${scaleConfig.input}`} value={blankDraft.lineItemId} onChange={(e) => updateBlankDraft({ lineItemId: e.currentTarget.value })} onBlur={handleBlankBlur} onKeyDown={handleBlankKeyDown}>
                     <option value="">Unassigned</option>
-                    {lineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    {activeLineItems.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                   </select>
                 </td>
                 <td className={`${scaleConfig.cell} text-slate-400`}>—</td>
@@ -838,6 +1086,7 @@ export function GrantBudgetSandboxModal({
                 <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>Draft</td>
                 <td className={`${scaleConfig.cell} font-semibold uppercase text-slate-400 ${scaleConfig.badge}`}>Blank</td>
               </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -908,7 +1157,7 @@ export function GrantBudgetSandboxModal({
         </div>
       </div>
 
-      {contextMenu && (
+      {contextMenu && !readOnly && (
         <SandboxContextMenu
           menu={contextMenu}
           row={contextRow}

@@ -1,5 +1,5 @@
 // functions/src/features/ledger/service.ts
-import { db, Timestamp, toMonthKey, removeUndefinedDeep } from "../../core";
+import { db, Timestamp, toMonthKey, removeUndefinedDeep, newBulkWriter } from "../../core";
 import {
   LedgerEntry,
   type TLedgerEntry,
@@ -9,6 +9,7 @@ import {
   type TLedgerAutoAssignBody,
   type TLedgerAutoAssignResp,
   type TLedgerBalanceQuery,
+  type TLedgerBulkAdjustItem,
 } from "./schemas";
 
 type ListResult = {
@@ -408,6 +409,160 @@ export async function classifyLedgerEntries(
   }
 
   return { ok: true, updated, dryRun, results };
+}
+
+// ─── Bulk direct adjust (admin) ─────────────────────────────────────────────
+
+export type LedgerBulkAdjustResult = {
+  updated: number;
+  /** Grants whose budget should be recomputed once (old + new allocation). */
+  affectedGrantIds: string[];
+  skipped: Array<{ entryId: string; reason: string }>;
+  failed: Array<{ entryId: string; error: string }>;
+  results: Array<{
+    entryId: string;
+    ok: boolean;
+    error?: string;
+    before?: { grantId: string | null; lineItemId: string | null; amountCents: number | null };
+    after?: { grantId: string | null; lineItemId: string | null; amountCents: number | null };
+  }>;
+  dryRun: boolean;
+};
+
+/**
+ * Directly edit existing ledger entries in place (no reversal + respend) and
+ * report which grants need a budget recompute. One BulkWriter pass for all
+ * updates; the HTTP layer triggers the per-grant recompute afterwards.
+ *
+ * Each field is optional: present key => apply (null clears), absent => leave.
+ * grantId/lineItemId must end up paired; a set grant+line item is validated
+ * (must exist for this org and not be locked). amountCents is the source of
+ * truth (amount is derived). dueDate also rewrites date + month.
+ */
+export async function bulkAdjustLedgerEntries(
+  orgId: string,
+  items: TLedgerBulkAdjustItem[],
+  opts: { reason?: string | null; dryRun?: boolean; user?: { uid?: string | null; email?: string | null; name?: string | null } } = {},
+): Promise<LedgerBulkAdjustResult> {
+  const dryRun = !!opts.dryRun;
+  const now = Timestamp.now();
+  const user = opts.user || {};
+
+  // Dedupe by entryId (last write wins).
+  const deduped = Array.from(new Map(items.map((i) => [String(i.entryId), i])).values());
+
+  const skipped: LedgerBulkAdjustResult["skipped"] = [];
+  const failed: LedgerBulkAdjustResult["failed"] = [];
+  const results: LedgerBulkAdjustResult["results"] = [];
+  const affected = new Set<string>();
+  const grantCache = new Map<string, { ok: true; value: GrantLineItemLookup } | { ok: false; error: string }>();
+
+  const refs = deduped.map((i) => db.collection("ledger").doc(String(i.entryId)));
+  const snaps = refs.length ? await db.getAll(...refs) : [];
+  const snapById = new Map(snaps.map((s) => [s.id, s]));
+
+  const writer = !dryRun ? newBulkWriter() : null;
+  let hasWrites = false;
+  let updated = 0;
+
+  for (const item of deduped) {
+    const entryId = String(item.entryId);
+    const has = (k: keyof TLedgerBulkAdjustItem) => Object.prototype.hasOwnProperty.call(item, k);
+    const snap = snapById.get(entryId);
+    if (!snap || !snap.exists) { skipped.push({ entryId, reason: "entry_not_found" }); continue; }
+    const entry = (snap.data() || {}) as Record<string, unknown>;
+    // Org isolation (treat cross-org as not found to avoid leaking existence).
+    if (String(entry.orgId || "") !== orgId) { skipped.push({ entryId, reason: "entry_not_found" }); continue; }
+
+    const beforeGrant = entry.grantId ? String(entry.grantId) : null;
+    const beforeLine = entry.lineItemId ? String(entry.lineItemId) : null;
+    const beforeAmountCents = entry.amountCents != null ? Number(entry.amountCents) : null;
+    const patch: Record<string, unknown> = {};
+
+    // Amount (amountCents is truth).
+    let nextAmountCents: number | undefined;
+    if (has("amountCents") && item.amountCents != null) nextAmountCents = Math.round(Number(item.amountCents));
+    else if (has("amount") && item.amount != null) nextAmountCents = Math.round(Number(item.amount) * 100);
+    if (nextAmountCents != null) {
+      if (!Number.isFinite(nextAmountCents)) { failed.push({ entryId, error: "invalid_amount" }); continue; }
+      patch.amountCents = nextAmountCents;
+      patch.amount = nextAmountCents / 100;
+    }
+
+    // Grant / line item pairing — compute resulting values, then validate.
+    let nextGrant = beforeGrant;
+    let nextLine = beforeLine;
+    if (has("grantId")) nextGrant = item.grantId ? String(item.grantId) : null;
+    if (has("lineItemId")) nextLine = item.lineItemId ? String(item.lineItemId) : null;
+    if (has("grantId") || has("lineItemId")) {
+      if (!!nextGrant !== !!nextLine) { failed.push({ entryId, error: "grant_lineitem_pair_required" }); continue; }
+      if (nextGrant && nextLine) {
+        const key = `${nextGrant}::${nextLine}`;
+        let lookup = grantCache.get(key);
+        if (!lookup) { lookup = await loadGrantLineItem(orgId, nextGrant, nextLine); grantCache.set(key, lookup); }
+        if (!lookup.ok) { failed.push({ entryId, error: lookup.error }); continue; }
+        if (lookup.value.locked) { failed.push({ entryId, error: "line_item_locked" }); continue; }
+      }
+      patch.grantId = nextGrant;
+      patch.lineItemId = nextLine;
+    }
+
+    // Other linking fields.
+    if (has("customerId")) patch.customerId = item.customerId ? String(item.customerId) : null;
+    if (has("enrollmentId")) patch.enrollmentId = item.enrollmentId ? String(item.enrollmentId) : null;
+    if (has("creditCardId")) patch.creditCardId = item.creditCardId ? String(item.creditCardId) : null;
+    if (has("caseManagerId")) patch.caseManagerId = item.caseManagerId ? String(item.caseManagerId) : null;
+
+    // Descriptive fields.
+    if (has("note")) patch.note = item.note ?? null;
+    if (has("vendor")) patch.vendor = item.vendor ?? null;
+    if (has("comment")) patch.comment = item.comment ?? null;
+    if (has("labels") && Array.isArray(item.labels)) patch.labels = item.labels.map(String);
+
+    // Date → dueDate + date + month.
+    if (has("dueDate") && item.dueDate) {
+      const d = String(item.dueDate).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { failed.push({ entryId, error: "invalid_dueDate" }); continue; }
+      patch.dueDate = d;
+      patch.date = d;
+      patch.month = toMonthKey(d);
+    }
+
+    if (Object.keys(patch).length === 0) {
+      results.push({ entryId, ok: true, before: { grantId: beforeGrant, lineItemId: beforeLine, amountCents: beforeAmountCents }, after: { grantId: nextGrant, lineItemId: nextLine, amountCents: beforeAmountCents } });
+      continue;
+    }
+
+    // Audit trail (extra keys are stripped on read by LedgerEntry schema).
+    patch.updatedAt = now;
+    patch.byUid = user.uid || null;
+    patch.byEmail = user.email ? String(user.email).toLowerCase() : null;
+    patch.byName = user.name || null;
+    patch.adjustReason = opts.reason || null;
+
+    // Recompute grants whose allocation/amount moved (old grant loses, new grant gains).
+    const allocationAffecting = patch.amountCents !== undefined || has("grantId") || has("lineItemId") || has("customerId");
+    if (allocationAffecting) {
+      if (beforeGrant) affected.add(beforeGrant);
+      if (nextGrant) affected.add(nextGrant);
+    }
+
+    if (!dryRun && writer) {
+      writer.update(snap.ref, removeUndefinedDeep(patch) as Record<string, unknown>);
+      hasWrites = true;
+    }
+    updated += 1;
+    results.push({
+      entryId,
+      ok: true,
+      before: { grantId: beforeGrant, lineItemId: beforeLine, amountCents: beforeAmountCents },
+      after: { grantId: nextGrant, lineItemId: nextLine, amountCents: nextAmountCents ?? beforeAmountCents },
+    });
+  }
+
+  if (!dryRun && writer && hasWrites) await writer.close();
+
+  return { updated, affectedGrantIds: Array.from(affected), skipped, failed, results, dryRun };
 }
 
 type AssignmentCandidate = {

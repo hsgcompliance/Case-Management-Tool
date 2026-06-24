@@ -22,6 +22,9 @@ import type {
   TInboxItem,
   TInboxSendInviteBody,
   TInboxSendMonthlySummaryBody,
+  TGrantBudgetManagerRow,
+  TGrantBudgetManagerRollup,
+  TGrantBudgetManagerLineItem,
 } from "@hdb/contracts";
 
 // -----------------------------------------------------------------------------
@@ -72,6 +75,9 @@ export type {
   TGrantBudgetLineItem,
   TGrantBudgetTotals,
   TGrantBudget,
+  TGrantBudgetManagerRow,
+  TGrantBudgetManagerRollup,
+  TGrantBudgetManagerLineItem,
   TGrantPinColor,
   TGrantPinImportant,
   TGrantPinDigest,
@@ -107,6 +113,7 @@ export type {
   TGDriveListQuery,
   TGDriveCreateFolderBody,
   TGDriveUploadBody,
+  TGDriveConfigPatchBody,
   TGDriveBuildCustomerFolderBody,
   TGDriveTemplate,
   TGDriveTemplateType,
@@ -152,6 +159,7 @@ export type {
   TPipelineCondition,
   TPipelineConditionGroup,
   TPipelineRuleNode,
+  TPipelineFormSchema,
   TBudgetPipeline,
   TBudgetPipelineUpsertBody,
   TBudgetPipelineListQuery,
@@ -238,6 +246,13 @@ export type GrantsActivityItem =
       : never
     : never;
 
+export type GrantBudgetManagerLoadReq = ReqOf<"grantBudgetManagerLoad">;
+export type GrantBudgetManagerLoadResp = RespOf<"grantBudgetManagerLoad">;
+export type GrantBudgetManagerSaveReq = ReqOf<"grantBudgetManagerSave">;
+export type GrantBudgetManagerSaveResp = RespOf<"grantBudgetManagerSave">;
+export type GrantBudgetManagerReconcileReq = ReqOf<"grantBudgetManagerReconcile">;
+export type GrantBudgetManagerReconcileResp = RespOf<"grantBudgetManagerReconcile">;
+
 // Credit Cards
 export type CreditCardsUpsertReq = ReqOf<"creditCardsUpsert">;
 export type CreditCardsUpsertResp = RespOf<"creditCardsUpsert">;
@@ -301,6 +316,11 @@ export type JotformDigestListResp = RespOf<"jotformDigestList">;
 export type JotformSyncSubmissionsReq = ReqOf<"jotformSyncSubmissions">;
 export type JotformSyncSubmissionsResp = RespOf<"jotformSyncSubmissions">;
 
+export type JotformApiListReq = ReqOf<"jotformApiSubmissionsList">;
+export type JotformApiListResp = RespOf<"jotformApiSubmissionsList">;
+export type JotformApiGetReq = ReqOf<"jotformApiSubmissionGet">;
+export type JotformApiGetResp = RespOf<"jotformApiSubmissionGet">;
+
 // Enrollments
 export type EnrollmentsUpsertReq = ReqOf<"enrollmentsUpsert">;
 export type EnrollmentsUpsertResp = RespOf<"enrollmentsUpsert">;
@@ -334,6 +354,9 @@ export type EnrollmentsUndoMigrationResp = RespOf<"enrollmentsUndoMigration">;
 
 export type EnrollmentsAdminReverseLedgerEntryReq = ReqOf<"enrollmentsAdminReverseLedgerEntry">;
 export type EnrollmentsAdminReverseLedgerEntryResp = RespOf<"enrollmentsAdminReverseLedgerEntry">;
+
+export type EnrollmentActionsApplyReq = ReqOf<"enrollmentActionsApply">;
+export type EnrollmentActionsApplyResp = RespOf<"enrollmentActionsApply">;
 
 export type EnrollmentsVoidProjectionsReq = ReqOf<"enrollmentsVoidProjections">;
 export type EnrollmentsVoidProjectionsResp = RespOf<"enrollmentsVoidProjections">;
@@ -410,6 +433,14 @@ export type GDriveConfigPatchResp = RespOf<"gdriveConfigPatch">;
 
 export type GDriveCustomerFolderIndexResp = RespOf<"gdriveCustomerFolderIndex">;
 export type GDriveBuildCustomerFolderResp = RespOf<"gdriveBuildCustomerFolder">;
+
+// Derived from EndpointMap: req types are identical to the contract zod-inferred
+// bodies (TGDrive*Body) but kept here to avoid drift and barrel-export gaps.
+export type TGDriveCopyGrantTemplatesBody = ReqOf<"gdriveCopyGrantTemplates">;
+export type GDriveCopyGrantTemplatesResp = RespOf<"gdriveCopyGrantTemplates">;
+
+export type TGDriveCustomerFolderSyncBody = ReqOf<"gdriveCustomerFolderSync">;
+export type GDriveCustomerFolderSyncResp = RespOf<"gdriveCustomerFolderSync">;
 
 export type GoogleConnectStartResp = RespOf<"calendarConnectStart"> | RespOf<"driveConnectStart">;
 export type GoogleDisconnectResp = RespOf<"calendarDisconnect"> | RespOf<"driveDisconnect">;

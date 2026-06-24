@@ -19,6 +19,7 @@ export * from "./features/users/triggers";
 export * from "./features/inbox";
 export * from "./features/gdrive";
 export * from "./features/grants";
+export * from "./features/grantBudgetManager";
 export * from "./features/enrollments";
 export * from "./features/payments";
 export * from "./features/ledger";

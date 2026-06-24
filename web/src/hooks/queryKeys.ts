@@ -19,6 +19,11 @@ export const qk = {
     activity: (grantId: string, filters?: Record<string, unknown>) =>
       ["grants", "activity", stable({ grantId, ...(filters || {}) })] as const,
   },
+  grantBudgetManager: {
+    root: ["grantBudgetManager"] as const,
+    load: (grantIds: string[]) =>
+      ["grantBudgetManager", "load", stable({ grantIds: [...grantIds].sort() })] as const,
+  },
   creditCards: {
     root: ["creditCards"] as const,
     list: (filters?: Record<string, unknown>) =>

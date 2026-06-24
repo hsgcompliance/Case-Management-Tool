@@ -146,6 +146,9 @@ export const endpointsStrict = {
   grantsAdminClearPayments:    { method: 'POST', path: 'grantsAdminClearPayments' },
   grantsAdminClearEnrollments: { method: 'POST', path: 'grantsAdminClearEnrollments' },
   grantsAdminReconcileBudget:  { method: 'POST', path: 'grantsAdminReconcileBudget' },
+  grantBudgetManagerLoad:      { method: 'POST', path: 'grantBudgetManagerLoad' },
+  grantBudgetManagerSave:      { method: 'POST', path: 'grantBudgetManagerSave' },
+  grantBudgetManagerReconcile: { method: 'POST', path: 'grantBudgetManagerReconcile' },
 
   // JOTFORM
   jotformSubmissionsUpsert: { method: 'POST', path: 'jotformSubmissionsUpsert' },
@@ -321,6 +324,7 @@ export const endpointsLoose = {
   paymentQueueList:             { method: 'GET',   path: 'paymentQueueList' },
   paymentQueueGet:              { method: 'GET',   path: 'paymentQueueGet' },
   paymentQueuePatch:            { method: 'PATCH', path: 'paymentQueuePatch' },
+  paymentQueueBulkDesignate:    { method: 'POST',  path: 'paymentQueueBulkDesignate' },
   paymentQueuePostToLedger:     { method: 'POST',  path: 'paymentQueuePostToLedger' },
   paymentQueueBypassClose:      { method: 'POST',  path: 'paymentQueueBypassClose' },
   paymentQueueReopen:           { method: 'POST',  path: 'paymentQueueReopen' },
@@ -333,6 +337,12 @@ export const endpointsLoose = {
   // Loose alias for the (drifted, non-contracted) recalc endpoint, used to
   // reconcile a grant's projected/spent from the pipeline manager.
   budgetPipelineReconcileGrant: { method: 'POST',  path: 'paymentsRecalcGrantProjected' },
+
+  // GRANTS (runtime endpoints not promoted into contracts yet)
+  grantsAddLineItemSpend:       { method: 'POST',  path: 'grantsAddLineItemSpend' },
+
+  // LEDGER (runtime endpoints not promoted into contracts yet)
+  ledgerBulkAdjust:             { method: 'POST',  path: 'ledgerBulkAdjust' },
 
   // DRIVE (runtime admin tooling)
   gdriveCustomerFolderSync:     { method: 'POST',  path: 'gdriveCustomerFolderSync' },

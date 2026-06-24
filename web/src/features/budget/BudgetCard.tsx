@@ -383,9 +383,13 @@ interface BudgetCardProps {
   labelOverride?: string;
   accentColor?: string;
   onClick: () => void;
+  onManageBudget?: (grantId: string) => void;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onSelectGesture?: (grantId: string, gesture: { source: "card" | "checkbox"; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => void;
 }
 
-export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOverride, accentColor, onClick }: BudgetCardProps) {
+export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOverride, accentColor, onClick, onManageBudget, selected = false, selectionMode = false, onSelectGesture }: BudgetCardProps) {
   const { data: gm } = useGrantMetrics(grant.id);
   const { data: pinnedIds = [] } = usePinnedGrantIds();
   const togglePin = useTogglePinnedGrant();
@@ -428,7 +432,8 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
   return (
     <div
       className={[
-        "group flex flex-col gap-0 rounded-xl border-2 shadow-md transition-shadow hover:shadow-lg",
+        "group relative flex flex-col gap-0 rounded-xl border-2 shadow-md transition-shadow hover:shadow-lg",
+        selected ? "ring-2 ring-sky-400" : "",
         accentLeftClass ? `border-l-[5px] ${accentLeftClass}` : "",
         isClientAlloc
           ? "border-sky-200 bg-sky-50/60 dark:border-sky-900/50 dark:bg-sky-950/20"
@@ -436,14 +441,40 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       ].join(" ")}
     >
       {/* Card header — clickable to open detail */}
+      <label
+        className={[
+          "absolute left-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white shadow-sm transition",
+          selected || selectionMode ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        ].join(" ")}
+        title={selected ? "Selected" : "Select grant"}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-sky-600"
+          checked={selected}
+          onChange={(event) => {
+            onSelectGesture?.(gid, {
+              source: "checkbox",
+              shiftKey: event.nativeEvent.shiftKey,
+              ctrlKey: event.nativeEvent.ctrlKey,
+              metaKey: event.nativeEvent.metaKey,
+            });
+          }}
+        />
+      </label>
       <button
         type="button"
         onClick={(event) => {
           if (hasSelectedTextWithin(event.currentTarget)) return;
+          if (selectionMode || event.shiftKey || event.ctrlKey || event.metaKey) {
+            onSelectGesture?.(gid, { source: "card", shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey });
+            return;
+          }
           onClick();
         }}
         className={[
-          "flex items-start justify-between gap-2 rounded-t-xl p-4 text-left transition hover:opacity-80",
+          "flex items-start justify-between gap-2 rounded-t-xl p-4 pl-11 text-left transition hover:opacity-80",
           accentHeaderBg ? accentHeaderBg : "",
         ].join(" ")}
       >
@@ -542,7 +573,17 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
             </>
           ) : null}
         </span>
-        <div className="flex items-center gap-0.5">
+        <button
+          type="button"
+          className="btn btn-secondary btn-xs"
+          onClick={(event) => {
+            event.stopPropagation();
+            onManageBudget?.(gid);
+          }}
+        >
+          Budget Manager
+        </button>
+        <div className="hidden items-center gap-0.5">
           <button
             type="button"
             title={isDashPinned ? "Unpin from dashboard" : "Pin to dashboard"}

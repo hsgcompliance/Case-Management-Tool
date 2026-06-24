@@ -1,12 +1,14 @@
 // functions/src/features/paymentQueue/service.ts
-import {db, isoNow, removeUndefinedDeep} from '../../core';
+import {db, FieldValue, isoNow, removeUndefinedDeep, newBulkWriter} from '../../core';
 import {writeLedgerEntry} from '../ledger/service';
 import {recordCustomerSpend, recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
+import {recomputeGrantBudgetFromLedger} from '../grants/budgetRecompute';
 import {primarySubtype} from '../payments/utils';
 import {autoAllocatePaymentQueueItem} from '../budgetPipeline/service';
 import {
   type TPaymentQueueItem,
   type TPaymentQueueListBody,
+  type TPaymentQueueBulkDesignateBody,
   type TPaymentQueueBypassCloseBody,
   type TPaymentQueuePatchBody,
   type TPaymentQueuePostToLedgerBody,
@@ -456,6 +458,61 @@ async function assertQueueGrantLineItem(item: TPaymentQueueItem): Promise<void> 
   if (matched?.locked) throw new Error('line_item_locked');
 }
 
+/**
+ * Build the raw ledger entry for a queue item. Shared by the single
+ * postToLedger (inside a transaction) and the bulk designate+post path
+ * (via BulkWriter) so both produce an identical ledger shape.
+ */
+function buildLedgerEntryForQueueItem(
+    item: TPaymentQueueItem,
+    opts: { ledgerEntryId?: string | null },
+): Record<string, unknown> {
+  const labels = [
+    item.source,
+    item.cardBucket || null,
+    item.isFlex ? 'flex' : null,
+    'paymentQueue',
+    item.source === 'invoice' ? 'invoice' : null,
+    item.source === 'credit-card' ? 'credit-card' : null,
+  ].filter(Boolean) as string[];
+  const noteParts = [item.note, item.notes, item.purpose, item.descriptor].filter(Boolean).map(String);
+  const commentParts = [item.expenseType, item.program, item.project].filter(Boolean).map(String);
+
+  return {
+    id: opts.ledgerEntryId || undefined,
+    orgId: item.orgId,
+    source: item.source === 'credit-card' ? 'card' : 'manual',
+    amount: item.amount,
+    amountCents: Math.round(item.amount * 100),
+    dueDate: item.dueDate || item.createdAt.slice(0, 10),
+    month: item.month,
+    description: [item.merchant, item.expenseType, item.program].filter(Boolean).join(' — '),
+    vendor: item.merchant,
+    grantId: item.grantId ?? null,
+    lineItemId: item.lineItemId ?? null,
+    customerId: item.customerId ?? null,
+    enrollmentId: item.enrollmentId ?? null,
+    customerNameAtSpend: item.customer || null,
+    lineItemLabelAtSpend: item.program || item.project || null,
+    paymentLabelAtSpend: item.descriptor || item.formTitle || item.submissionId || null,
+    creditCardId: item.creditCardId ?? null,
+    note: noteParts.length ? noteParts : null,
+    comment: commentParts.length ? commentParts.join(' | ') : null,
+    labels,
+    origin: {
+      app: 'hdb',
+      baseId: item.id,
+      sourcePath: `paymentQueue/${item.id}`,
+      paymentQueueId: item.id,
+      paymentQueueSource: item.source,
+      jotformSubmissionId: item.submissionId || null,
+      direction: item.direction || null,
+      amountFieldId: item.amountFieldId || null,
+      extractionGroup: item.extractionGroup || null,
+    },
+  };
+}
+
 // ─── Void ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -633,6 +690,121 @@ export async function upsertProjectionQueueSpendState(args: {
  *
  * Idempotent: if `ledgerEntryId` is already set, returns the existing entry.
  */
+export async function createManualProjectionQueueItem(args: {
+  orgId: string | null;
+  grantId: string;
+  lineItemId: string | null;
+  amount: number;
+  dueDate: string;
+  customerId?: string | null;
+  customerName?: string | null;
+  caseManagerId?: string | null;
+  caseManagerName?: string | null;
+  vendor?: string | null;
+  note?: string | null;
+  actorUid?: string | null;
+}): Promise<TPaymentQueueItem> {
+  const now = isoNow();
+  const dueDate = String(args.dueDate || now.slice(0, 10)).slice(0, 10);
+  const id = db.collection(COLLECTION).doc().id;
+  const amount = Number(args.amount || 0);
+  const note = String(args.note || '').trim();
+  const vendor = String(args.vendor || '').trim();
+  const doc: TPaymentQueueItem = {
+    id,
+    baseId: id,
+    submissionId: id,
+    paymentId: id,
+    formId: 'budget-manager',
+    formAlias: 'budget-manager',
+    formTitle: 'Budget Manager Projection',
+    schemaVersion: 1,
+    source: 'projection',
+    orgId: args.orgId ?? null,
+    createdAt: `${dueDate}T00:00:00`,
+    dueDate,
+    month: dueDate.slice(0, 7),
+    amount,
+    amountAbs: Math.abs(amount),
+    direction: amount < 0 ? 'return' : 'charge',
+    merchant: vendor || args.customerName || 'Budget Manager Projection',
+    expenseType: 'projection',
+    program: '',
+    billedTo: '',
+    project: '',
+    purchasePath: '',
+    card: '',
+    cardBucket: '',
+    txnNumber: null,
+    purpose: note || 'Budget Manager projection',
+    paymentMethod: '',
+    serviceType: '',
+    otherService: '',
+    serviceScope: '',
+    wex: '',
+    descriptor: 'Budget Manager Projection',
+    customer: String(args.customerName || ''),
+    customerKey: '',
+    purchaser: '',
+    email: '',
+    isFlex: false,
+    flexReasons: [],
+    submissionIsFlex: false,
+    files: [],
+    files_txn: [],
+    files_uploadAll: [],
+    files_typed: {receipt: [], required: [], agenda: [], w9: []},
+    notes: note,
+    note,
+    rawStatus: 'unpaid',
+    rawAnswers: {},
+    transactionFields: {},
+    rawMeta: {id, form_id: 'budget-manager', status: 'unpaid', created_at: dueDate, updated_at: now},
+    grantId: args.grantId,
+    lineItemId: args.lineItemId || null,
+    pipelineId: null,
+    customerId: args.customerId ?? null,
+    enrollmentId: null,
+    creditCardId: null,
+    ledgerEntryId: null,
+    reversalEntryId: null,
+    invoiceStatus: null,
+    invoicedAt: null,
+    invoicedBy: null,
+    invoiceRef: null,
+    okUnassigned: false,
+    okUnassignedAt: null,
+    okUnassignedBy: null,
+    compliance: {},
+    extractionErrors: [],
+    extractionPath: 'fallback',
+    queueStatus: 'pending',
+    voidedAt: null,
+    voidedBy: null,
+    postedAt: null,
+    postedBy: null,
+    closedBypassLedger: false,
+    closedBypassLedgerAt: null,
+    closedBypassLedgerBy: null,
+    closedBypassLedgerReason: null,
+    reopenedAt: null,
+    reopenedBy: null,
+    reopenReason: null,
+    localModified: true,
+    localModifiedAt: now,
+    localModifiedBy: args.actorUid ?? null,
+    localModifiedFields: ['amount', 'grantId', 'lineItemId', 'customerId'],
+    localModificationReason: 'Budget Manager projection',
+    createdAtISO: now,
+    updatedAtISO: now,
+    system: {lastWriter: 'createManualProjectionQueueItem', lastWriteAt: now, extractionVersion: 1},
+  };
+  (doc as any).caseManagerId = args.caseManagerId ?? null;
+  (doc as any).caseManagerName = args.caseManagerName ?? null;
+  await db.collection(COLLECTION).doc(id).set(removeUndefinedDeep(doc) as any, {merge: false});
+  return doc;
+}
+
 export async function postPaymentQueueToLedger(
     id: string,
     body: TPaymentQueuePostToLedgerBody,
@@ -660,52 +832,9 @@ export async function postPaymentQueueToLedger(
 
   const now = isoNow();
   const actor = actorUid ?? body.postedBy ?? null;
-  const labels = [
-    item.source,
-    item.cardBucket || null,
-    item.isFlex ? 'flex' : null,
-    'paymentQueue',
-    item.source === 'invoice' ? 'invoice' : null,
-    item.source === 'credit-card' ? 'credit-card' : null,
-  ].filter(Boolean) as string[];
-  const noteParts = [item.note, item.notes, item.purpose, item.descriptor].filter(Boolean).map(String);
-  const commentParts = [item.expenseType, item.program, item.project].filter(Boolean).map(String);
 
   const txResult = await db.runTransaction(async (trx) => {
-    const rawEntry: Record<string, unknown> = {
-      id: body.ledgerEntryId || undefined,
-      orgId: item.orgId,
-      source: item.source === 'credit-card' ? 'card' : 'manual',
-      amount: item.amount,
-      amountCents: Math.round(item.amount * 100),
-      dueDate: item.dueDate || item.createdAt.slice(0, 10),
-      month: item.month,
-      description: [item.merchant, item.expenseType, item.program].filter(Boolean).join(' — '),
-      vendor: item.merchant,
-      grantId: item.grantId ?? null,
-      lineItemId: item.lineItemId ?? null,
-      customerId: item.customerId ?? null,
-      enrollmentId: item.enrollmentId ?? null,
-      customerNameAtSpend: item.customer || null,
-      lineItemLabelAtSpend: item.program || item.project || null,
-      paymentLabelAtSpend: item.descriptor || item.formTitle || item.submissionId || null,
-      creditCardId: item.creditCardId ?? null,
-      note: noteParts.length ? noteParts : null,
-      comment: commentParts.length ? commentParts.join(' | ') : null,
-      labels,
-      origin: {
-        app: 'hdb',
-        baseId: item.id,
-        sourcePath: `paymentQueue/${item.id}`,
-        paymentQueueId: item.id,
-        paymentQueueSource: item.source,
-        jotformSubmissionId: item.submissionId || null,
-        direction: item.direction || null,
-        amountFieldId: item.amountFieldId || null,
-        extractionGroup: item.extractionGroup || null,
-      },
-    };
-
+    const rawEntry = buildLedgerEntryForQueueItem(item, {ledgerEntryId: body.ledgerEntryId});
     const entry = writeLedgerEntry(trx, rawEntry);
     const ledgerEntryId = entry.id as string;
 
@@ -754,6 +883,197 @@ export async function postPaymentQueueToLedger(
   }
 
   return txResult;
+}
+
+// ─── Bulk designate + post ──────────────────────────────────────────────────
+
+export type BulkDesignateResult = {
+  patched: number;
+  posted: number;
+  skipped: Array<{ id: string; reason: string }>;
+  failed: Array<{ id: string; error: string }>;
+  grantsRecomputed: string[];
+};
+
+/**
+ * Apply grant designations (or mark "no grant") to many queue rows and
+ * optionally post them to the ledger in one pass, using a single BulkWriter.
+ *
+ * Budget side-effects are batched, not per-row: after all writes flush, each
+ * affected grant's budget is recomputed exactly once (spent from ledger,
+ * projected from pending queue) plus a one-shot per-customer cap rebuild.
+ *
+ * Ledger entries use a deterministic id (`pqledger_{queueId}`) so retries and
+ * re-posts are idempotent. Already-posted rows with a linked ledger entry may
+ * be reallocated; the linked ledger row is patched in the same bulk pass.
+ */
+export async function bulkDesignatePaymentQueueItems(
+    body: TPaymentQueueBulkDesignateBody,
+    actorUid?: string,
+): Promise<BulkDesignateResult> {
+  const now = isoNow();
+  const actor = actorUid ?? body.postedBy ?? null;
+  const pipelineId = body.pipelineId ?? null;
+
+  const items = Array.from(
+      new Map(body.items.map((i) => [String(i.id), i])).values(),
+  ); // dedupe by id (last wins)
+
+  const refs = items.map((i) => db.collection(COLLECTION).doc(String(i.id)));
+  const snaps = refs.length ? await db.getAll(...refs) : [];
+  const snapById = new Map(snaps.map((s) => [s.id, s]));
+
+  const skipped: Array<{ id: string; reason: string }> = [];
+  const failed: Array<{ id: string; error: string }> = [];
+  const affectedGrantIds = new Set<string>();
+  let patched = 0;
+  let posted = 0;
+
+  const writer = newBulkWriter();
+  // BulkWriter rejects multiple ops on the same doc before a flush, so each
+  // queue row gets exactly one merged update (designation + optional post).
+  let hasWrites = false;
+
+  for (const input of items) {
+    const id = String(input.id);
+    const snap = snapById.get(id);
+    if (!snap || !snap.exists) {
+      skipped.push({id, reason: 'not_found'});
+      continue;
+    }
+    const item = docToItem(snap);
+    const prev = (snap.data() || {}) as Record<string, unknown>;
+
+    const assigned = !!(input.grantId && String(input.grantId).trim());
+    const targetGrantId = assigned ? String(input.grantId).trim() : null;
+    const targetLineItemId = assigned ? (input.lineItemId ? String(input.lineItemId).trim() : null) : null;
+
+    if (assigned && !targetLineItemId) {
+      failed.push({id, error: 'line_item_required_for_grant'});
+      continue;
+    }
+
+    const localFields = ['grantId', 'lineItemId', 'pipelineId', 'okUnassigned'];
+    const prevLocal = Array.isArray(prev.localModifiedFields) ? prev.localModifiedFields.map(String) : [];
+    const queueUpdate: Record<string, unknown> = {
+      grantId: targetGrantId,
+      lineItemId: targetLineItemId,
+      pipelineId: assigned ? pipelineId : null,
+      okUnassigned: !assigned,
+      okUnassignedAt: assigned ? null : now,
+      okUnassignedBy: assigned ? null : actor,
+      updatedAtISO: now,
+      localModified: true,
+      localModifiedAt: now,
+      localModifiedBy: actor,
+      localModifiedFields: Array.from(new Set([...prevLocal, ...localFields])),
+      localModificationReason: body.localModificationReason ??
+        (assigned ? 'Grant designation from budget pipeline preview' : 'Bulk marked no grant from budget pipeline preview'),
+      'system.lastWriter': 'paymentQueueBulkDesignate',
+      'system.lastWriteAt': now,
+    };
+
+    const prevGrantId = String(item.grantId || '').trim();
+    const prevLineItemId = String(item.lineItemId || '').trim();
+    const allocationChanged = prevGrantId !== String(targetGrantId || '') || prevLineItemId !== String(targetLineItemId || '');
+    const reallocatesLinkedLedger = item.queueStatus === 'posted' && !!item.ledgerEntryId && allocationChanged;
+
+    if (reallocatesLinkedLedger) {
+      const itemForLedgerMove: TPaymentQueueItem = {
+        ...item,
+        grantId: targetGrantId,
+        lineItemId: targetLineItemId,
+        okUnassigned: !assigned,
+      };
+      try {
+        await assertQueueGrantLineItem(itemForLedgerMove);
+      } catch (err: any) {
+        failed.push({id, error: err?.message || 'ledger_reallocation_validation_failed'});
+        continue;
+      }
+    }
+
+    let willPost = false;
+    if (input.post && !item.ledgerEntryId) {
+      if (item.queueStatus === 'void') {
+        failed.push({id, error: 'voided'});
+        continue;
+      }
+      if (item.source === 'projection') {
+        failed.push({id, error: 'use_payments_spend_for_projection'});
+        continue;
+      }
+      const itemForPost: TPaymentQueueItem = {
+        ...item,
+        grantId: targetGrantId,
+        lineItemId: targetLineItemId,
+        okUnassigned: !assigned,
+      };
+      try {
+        await assertQueueGrantLineItem(itemForPost);
+      } catch (err: any) {
+        failed.push({id, error: err?.message || 'post_validation_failed'});
+        continue;
+      }
+      const ledgerEntryId = `pqledger_${id}`;
+      const rawEntry = buildLedgerEntryForQueueItem(itemForPost, {ledgerEntryId});
+      // Route through writeLedgerEntry so the ledger doc gets the same
+      // normalization as the single-post path (ts / createdAt / updatedAt /
+      // month / amountCents). BulkWriter satisfies the .set() interface it needs,
+      // and the deterministic id keeps re-posts idempotent.
+      writeLedgerEntry(writer as unknown as FirebaseFirestore.WriteBatch, rawEntry);
+      Object.assign(queueUpdate, {
+        queueStatus: 'posted',
+        ledgerEntryId,
+        postedAt: now,
+        postedBy: actor,
+        reopenedAt: null,
+        reopenedBy: null,
+        reopenReason: null,
+      });
+      willPost = true;
+    }
+
+    writer.update(snap.ref, removeUndefinedDeep(queueUpdate) as any);
+    if (reallocatesLinkedLedger && item.ledgerEntryId) {
+      writer.update(
+        db.collection('ledger').doc(item.ledgerEntryId),
+        removeUndefinedDeep({
+          grantId: targetGrantId,
+          lineItemId: targetLineItemId,
+          updatedAt: FieldValue.serverTimestamp(),
+          byUid: actor,
+          adjustReason: body.localModificationReason ?? 'Grant designation from budget pipeline preview',
+          'system.lastWriter': 'paymentQueueBulkDesignate',
+          'system.lastWriteAt': now,
+        }) as any,
+      );
+    }
+    hasWrites = true;
+    patched += 1;
+    if (willPost) posted += 1;
+
+    // Both the new grant and the row's previous grant need a projected/spent
+    // refresh when allocation changes.
+    if (targetGrantId) affectedGrantIds.add(targetGrantId);
+    if (prevGrantId) affectedGrantIds.add(prevGrantId);
+  }
+
+  if (hasWrites) await writer.close();
+
+  // One budget recompute + cap rebuild per affected grant, after all writes land.
+  const grantsRecomputed: string[] = [];
+  for (const grantId of affectedGrantIds) {
+    try {
+      const res = await recomputeGrantBudgetFromLedger(grantId);
+      await recomputeCustomerSpendForGrant({grantId}).catch(() => null);
+      if (res.recomputed) grantsRecomputed.push(grantId);
+    } catch {
+      /* non-fatal per grant */
+    }
+  }
+
+  return {patched, posted, skipped, failed, grantsRecomputed};
 }
 
 export async function bypassClosePaymentQueueItems(
@@ -984,6 +1304,10 @@ export async function upsertPaymentQueueItems(
         voidedBy: prev.voidedBy ?? null,
         postedAt: prev.postedAt ?? null,
         postedBy: prev.postedBy ?? null,
+        closedBypassLedger: (prev as any).closedBypassLedger ?? null,
+        closedBypassLedgerAt: (prev as any).closedBypassLedgerAt ?? null,
+        closedBypassLedgerBy: (prev as any).closedBypassLedgerBy ?? null,
+        closedBypassLedgerReason: (prev as any).closedBypassLedgerReason ?? null,
         reopenedAt: prev.reopenedAt ?? null,
         reopenedBy: prev.reopenedBy ?? null,
         reopenReason: prev.reopenReason ?? null,
@@ -995,6 +1319,7 @@ export async function upsertPaymentQueueItems(
         okUnassigned: false, okUnassignedAt: null, okUnassignedBy: null,
         queueStatus: 'pending' as const,
         voidedAt: null, voidedBy: null, postedAt: null, postedBy: null,
+        closedBypassLedger: null, closedBypassLedgerAt: null, closedBypassLedgerBy: null, closedBypassLedgerReason: null,
         reopenedAt: null, reopenedBy: null, reopenReason: null,
         createdAtISO: now,
       };

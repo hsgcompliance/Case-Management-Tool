@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toApiError } from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
 import { ListStyleLayout } from "@entities/Page/listStyle";
+import { PageBulkActionsBar } from "@entities/Page";
 import PageShell from "@entities/Page/PageShell";
 import PageFilterBar from "@entities/Page/PageFilterBar";
 import { FilterToggleGroup } from "@entities/ui";
@@ -19,6 +20,7 @@ import { hasAnyRole, isAdminLike, isViewerLike } from "@lib/roles";
 import { toast } from "@lib/toast";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import type { CreditCardEntity, CreditCardSummaryItem, TGrant as Grant } from "@types";
+import { fmtCurrencyUSD } from "@lib/formatters";
 import { BudgetGroupSection } from "./BudgetGroupSection";
 import { CreditCardBudgetCard } from "./CreditCardBudgetCard";
 import { CreditCardBudgetDetailModal } from "./CreditCardBudgetDetailModal";
@@ -26,8 +28,10 @@ import { BudgetConfigModal } from "./BudgetConfigModal";
 import { NewCreditCardModal } from "./NewCreditCardModal";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import PinnedGrantCards from "@features/grants/PinnedGrantCards";
+import GrantBudgetSandboxModal from "@features/grants/tabs/GrantBudgetSandboxModal";
 import { shouldShowInBudgetWorkspace } from "@features/grants/financialVisibility";
 import { HelpButton } from "@entities/help/HelpButton";
+import { useReconcileGrantBudgets } from "@hooks/useGrantBudgetManager";
 
 type FilterMode = "active" | "inactive";
 type ViewMode = "custom" | "all";
@@ -250,11 +254,16 @@ export function BudgetPage() {
   const [selectedCreditCard, setSelectedCreditCard] = useState<CreditCardSummaryItem | null>(null);
   const [newCardOpen, setNewCardOpen] = useState(false);
   const [creatingGrant, setCreatingGrant] = useState(false);
+  const [selectedGrantIds, setSelectedGrantIds] = useState<Set<string>>(new Set());
+  const [selectedGrantCache, setSelectedGrantCache] = useState<Record<string, Grant>>({});
+  const [lastSelectedGrantId, setLastSelectedGrantId] = useState<string | null>(null);
+  const [managerGrantIds, setManagerGrantIds] = useState<string[] | null>(null);
 
   const { data: activeData = [], isLoading } = useGrants({ active: true, limit: 200 });
   const { data: inactiveData = [] } = useGrants({ active: false, limit: 200 });
   const { data: config } = useOrgConfig();
   const syncSpendingForms = useSyncJotformSelection();
+  const reconcileGrantBudgets = useReconcileGrantBudgets();
   const isViewer = isViewerLike(profile);
   const canSyncSpendingForms = !isViewer && (isAdminLike(profile) || hasAnyRole(profile?.roles, ["compliance", "org_dev", "super_dev"]));
   const autoSyncFired = useRef(false);
@@ -272,6 +281,16 @@ export function BudgetPage() {
   const { grantsById, sections } = useMemo(
     () => buildSections(sourceGrants, config, search, viewMode),
     [sourceGrants, config, search, viewMode],
+  );
+  const orderedGrantIds = useMemo(
+    () => Array.from(new Set(sections.flatMap((section) => section.items.map((item) => String(item.grantId || "")).filter(Boolean)))),
+    [sections],
+  );
+  const selectedRows = useMemo(
+    () => Array.from(selectedGrantIds)
+      .map((id) => selectedGrantCache[id] || grantsById.get(id))
+      .filter((grant): grant is Grant => !!grant),
+    [grantsById, selectedGrantCache, selectedGrantIds],
   );
   const queryGrantId = String(searchParams?.get("grantId") || "").trim();
 
@@ -324,6 +343,62 @@ export function BudgetPage() {
   }, [profile]);
 
   const onOpen = (id: string) => setSelectedGrantId(id);
+  const openBudgetManager = (ids: string[]) => {
+    const normalized = Array.from(new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)));
+    if (!normalized.length) {
+      toast("Select at least one grant.", { type: "error" });
+      return;
+    }
+    setManagerGrantIds(normalized);
+  };
+  const clearSelection = () => {
+    setSelectedGrantIds(new Set());
+    setSelectedGrantCache({});
+    setLastSelectedGrantId(null);
+  };
+  const applySelectionGesture = (
+    grantId: string,
+    gesture: { source: "card" | "checkbox"; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
+  ) => {
+    const isRange = !!gesture.shiftKey;
+    const isToggle = gesture.source === "checkbox" || !!gesture.ctrlKey || !!gesture.metaKey;
+    setSelectedGrantIds((prev) => {
+      const next = new Set(prev);
+      if (isRange) {
+        const anchor = lastSelectedGrantId && orderedGrantIds.includes(lastSelectedGrantId) ? lastSelectedGrantId : grantId;
+        const a = orderedGrantIds.indexOf(anchor);
+        const b = orderedGrantIds.indexOf(grantId);
+        if (a >= 0 && b >= 0) {
+          const [start, end] = a < b ? [a, b] : [b, a];
+          for (const id of orderedGrantIds.slice(start, end + 1)) next.add(id);
+          return next;
+        }
+      }
+      if (isToggle) {
+        if (next.has(grantId)) next.delete(grantId);
+        else next.add(grantId);
+        return next;
+      }
+      return new Set([grantId]);
+    });
+    const grant = grantsById.get(grantId);
+    if (grant) {
+      setSelectedGrantCache((prev) => ({ ...prev, [grantId]: grant }));
+    }
+    setLastSelectedGrantId(grantId);
+  };
+  const onBulkReconcile = async () => {
+    if (!selectedGrantIds.size) {
+      toast("Select at least one grant.", { type: "error" });
+      return;
+    }
+    try {
+      const result = await reconcileGrantBudgets.mutateAsync({ grantIds: Array.from(selectedGrantIds) });
+      toast(`Reconciled ${result.affectedGrantIds.length} grant${result.affectedGrantIds.length === 1 ? "" : "s"}.`, { type: result.failed.length ? "warning" : "success" });
+    } catch (error: unknown) {
+      toast(toApiError(error, "Failed to reconcile grants.").error, { type: "error" });
+    }
+  };
 
   const tabClass = (active: boolean) =>
     [
@@ -434,6 +509,33 @@ export function BudgetPage() {
             />
           </PageFilterBar>
 
+          {selectedRows.length > 0 ? (
+            <PageBulkActionsBar
+              selectedCount={selectedGrantIds.size}
+              noun="grant"
+              statusText="Selection persists while you search or change budget views."
+              onClear={clearSelection}
+            >
+              <button
+                type="button"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                onClick={() => openBudgetManager(Array.from(selectedGrantIds))}
+              >
+                Manage Ledger
+              </button>
+              {!isViewer && (
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                  disabled={reconcileGrantBudgets.isPending}
+                  onClick={() => void onBulkReconcile()}
+                >
+                  {reconcileGrantBudgets.isPending ? "Reconciling..." : "Reconcile with Ledger"}
+                </button>
+              )}
+            </PageBulkActionsBar>
+          ) : null}
+
           {/* Budget sections */}
           {isLoading && filter === "active" ? (
             <div className="py-10 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</div>
@@ -467,6 +569,10 @@ export function BudgetPage() {
                   items={s.items}
                   grantsById={grantsById}
                   onOpen={onOpen}
+                  onManageBudget={(id) => openBudgetManager([id])}
+                  selectedIds={selectedGrantIds}
+                  selectionMode={selectedGrantIds.size > 0}
+                  onSelectGesture={applySelectionGesture}
                 />
               ))}
             </div>
@@ -509,6 +615,21 @@ export function BudgetPage() {
         <GrantWorkspaceModal
           grantId={selectedGrantId}
           onClose={() => setSelectedGrantId(null)}
+        />
+      )}
+
+      {managerGrantIds && (
+        <GrantBudgetSandboxModal
+          isOpen={!!managerGrantIds}
+          onClose={() => setManagerGrantIds(null)}
+          grantIds={managerGrantIds}
+          readOnly={isViewer}
+          canSave={!isViewer}
+          grantId={managerGrantIds[0] || ""}
+          grantName="Budget Manager"
+          seedRows={[]}
+          lineItems={[]}
+          currency={fmtCurrencyUSD}
         />
       )}
     </ListStyleLayout>

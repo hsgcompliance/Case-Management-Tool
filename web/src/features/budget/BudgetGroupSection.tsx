@@ -26,6 +26,10 @@ interface BudgetGroupSectionProps {
   /** All active grants keyed by ID — used to look up grants for each item. */
   grantsById: Map<string, Grant>;
   onOpen: (grantId: string) => void;
+  onManageBudget?: (grantId: string) => void;
+  selectedIds?: Set<string>;
+  selectionMode?: boolean;
+  onSelectGesture?: (grantId: string, gesture: { source: "card" | "checkbox"; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => void;
 }
 
 export function BudgetGroupSection({
@@ -35,6 +39,10 @@ export function BudgetGroupSection({
   items,
   grantsById,
   onOpen,
+  onManageBudget,
+  selectedIds,
+  selectionMode,
+  onSelectGesture,
 }: BudgetGroupSectionProps) {
   // Resolve items to grants (skip missing)
   const resolved = items
@@ -89,6 +97,10 @@ export function BudgetGroupSection({
             labelOverride={item.labelOverride}
             accentColor={item.color}
             onClick={() => onOpen(item.grantId)}
+            onManageBudget={onManageBudget}
+            selected={selectedIds?.has(String(item.grantId)) ?? false}
+            selectionMode={selectionMode}
+            onSelectGesture={onSelectGesture}
           />
         ))}
       </div>

@@ -30,6 +30,7 @@ export * as enrollments from "./enrollments";
 export * as gdrive from "./gdrive";
 export * as google from "./google";
 export * as grants from "./grants";
+export * as grantBudgetManager from "./grantBudgetManager";
 export * as inbox from "./inbox";
 export * as jotform from "./jotform";
 export * as ledger from "./ledger";
@@ -65,6 +66,18 @@ export {
   TsLike,
   ISO10,
 } from "./core";
+
+export {
+  GrantBudgetManagerSourceType,
+  GrantBudgetManagerSaveMode,
+  GrantBudgetManagerOriginal,
+  GrantBudgetManagerRow,
+  GrantBudgetManagerLineItem,
+  GrantBudgetManagerRollup,
+  GrantBudgetManagerLoadBody,
+  GrantBudgetManagerSaveBody,
+  GrantBudgetManagerReconcileBody,
+} from "./grantBudgetManager";
 
 // Assessments (local types)
 export type {
@@ -136,6 +149,21 @@ export type {
   TCreditCardsSummaryItem,
   TCreditCardsSummaryResp,
 } from "./creditCards";
+
+export type {
+  TGrantBudgetManagerSourceType,
+  TGrantBudgetManagerSaveMode,
+  TGrantBudgetManagerOriginal,
+  TGrantBudgetManagerRow,
+  TGrantBudgetManagerLineItem,
+  TGrantBudgetManagerRollup,
+  TGrantBudgetManagerLoadBody,
+  TGrantBudgetManagerLoadResp,
+  TGrantBudgetManagerSaveBody,
+  TGrantBudgetManagerSaveResp,
+  TGrantBudgetManagerReconcileBody,
+  TGrantBudgetManagerReconcileResp,
+} from "./grantBudgetManager";
 
 // Enrollments
 export type {
