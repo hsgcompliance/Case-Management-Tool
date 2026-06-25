@@ -29,6 +29,8 @@ type PageFilterBarProps = {
   actions?: React.ReactNode;
   /** The expanded filter controls shown below the search row when the bar is open */
   children?: React.ReactNode;
+  /** Always-visible content attached to the bottom of the pinned/floating filter bar. */
+  attachedFooter?: React.ReactNode;
   /** Start expanded (default: false) */
   defaultExpanded?: boolean;
 };
@@ -41,6 +43,7 @@ export function PageFilterBar({
   resultLabel,
   actions,
   children,
+  attachedFooter,
   defaultExpanded = false,
 }: PageFilterBarProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
@@ -190,6 +193,11 @@ export function PageFilterBar({
               {children}
             </div>
           ) : null}
+          {attachedFooter ? (
+            <div className="border-t border-slate-200 px-3 py-3 dark:border-slate-700">
+              {attachedFooter}
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -240,6 +248,11 @@ export function PageFilterBar({
         {/* Filter content */}
         <div className="overflow-auto px-3 py-3">
           {children}
+          {attachedFooter ? (
+            <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+              {attachedFooter}
+            </div>
+          ) : null}
           {actions ? (
             <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
               {actions}

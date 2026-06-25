@@ -49,6 +49,58 @@ function rowInGrantWindow(row: Record<string, unknown>, grantData: Record<string
   return true;
 }
 
+function rowInSplitWindow(date: string, goal: Record<string, unknown>): boolean {
+  const start = isoDate10(goal.startDate);
+  const end = isoDate10(goal.endDate);
+  if (!date || !start || !end) return false;
+  return date >= start && date <= end;
+}
+
+function addSplitAmount(
+  splitAcc: Record<string, Record<string, { spentCents: number; projectedCents: number }>>,
+  lineItem: Record<string, unknown> | undefined,
+  kind: "spent" | "projected",
+  amountCents: number,
+  date: string,
+) {
+  if (!lineItem || !amountCents || !date) return;
+  const lineItemId = String(lineItem.id || "");
+  const splitGoals = Array.isArray(lineItem.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
+  if (!lineItemId || !splitGoals.length) return;
+  for (const goal of splitGoals) {
+    const goalId = String(goal.id || "");
+    if (!goalId || !rowInSplitWindow(date, goal)) continue;
+    const byGoal = splitAcc[lineItemId] ?? (splitAcc[lineItemId] = {});
+    const acc = byGoal[goalId] ?? (byGoal[goalId] = { spentCents: 0, projectedCents: 0 });
+    if (kind === "spent") acc.spentCents += amountCents;
+    else acc.projectedCents += amountCents;
+  }
+}
+
+function applySplitRollups(
+  lineItem: Record<string, unknown>,
+  splitAcc: Record<string, { spentCents: number; projectedCents: number }> | undefined,
+) {
+  const splitGoals = Array.isArray(lineItem.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
+  if (!splitGoals.length) return lineItem;
+  return {
+    ...lineItem,
+    splitGoals: splitGoals.map((goal) => {
+      const acc = splitAcc?.[String(goal.id || "")] ?? { spentCents: 0, projectedCents: 0 };
+      const amountCents = toBudgetCents(goal.amount);
+      const spentCents = Math.max(0, acc.spentCents);
+      const projectedCents = Math.max(0, acc.projectedCents);
+      return {
+        ...goal,
+        spent: fromBudgetCents(spentCents),
+        projected: fromBudgetCents(projectedCents),
+        balance: fromBudgetCents(amountCents - spentCents),
+        projectedBalance: fromBudgetCents(amountCents - spentCents - projectedCents),
+      };
+    }),
+  };
+}
+
 export type GrantBudgetRecomputeResult = {
   grantId: string;
   recomputed: boolean;
@@ -86,6 +138,8 @@ export async function recomputeGrantBudgetFromLedger(
     db.collection("paymentQueue").where("grantId", "==", id).where("queueStatus", "==", "pending").get(),
   ]);
 
+  const lineItemById = new Map(lineItems.map((li) => [String(li.id || ""), li]));
+  const splitAccByLineId: Record<string, Record<string, { spentCents: number; projectedCents: number }>> = {};
   const spentByLineCents: Record<string, number> = {};
   for (const d of ledgerSnap.docs) {
     const row = d.data() as Record<string, unknown>;
@@ -96,6 +150,7 @@ export async function recomputeGrantBudgetFromLedger(
       ? Math.round(Number(row.amountCents) || 0)
       : toBudgetCents(row.amount);
     if (amountCents) spentByLineCents[lineId] = (spentByLineCents[lineId] ?? 0) + amountCents;
+    addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "spent", amountCents, rowBudgetDate(row));
   }
 
   const projectedByLineCents: Record<string, number> = {};
@@ -108,13 +163,14 @@ export async function recomputeGrantBudgetFromLedger(
     const lineId = String(row.lineItemId || "") || "__none__";
     const amountCents = toBudgetCents(row.amount);
     if (amountCents) projectedByLineCents[lineId] = (projectedByLineCents[lineId] ?? 0) + amountCents;
+    addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "projected", amountCents, rowBudgetDate(row));
   }
 
   const updatedLineItems = lineItems.map((li) => {
     const liId = String(li.id || "");
     const spent = fromBudgetCents(spentByLineCents[liId] ?? 0);
     const projected = fromBudgetCents(projectedByLineCents[liId] ?? 0);
-    const next: Record<string, unknown> = { ...li, spent, projected, spentInWindow: spent, projectedInWindow: projected };
+    const next: Record<string, unknown> = applySplitRollups({ ...li, spent, projected, spentInWindow: spent, projectedInWindow: projected }, splitAccByLineId[liId]);
     const overCap = computeGrantLineItemOverCap(grantData, next);
     if (overCap != null) next.overCap = overCap;
     else delete next.overCap;

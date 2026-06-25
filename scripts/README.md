@@ -7,26 +7,37 @@ Node.js automation scripts for HDB v2. All scripts are ESM (`.mjs`) and run with
 ## Deploy
 
 ### `deploy-functions-safe.mjs`
-Chunked all-functions deploy. Avoids accidentally deleting extra deployed functions by deploying in batches.
+Chunked all-functions deploy. Avoids accidentally deleting extra deployed functions by deploying in batches. Checks out the selected function names before deploy so another agent can deploy disjoint functions in parallel but cannot deploy the same function at the same time.
 ```sh
-node scripts/deploy-functions-safe.mjs housing-db-v2 [--list-only] [--no-push] [--start-at=<fn>] [--match='^(grants|customers)'] [--hosting]
+node scripts/deploy-functions-safe.mjs housing-db-v2 [--list-only] [--no-push] [--start-at=<fn>] [--match='^(grants|customers)'] [--hosting] [--hosting-all]
 ```
 - `--list-only` — preview chunks without deploying
 - `--start-at=<fn>` — resume after a failed chunk
 - `--match=<regex>` — deploy only matching functions
-- `--hosting` — also deploy hosting after functions
-- `--no-push` — skip GitHub push
+- `--hosting` - also deploy web hosting (`hosting:web`) after functions
+- `--hosting-all` - also deploy every configured Firebase Hosting target after functions
+- `--no-push` - skip GitHub push
 
 ### `deploy-hosting-safe.mjs`
-Deploy Firebase Hosting only (skips functions).
+Deploy Firebase Hosting targets with target-aware checkouts. This defaults to `hosting:web`; pass `--target=mobile` or `--target=forms` for static targets, and `--build` to run that target's build first. Pass `--all` only when every configured Firebase Hosting target should deploy.
 ```sh
-node scripts/deploy-hosting-safe.mjs [--no-push]
+node scripts/deploy-hosting-safe.mjs [--no-push] [--all] [--target=web|mobile|forms] [--build]
 ```
+
+### `deploy-status.mjs`
+Show active deploy/build checkouts in `.deploy-checkouts/`.
+```sh
+node scripts/deploy-status.mjs
+```
+
+Deploy and contracts scripts wait for conflicting checkouts by default. Conflict keys include `functions:<name>`, `functions:all`, `hosting:<target>`, `hosting:all`, and `build:contracts`.
+
+Full function deploys (`deploy:functions`, `deploy:functions-hosting`, and `deploy:all`) are opportunistic: they skip functions that are already checked out and deploy the unchecked-out functions. If their follow-up hosting target is checked out, they skip that hosting deploy. Targeted deploys such as `--match=...`, `--start-at=...`, and direct hosting deploys still wait for their requested target.
 
 ### `deploy-missing-functions-and-hosting.mjs`
 Diff-based deploy: compares local functions against currently deployed ones and deploys only those missing.
 ```sh
-node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 [--list-only] [--hosting] [--no-push]
+node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 [--list-only] [--hosting] [--hosting-all] [--no-push]
 ```
 
 ### `reset-and-redeploy.mjs`
@@ -42,6 +53,7 @@ Builds the `contracts/` package and vendors the output into `functions/vendor/co
 ```sh
 node scripts/pack-contracts.mjs
 ```
+This script checks out `build:contracts` so concurrent builds/deploys wait while shared generated contract outputs are being rewritten.
 
 ### `update-contracts.mjs`
 Rebuilds contracts with update semantics (preserves existing vendor structure, re-copies dist).

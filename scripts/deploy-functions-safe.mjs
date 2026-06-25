@@ -12,6 +12,8 @@
  *   node scripts/deploy-functions-safe.mjs housing-db-v2 --match='^(grants|customers)' --no-push
  * - Deploy all local functions, then hosting, serially:
  *   node scripts/deploy-functions-safe.mjs housing-db-v2 --hosting --no-push
+ * - Deploy all local functions, then all hosting targets:
+ *   node scripts/deploy-functions-safe.mjs housing-db-v2 --hosting-all --no-push
  */
 import fs from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
@@ -19,6 +21,12 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
+import {
+  acquireDeployCheckouts,
+  describeDeployCheckout,
+  getDeployCheckoutConflicts,
+  withDeployCheckouts,
+} from "./lib/deployCheckouts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -29,7 +37,8 @@ const PROJECT = process.argv[2] && !process.argv[2].startsWith("--")
   : "housing-db-v2";
 const LIST_ONLY = process.argv.includes("--list-only") || process.argv.includes("--dry-run");
 const NO_BUILD = process.argv.includes("--no-build");
-const WITH_HOSTING = process.argv.includes("--hosting");
+const WITH_HOSTING = process.argv.includes("--hosting") || process.argv.includes("--hosting-all");
+const DEPLOY_ALL_HOSTING = process.argv.includes("--hosting-all");
 const { shouldPush, commitMsg } = parsePushArgs();
 
 const chunkSizeArg = process.argv.find((a) => a.startsWith("--chunk-size="));
@@ -46,9 +55,9 @@ const MATCH = matchArg ? new RegExp(matchArg.slice("--match=".length)) : null;
 
 const maxChunksArg = process.argv.find((a) => a.startsWith("--max-chunks="));
 const MAX_CHUNKS = maxChunksArg ? Math.max(1, Number(maxChunksArg.slice("--max-chunks=".length))) : 0;
+const DEPLOY_AVAILABLE_ONLY = !MATCH && !START_AT && !START_AFTER;
 
 const TEMP_CONFIG = path.join(ROOT, ".firebase.deploy-functions-safe.json");
-const LOCK_FILE = path.join(ROOT, ".firebase.deploy.lock");
 
 function run(cmd, args, { allowFailure = false, cwd = ROOT, env = process.env, stdio = "inherit" } = {}) {
   const result = spawnSync(cmd, args, {
@@ -82,29 +91,6 @@ function writeTempFirebaseConfig() {
 function cleanupTempFirebaseConfig() {
   try {
     fs.unlinkSync(TEMP_CONFIG);
-  } catch {
-    // ignore
-  }
-}
-
-function acquireDeployLock() {
-  try {
-    fs.writeFileSync(
-      LOCK_FILE,
-      JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), script: path.basename(process.argv[1]) }),
-      { flag: "wx" },
-    );
-  } catch (error) {
-    if (error?.code === "EEXIST") {
-      throw new Error(`Another deploy is already running (${LOCK_FILE}).`);
-    }
-    throw error;
-  }
-}
-
-function releaseDeployLock() {
-  try {
-    fs.unlinkSync(LOCK_FILE);
   } catch {
     // ignore
   }
@@ -176,6 +162,35 @@ function applyWindow(names) {
   return out;
 }
 
+function filterCheckedOutFunctions(names) {
+  if (!DEPLOY_AVAILABLE_ONLY) return { deployable: names, skipped: [] };
+
+  const conflicts = getDeployCheckoutConflicts(
+    names.map((name) => `functions:${name}`),
+    { root: ROOT },
+  );
+  if (!conflicts.length) return { deployable: names, skipped: [] };
+
+  const blocksAllFunctions = conflicts.some((checkout) => checkout.key === "functions:all");
+  const checkedOutNames = new Set(
+    conflicts
+      .map((checkout) => String(checkout.key || ""))
+      .filter((key) => key.startsWith("functions:"))
+      .map((key) => key.slice("functions:".length)),
+  );
+
+  const skipped = blocksAllFunctions ? names : names.filter((name) => checkedOutNames.has(name));
+  const skippedSet = new Set(skipped);
+  const deployable = names.filter((name) => !skippedSet.has(name));
+
+  console.log("Skipping checked-out function deploy targets:");
+  for (const checkout of conflicts) {
+    console.log(`  ${describeDeployCheckout(checkout)}`);
+  }
+
+  return { deployable, skipped };
+}
+
 function deployChunk(group, index, total) {
   const onlyValue = group.map((name) => `functions:${name}`).join(",");
   console.log(`Deploying chunk ${index + 1}/${total} (${group.length}): ${group.join(", ")}`);
@@ -193,13 +208,28 @@ function deployChunk(group, index, total) {
 }
 
 function deployHosting() {
-  console.log("Deploying hosting after function chunks...");
-  run("firebase", ["experiments:disable", "pintags"]);
-  run("firebase", ["deploy", "--project", PROJECT, "--only", "hosting"]);
+  const hostingTarget = DEPLOY_ALL_HOSTING ? "hosting" : "hosting:web";
+  const checkoutKeys = DEPLOY_ALL_HOSTING ? ["hosting:all"] : ["hosting:web", "functions:ssrhousingdbv2"];
+  console.log(`Deploying ${hostingTarget} after function chunks...`);
+  if (DEPLOY_AVAILABLE_ONLY) {
+    const conflicts = getDeployCheckoutConflicts(checkoutKeys, { root: ROOT });
+    if (conflicts.length) {
+      console.log(`Skipping ${hostingTarget}; deploy target is checked out:`);
+      for (const checkout of conflicts) {
+        console.log(`  ${describeDeployCheckout(checkout)}`);
+      }
+      return;
+    }
+  }
+  withDeployCheckouts(checkoutKeys, { root: ROOT, description: `firebase deploy --only ${hostingTarget}` }, () => {
+    run("firebase", ["experiments:disable", "pintags"]);
+    run("firebase", ["deploy", "--project", PROJECT, "--only", hostingTarget]);
+  });
 }
 
+let releaseSelectedFunctions = () => {};
+
 try {
-  acquireDeployLock();
   console.log(`Project: ${PROJECT}`);
   console.log(`Chunk size: ${CHUNK_SIZE}`);
 
@@ -212,15 +242,18 @@ try {
 
   const localAll = getLocalFunctionNames();
   const selected = applyWindow(localAll);
+  const { deployable, skipped } = filterCheckedOutFunctions(selected);
   const deployed = getDeployedFunctionNames();
   const deployedSet = new Set(deployed);
   const localSet = new Set(localAll);
   const missing = localAll.filter((name) => !deployedSet.has(name));
   const extra = deployed.filter((name) => !localSet.has(name));
-  const groups = chunk(selected, CHUNK_SIZE).slice(0, MAX_CHUNKS || undefined);
+  const groups = chunk(deployable, CHUNK_SIZE).slice(0, MAX_CHUNKS || undefined);
 
   console.log(`Local exported functions: ${localAll.length}`);
   console.log(`Selected for deploy: ${selected.length}`);
+  if (skipped.length) console.log(`Skipped checked-out functions: ${skipped.length} (${skipped.join(", ")})`);
+  console.log(`Deployable now: ${deployable.length}`);
   console.log(`Deployed functions: ${deployed.length || "unknown"}`);
   if (missing.length) console.log(`Missing deployed functions: ${missing.join(", ")}`);
   if (extra.length) console.log(`Extra deployed functions left untouched: ${extra.join(", ")}`);
@@ -228,13 +261,17 @@ try {
   groups.forEach((group, i) => console.log(`  ${i + 1}: ${group[0]} ... ${group[group.length - 1]} (${group.length})`));
 
   if (!LIST_ONLY) {
+    releaseSelectedFunctions = acquireDeployCheckouts(
+      deployable.map((name) => `functions:${name}`),
+      { root: ROOT, description: "chunked functions deploy" },
+    );
     writeTempFirebaseConfig();
     groups.forEach((group, index) => deployChunk(group, index, groups.length));
     if (WITH_HOSTING) deployHosting();
   }
 } finally {
   cleanupTempFirebaseConfig();
-  releaseDeployLock();
+  releaseSelectedFunctions();
 }
 
 if (shouldPush) {

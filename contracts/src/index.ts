@@ -27,6 +27,7 @@ export * as assessments from "./assessments";
 export * as customers from "./customers";
 export * as creditCards from "./creditCards";
 export * as enrollments from "./enrollments";
+export * as formSessions from "./formSessions";
 export * as gdrive from "./gdrive";
 export * as google from "./google";
 export * as grants from "./grants";
@@ -194,6 +195,42 @@ export type {
   TEnrollmentsUndoMigrationBody,
   TEnrollmentsAdminReverseLedgerEntryBody,
 } from "./enrollments";
+
+// Form Sessions (Forms surface)
+export type {
+  TFormWorkflowId,
+  TFormRenderMode,
+  TFormSessionStatus,
+  TFormSessionSource,
+  TFormWorkflowConfig,
+  TFormContextKey,
+  TFormPrefillSnapshot,
+  TFormSubmissionSnapshot,
+  TFormSessionEntity,
+  TFormSessionCreateBody,
+  TFormSessionCreateResp,
+  TFormSessionResolveBody,
+  TFormSessionResolved,
+  TFormSessionResolveResp,
+  TFormSessionCompleteBody,
+  TFormSessionCompleteResp,
+} from "./formSessions";
+export {
+  FormWorkflowId,
+  FormRenderMode,
+  FormSessionStatus,
+  FormSessionSource,
+  FormWorkflowConfig,
+  FormPrefillSnapshot,
+  FormSubmissionSnapshot,
+  FormSessionEntity,
+  FormSessionCreateBody,
+  FormSessionResolveBody,
+  FormSessionCompleteBody,
+  FORM_CONTEXT_KEYS,
+  WORKFLOW_CONFIGS,
+  getWorkflowConfig,
+} from "./formSessions";
 
 // Drive
 export type {

@@ -332,6 +332,9 @@ export const endpointsLoose = {
   paymentQueueRecomputeGrantAllocations: { method: 'POST', path: 'paymentQueueRecomputeGrantAllocations' },
   paymentQueueAdminSync:        { method: 'POST',  path: 'paymentQueueAdminSync' },
 
+  // FORM SESSIONS (tokenized Forms surface launcher; create is authed:user)
+  createFormSession:            { method: 'POST',  path: 'createFormSession' },
+
   // BUDGET PIPELINE (runtime endpoints not promoted into contracts yet)
   budgetPipelineRollup:         { method: 'GET',   path: 'budgetPipelineRollup' },
   // Loose alias for the (drifted, non-contracted) recalc endpoint, used to

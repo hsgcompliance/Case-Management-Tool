@@ -2,6 +2,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { withDeployCheckouts } from "./lib/deployCheckouts.mjs";
 
 const ROOT = process.cwd();
 const contractsDir = path.join(ROOT, "contracts");
@@ -108,4 +109,4 @@ function main() {
   console.log(`  npm -w web run build`);
 }
 
-main();
+withDeployCheckouts(["build:contracts"], { root: ROOT, description: "update contracts package" }, main);

@@ -1,0 +1,32 @@
+{
+  "name": "forms-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "dev": "vite --port 5176",
+    "prebuild": "node ../scripts/pack-contracts.mjs",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 5177"
+  },
+  "dependencies": {
+    "firebase": "^12.13.0",
+    "qrcode.react": "^4.2.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-router-dom": "^7.15.1"
+  },
+  "devDependencies": {
+    "@hdb/contracts": "file:vendor/contracts",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4.5.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5",
+    "vite": "^6.0.0"
+  }
+}

@@ -791,6 +791,73 @@ function _canRunSpendDownBudgetAction(data: Record<string, unknown>): boolean {
   return getGrantFinancialCapabilities(data).drawsDownBudget;
 }
 
+function _isoDate10(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "object" && value && typeof (value as { toDate?: unknown }).toDate === "function") {
+    const d = (value as { toDate: () => Date }).toDate();
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  const d = new Date(value as never);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
+function _budgetRowDate(row: Record<string, unknown>): string {
+  return _isoDate10(row.dueDate || row.date || row.paymentDate || row.serviceDate || row.postedAt || row.createdAt || row.updatedAt);
+}
+
+function _addSplitAmount(
+  splitAcc: Record<string, Record<string, { spentCents: number; projectedCents: number }>>,
+  lineItem: Record<string, unknown> | undefined,
+  kind: "spent" | "projected",
+  amountCents: number,
+  date: string,
+) {
+  const lineItemId = String(lineItem?.id || "");
+  const splitGoals = Array.isArray(lineItem?.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
+  if (!lineItemId || !splitGoals.length || !amountCents || !date) return;
+  for (const goal of splitGoals) {
+    const goalId = String(goal.id || "");
+    const start = _isoDate10(goal.startDate);
+    const end = _isoDate10(goal.endDate);
+    if (!goalId || !start || !end || date < start || date > end) continue;
+    const byGoal = splitAcc[lineItemId] ?? (splitAcc[lineItemId] = {});
+    const acc = byGoal[goalId] ?? (byGoal[goalId] = { spentCents: 0, projectedCents: 0 });
+    if (kind === "spent") acc.spentCents += amountCents;
+    else acc.projectedCents += amountCents;
+  }
+}
+
+function _applySplitRollups(
+  lineItem: Record<string, unknown>,
+  splitAcc: Record<string, { spentCents: number; projectedCents: number }> | undefined,
+) {
+  const splitGoals = Array.isArray(lineItem.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
+  if (!splitGoals.length) return lineItem;
+  return {
+    ...lineItem,
+    splitGoals: splitGoals.map((goal) => {
+      const acc = splitAcc?.[String(goal.id || "")] ?? { spentCents: 0, projectedCents: 0 };
+      const amountCents = toBudgetCents(goal.amount);
+      const spentCents = Math.max(0, acc.spentCents);
+      const projectedCents = Math.max(0, acc.projectedCents);
+      return {
+        ...goal,
+        spent: fromBudgetCents(spentCents),
+        projected: fromBudgetCents(projectedCents),
+        balance: fromBudgetCents(amountCents - spentCents),
+        projectedBalance: fromBudgetCents(amountCents - spentCents - projectedCents),
+      };
+    }),
+  };
+}
+
 /**
  * Recomputes budget totals from live ledger + pending paymentQueue data and
  * writes them back to the grant document.  Both callers (clearPayments and
@@ -822,6 +889,12 @@ async function recomputeAndWriteBudget(
       .get(),
   ]);
 
+  const budget = (grantData.budget || {}) as Record<string, unknown>;
+  const total = Number(budget.total ?? 0);
+  const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
+  const lineItemById = new Map(lineItems.map((li) => [String(li.id || ""), li]));
+  const splitAccByLineId: Record<string, Record<string, { spentCents: number; projectedCents: number }>> = {};
+
   const spentByLineCents: Record<string, number> = {};
   let ledgerCounted = 0;
   for (const d of ledgerSnap.docs) {
@@ -833,6 +906,7 @@ async function recomputeAndWriteBudget(
       : toBudgetCents(row.amount);
     if (amountCents) {
       spentByLineCents[lineId] = (spentByLineCents[lineId] ?? 0) + amountCents;
+      _addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "spent", amountCents, _budgetRowDate(row));
       ledgerCounted++;
     }
   }
@@ -848,19 +922,16 @@ async function recomputeAndWriteBudget(
     const amountCents = toBudgetCents(row.amount);
     if (amountCents) {
       projectedByLineCents[lineId] = (projectedByLineCents[lineId] ?? 0) + amountCents;
+      _addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "projected", amountCents, _budgetRowDate(row));
       queueCounted++;
     }
   }
-
-  const budget = (grantData.budget || {}) as Record<string, unknown>;
-  const total = Number(budget.total ?? 0);
-  const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
 
   const updatedLineItems = lineItems.map((li) => {
     const liId = String(li.id || "");
     const spent = fromBudgetCents(spentByLineCents[liId] ?? 0);
     const projected = fromBudgetCents(projectedByLineCents[liId] ?? 0);
-    return { ...li, spent, projected, spentInWindow: spent, projectedInWindow: projected };
+    return _applySplitRollups({ ...li, spent, projected, spentInWindow: spent, projectedInWindow: projected }, splitAccByLineId[liId]);
   });
 
   const totalCents = toBudgetCents(total);

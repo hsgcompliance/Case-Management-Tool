@@ -5,9 +5,17 @@
   "targets": {
     "housing-db-v2": {
       "hosting": {
-        "web": ["housing-db-v2"],
-        "mobile": ["housing-db-mobile"]
+        "web": [
+          "housing-db-v2"
+        ],
+        "mobile": [
+          "housing-db-mobile"
+        ],
+        "forms": [
+          "housing-db-forms"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }

@@ -1,6 +1,6 @@
 // web/src/features/budget/BudgetPage.tsx
 "use client";
-import React, { useMemo, useState, useEffect, useRef } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toApiError } from "@client/api";
@@ -29,6 +29,7 @@ import { NewCreditCardModal } from "./NewCreditCardModal";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import PinnedGrantCards from "@features/grants/PinnedGrantCards";
 import GrantBudgetSandboxModal from "@features/grants/tabs/GrantBudgetSandboxModal";
+import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
 import { shouldShowInBudgetWorkspace } from "@features/grants/financialVisibility";
 import { HelpButton } from "@entities/help/HelpButton";
 import { useReconcileGrantBudgets } from "@hooks/useGrantBudgetManager";
@@ -258,6 +259,7 @@ export function BudgetPage() {
   const [selectedGrantCache, setSelectedGrantCache] = useState<Record<string, Grant>>({});
   const [lastSelectedGrantId, setLastSelectedGrantId] = useState<string | null>(null);
   const [managerGrantIds, setManagerGrantIds] = useState<string[] | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
   const { data: activeData = [], isLoading } = useGrants({ active: true, limit: 200 });
   const { data: inactiveData = [] } = useGrants({ active: false, limit: 200 });
@@ -351,11 +353,23 @@ export function BudgetPage() {
     }
     setManagerGrantIds(normalized);
   };
-  const clearSelection = () => {
+  const clearSelection = useCallback(() => {
     setSelectedGrantIds(new Set());
     setSelectedGrantCache({});
     setLastSelectedGrantId(null);
-  };
+  }, []);
+  useEffect(() => {
+    if (!selectedGrantIds.size) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      if (tagName === "input" || tagName === "textarea" || tagName === "select" || target?.isContentEditable) return;
+      clearSelection();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [clearSelection, selectedGrantIds.size]);
   const applySelectionGesture = (
     grantId: string,
     gesture: { source: "card" | "checkbox"; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
@@ -497,6 +511,33 @@ export function BudgetPage() {
                 </button>
               ) : undefined
             }
+            attachedFooter={selectedRows.length > 0 ? (
+              <PageBulkActionsBar
+                selectedCount={selectedGrantIds.size}
+                noun="grant"
+                statusText="Selection persists while you search or change budget views. Press Esc to clear."
+                onClear={clearSelection}
+                className="rounded-lg"
+              >
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  onClick={() => openBudgetManager(Array.from(selectedGrantIds))}
+                >
+                  Manage Ledger
+                </button>
+                {!isViewer && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                    disabled={reconcileGrantBudgets.isPending}
+                    onClick={() => void onBulkReconcile()}
+                  >
+                    {reconcileGrantBudgets.isPending ? "Reconciling..." : "Reconcile with Ledger"}
+                  </button>
+                )}
+              </PageBulkActionsBar>
+            ) : undefined}
           >
             <FilterToggleGroup
               label="Status"
@@ -508,33 +549,6 @@ export function BudgetPage() {
               onChange={setFilter}
             />
           </PageFilterBar>
-
-          {selectedRows.length > 0 ? (
-            <PageBulkActionsBar
-              selectedCount={selectedGrantIds.size}
-              noun="grant"
-              statusText="Selection persists while you search or change budget views."
-              onClear={clearSelection}
-            >
-              <button
-                type="button"
-                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                onClick={() => openBudgetManager(Array.from(selectedGrantIds))}
-              >
-                Manage Ledger
-              </button>
-              {!isViewer && (
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60"
-                  disabled={reconcileGrantBudgets.isPending}
-                  onClick={() => void onBulkReconcile()}
-                >
-                  {reconcileGrantBudgets.isPending ? "Reconciling..." : "Reconcile with Ledger"}
-                </button>
-              )}
-            </PageBulkActionsBar>
-          ) : null}
 
           {/* Budget sections */}
           {isLoading && filter === "active" ? (
@@ -630,8 +644,16 @@ export function BudgetPage() {
           seedRows={[]}
           lineItems={[]}
           currency={fmtCurrencyUSD}
+          onOpenCustomer={setSelectedCustomerId}
         />
       )}
+
+      {selectedCustomerId ? (
+        <CustomerWorkspaceModal
+          customerId={selectedCustomerId}
+          onClose={() => setSelectedCustomerId(null)}
+        />
+      ) : null}
     </ListStyleLayout>
   );
 }

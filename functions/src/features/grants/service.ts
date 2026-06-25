@@ -68,33 +68,208 @@ function normalizeLineItemType(value: unknown) {
   };
 }
 
+type BudgetWindow = { startDate?: unknown; endDate?: unknown };
+
+function iso10(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "object" && value && typeof (value as { toDate?: unknown }).toDate === "function") {
+    const d = (value as { toDate: () => Date }).toDate();
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  const d = new Date(value as never);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
+function monthEnd(year: number, monthIndex: number): string {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
+}
+
+function splitMonthKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function periodLabel(mode: "monthly" | "quarterly", start: string, index: number) {
+  if (mode === "monthly") return splitMonthKey(new Date(`${start}T00:00:00.000Z`));
+  return `Q${index + 1}`;
+}
+
+function generateEvenSplitGoals(args: {
+  mode: "monthly" | "quarterly";
+  amount: number;
+  startDate: string;
+  endDate: string;
+}) {
+  const start = new Date(`${args.startDate}T00:00:00.000Z`);
+  const end = new Date(`${args.endDate}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+
+  const periods: Array<{ startDate: string; endDate: string }> = [];
+  let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const endCursor = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  const step = args.mode === "monthly" ? 1 : 3;
+
+  while (cursor <= endCursor && periods.length < 240) {
+    const periodStart = cursor.toISOString().slice(0, 10) < args.startDate
+      ? args.startDate
+      : cursor.toISOString().slice(0, 10);
+    const rawEnd = monthEnd(cursor.getUTCFullYear(), cursor.getUTCMonth() + step - 1);
+    const periodEnd = rawEnd > args.endDate ? args.endDate : rawEnd;
+    periods.push({ startDate: periodStart, endDate: periodEnd });
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + step, 1));
+  }
+
+  if (!periods.length) return [];
+  const totalCents = toBudgetCents(args.amount);
+  const base = Math.trunc(totalCents / periods.length);
+  let remainder = totalCents - base * periods.length;
+  return periods.map((period, index) => {
+    const extra = remainder > 0 ? 1 : remainder < 0 ? -1 : 0;
+    remainder -= extra;
+    return {
+      id: `${args.mode}_${period.startDate}_${period.endDate}`,
+      label: periodLabel(args.mode, period.startDate, index),
+      ...period,
+      amount: fromBudgetCents(base + extra),
+      spent: 0,
+      projected: 0,
+      balance: fromBudgetCents(base + extra),
+      projectedBalance: fromBudgetCents(base + extra),
+    };
+  });
+}
+
+function normalizeSplitGoals(
+  li: Record<string, any>,
+  window?: BudgetWindow,
+) {
+  const modeRaw = String(li.splitMode || "none").trim();
+  const splitMode = (["fixed", "monthly", "quarterly", "custom"].includes(modeRaw) ? modeRaw : "none") as "none" | "fixed" | "monthly" | "quarterly" | "custom";
+  const rollRaw = String(li.rollForward || "none").trim();
+  const rollForward = (["rollToNext", "rollToEnd", "rebalanceFuture", "manual"].includes(rollRaw)
+    ? rollRaw
+    : "none") as "none" | "rollToNext" | "rollToEnd" | "rebalanceFuture" | "manual";
+  const amount = Number(li.amount || 0);
+  const splitStartDate = iso10(li.splitStartDate || window?.startDate);
+  const splitEndDate = iso10(li.splitEndDate || window?.endDate);
+  const rawGoals = Array.isArray(li.splitGoals) ? li.splitGoals : [];
+
+  let goals = rawGoals.map((goal: Record<string, any>, index: number) => {
+    const goalAmount = Number(goal?.amount || 0);
+    const spent = Number(goal?.spent || 0);
+    const projected = Number(goal?.projected || 0);
+    return {
+      ...goal,
+      id: String(goal?.id || `split_${index + 1}`).trim(),
+      label: String(goal?.label || goal?.name || `Cycle ${index + 1}`).trim(),
+      startDate: iso10(goal?.startDate),
+      endDate: iso10(goal?.endDate),
+      amount: Number.isFinite(goalAmount) ? goalAmount : 0,
+      spent: Number.isFinite(spent) ? spent : 0,
+      projected: Number.isFinite(projected) ? projected : 0,
+      balance: fromBudgetCents(toBudgetCents(goalAmount) - toBudgetCents(spent)),
+      projectedBalance: fromBudgetCents(toBudgetCents(goalAmount) - toBudgetCents(spent) - toBudgetCents(projected)),
+    };
+  });
+
+  if ((splitMode === "monthly" || splitMode === "quarterly") && splitStartDate && splitEndDate) {
+    const currentKey = goals.map((goal) => `${goal.startDate}:${goal.endDate}:${goal.amount}`).join("|");
+    const generated = generateEvenSplitGoals({ mode: splitMode, amount, startDate: splitStartDate, endDate: splitEndDate });
+    const generatedKey = generated.map((goal) => `${goal.startDate}:${goal.endDate}:${goal.amount}`).join("|");
+    if (!goals.length || currentKey !== generatedKey) goals = generated;
+  }
+
+  const splitTotal = sum(goals.map((goal) => goal.amount));
+  const variance = fromBudgetCents(toBudgetCents(amount) - toBudgetCents(splitTotal));
+  const needsTotalWarning = splitMode !== "none" && goals.length > 0 && Math.abs(toBudgetCents(variance)) > 0;
+  const needsDateWarning = splitMode !== "none" && goals.some((goal) => !goal.startDate || !goal.endDate);
+
+  return {
+    splitMode,
+    rollForward,
+    splitStartDate: splitStartDate || null,
+    splitEndDate: splitEndDate || null,
+    splitGoals: goals,
+    breakdownValidation: splitMode === "none"
+      ? { status: "ok" as const, splitTotal: 0, variance: amount }
+      : {
+          status: needsTotalWarning || needsDateWarning ? "warning" as const : "ok" as const,
+          splitTotal,
+          variance,
+          ...(needsDateWarning
+            ? { message: "One or more split goals is missing a date range." }
+            : needsTotalWarning
+            ? { message: "Split goal total does not match the line item budget." }
+            : {}),
+        },
+  };
+}
+
+function preserveStoredSplitActuals(
+  patchLineItem: Record<string, unknown>,
+  storedLineItem: Record<string, unknown>,
+) {
+  const patchGoals = Array.isArray(patchLineItem.splitGoals) ? patchLineItem.splitGoals : [];
+  const storedGoals = Array.isArray(storedLineItem.splitGoals) ? storedLineItem.splitGoals : [];
+  if (!patchGoals.length || !storedGoals.length) return patchLineItem;
+  const storedById = new Map(storedGoals.map((goal: any) => [String(goal?.id || ""), goal]));
+  return {
+    ...patchLineItem,
+    splitGoals: patchGoals.map((goal: any) => {
+      const stored = storedById.get(String(goal?.id || ""));
+      if (!stored) return goal;
+      return {
+        ...goal,
+        spent: stored.spent ?? 0,
+        projected: stored.projected ?? 0,
+        balance: stored.balance,
+        projectedBalance: stored.projectedBalance,
+      };
+    }),
+  };
+}
+
 export function normalizeBudget(
   input?: TGrantBudget | null,
+  window?: BudgetWindow,
 ): TGrantBudget | null {
   if (!input) return null;
 
-  const items = (Array.isArray(input.lineItems) ? input.lineItems : []).map(
-    (li) => ({
-      id: li.id || uuid(),
-      label: li.label ?? null,
-      amount: Number(li.amount || 0),
+  const items: any[] = (Array.isArray(input.lineItems) ? input.lineItems : []).map(
+    (li) => {
+      const base = {
+        ...li,
+        id: li.id || uuid(),
+        label: li.label ?? null,
+        amount: Number(li.amount || 0),
 
-      // totals across all time (these are inputs here; rollups may overwrite elsewhere)
-      projected: Number(li.projected || 0),
-      spent: Number(li.spent || 0),
+        // totals across all time (these are inputs here; rollups may overwrite elsewhere)
+        projected: Number(li.projected || 0),
+        spent: Number(li.spent || 0),
 
-      // windowed tallies default to 0 if missing
-      projectedInWindow: Number(li.projectedInWindow || 0),
-      spentInWindow: Number(li.spentInWindow || 0),
+        // windowed tallies default to 0 if missing
+        projectedInWindow: Number(li.projectedInWindow || 0),
+        spentInWindow: Number(li.spentInWindow || 0),
 
-      locked: li.locked ?? null,
+        locked: li.locked ?? null,
 
-      type: normalizeLineItemType(li.type),
+        type: normalizeLineItemType(li.type),
 
-      // per-customer cap (optional, pass through as-is)
-      ...(li.capEnabled !== undefined ? { capEnabled: li.capEnabled } : { capEnabled: false }),
-      ...(li.perCustomerCap != null ? { perCustomerCap: Number(li.perCustomerCap) } : {}),
-    }),
+        // per-customer cap (optional, pass through as-is)
+        ...(li.capEnabled !== undefined ? { capEnabled: li.capEnabled } : { capEnabled: false }),
+        ...(li.perCustomerCap != null ? { perCustomerCap: Number(li.perCustomerCap) } : {}),
+      };
+      return {
+        ...base,
+        ...normalizeSplitGoals(base, window),
+      };
+    },
   );
 
   const capFromItems = sum(items.map((i) => i.amount));
@@ -145,6 +320,9 @@ export function normalizeBudget(
   }
   if (input.createdAt != null) out.createdAt = input.createdAt;
   if (input.updatedAt != null) out.updatedAt = input.updatedAt;
+  if ((input as Record<string, unknown>).digestDisplay !== undefined) {
+    (out as Record<string, unknown>).digestDisplay = sanitizeNestedObject((input as Record<string, unknown>).digestDisplay);
+  }
 
   return out;
 }
@@ -421,7 +599,7 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
   const driveTemplates = normalizeGrantDriveTemplates((parsed as Record<string, unknown>).driveTemplates);
 
   const budget = shouldRetainGrantBudget({ ...parsed, kind, financialConfig })
-    ? normalizeBudget(parsed.budget ?? { total: 0, lineItems: [] })
+    ? normalizeBudget(parsed.budget ?? { total: 0, lineItems: [] }, parsed)
     : null;
 
   const tasks = cleanGrantTasks(parsed.tasks);
@@ -591,7 +769,7 @@ export async function patchGrants(
       financialConfig: nextFinancialConfig,
       complianceConfig: nextComplianceConfig,
       ...(mustClearBudget ? { budget: null } : {}),
-      ...(shouldSeedBudget ? { budget: normalizeBudget({ total: 0, lineItems: [] }) } : {}),
+      ...(shouldSeedBudget ? { budget: normalizeBudget({ total: 0, lineItems: [] }, { ...prev, ...safePatch }) } : {}),
       ...(normId(prev.orgId) ? {} : { orgId: normId(targetOrg) }), // migrate legacy
       updatedAt: FieldValue.serverTimestamp(),
     };
@@ -669,22 +847,23 @@ export async function patchGrants(
       if (mustClearBudget) {
         nextBudget = null;
       } else if (hasOwn(patch, "budget") && patch.budget === null) {
-        nextBudget = normalizeBudget({ total: 0, lineItems: [] });
+        nextBudget = normalizeBudget({ total: 0, lineItems: [] }, { ...prev, ...patch });
       } else {
         const prevBudget = (prevObj.budget || {}) as Partial<TGrantBudget>;
         const patchBudget = (patch.budget || {}) as Partial<TGrantBudget>;
 
         // When line items are patched, preserve spent/projected/windowed tallies from
         // the stored Firestore doc so a budget edit cannot zero out real spend history.
-        let mergedLineItems = prevBudget.lineItems;
+        let mergedLineItems: any[] | undefined = prevBudget.lineItems as any[] | undefined;
         if (Array.isArray(patchBudget.lineItems)) {
           const prevById: Record<string, any> = Object.fromEntries(
             (prevBudget.lineItems ?? []).map((li: any) => [String(li.id || ""), li])
           );
           mergedLineItems = patchBudget.lineItems.map((pli: any) => {
             const stored = prevById[String(pli.id || "")] ?? {};
+            const nextLineItem = preserveStoredSplitActuals(pli, stored);
             return {
-              ...pli,
+              ...nextLineItem,
               // Never let patch input overwrite these — they are owned by the spend system
               spent: stored.spent ?? 0,
               projected: stored.projected ?? 0,
@@ -710,6 +889,7 @@ export async function patchGrants(
           Object.keys(mergedInput).length
             ? (mergedInput as TGrantBudget)
             : { total: 0, lineItems: [] },
+          { ...prev, ...patch },
         );
       }
 

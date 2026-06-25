@@ -57,7 +57,7 @@ export default function AccessPendingPage() {
       !topRole || topRole === "unverified" || topRole === "public_user" || !isActive;
 
     if (!isBlocked) {
-      router.replace(topRole === "viewer" ? "/customers" : "/reports");
+      router.replace("/customers");
     }
   }, [loading, user, topRole, isActive, router]);
 

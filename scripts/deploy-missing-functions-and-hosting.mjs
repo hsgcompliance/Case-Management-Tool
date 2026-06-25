@@ -6,18 +6,22 @@
  *   `node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2`
  * - Deploy only missing functions + hosting:
  *   `node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --hosting`
+ * - Deploy only missing functions + all hosting targets:
+ *   `node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --hosting-all`
  */
 import { execSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
+import { acquireDeployCheckouts, withDeployCheckouts } from "./lib/deployCheckouts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
 const PROJECT = process.argv[2] || "housing-db-v2";
-const WITH_HOSTING = process.argv.includes("--hosting");
+const WITH_HOSTING = process.argv.includes("--hosting") || process.argv.includes("--hosting-all");
+const DEPLOY_ALL_HOSTING = process.argv.includes("--hosting-all");
 const LIST_ONLY = process.argv.includes("--list-only");
 const { shouldPush, commitMsg } = parsePushArgs();
 const CHUNK_SIZE = 20;
@@ -90,19 +94,33 @@ if (extra.length) console.log(`Extra deployed (not local): ${extra.join(", ")}`)
 
 if (LIST_ONLY) process.exit(0);
 
+let releaseMissingFunctions = () => {};
+
 if (missing.length) {
-  for (const group of chunk(missing, CHUNK_SIZE)) {
-    const onlyValue = group.map((n) => `functions:${n}`).join(",");
-    console.log(`Deploying missing functions (${group.length}): ${group.join(", ")}`);
-    run("firebase", ["deploy", "--only", onlyValue, "--project", PROJECT, "--force"]);
+  releaseMissingFunctions = acquireDeployCheckouts(
+    missing.map((name) => `functions:${name}`),
+    { root: ROOT, description: "missing functions deploy" },
+  );
+  try {
+    for (const group of chunk(missing, CHUNK_SIZE)) {
+      const onlyValue = group.map((n) => `functions:${n}`).join(",");
+      console.log(`Deploying missing functions (${group.length}): ${group.join(", ")}`);
+      run("firebase", ["deploy", "--only", onlyValue, "--project", PROJECT, "--force"]);
+    }
+  } finally {
+    releaseMissingFunctions();
   }
 } else {
   console.log("No missing functions to deploy.");
 }
 
 if (WITH_HOSTING) {
-  console.log("Deploying hosting...");
-  run("firebase", ["deploy", "--only", "hosting", "--project", PROJECT]);
+  const hostingTarget = DEPLOY_ALL_HOSTING ? "hosting" : "hosting:web";
+  const checkoutKeys = DEPLOY_ALL_HOSTING ? ["hosting:all", "functions:ssrhousingdbv2"] : ["hosting:web", "functions:ssrhousingdbv2"];
+  console.log(`Deploying ${hostingTarget}...`);
+  withDeployCheckouts(checkoutKeys, { root: ROOT, description: `firebase deploy --only ${hostingTarget}` }, () => {
+    run("firebase", ["deploy", "--only", hostingTarget, "--project", PROJECT]);
+  });
 }
 
 if (shouldPush) {

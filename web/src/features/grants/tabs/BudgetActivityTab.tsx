@@ -595,6 +595,327 @@ function SpendCapModal({
   );
 }
 
+type SplitMode = "none" | "fixed" | "monthly" | "quarterly" | "custom";
+type RollForward = "none" | "rollToNext" | "rollToEnd" | "rebalanceFuture" | "manual";
+
+const SPLIT_MODES: Array<{ value: SplitMode; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "fixed", label: "Fixed" },
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "custom", label: "Custom" },
+];
+
+const ROLL_FORWARD_OPTIONS: Array<{ value: RollForward; label: string }> = [
+  { value: "none", label: "No adjustment" },
+  { value: "rollToNext", label: "Roll to next" },
+  { value: "rollToEnd", label: "Roll to final" },
+  { value: "rebalanceFuture", label: "Rebalance future" },
+  { value: "manual", label: "Manual review" },
+];
+
+function moneyCents(value: unknown) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+function moneyFromCents(value: number) {
+  return value / 100;
+}
+
+function isoDate(value: unknown) {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  return "";
+}
+
+function monthEnd(year: number, monthIndex: number) {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
+}
+
+function generateSplitGoals(mode: SplitMode, amount: number, startDate: string, endDate: string) {
+  if (mode !== "monthly" && mode !== "quarterly") return [];
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  if (!startDate || !endDate || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+  const step = mode === "monthly" ? 1 : 3;
+  const periods: Array<{ startDate: string; endDate: string }> = [];
+  let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const finalCursor = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  while (cursor <= finalCursor && periods.length < 240) {
+    const periodStart = cursor.toISOString().slice(0, 10) < startDate ? startDate : cursor.toISOString().slice(0, 10);
+    const rawEnd = monthEnd(cursor.getUTCFullYear(), cursor.getUTCMonth() + step - 1);
+    const periodEnd = rawEnd > endDate ? endDate : rawEnd;
+    periods.push({ startDate: periodStart, endDate: periodEnd });
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + step, 1));
+  }
+  const totalCents = moneyCents(amount);
+  const base = periods.length ? Math.trunc(totalCents / periods.length) : 0;
+  let remainder = totalCents - base * periods.length;
+  return periods.map((period, index) => {
+    const extra = remainder > 0 ? 1 : remainder < 0 ? -1 : 0;
+    remainder -= extra;
+    const goalAmount = moneyFromCents(base + extra);
+    return {
+      id: `${mode}_${period.startDate}_${period.endDate}`,
+      label: mode === "monthly" ? period.startDate.slice(0, 7) : `Q${index + 1}`,
+      ...period,
+      amount: goalAmount,
+      spent: 0,
+      projected: 0,
+      balance: goalAmount,
+      projectedBalance: goalAmount,
+    };
+  });
+}
+
+function normalizeSplitGoalsForLineItem(lineItem: any, num: (n: unknown, fallback?: number) => number) {
+  const mode = (["fixed", "monthly", "quarterly", "custom"].includes(String(lineItem?.splitMode)) ? lineItem.splitMode : "none") as SplitMode;
+  const amount = num(lineItem?.amount, 0);
+  const splitStartDate = isoDate(lineItem?.splitStartDate);
+  const splitEndDate = isoDate(lineItem?.splitEndDate);
+  const rawGoals = Array.isArray(lineItem?.splitGoals) ? lineItem.splitGoals : [];
+  const goals = rawGoals.map((goal: any, index: number) => {
+    const planned = num(goal?.amount, 0);
+    const spent = num(goal?.spent, 0);
+    const projected = num(goal?.projected, 0);
+    return {
+      ...goal,
+      id: String(goal?.id || `split_${index + 1}`),
+      label: String(goal?.label || `Cycle ${index + 1}`),
+      startDate: isoDate(goal?.startDate),
+      endDate: isoDate(goal?.endDate),
+      amount: planned,
+      spent,
+      projected,
+      balance: moneyFromCents(moneyCents(planned) - moneyCents(spent)),
+      projectedBalance: moneyFromCents(moneyCents(planned) - moneyCents(spent) - moneyCents(projected)),
+    };
+  });
+  const splitTotal = moneyFromCents(goals.reduce((sum, goal) => sum + moneyCents(goal.amount), 0));
+  const variance = moneyFromCents(moneyCents(amount) - moneyCents(splitTotal));
+  const needsWarning = mode !== "none" && goals.length > 0 && Math.abs(moneyCents(variance)) > 0;
+  return {
+    ...lineItem,
+    splitMode: mode,
+    rollForward: (["rollToNext", "rollToEnd", "rebalanceFuture", "manual"].includes(String(lineItem?.rollForward)) ? lineItem.rollForward : "none") as RollForward,
+    splitStartDate: splitStartDate || null,
+    splitEndDate: splitEndDate || null,
+    splitGoals: mode === "none" ? [] : goals,
+    breakdownValidation: {
+      status: needsWarning ? "warning" : "ok",
+      splitTotal,
+      variance,
+      ...(needsWarning ? { message: "Split goal total does not match the line item budget." } : {}),
+    },
+  };
+}
+
+function SplitConfigModal({
+  lineItem,
+  num,
+  currency,
+  editing,
+  onCommit,
+  onClose,
+}: {
+  lineItem: any;
+  num: (n: unknown, fallback?: number) => number;
+  currency: (n: number) => string;
+  editing: boolean;
+  onCommit: (patch: Partial<any>) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState(() => normalizeSplitGoalsForLineItem(lineItem || {}, num));
+  const amount = num(draft.amount, num(lineItem?.amount, 0));
+  const splitTotal = moneyFromCents((draft.splitGoals || []).reduce((sum: number, goal: any) => sum + moneyCents(goal.amount), 0));
+  const variance = moneyFromCents(moneyCents(amount) - moneyCents(splitTotal));
+  const hasWarning = draft.splitMode !== "none" && (draft.splitGoals || []).length > 0 && Math.abs(moneyCents(variance)) > 0;
+
+  const setMode = (mode: SplitMode) => {
+    setDraft((prev: any) => {
+      const next = { ...prev, splitMode: mode };
+      if (mode === "none") next.splitGoals = [];
+      if ((mode === "monthly" || mode === "quarterly") && prev.splitStartDate && prev.splitEndDate) {
+        next.splitGoals = generateSplitGoals(mode, amount, prev.splitStartDate, prev.splitEndDate);
+      }
+      return normalizeSplitGoalsForLineItem(next, num);
+    });
+  };
+
+  const regenerate = () => {
+    setDraft((prev: any) => {
+      const goals = generateSplitGoals(prev.splitMode, amount, String(prev.splitStartDate || ""), String(prev.splitEndDate || ""));
+      return normalizeSplitGoalsForLineItem({ ...prev, splitGoals: goals }, num);
+    });
+  };
+
+  const updateGoal = (index: number, patch: Record<string, unknown>) => {
+    setDraft((prev: any) => {
+      const splitGoals = [...(prev.splitGoals || [])];
+      splitGoals[index] = { ...splitGoals[index], ...patch };
+      return normalizeSplitGoalsForLineItem({ ...prev, splitGoals }, num);
+    });
+  };
+
+  const addGoal = () => {
+    setDraft((prev: any) => normalizeSplitGoalsForLineItem({
+      ...prev,
+      splitMode: prev.splitMode === "none" ? "custom" : prev.splitMode,
+      splitGoals: [
+        ...(prev.splitGoals || []),
+        { id: `split_${Date.now().toString(36)}`, label: "New cycle", startDate: "", endDate: "", amount: 0, spent: 0, projected: 0 },
+      ],
+    }, num));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <div className="border-b border-slate-100 px-6 py-4 dark:border-slate-800">
+          <div className="text-xs font-semibold uppercase tracking-wide text-sky-600">Line Item Config</div>
+          <h3 className="mt-1 text-xl font-bold text-slate-950 dark:text-slate-50">{String(lineItem?.label || lineItem?.id || "Line item")}</h3>
+          <p className="mt-1 text-sm text-slate-500">Line item total remains authoritative: <span className="font-semibold text-slate-800">{currency(amount)}</span>.</p>
+        </div>
+
+        <div className="max-h-[62vh] space-y-5 overflow-y-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Split mode</span>
+              <select className="input w-full" disabled={!editing} value={draft.splitMode} onChange={(e) => setMode(e.currentTarget.value as SplitMode)}>
+                {SPLIT_MODES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Roll-forward</span>
+              <select className="input w-full" disabled={!editing} value={draft.rollForward} onChange={(e) => setDraft((prev: any) => ({ ...prev, rollForward: e.currentTarget.value as RollForward }))}>
+                {ROLL_FORWARD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Start</span>
+              <input className="input w-full" type="date" disabled={!editing} value={draft.splitStartDate || ""} onChange={(e) => setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitStartDate: e.currentTarget.value }, num))} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">End</span>
+              <input className="input w-full" type="date" disabled={!editing} value={draft.splitEndDate || ""} onChange={(e) => setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitEndDate: e.currentTarget.value }, num))} />
+            </label>
+          </div>
+
+          <div className={`rounded-lg border px-4 py-3 text-sm ${hasWarning ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+            Planned cycles total {currency(splitTotal)}. Variance from line item total: <span className="font-semibold">{currency(variance)}</span>.
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Digest / Display</div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                ["appearInDigest", "Appear in digest"],
+                ["showLineItemTotal", "Show line item total"],
+                ["showSplitGoals", "Show split goals"],
+              ].map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 accent-sky-600"
+                    disabled={!editing}
+                    checked={(draft.display?.[key] ?? true) !== false}
+                    onChange={(e) => setDraft((prev: any) => ({
+                      ...prev,
+                      display: { ...(prev.display || {}), [key]: e.currentTarget.checked },
+                    }))}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Display as</span>
+                <select
+                  className="input w-full"
+                  disabled={!editing}
+                  value={draft.display?.displayAs || "nested"}
+                  onChange={(e) => setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), displayAs: e.currentTarget.value } }))}
+                >
+                  <option value="nested">Nested under grant</option>
+                  <option value="main">Main row/card</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Main level</span>
+                <select
+                  className="input w-full"
+                  disabled={!editing}
+                  value={draft.display?.mainDisplayLevel || "grant"}
+                  onChange={(e) => setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), mainDisplayLevel: e.currentTarget.value } }))}
+                >
+                  <option value="grant">Grant</option>
+                  <option value="lineItem">Line item</option>
+                  <option value="split">Split goal / cycle</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+            <table className="table text-sm">
+              <thead>
+                <tr>
+                  <th>Cycle</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th className="text-right">Goal</th>
+                  <th className="text-right">Spent</th>
+                  <th className="text-right">Projected</th>
+                  {editing && <th />}
+                </tr>
+              </thead>
+              <tbody>
+                {(draft.splitGoals || []).length === 0 ? (
+                  <tr><td colSpan={editing ? 7 : 6} className="text-slate-400">No split goals configured.</td></tr>
+                ) : (
+                  (draft.splitGoals || []).map((goal: any, index: number) => (
+                    <tr key={goal.id || index}>
+                      <td>{editing ? <input className="input text-sm" value={goal.label || ""} onChange={(e) => updateGoal(index, { label: e.currentTarget.value })} /> : String(goal.label || `Cycle ${index + 1}`)}</td>
+                      <td>{editing ? <input className="input text-sm" type="date" value={goal.startDate || ""} onChange={(e) => updateGoal(index, { startDate: e.currentTarget.value })} /> : (goal.startDate || "TBD")}</td>
+                      <td>{editing ? <input className="input text-sm" type="date" value={goal.endDate || ""} onChange={(e) => updateGoal(index, { endDate: e.currentTarget.value })} /> : (goal.endDate || "TBD")}</td>
+                      <td className="text-right">{editing ? <input className="input w-28 text-right text-sm" type="number" value={num(goal.amount, 0)} onChange={(e) => updateGoal(index, { amount: Number(e.currentTarget.value) })} /> : currency(num(goal.amount, 0))}</td>
+                      <td className="text-right text-slate-700">{currency(num(goal.spent, 0))}</td>
+                      <td className="text-right text-slate-700">{currency(num(goal.projected, 0))}</td>
+                      {editing && <td className="text-right"><button type="button" className="btn btn-ghost btn-xs text-red-500" onClick={() => setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitGoals: (prev.splitGoals || []).filter((_: any, j: number) => j !== index) }, num))}>Delete</button></td>}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {editing && (
+            <div className="flex flex-wrap items-center gap-2">
+              {(draft.splitMode === "monthly" || draft.splitMode === "quarterly") && <button type="button" className="btn btn-secondary btn-sm" onClick={regenerate}>Regenerate Cycles</button>}
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addGoal}>+ Custom Cycle</button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{editing ? "Cancel" : "Close"}</button>
+          {editing && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => onCommit(normalizeSplitGoalsForLineItem(draft, num))}
+            >
+              Apply Config
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BudgetActivityTab({
   editing,
   model,
@@ -628,6 +949,7 @@ export function BudgetActivityTab({
   const [activityMode, setActivityMode] = useState<ActivityMode>("all");
   const [fundsState, setFundsState] = useState<{ index: number; mode: "add" | "move" } | null>(null);
   const [spendCapIdx, setSpendCapIdx] = useState<number | null>(null);
+  const [splitConfigIdx, setSplitConfigIdx] = useState<number | null>(null);
   const [selectedActivity, setSelectedActivity] = useState<SpendRow | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [lineItemSort, setLineItemSort] = useState<{ key: LineItemSortKey; direction: SortDirection }>({ key: "label", direction: "asc" });
@@ -679,6 +1001,11 @@ export function BudgetActivityTab({
     const next = JSON.parse(JSON.stringify(budget));
     next.lineItems.splice(index, 1);
     commit(next);
+  };
+
+  const updateLineItemConfig = (index: number, patch: Partial<any>) => {
+    updateLineItem(index, patch);
+    setSplitConfigIdx(null);
   };
 
   const handleFundsCommit = ({ targetIdxAmountDelta, sourceIdx }: { targetIdxAmountDelta: number; sourceIdx?: number }) => {
@@ -1261,6 +1588,11 @@ export function BudgetActivityTab({
                     },
                   },
                   {
+                    key: "line-item-config",
+                    label: "Line Item Config",
+                    onSelect: () => setSplitConfigIdx(i),
+                  },
+                  {
                     key: "edit-cap",
                     label: "Edit Spend Cap",
                     onSelect: () => setSpendCapIdx(i),
@@ -1342,6 +1674,9 @@ export function BudgetActivityTab({
                           <button type="button" className="btn btn-ghost btn-xs" onClick={() => updateLineItem(i, { locked: !li.locked })} title={li.locked ? tip("Unlock this line item so it can be adjusted.") : tip("Lock this line item to prevent accidental budget edits.")}>
                             {li.locked ? "🔒" : "🔓"}
                           </button>
+                          <button type="button" className="btn btn-ghost btn-xs text-slate-500" onClick={() => setSplitConfigIdx(i)} title={tip("Open line item split goal and digest display config.")}>
+                            ⚙
+                          </button>
                           <button type="button" className={`btn btn-ghost btn-xs ${li.capEnabled ? "text-amber-600" : "text-slate-400"}`} onClick={() => updateLineItem(i, { capEnabled: !li.capEnabled })} title={li.capEnabled ? tip("Per-customer spend cap is enabled.") : tip("Per-customer spend cap is disabled.")}>
                             {li.capEnabled ? "🚧" : "–"}
                           </button>
@@ -1380,6 +1715,43 @@ export function BudgetActivityTab({
                   </tr>
                 );
 
+                const splitGoals = Array.isArray(li.splitGoals) ? li.splitGoals : [];
+                const splitRows = splitGoals.length > 0 ? splitGoals.map((goal: any, goalIndex: number) => {
+                  const goalAmount = num(goal.amount, 0);
+                  const goalSpent = num(goal.spent, 0);
+                  const goalProjected = num(goal.projected, 0);
+                  const goalProjectedSpend = goalSpent + goalProjected;
+                  const goalBalance = goalAmount - goalSpent;
+                  const goalProjectedBalance = goalAmount - goalProjectedSpend;
+                  const period = goal.startDate || goal.endDate ? `${goal.startDate || "TBD"} - ${goal.endDate || "TBD"}` : "Date range TBD";
+                  return (
+                    <tr key={`${liId}_split_${goal.id || goalIndex}`} className="bg-slate-50/70 text-xs dark:bg-slate-900/60">
+                      <td className="pl-8 text-slate-700 dark:text-slate-300">
+                        <span className="mr-2 text-slate-400">↳</span>
+                        <span className="font-medium">{String(goal.label || `Cycle ${goalIndex + 1}`)}</span>
+                        <span className="ml-2 text-[10px] font-normal text-slate-400">{period}</span>
+                      </td>
+                      <td>
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-950">
+                          {String(li.splitMode || "custom")}
+                        </span>
+                      </td>
+                      <td className="text-right">{currency(goalAmount)}</td>
+                      <td className="text-right text-slate-600 dark:text-slate-300">{currency(goalSpent)}</td>
+                      <td className={`text-right ${drawsDownBudget ? colorVal(goalBalance) : "text-slate-600"}`}>{currency(goalBalance)}</td>
+                      <td className="text-right text-slate-600 dark:text-slate-300">{currency(goalProjectedSpend)}</td>
+                      <td className={`text-right font-semibold ${drawsDownBudget ? colorVal(goalProjectedBalance) : "text-slate-600"}`}>{currency(goalProjectedBalance)}</td>
+                      <td><MiniBar spent={goalSpent} amount={goalAmount} /></td>
+                      <td className="text-center">
+                        {goalProjectedBalance < 0 ? <StatusChip label="Over" active tone="amber" /> : <span className="text-slate-300">-</span>}
+                      </td>
+                      {!editing && <td />}
+                      {editing && <td />}
+                      {editing && <td />}
+                    </tr>
+                  );
+                }) : [];
+
                 const drawer = isExpanded && !editing ? (
                   <ActivityDrawer
                     key={`${liId}_drawer`}
@@ -1393,7 +1765,7 @@ export function BudgetActivityTab({
                   />
                 ) : null;
 
-                return [row, drawer].filter(Boolean) as React.ReactElement[];
+                return [row, ...splitRows, drawer].filter(Boolean) as React.ReactElement[];
               })
             )}
           </tbody>
@@ -1470,6 +1842,17 @@ export function BudgetActivityTab({
             updateLineItem(spendCapIdx, { capEnabled, perCustomerCap });
             setSpendCapIdx(null);
           }}
+        />
+      )}
+
+      {splitConfigIdx !== null && budget.lineItems[splitConfigIdx] && (
+        <SplitConfigModal
+          lineItem={budget.lineItems[splitConfigIdx]}
+          num={num}
+          currency={currency}
+          editing={editing}
+          onClose={() => setSplitConfigIdx(null)}
+          onCommit={(patch) => updateLineItemConfig(splitConfigIdx, patch)}
         />
       )}
 

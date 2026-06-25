@@ -61,6 +61,35 @@ function lineItemTypeLabel(value: unknown): string {
   return "";
 }
 
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    if (value == null) continue;
+    if (Array.isArray(value)) {
+      const joined = value.map((item) => String(item || "").trim()).filter(Boolean).join(" | ");
+      if (joined) return joined;
+      continue;
+    }
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function personLabel(name: unknown, email: unknown): string {
+  const n = firstText(name);
+  const e = firstText(email);
+  if (n && e && n.toLowerCase() !== e.toLowerCase()) return `${n} <${e}>`;
+  return n || e;
+}
+
+function queueIdFromOrigin(origin: Record<string, unknown>): string {
+  const explicit = firstText(origin.paymentQueueId, origin.baseId);
+  if (explicit) return explicit;
+  const sourcePath = firstText(origin.sourcePath);
+  const match = sourcePath.match(/^paymentQueue\/([^/]+)$/);
+  return match ? match[1] || "" : "";
+}
+
 function sourceUpdatedAt(row: Record<string, unknown>): string | null {
   return toIso(row.updatedAtISO) || toIso(row.updatedAt) || toIso(row.system && (row.system as Record<string, unknown>).lastWriteAt);
 }
@@ -131,6 +160,33 @@ async function loadGrantDocs(grantIds: string[], orgId: string): Promise<Map<str
   return grants;
 }
 
+async function attachBudgetPipelineRefs(grants: Map<string, Record<string, unknown>>, orgId: string): Promise<void> {
+  const ids = Array.from(grants.keys());
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const snap = await db
+      .collection("budgetPipelines")
+      .where("orgId", "==", orgId)
+      .where("grantId", "in", chunk)
+      .get();
+    for (const doc of snap.docs) {
+      const data = doc.data() || {};
+      const grantId = String(data.grantId || "").trim();
+      const grant = grants.get(grantId);
+      if (!grant) continue;
+      const refs = Array.isArray(grant.budgetPipelineRefs)
+        ? grant.budgetPipelineRefs as Array<Record<string, unknown>>
+        : [];
+      refs.push({
+        id: doc.id,
+        name: String(data.name || doc.id),
+        status: String(data.status || ""),
+      });
+      grant.budgetPipelineRefs = refs;
+    }
+  }
+}
+
 async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>): Promise<TGrantBudgetManagerRow[]> {
   const [ledgerSnap, queueSnap] = await Promise.all([
     db.collection("ledger").where("grantId", "==", grantId).get(),
@@ -138,11 +194,44 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
   ]);
   const rows: TGrantBudgetManagerRow[] = [];
   const grantName = String(grant.name || grantId);
-  for (const doc of ledgerSnap.docs) {
-    const row = { id: doc.id, ...(doc.data() || {}) } as Record<string, unknown>;
+  const ledgerRows = ledgerSnap.docs.map((doc) => ({
+    doc,
+    data: { id: doc.id, ...(doc.data() || {}) } as Record<string, unknown>,
+  }));
+  const reversedById = new Map<string, string[]>();
+  const queueIdsFromLedger = Array.from(new Set(ledgerRows.map(({ data }) => {
+    const origin = (data.origin && typeof data.origin === "object" ? data.origin : {}) as Record<string, unknown>;
+    return queueIdFromOrigin(origin);
+  }).filter(Boolean)));
+  const queueById = new Map<string, Record<string, unknown>>();
+  if (queueIdsFromLedger.length) {
+    const queueRefs = queueIdsFromLedger.map((id) => db.collection("paymentQueue").doc(id));
+    const queueDocs = await db.getAll(...queueRefs);
+    for (const snap of queueDocs) {
+      if (snap.exists) queueById.set(snap.id, { id: snap.id, ...(snap.data() || {}) } as Record<string, unknown>);
+    }
+  }
+  for (const { doc, data } of ledgerRows) {
+    const origin = (data.origin && typeof data.origin === "object" ? data.origin : {}) as Record<string, unknown>;
+    const reversalOf = String(data.reversalOf || origin.reversalOf || "").trim();
+    if (!reversalOf) continue;
+    const current = reversedById.get(reversalOf) || [];
+    current.push(doc.id);
+    reversedById.set(reversalOf, current);
+  }
+  for (const { doc, data: row } of ledgerRows) {
     const amount = amountFromLedger(row);
     const date = date10(row.dueDate, row.date, row.createdAt, doc.updateTime);
     const updatedAt = sourceUpdatedAt(row) || toIso(doc.updateTime);
+    const origin = (row.origin && typeof row.origin === "object" ? row.origin : {}) as Record<string, unknown>;
+    const queueRow = queueById.get(queueIdFromOrigin(origin)) || {};
+    const reversalOf = String(row.reversalOf || origin.reversalOf || "").trim() || null;
+    const reversedByLedgerItemIds = reversedById.get(doc.id) || [];
+    const ledgerStatus = reversalOf
+      ? "reversal"
+      : reversedByLedgerItemIds.length
+        ? "reversed"
+        : row.paid === false ? "open" : "posted";
     const normalized: TGrantBudgetManagerRow = {
       rowId: doc.id,
       sourceType: "ledger",
@@ -152,22 +241,24 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
       grantId,
       lineItemId: row.lineItemId ? String(row.lineItemId) : null,
       customerId: row.customerId ? String(row.customerId) : null,
-      customerName: row.customerNameAtSpend ? String(row.customerNameAtSpend) : null,
+      customerName: firstText(row.customerNameAtSpend, queueRow.customer) || null,
       caseManagerId: row.caseManagerId ? String(row.caseManagerId) : null,
-      caseManagerName: row.caseManagerNameAtSpend ? String(row.caseManagerNameAtSpend) : null,
+      caseManagerName: firstText(row.caseManagerNameAtSpend, personLabel(queueRow.purchaser, queueRow.email)) || null,
       amount,
       date,
       serviceDate: date,
       paymentDate: date,
-      description: Array.isArray(row.note) ? row.note.map(String).join(" | ") : String(row.note ?? row.comment ?? ""),
-      memo: row.comment ? String(row.comment) : null,
-      category: row.lineItemLabelAtSpend ? String(row.lineItemLabelAtSpend) : null,
-      vendor: row.vendor ? String(row.vendor) : null,
-      status: row.paid === false ? "open" : "posted",
+      description: firstText(row.note, row.comment, queueRow.notes, queueRow.note, queueRow.purpose, queueRow.descriptor),
+      memo: firstText(row.comment, queueRow.notes, queueRow.note) || null,
+      category: firstText(queueRow.expenseType, queueRow.descriptor, queueRow.serviceType, row.lineItemLabelAtSpend) || null,
+      vendor: firstText(row.vendor, queueRow.merchant) || null,
+      status: ledgerStatus,
+      reversalOf,
+      reversedByLedgerItemIds,
       isWritable: true,
       lockedReason: null,
       rowState: "clean",
-      original: { grantId, lineItemId: row.lineItemId ? String(row.lineItemId) : null, customerId: row.customerId ? String(row.customerId) : null, caseManagerId: row.caseManagerId ? String(row.caseManagerId) : null, amount, date, serviceDate: date, paymentDate: date, description: Array.isArray(row.note) ? row.note.map(String).join(" | ") : String(row.note ?? row.comment ?? ""), memo: row.comment ? String(row.comment) : null, category: row.lineItemLabelAtSpend ? String(row.lineItemLabelAtSpend) : null, vendor: row.vendor ? String(row.vendor) : null, status: row.paid === false ? "open" : "posted", updatedAt },
+      original: { grantId, lineItemId: row.lineItemId ? String(row.lineItemId) : null, customerId: row.customerId ? String(row.customerId) : null, caseManagerId: row.caseManagerId ? String(row.caseManagerId) : null, amount, date, serviceDate: date, paymentDate: date, description: firstText(row.note, row.comment, queueRow.notes, queueRow.note, queueRow.purpose, queueRow.descriptor), memo: firstText(row.comment, queueRow.notes, queueRow.note) || null, category: firstText(queueRow.expenseType, queueRow.descriptor, queueRow.serviceType, row.lineItemLabelAtSpend) || null, vendor: firstText(row.vendor, queueRow.merchant) || null, status: ledgerStatus, updatedAt },
     };
     (normalized as Record<string, unknown>).grantName = grantName;
     rows.push(normalized);
@@ -188,20 +279,20 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
       customerId: row.customerId ? String(row.customerId) : null,
       customerName: row.customer ? String(row.customer) : null,
       caseManagerId: row.caseManagerId ? String(row.caseManagerId) : null,
-      caseManagerName: row.caseManagerName ? String(row.caseManagerName) : null,
+      caseManagerName: firstText(row.caseManagerName, personLabel(row.purchaser, row.email)) || null,
       amount,
       date,
       serviceDate: date,
       paymentDate: null,
-      description: String(row.note ?? row.notes ?? row.purpose ?? row.descriptor ?? ""),
-      memo: row.notes ? String(row.notes) : null,
-      category: row.expenseType ? String(row.expenseType) : null,
-      vendor: row.merchant ? String(row.merchant) : null,
+      description: firstText(row.notes, row.note, row.purpose, row.descriptor),
+      memo: firstText(row.notes, row.note) || null,
+      category: firstText(row.expenseType, row.descriptor, row.serviceType, row.paymentMethod) || null,
+      vendor: firstText(row.merchant) || null,
       status: "pending",
       isWritable: true,
       lockedReason: null,
       rowState: "clean",
-      original: { grantId, lineItemId: row.lineItemId ? String(row.lineItemId) : null, customerId: row.customerId ? String(row.customerId) : null, caseManagerId: row.caseManagerId ? String(row.caseManagerId) : null, amount, date, serviceDate: date, paymentDate: null, description: String(row.note ?? row.notes ?? row.purpose ?? row.descriptor ?? ""), memo: row.notes ? String(row.notes) : null, category: row.expenseType ? String(row.expenseType) : null, vendor: row.merchant ? String(row.merchant) : null, status: "pending", updatedAt },
+      original: { grantId, lineItemId: row.lineItemId ? String(row.lineItemId) : null, customerId: row.customerId ? String(row.customerId) : null, caseManagerId: row.caseManagerId ? String(row.caseManagerId) : null, amount, date, serviceDate: date, paymentDate: null, description: firstText(row.notes, row.note, row.purpose, row.descriptor), memo: firstText(row.notes, row.note) || null, category: firstText(row.expenseType, row.descriptor, row.serviceType, row.paymentMethod) || null, vendor: firstText(row.merchant) || null, status: "pending", updatedAt },
     };
     (normalized as Record<string, unknown>).grantName = grantName;
     rows.push(normalized);
@@ -212,6 +303,7 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
 export async function loadGrantBudgetManager(orgId: string, grantIds: string[]): Promise<TGrantBudgetManagerLoadResp> {
   const ids = Array.from(new Set(grantIds.map((id) => String(id || "").trim()).filter(Boolean)));
   const grants = await loadGrantDocs(ids, orgId);
+  await attachBudgetPipelineRefs(grants, orgId);
   const lineItems = Array.from(grants.entries()).flatMap(([grantId, grant]) => lineItemsForGrant(grantId, grant));
   const rows = (await Promise.all(Array.from(grants.entries()).map(([grantId, grant]) => loadRowsForGrant(grantId, grant)))).flat();
   const rollups = rollupsFromRows(grants, rows);
