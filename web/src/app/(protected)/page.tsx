@@ -3,12 +3,12 @@ import RunnerGame from "@features/games/runner/RunnerGame";
 const OTHER_APPS = [
   {
     name: "Mobile App",
-    description: "Field-friendly customer lookup, activity logging, and case manager workflows.",
+    description: "Your on the go Case Management Tool",
     href: "https://housing-db-mobile.web.app/",
   },
   {
     name: "Forms App",
-    description: "Staff forms, customer prefill flows, checkout, intake, and submission tools.",
+    description: "Jotforms Made Easy (I hope)",
     href: "https://housing-db-forms.web.app/",
   },
 ] as const;
@@ -16,18 +16,7 @@ const OTHER_APPS = [
 export default function Page() {
   return (
     <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-6 py-4">
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
-        <div className="mb-4 flex flex-col gap-1">
-          <h1 className="text-xl font-semibold text-slate-950 dark:text-slate-50">
-            Runner
-          </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Take a quick break, chase the high score, then jump back into the dashboard.
-          </p>
-        </div>
         <RunnerGame embedded title="Runner" />
-      </section>
-
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
         <div className="mb-4">
           <h2 className="text-base font-semibold text-slate-950 dark:text-slate-50">

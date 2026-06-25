@@ -37,6 +37,59 @@ export type BudgetPipelineRollupResult = {
   rows: BudgetPipelineRollupRow[];
   totals: { pendingAmount: number; postedAmount: number; pendingCount: number; postedCount: number };
 };
+
+export type BudgetRollupPreviewSource = {
+  id: string;
+  sourceType: "ledger" | "paymentQueue";
+  date: string;
+  amount: number;
+  status: "spent" | "projected";
+  label: string;
+  grantId: string;
+  lineItemId: string;
+  splitGoalId: string | null;
+  customerId: string;
+  caseManagerId: string;
+  ledgerId: string | null;
+  paymentQueueId: string | null;
+  reason?: string;
+};
+
+export type BudgetRollupPreview = {
+  grant: {
+    id: string;
+    name: string;
+    budget: number;
+    spent: number;
+    projected: number;
+    balance: number;
+    projectedBalance: number;
+  };
+  lineItems: Array<{
+    id: string;
+    label: string;
+    budget: number;
+    spent: number;
+    projected: number;
+    balance: number;
+    projectedBalance: number;
+    splitGoals: Array<{
+      id: string;
+      label: string;
+      startDate: string;
+      endDate: string;
+      amount: number;
+      spent: number;
+      projected: number;
+      balance: number;
+      projectedBalance: number;
+      sources: BudgetRollupPreviewSource[];
+    }>;
+    sources: BudgetRollupPreviewSource[];
+  }>;
+  unmatched: BudgetRollupPreviewSource[];
+  sourceCounts: { ledger: number; paymentQueue: number; unmatched: number };
+};
 type ReconcileGrantResult = { ok: true; totals: Record<string, unknown>; warnings: string[] };
 
 export const BudgetPipeline = {
@@ -65,6 +118,8 @@ export const BudgetPipeline = {
 
   rollup: (query: { pipelineId?: string } = {}): Promise<BudgetPipelineRollupResult> =>
     api.get("budgetPipelineRollup", query) as Promise<BudgetPipelineRollupResult>,
+  rollupPreview: (query: { grantId: string; startDate?: string; endDate?: string; limit?: number; focusSourceId?: string }): Promise<{ ok: true; preview: BudgetRollupPreview }> =>
+    api.get("budgetRollupPreview", query) as Promise<{ ok: true; preview: BudgetRollupPreview }>,
 
   // Reconcile a grant's authoritative projected/spent from queue + ledger.
   reconcileGrant: (grantId: string): Promise<ReconcileGrantResult> =>

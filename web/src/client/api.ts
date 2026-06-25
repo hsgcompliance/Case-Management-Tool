@@ -337,6 +337,7 @@ export const endpointsLoose = {
 
   // BUDGET PIPELINE (runtime endpoints not promoted into contracts yet)
   budgetPipelineRollup:         { method: 'GET',   path: 'budgetPipelineRollup' },
+  budgetRollupPreview:          { method: 'GET',   path: 'budgetRollupPreview' },
   // Loose alias for the (drifted, non-contracted) recalc endpoint, used to
   // reconcile a grant's projected/spent from the pipeline manager.
   budgetPipelineReconcileGrant: { method: 'POST',  path: 'paymentsRecalcGrantProjected' },

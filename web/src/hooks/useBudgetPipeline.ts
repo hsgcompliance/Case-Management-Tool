@@ -61,6 +61,17 @@ export function usePipelineRollup(pipelineId?: string) {
   });
 }
 
+export function useBudgetRollupPreview(query: { grantId?: string | null; startDate?: string; endDate?: string; limit?: number; focusSourceId?: string } = {}) {
+  const grantId = String(query.grantId || "").trim();
+  return useQuery({
+    queryKey: [...qk.pipeline.root, "budgetRollupPreview", grantId, query.startDate ?? "", query.endDate ?? "", query.limit ?? 25, query.focusSourceId ?? ""],
+    queryFn: () => BudgetPipeline.rollupPreview({ ...query, grantId, limit: query.limit ?? 25 }),
+    enabled: !!grantId,
+    staleTime: 30_000,
+    select: (data) => data.preview,
+  });
+}
+
 export function useReconcileGrant() {
   const qc = useQueryClient();
   return useMutation({
