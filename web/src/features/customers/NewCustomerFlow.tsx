@@ -34,6 +34,7 @@ import { DuplicateChecker, type DupCheckState } from "./DuplicateChecker";
 import type { DupMatch } from "@lib/duplicateScore";
 import { enrollmentControlsForGrant } from "@features/enrollments/enrollmentControls";
 import { defaultGrantDriveTemplateKeys, grantDriveTemplates } from "@features/grants/driveTemplates";
+import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "./paymentScheduleBuildSummary";
 
 type FlowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type Population = "Youth" | "Individual" | "Family" | "";
@@ -493,6 +494,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [taskReminderDrafts, setTaskReminderDrafts] = React.useState<TaskTemplateDraft[]>([]);
   const [wantsPayments, setWantsPayments] = React.useState(false);
   const [paymentBuilderOpen, setPaymentBuilderOpen] = React.useState(false);
+  const [paymentBuildSummary, setPaymentBuildSummary] = React.useState<PaymentScheduleBuildSummary | null>(null);
   const [wantsFolderLink, setWantsFolderLink] = React.useState(false);
   const [folderUrl, setFolderUrl] = React.useState("");
   const [folderAlias, setFolderAlias] = React.useState("");
@@ -963,6 +965,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const buildSchedule = React.useCallback(
     async (payload: PaymentScheduleBuildInput) => {
       setFlowError(null);
+      const summary = summarizePaymentScheduleBuild(payload, builderEnrollments);
+      setPaymentBuildSummary(summary);
       try {
         await buildPayments.mutateAsync(payload);
         setPaymentBuilderOpen(false);
@@ -970,9 +974,10 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         await enrollmentsQ.refetch();
       } catch (error: unknown) {
         setFlowError(formatFlowError("Error building Payment schedule", error));
+        setPaymentBuildSummary(null);
       }
     },
-    [buildPayments, enrollmentsQ],
+    [buildPayments, builderEnrollments, enrollmentsQ],
   );
 
   const copySelectedGrantTemplates = React.useCallback(
@@ -1665,6 +1670,15 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
               >
                 {buildPayments.isPending ? "Building..." : "Open Payment Builder"}
               </button>
+              {buildPayments.isPending && paymentBuildSummary ? (
+                <div className="rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-sky-900">
+                  Building {paymentBuildSummary.rowCount} payment row{paymentBuildSummary.rowCount === 1 ? "" : "s"} for {paymentBuildSummary.enrollmentLabel}.
+                </div>
+              ) : paymentBuildSummary ? (
+                <div className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900">
+                  Built {paymentBuildSummary.rowCount} payment row{paymentBuildSummary.rowCount === 1 ? "" : "s"} for {paymentBuildSummary.enrollmentLabel}. The refreshed schedule is listed below.
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {enrollments.map((enrollment) => (
                   <div key={enrollment.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm shadow-sm">
