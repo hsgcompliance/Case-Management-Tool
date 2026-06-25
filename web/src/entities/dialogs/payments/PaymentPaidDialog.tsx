@@ -23,6 +23,7 @@ import React from "react";
 import dynamic from "next/dynamic";
 import { Modal } from "@entities/ui/Modal";
 import type { ISODate } from "@types";
+import { BudgetRollupPreviewPanel } from "@features/budget/BudgetRollupPreviewPanel";
 
 const GrantBudgetStrip = dynamic(
   () => import("@entities/grants/GrantBudgetStrip").then((m) => m.GrantBudgetStrip),
@@ -108,6 +109,11 @@ export function PaymentPaidDialog({
       </div>
 
       {grantId && <GrantBudgetStrip grantId={grantId} className="mb-3" />}
+      {grantId && (
+        <div className="mb-3">
+          <BudgetRollupPreviewPanel grantId={grantId} compact />
+        </div>
+      )}
 
       <div className="space-y-3" data-tour="payment-paid-dialog-form">
         <label className="block text-sm" data-tour="payment-paid-dialog-note">

@@ -15,6 +15,7 @@ import { useAuth } from "@app/auth/AuthProvider";
 import { isAdminLike } from "@lib/roles";
 import PaymentQueue, { type PaymentQueueAdminSyncResp } from "@client/paymentQueue";
 import type { BudgetPipelineRollupRow } from "@client/budgetPipeline";
+import { BudgetRollupPreviewPanel } from "@features/budget/BudgetRollupPreviewPanel";
 
 function fmtMoney(n: number | null | undefined) {
   const v = Number(n ?? 0);
@@ -188,6 +189,7 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
   const { data: rollup } = usePipelineRollup();
   const reconcile = useReconcileGrant();
   const [reconcilingId, setReconcilingId] = useState<string | null>(null);
+  const [previewGrantId, setPreviewGrantId] = useState<string>("");
 
   const rollupByPipeline = useMemo(
     () => Object.fromEntries((rollup?.rows ?? []).map((r) => [r.pipelineId, r])) as Record<string, BudgetPipelineRollupRow>,
@@ -260,6 +262,10 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
 
         <QueueSyncPanel />
 
+        <BudgetRollupPreviewPanel
+          grantId={previewGrantId || active.find((p) => p.grantId)?.grantId || inactive.find((p) => p.grantId)?.grantId || null}
+        />
+
         {isLoading && (
           <div className="text-center py-10 text-sm text-slate-400 dark:text-slate-500 animate-pulse">
             Loading pipelines…
@@ -284,6 +290,7 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
             onEdit={onEdit}
             onDelete={handleDelete}
             onReconcile={handleReconcile}
+            onPreview={(grantId) => setPreviewGrantId(grantId || "")}
             reconcilingId={reconcilingId}
           />
         )}
@@ -297,6 +304,7 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
             onEdit={onEdit}
             onDelete={handleDelete}
             onReconcile={handleReconcile}
+            onPreview={(grantId) => setPreviewGrantId(grantId || "")}
             reconcilingId={reconcilingId}
             muted
           />
@@ -313,11 +321,12 @@ type TableProps = {
   onEdit: (id: string) => void;
   onDelete: (id: string, name: string) => void;
   onReconcile: (grantId: string | null, name: string) => void;
+  onPreview: (grantId: string | null) => void;
   reconcilingId: string | null;
   muted?: boolean;
 };
 
-function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, reconcilingId, muted }: TableProps) {
+function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, onPreview, reconcilingId, muted }: TableProps) {
   return (
     <div className="space-y-2">
       <h3 className={`text-xs font-semibold uppercase tracking-wide ${muted ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"}`}>
@@ -397,6 +406,15 @@ function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, rec
                   </button>
                   <button
                     type="button"
+                    disabled={!p.grantId}
+                    onClick={(e) => { e.stopPropagation(); onPreview(p.grantId); }}
+                    className="mr-3 text-xs text-slate-400 dark:text-slate-500 hover:text-sky-600 dark:hover:text-sky-400 transition-colors disabled:opacity-40 disabled:hover:text-slate-400"
+                    title={p.grantId ? "Preview grant line-item and split rollup" : "No grant target"}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
                     onClick={(e) => { e.stopPropagation(); void onDelete(p.id, p.name); }}
                     className="text-xs text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   >
@@ -438,4 +456,3 @@ export function PipelineManagerMain() {
     />
   );
 }
-

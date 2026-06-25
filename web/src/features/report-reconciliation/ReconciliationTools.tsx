@@ -47,6 +47,7 @@ import {
   type CompareRow,
   type EnrollmentCompareGranularity,
 } from "./reconciliationCompare";
+import { BudgetRollupPreviewPanel } from "@features/budget/BudgetRollupPreviewPanel";
 
 export type ReconciliationToolKind = "enrollment" | "payment" | "identity";
 
@@ -2368,6 +2369,7 @@ function ReconciliationToolMain({
   const [refreshingCollection, setRefreshingCollection] = React.useState<DatabaseCollectionKey | null>(null);
   const [selectedFindingIds, setSelectedFindingIds] = React.useState<Set<string>>(new Set());
   const [findingSearch, setFindingSearch] = React.useState("");
+  const [rollupGrantId, setRollupGrantId] = React.useState("");
   const [compareMode, setCompareMode] = React.useState<CompareMode>(() => defaultCompareMode(kind));
   const [enrollmentGranularity, setEnrollmentGranularity] = React.useState<EnrollmentCompareGranularity>("enrollment");
   const [showMissingSystemEnrollments, setShowMissingSystemEnrollments] = React.useState(true);
@@ -2383,6 +2385,11 @@ function ReconciliationToolMain({
     })).filter((grant) => grant.id || grant.name),
     [dashboard.grants],
   );
+  React.useEffect(() => {
+    if (kind !== "payment") return;
+    if (rollupGrantId && grantOptions.some((grant) => grant.id === rollupGrantId)) return;
+    setRollupGrantId(grantOptions[0]?.id || "");
+  }, [grantOptions, kind, rollupGrantId]);
   const selectedFinding = React.useMemo(
     () => filteredFindings.find((finding) => finding.id === selection?.findingId) ?? filteredFindings[0] ?? null,
     [filteredFindings, selection?.findingId],
@@ -2534,6 +2541,27 @@ function ReconciliationToolMain({
       </div>
 
       <ReviewFilterPanel findings={toolFindings} value={filterState} onChange={onFilterChange} />
+
+      {kind === "payment" ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Budget rollup debug</div>
+              <div className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">Use this while reconciling payment reports to find missing line-item or cycle assignment.</div>
+            </div>
+            <select
+              className="input h-9 min-w-64 text-sm"
+              value={rollupGrantId}
+              onChange={(event) => setRollupGrantId(event.currentTarget.value)}
+            >
+              {grantOptions.map((grant) => (
+                <option key={grant.id || grant.name} value={grant.id}>{grant.name || grant.id}</option>
+              ))}
+            </select>
+          </div>
+          <BudgetRollupPreviewPanel grantId={rollupGrantId || null} compact />
+        </div>
+      ) : null}
 
       <ActionQueuePanel
         selectedFindings={selectedFindings}
