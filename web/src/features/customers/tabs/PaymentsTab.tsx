@@ -33,6 +33,7 @@ const PaymentEditorSheetSurface = dynamic(
 );
 import { CustomerPaymentsTable } from "../components";
 import { addMonthsISO } from "../components/paymentScheduleUtils";
+import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "../paymentScheduleBuildSummary";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
@@ -155,6 +156,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   const [error, setError] = React.useState<string | null>(null);
   const [enrollmentFilterId, setEnrollmentFilterId] = React.useState<string>("all");
   const [viewMode, setViewMode] = React.useState<"legacy" | "sheet">("legacy");
+  const [buildSummary, setBuildSummary] = React.useState<PaymentScheduleBuildSummary | null>(null);
 
   const grantBudgetById = React.useMemo(() => {
     const m = new Map<string, number>();
@@ -588,11 +590,15 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
 
   const buildSchedule = async (payload: PaymentScheduleBuildInput) => {
     setError(null);
+    const summary = summarizePaymentScheduleBuild(payload, builderEnrollments);
+    setBuildSummary(summary);
     try {
       await buildScheduleMutation.mutateAsync(payload);
       setBuilderOpen(false);
+      toast("Payment schedule built.", { type: "success" });
     } catch (e: unknown) {
       setError(toApiError(e).error || "Failed to build payment schedule.");
+      setBuildSummary(null);
     }
   };
 
@@ -673,6 +679,16 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           ) : null}
         </div>
       </div>
+
+      {buildScheduleMutation.isPending && buildSummary ? (
+        <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          Building {buildSummary.rowCount} payment row{buildSummary.rowCount === 1 ? "" : "s"} for {buildSummary.enrollmentLabel}. Budget totals and task schedules will refresh when it completes.
+        </div>
+      ) : buildSummary ? (
+        <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          Built {buildSummary.rowCount} payment row{buildSummary.rowCount === 1 ? "" : "s"} for {buildSummary.enrollmentLabel}. Payment rows, budget projections, and schedule metadata have been refreshed.
+        </div>
+      ) : null}
 
       {viewMode === "sheet" ? (
         <PaymentEditorSheetSurface fixedCustomerId={customerId} fixedCustomerName={customerName} embedded />

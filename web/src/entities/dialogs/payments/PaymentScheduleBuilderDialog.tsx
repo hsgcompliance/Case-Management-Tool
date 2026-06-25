@@ -1377,7 +1377,12 @@ export default function PaymentScheduleBuilderDialog({
         onClose={onCancel}
         widthClass="max-w-5xl"
         footer={
-          <div className="flex w-full items-center justify-end gap-2">
+          <div className="flex w-full items-center gap-2">
+            {busy ? (
+              <div className="mr-auto text-xs font-medium text-slate-500">Saving rows, tasks, and budget projections...</div>
+            ) : (
+              <div className="mr-auto" />
+            )}
             <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
             {viewMode === "spreadsheet" ? (
               <button className="btn btn-sm" onClick={ssSubmit} disabled={busy}>{busy ? "Building..." : "Build Schedule"}</button>
@@ -1387,11 +1392,14 @@ export default function PaymentScheduleBuilderDialog({
           </div>
         }
       >
-        <div className="relative space-y-4">
+        <div className="relative space-y-4" aria-busy={busy}>
           {busy && (
             <div className="absolute inset-0 z-10 flex items-center justify-center rounded bg-white/80 backdrop-blur-[1px] dark:bg-slate-900/80">
               <div className="rounded border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                Building payment schedule...
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Building payment schedule...</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Keeping this dialog open while projections, tasks, and budget totals refresh.
+                </div>
               </div>
             </div>
           )}

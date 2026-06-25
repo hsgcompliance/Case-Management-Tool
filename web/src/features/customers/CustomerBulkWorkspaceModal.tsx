@@ -19,6 +19,7 @@ import { toast } from "@lib/toast";
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
+import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "./paymentScheduleBuildSummary";
 
 type CustomerRow = TCustomerEntity & { id: string };
 
@@ -826,6 +827,7 @@ function BulkPaymentsWorkspace({
   const [copyEnrollmentId, setCopyEnrollmentId] = React.useState<string>("");
   const [previousSourceEnrollmentId, setPreviousSourceEnrollmentId] = React.useState<string>("");
   const [processedIds, setProcessedIds] = React.useState<string[]>([]);
+  const [paymentBuildSummary, setPaymentBuildSummary] = React.useState<PaymentScheduleBuildSummary | null>(null);
   const currentCustomer = customers[currentIndex] || null;
   const currentCustomerId = String(currentCustomer?.id || "");
   const currentEnrollments = React.useMemo(
@@ -885,13 +887,20 @@ function BulkPaymentsWorkspace({
 
   const handleBuild = React.useCallback(
     async (payload: PaymentScheduleBuildInput) => {
-      await buildPayments.mutateAsync(payload);
-      setPreviousSourceEnrollmentId(payload.enrollmentId);
-      toast("Payment schedule built.", { type: "success" });
-      setBuilderOpen(false);
-      advance();
+      const summary = summarizePaymentScheduleBuild(payload, currentEnrollmentOptions);
+      setPaymentBuildSummary(summary);
+      try {
+        await buildPayments.mutateAsync(payload);
+        setPreviousSourceEnrollmentId(payload.enrollmentId);
+        toast("Payment schedule built.", { type: "success" });
+        setBuilderOpen(false);
+        advance();
+      } catch (error: unknown) {
+        setPaymentBuildSummary(null);
+        toast(error instanceof Error ? error.message : "Failed to build payment schedule.", { type: "error" });
+      }
     },
-    [advance, buildPayments],
+    [advance, buildPayments, currentEnrollmentOptions],
   );
 
   const handleCopyPrevious = React.useCallback(async () => {
@@ -1069,8 +1078,17 @@ function BulkPaymentsWorkspace({
                   onClick={() => setBuilderOpen(true)}
                   disabled={!currentEnrollmentOptions.length || buildPayments.isPending}
                 >
-                  Open Builder
+                  {buildPayments.isPending ? "Building..." : "Open Builder"}
                 </button>
+                {buildPayments.isPending && paymentBuildSummary ? (
+                  <div className="mt-3 rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-sky-900">
+                    Building {paymentBuildSummary.rowCount} payment row{paymentBuildSummary.rowCount === 1 ? "" : "s"} for {paymentBuildSummary.enrollmentLabel}.
+                  </div>
+                ) : paymentBuildSummary ? (
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900">
+                    Last built {paymentBuildSummary.rowCount} payment row{paymentBuildSummary.rowCount === 1 ? "" : "s"} for {paymentBuildSummary.enrollmentLabel}.
+                  </div>
+                ) : null}
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
