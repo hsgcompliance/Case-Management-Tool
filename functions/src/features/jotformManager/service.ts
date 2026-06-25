@@ -34,8 +34,14 @@ async function jfGet(path: string, params: Record<string, string | number> = {})
 
 export type JfForm = { id: string; title: string; count: number; status: string; updatedAt: string | null };
 
-export async function listForms(): Promise<JfForm[]> {
-  const content = (await jfGet("/user/forms", { limit: 1000, orderby: "title" })) as Array<Record<string, unknown>> | null;
+// Hard cap: never list forms not edited in the last 2 years. Default look-back is
+// one month; advanced callers can widen up to the cap.
+const MAX_FORM_AGE_DAYS = 730;
+
+export async function listForms(maxAgeDays = 30): Promise<JfForm[]> {
+  const days = Math.max(1, Math.min(MAX_FORM_AGE_DAYS, Number(maxAgeDays) || 30));
+  const cutoff = Date.now() - days * 86_400_000;
+  const content = (await jfGet("/user/forms", { limit: 1000, orderby: "updated_at" })) as Array<Record<string, unknown>> | null;
   return (content || [])
     .map((f) => ({
       id: String(f.id || ""),
@@ -45,6 +51,11 @@ export async function listForms(): Promise<JfForm[]> {
       updatedAt: (f.updated_at as string) || (f.created_at as string) || null,
     }))
     .filter((f) => isValidId(f.id))
+    .filter((f) => {
+      // Keep if edited within the window; drop stale forms. Unknown dates kept.
+      const t = f.updatedAt ? Date.parse(f.updatedAt) : NaN;
+      return !Number.isFinite(t) || t >= cutoff;
+    })
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 
@@ -112,59 +123,101 @@ export async function cloneSubmission(formId: string, submissionId: string): Pro
   return { newSubmissionId: newId, editUrl: `${jfWeb()}/edit/${newId}` };
 }
 
-/* ── submission → customer links ── */
+/* ── submission → customer links ───────────────────────────────────────────
+ * Canonical store = customers/{id}.meta.linkedSubmissions[] (read by the web
+ * customer modal). We also write a derived reverse index `submissionLinks/{sid}`
+ * (rebuildable) so the forms-app Submission Manager can show "linked" badges.
+ * Multiple customers per submission allowed (households).
+ */
+export type LinkedCustomer = { customerId: string; customerName: string; cwId: string | null };
+export type SubmissionLink = { submissionId: string; customers: LinkedCustomer[] };
 
-function linkId(formId: string, submissionId: string): string {
-  return `${formId}_${submissionId}`;
-}
+/** Canonical lightweight ref appended to customers.meta.linkedSubmissions[]. */
+type LinkedSubmissionRef = {
+  formId: string;
+  formName: string;
+  submissionId: string;
+  alias: string | null;
+  cwId: string | null;
+  linkedAt: string;
+  linkedBy: string | null;
+};
 
-export async function setSubmissionLink(args: {
+export async function linkSubmissionToCustomer(args: {
   orgId: string | null;
   formId: string;
+  formName: string;
   submissionId: string;
   customerId: string;
   customerName: string;
   cwId: string | null;
+  alias: string | null;
   byUid: string | null;
-}): Promise<{ id: string }> {
+}): Promise<{ ok: true }> {
   if (!isValidId(args.formId) || !isValidId(args.submissionId)) throw Object.assign(new Error("invalid_id"), { code: 400 });
   if (!args.customerId) throw Object.assign(new Error("missing_customer"), { code: 400 });
-  const id = linkId(args.formId, args.submissionId);
-  await db.collection("submissionLinks").doc(id).set(
-    {
-      orgId: normId(args.orgId) || null,
-      formId: args.formId,
-      submissionId: args.submissionId,
-      customerId: args.customerId,
-      customerName: args.customerName || "",
-      cwId: args.cwId || null,
-      linkedByUid: args.byUid,
-      linkedAtISO: isoNow(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
-  return { id };
-}
+  const org = normId(args.orgId);
 
-export type SubmissionLink = { submissionId: string; customerId: string; customerName: string; cwId: string | null };
+  // 1) Canonical: append/update the ref on the customer doc.
+  const ref: LinkedSubmissionRef = {
+    formId: args.formId,
+    formName: args.formName || "",
+    submissionId: args.submissionId,
+    alias: args.alias || null,
+    cwId: args.cwId || null,
+    linkedAt: isoNow(),
+    linkedBy: args.byUid,
+  };
+  await db.runTransaction(async (tx) => {
+    const cref = db.collection("customers").doc(args.customerId);
+    const snap = await tx.get(cref);
+    if (!snap.exists) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+    const data = snap.data() || {};
+    if (org && normId(data.orgId) && normId(data.orgId) !== org) throw Object.assign(new Error("forbidden"), { code: 403 });
+    const meta = (data.meta && typeof data.meta === "object" ? data.meta : {}) as Record<string, unknown>;
+    const list = Array.isArray(meta.linkedSubmissions) ? (meta.linkedSubmissions as LinkedSubmissionRef[]) : [];
+    const idx = list.findIndex((x) => String(x?.submissionId) === args.submissionId);
+    const next = idx >= 0 ? list.map((x, i) => (i === idx ? { ...x, ...ref } : x)) : [...list, ref];
+    tx.set(cref, { meta: { ...meta, linkedSubmissions: next } }, { merge: true });
+  });
+
+  // 2) Derived reverse index (best-effort; rebuildable). Keyed by submissionId,
+  //    customers as a map so re-links dedupe by customerId.
+  try {
+    await db.collection("submissionLinks").doc(args.submissionId).set(
+      {
+        orgId: org || null,
+        formId: args.formId,
+        submissionId: args.submissionId,
+        customers: { [args.customerId]: { customerName: args.customerName || "", cwId: args.cwId || null, linkedAtISO: isoNow() } },
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch {
+    /* index is derived; ignore */
+  }
+
+  return { ok: true };
+}
 
 export async function listSubmissionLinks(orgId: string | null, formId: string): Promise<Record<string, SubmissionLink>> {
   if (!isValidId(formId)) return {};
   const org = normId(orgId);
-  const snap = await db.collection("submissionLinks").where("formId", "==", formId).limit(2000).get();
+  const snap = await db.collection("submissionLinks").where("formId", "==", formId).limit(3000).get();
   const out: Record<string, SubmissionLink> = {};
   for (const d of snap.docs) {
     const r = d.data() || {};
     if (org && normId(r.orgId) && normId(r.orgId) !== org) continue;
-    const sid = String(r.submissionId || "");
+    const sid = String(r.submissionId || d.id || "");
     if (!sid) continue;
-    out[sid] = {
-      submissionId: sid,
-      customerId: String(r.customerId || ""),
-      customerName: String(r.customerName || ""),
-      cwId: (r.cwId as string | null) ?? null,
-    };
+    const map = (r.customers && typeof r.customers === "object" ? r.customers : {}) as Record<string, { customerName?: string; cwId?: string | null }>;
+    const customers: LinkedCustomer[] = Object.entries(map).map(([customerId, v]) => ({
+      customerId,
+      customerName: String(v?.customerName || ""),
+      cwId: (v?.cwId as string | null) ?? null,
+    }));
+    if (customers.length) out[sid] = { submissionId: sid, customers };
   }
   return out;
 }

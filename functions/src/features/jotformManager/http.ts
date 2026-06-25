@@ -1,6 +1,6 @@
 // functions/src/features/jotformManager/http.ts
 import { secureHandler, normStr, orgIdFromClaims, JOTFORM_API_KEY_SECRET } from "../../core";
-import { listForms, listSubmissions, cloneSubmission, setSubmissionLink, listSubmissionLinks } from "./service";
+import { listForms, listSubmissions, cloneSubmission, linkSubmissionToCustomer, listSubmissionLinks } from "./service";
 
 const JF_SECRETS = [JOTFORM_API_KEY_SECRET];
 
@@ -8,7 +8,8 @@ const JF_SECRETS = [JOTFORM_API_KEY_SECRET];
 export const jfFormsList_http = secureHandler(
   async (req, res) => {
     void req.user;
-    const items = await listForms();
+    const maxAgeDays = Number((req.query as Record<string, unknown>)?.maxAgeDays) || 30;
+    const items = await listForms(maxAgeDays);
     res.status(200).json({ ok: true, items, count: items.length });
   },
   { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"], secrets: JF_SECRETS }
@@ -36,21 +37,27 @@ export const jfCloneSubmission_http = secureHandler(
   { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"], secrets: JF_SECRETS }
 );
 
-/** POST /submissionLinkSet — authed staff; link a Jotform submission to a customer. */
-export const submissionLinkSet_http = secureHandler(
+/**
+ * POST /customerLinkSubmission — authed staff; link a Jotform submission to a
+ * customer. Canonical store is customers.meta.linkedSubmissions[] (read by the web
+ * customer modal); a derived reverse index is also written. appCheck:false for forms-web.
+ */
+export const customerLinkSubmission_http = secureHandler(
   async (req, res) => {
     const caller = req.user!;
     const body = (req.body || {}) as Record<string, unknown>;
-    const out = await setSubmissionLink({
+    await linkSubmissionToCustomer({
       orgId: orgIdFromClaims(caller),
       formId: normStr(body.formId),
+      formName: normStr(body.formName),
       submissionId: normStr(body.submissionId),
       customerId: normStr(body.customerId),
       customerName: normStr(body.customerName),
       cwId: normStr(body.cwId) || null,
+      alias: normStr(body.alias) || null,
       byUid: (caller as { uid?: string })?.uid || null,
     });
-    res.status(200).json({ ok: true, ...out });
+    res.status(200).json({ ok: true });
   },
   { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
 );

@@ -41,6 +41,12 @@ import { refreshCreditCardBudgets } from "../creditCards/refreshBudget";
 
 const CC_FORM_ID = "251878265158166";
 
+// Jotform sync windowing — keep it light. Default look-back is one month; we never
+// pull/refresh submissions older than the hard cap (2 years). Advanced callers can
+// widen `since` up to the cap.
+export const JOTFORM_SYNC_DEFAULT_WINDOW_DAYS = 30;
+export const JOTFORM_SYNC_MAX_AGE_DAYS = 730;
+
 function resolveCreditCardId(card: string, cards: Array<Record<string, unknown>>): string {
   if (!card) return "";
   const needle = card.trim().toLowerCase();
@@ -1340,7 +1346,17 @@ export async function syncJotformSubmissions(body: unknown, caller: Claims, targ
   const pageLimit = Math.max(1, Math.min(1000, Number(limit) || 50));
   const pageMax = Math.max(1, Math.min(25, Number(maxPages) || 1));
 
-  const sinceIso = toUtcIso(since as any);
+  // Windowing: default to the last month; clamp to a 2-year hard cap. We never
+  // pull/refresh anything older than 2 years; an explicit `since` (advanced) can
+  // widen the window up to that cap. The sync is always bounded — keeps it light.
+  const DAY_MS = 86_400_000;
+  const nowMs = Date.now();
+  const capMs = nowMs - JOTFORM_SYNC_MAX_AGE_DAYS * DAY_MS;
+  const defaultMs = nowMs - JOTFORM_SYNC_DEFAULT_WINDOW_DAYS * DAY_MS;
+  const reqIso = toUtcIso(since as any);
+  const reqMs = reqIso ? Date.parse(reqIso) : NaN;
+  const effMs = Number.isFinite(reqMs) ? Math.max(reqMs, capMs) : defaultMs;
+  const sinceIso = toUtcIso(new Date(effMs).toISOString());
 
   let offset = Math.max(0, Number(startOffset) || 0);
   let page = 0;
