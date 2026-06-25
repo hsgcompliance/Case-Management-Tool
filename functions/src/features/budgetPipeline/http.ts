@@ -1,4 +1,5 @@
 // functions/src/features/budgetPipeline/http.ts
+import {z} from 'zod';
 import {secureHandler, orgIdFromClaims, requireUid, requireOrg, hasLevel} from '../../core';
 import {
   BudgetPipelineUpsertBody,
@@ -14,6 +15,7 @@ import {
   deleteBudgetPipeline,
   previewBudgetPipeline,
   rollupBudgetPipelines,
+  previewGrantBudgetRollup,
 } from './service';
 
 function resolveOrgId(req: any): string {
@@ -135,3 +137,36 @@ export const budgetPipelineRollup = secureHandler(async (req, res): Promise<void
   const result = await rollupBudgetPipelines(orgId, {pipelineId: parsed.data.pipelineId});
   res.json({ok: true, ...result});
 }, {auth: 'viewer', methods: ['GET', 'POST', 'OPTIONS']});
+
+const BudgetRollupPreviewQuery = z.object({
+  grantId: z.string().trim().min(1),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  focusSourceId: z.string().optional(),
+});
+
+/* ============================================================================
+   GET|POST /budgetRollupPreview — read-only grant → line item → split explain
+============================================================================ */
+
+export const budgetRollupPreview = secureHandler(async (req, res): Promise<void> => {
+  const src = req.method === 'GET' ? req.query : (req.body || {});
+  const parsed = BudgetRollupPreviewQuery.safeParse(src);
+  if (!parsed.success) {
+    res.status(400).json({ok: false, error: 'invalid_query', issues: parsed.error.issues});
+    return;
+  }
+  const orgId = resolveOrgId(req);
+  try {
+    const preview = await previewGrantBudgetRollup(orgId, parsed.data);
+    res.json({ok: true, preview});
+  } catch (error) {
+    const code = Number((error as {code?: unknown})?.code || 500);
+    if (code === 400 || code === 404) {
+      res.status(code).json({ok: false, error: (error as Error)?.message || 'rollup_preview_failed'});
+      return;
+    }
+    throw error;
+  }
+}, {auth: 'viewer', methods: ['GET', 'POST', 'OPTIONS'], memory: '512MiB'});

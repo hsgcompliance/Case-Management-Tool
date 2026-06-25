@@ -21,6 +21,95 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function isoDate10(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'object' && value && typeof (value as {toDate?: unknown}).toDate === 'function') {
+    const d = (value as {toDate: () => Date}).toDate();
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+  }
+  const d = new Date(value as never);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
+function budgetRowDate(row: Record<string, unknown>): string {
+  return isoDate10(row.dueDate || row.date || row.paymentDate || row.serviceDate || row.postedAt || row.createdAt || row.updatedAtISO || row.updatedAt);
+}
+
+function rowAmount(row: Record<string, unknown>): number {
+  if (row.amountCents != null) return round2((Number(row.amountCents) || 0) / 100);
+  return round2(Number(row.amount || 0));
+}
+
+function inWindow(date: string, start?: string, end?: string): boolean {
+  if (!date) return true;
+  if (start && date < start) return false;
+  if (end && date > end) return false;
+  return true;
+}
+
+function sourceLabel(row: Record<string, unknown>, fallback: string) {
+  return String(row.customer || row.customerName || row.vendor || row.merchant || row.formTitle || row.note || fallback || '').trim();
+}
+
+export type BudgetRollupPreviewSource = {
+  id: string;
+  sourceType: 'ledger' | 'paymentQueue';
+  date: string;
+  amount: number;
+  status: 'spent' | 'projected';
+  label: string;
+  grantId: string;
+  lineItemId: string;
+  splitGoalId: string | null;
+  customerId: string;
+  caseManagerId: string;
+  ledgerId: string | null;
+  paymentQueueId: string | null;
+  reason?: string;
+};
+
+export type BudgetRollupPreview = {
+  grant: {
+    id: string;
+    name: string;
+    budget: number;
+    spent: number;
+    projected: number;
+    balance: number;
+    projectedBalance: number;
+  };
+  lineItems: Array<{
+    id: string;
+    label: string;
+    budget: number;
+    spent: number;
+    projected: number;
+    balance: number;
+    projectedBalance: number;
+    splitGoals: Array<{
+      id: string;
+      label: string;
+      startDate: string;
+      endDate: string;
+      amount: number;
+      spent: number;
+      projected: number;
+      balance: number;
+      projectedBalance: number;
+      sources: BudgetRollupPreviewSource[];
+    }>;
+    sources: BudgetRollupPreviewSource[];
+  }>;
+  unmatched: BudgetRollupPreviewSource[];
+  sourceCounts: {ledger: number; paymentQueue: number; unmatched: number};
+};
+
 // ─── Field extraction ─────────────────────────────────────────────────────────
 
 const WIDE_GRANT_TEXT_FIELDS = [
@@ -645,6 +734,175 @@ export async function rollupBudgetPipelines(
   );
 
   return {rows, totals};
+}
+
+export async function previewGrantBudgetRollup(
+  orgId: string,
+  opts: {grantId: string; startDate?: string; endDate?: string; limit?: number; focusSourceId?: string},
+): Promise<BudgetRollupPreview> {
+  const grantId = String(opts.grantId || '').trim();
+  if (!grantId) throw Object.assign(new Error('grant_required'), {code: 400});
+
+  const gSnap = await db.collection('grants').doc(grantId).get();
+  if (!gSnap.exists) throw Object.assign(new Error('grant_not_found'), {code: 404});
+  const grant = gSnap.data() as Record<string, unknown>;
+  if (orgId && String(grant.orgId || '') && String(grant.orgId || '') !== orgId) {
+    throw Object.assign(new Error('grant_not_found'), {code: 404});
+  }
+
+  const budget = (grant.budget || {}) as Record<string, unknown>;
+  const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
+  const startDate = isoDate10(opts.startDate);
+  const endDate = isoDate10(opts.endDate);
+  const limit = Math.max(1, Math.min(Number(opts.limit || 25), 100));
+
+  const baseLineItems = lineItems.map((li) => {
+    const amount = round2(Number(li.amount || 0));
+    return {
+      id: String(li.id || ''),
+      label: String(li.label || li.name || li.id || 'Line item'),
+      budget: amount,
+      spent: 0,
+      projected: 0,
+      balance: amount,
+      projectedBalance: amount,
+      splitGoals: (Array.isArray(li.splitGoals) ? li.splitGoals : []).map((goal: Record<string, unknown>) => {
+        const goalAmount = round2(Number(goal.amount || 0));
+        return {
+          id: String(goal.id || ''),
+          label: String(goal.label || goal.name || goal.id || 'Cycle'),
+          startDate: isoDate10(goal.startDate),
+          endDate: isoDate10(goal.endDate),
+          amount: goalAmount,
+          spent: 0,
+          projected: 0,
+          balance: goalAmount,
+          projectedBalance: goalAmount,
+          sources: [] as BudgetRollupPreviewSource[],
+        };
+      }),
+      sources: [] as BudgetRollupPreviewSource[],
+    };
+  });
+  const previewLineById = new Map(baseLineItems.map((li) => [li.id, li]));
+  const unmatched: BudgetRollupPreviewSource[] = [];
+  let ledgerCount = 0;
+  let queueCount = 0;
+
+  function addRow(raw: Record<string, unknown>, id: string, sourceType: 'ledger' | 'paymentQueue') {
+    const date = budgetRowDate(raw);
+    if (!inWindow(date, startDate, endDate)) return;
+
+    const amount = rowAmount(raw);
+    if (!amount) return;
+
+    const status = sourceType === 'ledger' || String(raw.queueStatus || '') === 'posted' ? 'spent' : 'projected';
+    const lineItemId = String(raw.lineItemId || '');
+    const line = lineItemId ? previewLineById.get(lineItemId) : null;
+    let splitGoalId: string | null = null;
+    let reason = '';
+
+    if (!lineItemId) reason = 'Missing line item assignment.';
+    else if (!line) reason = 'Line item ID does not match this grant budget.';
+
+    const src: BudgetRollupPreviewSource = {
+      id,
+      sourceType,
+      date,
+      amount,
+      status,
+      label: sourceLabel(raw, id),
+      grantId,
+      lineItemId,
+      splitGoalId: null,
+      customerId: String(raw.customerId || raw.customerID || ''),
+      caseManagerId: String(raw.caseManagerId || raw.caseManagerUid || raw.cmUid || ''),
+      ledgerId: sourceType === 'ledger' ? id : (String(raw.ledgerEntryId || '') || null),
+      paymentQueueId: sourceType === 'paymentQueue' ? id : null,
+      ...(reason ? {reason} : {}),
+    };
+
+    if (!line) {
+      unmatched.push(src);
+      return;
+    }
+
+    if (status === 'spent') line.spent = round2(line.spent + amount);
+    else line.projected = round2(line.projected + amount);
+
+    for (const goal of line.splitGoals) {
+      if (!goal.id || !date || !goal.startDate || !goal.endDate) continue;
+      if (date < goal.startDate || date > goal.endDate) continue;
+      splitGoalId = goal.id;
+      if (status === 'spent') goal.spent = round2(goal.spent + amount);
+      else goal.projected = round2(goal.projected + amount);
+      if (goal.sources.length < limit) goal.sources.push({...src, splitGoalId});
+      break;
+    }
+
+    line.sources.push({...src, splitGoalId});
+    if (line.sources.length > limit) line.sources = line.sources.slice(0, limit);
+  }
+
+  const [ledgerSnap, queueSnap] = await Promise.all([
+    db.collection('ledger').where('grantId', '==', grantId).get(),
+    db.collection(QUEUE_COLLECTION).where('grantId', '==', grantId).get(),
+  ]);
+
+  for (const doc of ledgerSnap.docs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (orgId && String(data.orgId || '') && String(data.orgId || '') !== orgId) continue;
+    ledgerCount += 1;
+    addRow(data, doc.id, 'ledger');
+  }
+
+  for (const doc of queueSnap.docs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (orgId && String(data.orgId || '') && String(data.orgId || '') !== orgId) continue;
+    if (String(data.queueStatus || '') === 'void') continue;
+    queueCount += 1;
+    addRow(data, doc.id, 'paymentQueue');
+  }
+
+  const lineItemsOut = baseLineItems.map((li) => {
+    const budgetCents = Math.round(li.budget * 100);
+    const spentCents = Math.round(li.spent * 100);
+    const projectedCents = Math.round(li.projected * 100);
+    return {
+      ...li,
+      balance: round2((budgetCents - spentCents) / 100),
+      projectedBalance: round2((budgetCents - spentCents - projectedCents) / 100),
+      splitGoals: li.splitGoals.map((goal) => {
+        const amountCents = Math.round(goal.amount * 100);
+        const spentCentsGoal = Math.round(goal.spent * 100);
+        const projectedCentsGoal = Math.round(goal.projected * 100);
+        return {
+          ...goal,
+          balance: round2((amountCents - spentCentsGoal) / 100),
+          projectedBalance: round2((amountCents - spentCentsGoal - projectedCentsGoal) / 100),
+        };
+      }),
+    };
+  });
+
+  const totalBudget = round2(Number(budget.total || lineItemsOut.reduce((sum, li) => sum + li.budget, 0)));
+  const totalSpent = round2(lineItemsOut.reduce((sum, li) => sum + li.spent, 0));
+  const totalProjected = round2(lineItemsOut.reduce((sum, li) => sum + li.projected, 0));
+
+  return {
+    grant: {
+      id: grantId,
+      name: String(grant.name || grant.label || grantId),
+      budget: totalBudget,
+      spent: totalSpent,
+      projected: totalProjected,
+      balance: round2(totalBudget - totalSpent),
+      projectedBalance: round2(totalBudget - totalSpent - totalProjected),
+    },
+    lineItems: lineItemsOut,
+    unmatched: unmatched.slice(0, limit),
+    sourceCounts: {ledger: ledgerCount, paymentQueue: queueCount, unmatched: unmatched.length},
+  };
 }
 
 // ─── Trigger helper ───────────────────────────────────────────────────────────
