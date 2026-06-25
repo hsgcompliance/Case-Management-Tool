@@ -3,6 +3,8 @@
 import React from "react";
 import type { OrgConfigDoc } from "@client/orgs";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
+import { BudgetDigestConfigEditor } from "@features/budget/BudgetDigestConfigEditor";
+import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import { toast } from "@lib/toast";
 import { useOrgConfigDashboard } from "../orgConfigContext";
 import { ConfigDocEditorCard } from "./configEditors";
@@ -74,7 +76,10 @@ export const DisplayConfigMain: DashboardToolDefinition<DisplayConfigFilterState
   onSelect,
 }) => {
   const { docsByKind, patchConfigDoc, isLoading, isError, error } = useOrgConfigDashboard();
+  const { data: orgConfig } = useOrgConfig();
+  const saveOrgConfig = useSaveOrgConfig();
   const [savingId, setSavingId] = React.useState<string | null>(null);
+  const [savingBudgetDigest, setSavingBudgetDigest] = React.useState(false);
   const docs = docsByKind.display.filter((doc) => matchesSearch(doc, filterState.search));
   const selectedDoc = docs.find((doc) => doc.id === selection?.docId) ?? docs[0] ?? null;
 
@@ -87,7 +92,22 @@ export const DisplayConfigMain: DashboardToolDefinition<DisplayConfigFilterState
   if (!selectedDoc) return <div className="py-12 text-center text-sm text-slate-400">No display config docs found.</div>;
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-5xl space-y-4">
+      <BudgetDigestConfigEditor
+        config={orgConfig}
+        saving={savingBudgetDigest}
+        onSave={async (next) => {
+          setSavingBudgetDigest(true);
+          try {
+            await saveOrgConfig.mutateAsync(next);
+            toast("Budget digest settings saved.", { type: "success" });
+          } catch (e: unknown) {
+            toast(e instanceof Error ? e.message : "Save failed.", { type: "error" });
+          } finally {
+            setSavingBudgetDigest(false);
+          }
+        }}
+      />
       <ConfigDocEditorCard
         doc={selectedDoc}
         saving={savingId === selectedDoc.id}
@@ -106,4 +126,3 @@ export const DisplayConfigMain: DashboardToolDefinition<DisplayConfigFilterState
     </div>
   );
 };
-
