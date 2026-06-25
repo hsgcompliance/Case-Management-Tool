@@ -28,6 +28,9 @@ export type FolderIndexEntry = {
   status: "active" | "exited";
   url: string;
   createdTime: string | null;
+  tssWorkbookId?: string | null;
+  tssWorkbookUrl?: string | null;
+  tssWorkbookName?: string | null;
 };
 
 /** "Last, First_CWID" → parts. Mirrors the GAS folder-naming convention. */
@@ -49,6 +52,28 @@ function quoteSheetTitle(title: string) {
   return `'${String(title || "").replace(/'/g, "''")}'`;
 }
 
+function firstExistingCol(header: string[], labels: string[]): number {
+  const normalized = new Map(header.map((h, idx) => [h.toLowerCase(), idx]));
+  for (const label of labels) {
+    const idx = normalized.get(label.toLowerCase());
+    if (idx != null) return idx;
+  }
+  return -1;
+}
+
+function spreadsheetUrl(id: string): string {
+  return `https://docs.google.com/spreadsheets/d/${id}/edit`;
+}
+
+function spreadsheetIdFromUrl(value: string): string {
+  const text = String(value || "").trim();
+  return (
+    text.match(/\/spreadsheets\/d\/([-\w]{20,})/i)?.[1] ||
+    text.match(/[?&]id=([-\w]{20,})/i)?.[1] ||
+    (/^[-\w]{20,}$/.test(text) ? text : "")
+  );
+}
+
 /**
  * Read the org's index sheet server-side and return the parsed folder rows.
  * Tolerant of column reordering (maps by header label). Prefers the `index` tab,
@@ -58,8 +83,9 @@ function quoteSheetTitle(title: string) {
 export async function readIndexSheetFolders(
   sheetId: string,
   userUid?: string,
+  googleAccessToken?: string,
 ): Promise<FolderIndexEntry[]> {
-  const sheets = await getSheetsClient({ userUid, requiredScopes: [SHEETS_SCOPE] });
+  const sheets = await getSheetsClient({ userUid, googleAccessToken, requiredScopes: [SHEETS_SCOPE] });
 
   const meta = await sheets.spreadsheets.get({
     spreadsheetId: sheetId,
@@ -89,6 +115,24 @@ export async function readIndexSheetFolders(
   const cwidC = col("CWID");
   const statusC = col("Status");
   const createdC = col("Created At");
+  const tssWorkbookIdC = firstExistingCol(header, [
+    "TSS Workbook ID",
+    "TSS Workbook Id",
+    "TSS Workbook",
+    "Workbook ID",
+    "Workbook Id",
+    "TSS ID",
+  ]);
+  const tssWorkbookUrlC = firstExistingCol(header, [
+    "TSS Workbook URL",
+    "TSS Workbook Url",
+    "Workbook URL",
+    "Workbook Url",
+  ]);
+  const tssWorkbookNameC = firstExistingCol(header, [
+    "TSS Workbook Name",
+    "Workbook Name",
+  ]);
   if (idC < 0) throw new Error("customer_index_sheet_missing_folder_id_column");
 
   const out: FolderIndexEntry[] = [];
@@ -100,6 +144,13 @@ export async function readIndexSheetFolders(
     seen.add(id);
     const name = nameC >= 0 ? String(row[nameC] || "").trim() : "";
     const parsed = parseFolderName(name);
+    const rawTssWorkbookUrl = tssWorkbookUrlC >= 0 ? String(row[tssWorkbookUrlC] || "").trim() : "";
+    const tssWorkbookId =
+      (tssWorkbookIdC >= 0 ? String(row[tssWorkbookIdC] || "").trim() : "") ||
+      spreadsheetIdFromUrl(rawTssWorkbookUrl) ||
+      null;
+    const tssWorkbookUrl = rawTssWorkbookUrl || (tssWorkbookId ? spreadsheetUrl(tssWorkbookId) : null);
+    const tssWorkbookName = (tssWorkbookNameC >= 0 ? String(row[tssWorkbookNameC] || "").trim() : "") || null;
     out.push({
       id,
       name,
@@ -109,6 +160,7 @@ export async function readIndexSheetFolders(
       status: statusToken(statusC >= 0 ? row[statusC] : "active"),
       url: (urlC >= 0 ? String(row[urlC] || "").trim() : "") || `https://drive.google.com/drive/folders/${id}`,
       createdTime: (createdC >= 0 ? String(row[createdC] || "").trim() : "") || null,
+      ...(tssWorkbookId ? { tssWorkbookId, tssWorkbookUrl, tssWorkbookName } : {}),
     });
   }
   return out;

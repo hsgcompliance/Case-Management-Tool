@@ -8,6 +8,7 @@ import {
 } from "../../core";
 import { getDriveClient, getDriveClientWithDiagnostics } from "./service";
 import { getOrgGDriveConfig } from "./orgConfig";
+import { readIndexSheetFolders } from "./folderIndexCache";
 import { z } from "zod";
 import * as logger from "firebase-functions/logger";
 
@@ -130,11 +131,6 @@ export const gdriveCustomerFolderIndex = secureHandler(
           query.exitedParentId || orgConfig.customerFolderIndex.exitedParentId,
       };
 
-      if (!resolvedQuery.activeParentId && !resolvedQuery.exitedParentId) {
-        res.status(400).json({ ok: false, error: "missing_parent_ids" });
-        return;
-      }
-
       // Collect auth diagnostics before listing (debug mode only)
       let authDebug: Record<string, unknown> | undefined;
       if (debug) {
@@ -144,6 +140,29 @@ export const gdriveCustomerFolderIndex = secureHandler(
         } catch (e: any) {
           authDebug = { error: String(e?.message || e) };
         }
+      }
+
+      const sheetId = String(orgConfig.customerFolderIndex.sheetId || "").trim();
+      if (sheetId) {
+        try {
+          const folders = await readIndexSheetFolders(sheetId, userUid, googleAccessToken);
+          res.status(200).json({
+            ok: true,
+            folders,
+            ...(debug ? { debug: authDebug } : {}),
+          });
+          return;
+        } catch (err: any) {
+          logger.warn("gdrive_customer_index_sheet_read_failed_fallback_drive_scan", {
+            sheetId,
+            message: String(err?.message || err || ""),
+          });
+        }
+      }
+
+      if (!resolvedQuery.activeParentId && !resolvedQuery.exitedParentId) {
+        res.status(400).json({ ok: false, error: "missing_parent_ids" });
+        return;
       }
 
       const results: Awaited<ReturnType<typeof listFoldersInParent>> = [];

@@ -119,6 +119,9 @@ export type TCustomerFolder = {
   last: string | null;
   first: string | null;
   cwid: string | null;
+  tssWorkbookId?: string | null;
+  tssWorkbookUrl?: string | null;
+  tssWorkbookName?: string | null;
 };
 
 export const GDriveListQuery = z.object({
@@ -155,6 +158,7 @@ export const GDriveBuildCustomerFolderBody = z.object({
     .optional()
     .default([]),
   subfolders: z.array(z.string().min(1).max(255)).optional().default([]),
+  customerId: z.string().trim().min(1).optional(),
 });
 export type TGDriveBuildCustomerFolderBody = z.infer<typeof GDriveBuildCustomerFolderBody>;
 

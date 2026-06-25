@@ -173,24 +173,59 @@ export function useGDriveCustomerFolderSync() {
 
 // ── Sheets-based folder index ─────────────────────────────────────────────────
 
-// Column order from Apps Script INDEX_HEADERS:
-// ['FUNC','Folder Name','First','Last','Folder URL','Folder ID','CWID','Status','Result','Created At']
-const SC = { NAME: 1, FIRST: 2, LAST: 3, URL: 4, ID: 5, CWID: 6, STATUS: 7, CREATED: 9 } as const;
-
 function parseSheetRows(values: string[][]): TCustomerFolder[] {
-  const [, ...rows] = values; // skip header
+  const [rawHeader = [], ...rows] = values;
+  const header = rawHeader.map((v) => String(v || '').trim());
+  const col = (label: string) => header.findIndex((h) => h.toLowerCase() === label.toLowerCase());
+  const firstCol = (labels: string[]) => {
+    for (const label of labels) {
+      const idx = col(label);
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  };
+  const idC = col('Folder ID');
+  const nameC = col('Folder Name');
+  const urlC = col('Folder URL');
+  const firstC = col('First');
+  const lastC = col('Last');
+  const cwidC = col('CWID');
+  const statusC = col('Status');
+  const createdC = col('Created At');
+  const tssWorkbookIdC = firstCol(['TSS Workbook ID', 'TSS Workbook Id', 'TSS Workbook', 'Workbook ID', 'Workbook Id', 'TSS ID']);
+  const tssWorkbookUrlC = firstCol(['TSS Workbook URL', 'TSS Workbook Url', 'Workbook URL', 'Workbook Url']);
+  const tssWorkbookNameC = firstCol(['TSS Workbook Name', 'Workbook Name']);
+  const spreadsheetIdFromUrl = (value: string) => {
+    const text = String(value || '').trim();
+    return (
+      text.match(/\/spreadsheets\/d\/([-\w]{20,})/i)?.[1] ||
+      text.match(/[?&]id=([-\w]{20,})/i)?.[1] ||
+      (/^[-\w]{20,}$/.test(text) ? text : '')
+    );
+  };
+  if (idC < 0) return [];
   return rows
-    .filter((r) => r[SC.ID])
-    .map((r) => ({
-      id: r[SC.ID] ?? "",
-      name: r[SC.NAME] ?? "",
-      url: r[SC.URL] ?? "",
-      first: r[SC.FIRST] || null,
-      last: r[SC.LAST] || null,
-      cwid: r[SC.CWID] || null,
-      status: (r[SC.STATUS]?.toUpperCase() === "ACTIVE" ? "active" : "exited") as "active" | "exited",
-      createdTime: r[SC.CREATED] || null,
-    }));
+    .filter((r) => r[idC])
+    .map((r) => {
+      const rawTssWorkbookUrl = tssWorkbookUrlC >= 0 ? String(r[tssWorkbookUrlC] || '').trim() : '';
+      const tssWorkbookId =
+        (tssWorkbookIdC >= 0 ? String(r[tssWorkbookIdC] || '').trim() : '') ||
+        spreadsheetIdFromUrl(rawTssWorkbookUrl) ||
+        null;
+      const tssWorkbookUrl = rawTssWorkbookUrl || (tssWorkbookId ? `https://docs.google.com/spreadsheets/d/${tssWorkbookId}/edit` : null);
+      const tssWorkbookName = (tssWorkbookNameC >= 0 ? String(r[tssWorkbookNameC] || '').trim() : '') || null;
+      return {
+        id: r[idC] ?? "",
+        name: nameC >= 0 ? r[nameC] ?? "" : "",
+        url: urlC >= 0 ? r[urlC] ?? "" : "",
+        first: firstC >= 0 ? r[firstC] || null : null,
+        last: lastC >= 0 ? r[lastC] || null : null,
+        cwid: cwidC >= 0 ? r[cwidC] || null : null,
+        status: ((statusC >= 0 ? r[statusC] : '')?.toUpperCase() === "ACTIVE" ? "active" : "exited") as "active" | "exited",
+        createdTime: createdC >= 0 ? r[createdC] || null : null,
+        ...(tssWorkbookId ? { tssWorkbookId, tssWorkbookUrl, tssWorkbookName } : {}),
+      };
+    });
 }
 
 // Index sheet layout mirrors the Apps Script INDEX_HEADERS: FUNC is column A and
