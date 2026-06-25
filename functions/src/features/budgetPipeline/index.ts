@@ -6,6 +6,7 @@ export {
   budgetPipelineDelete,
   budgetPipelinePreview,
   budgetPipelineRollup,
+  budgetRollupPreview,
 } from './http';
 
 export { onPaymentQueueItemCreate } from './triggers';
