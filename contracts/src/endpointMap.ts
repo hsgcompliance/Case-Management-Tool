@@ -755,8 +755,15 @@ export type GDriveBuildCustomerFolderResp = Ok<{
     id: string;
     name: string;
     url: string;
+    workbook?: {
+      spreadsheetId: string;
+      url: string;
+      name: string;
+    };
     warnings?: TGDriveCustomerFolderBuildWarning[];
   };
+  linked?: boolean;
+  linkError?: string;
 }> | GDriveEndpointError;
 export type GDriveCopyGrantTemplatesResp = Ok<TGDriveGrantTemplateCopyResult> | GDriveEndpointError;
 export type GDriveCustomerFolderIndexResp = Ok<{ folders: TCustomerFolder[]; warnings?: Array<Record<string, unknown>> }> | GDriveEndpointError;
