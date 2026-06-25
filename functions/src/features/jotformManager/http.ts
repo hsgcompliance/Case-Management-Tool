@@ -1,0 +1,67 @@
+// functions/src/features/jotformManager/http.ts
+import { secureHandler, normStr, orgIdFromClaims, JOTFORM_API_KEY_SECRET } from "../../core";
+import { listForms, listSubmissions, cloneSubmission, setSubmissionLink, listSubmissionLinks } from "./service";
+
+const JF_SECRETS = [JOTFORM_API_KEY_SECRET];
+
+/** GET /jfFormsList — authed staff; all Jotform forms (for the form picker). */
+export const jfFormsList_http = secureHandler(
+  async (req, res) => {
+    void req.user;
+    const items = await listForms();
+    res.status(200).json({ ok: true, items, count: items.length });
+  },
+  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"], secrets: JF_SECRETS }
+);
+
+/** GET /jfSubmissionsList?formId= — authed staff; all submissions for a form. */
+export const jfSubmissionsList_http = secureHandler(
+  async (req, res) => {
+    void req.user;
+    const formId = normStr((req.query as Record<string, unknown>)?.formId);
+    const content = await listSubmissions(formId);
+    res.status(200).json({ ok: true, content, count: content.length });
+  },
+  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"], timeoutSeconds: 120, secrets: JF_SECRETS }
+);
+
+/** POST /jfCloneSubmission — authed staff; clone a submission → editable new one. */
+export const jfCloneSubmission_http = secureHandler(
+  async (req, res) => {
+    void req.user;
+    const body = (req.body || {}) as Record<string, unknown>;
+    const out = await cloneSubmission(normStr(body.formId), normStr(body.submissionId));
+    res.status(200).json({ ok: true, ...out });
+  },
+  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"], secrets: JF_SECRETS }
+);
+
+/** POST /submissionLinkSet — authed staff; link a Jotform submission to a customer. */
+export const submissionLinkSet_http = secureHandler(
+  async (req, res) => {
+    const caller = req.user!;
+    const body = (req.body || {}) as Record<string, unknown>;
+    const out = await setSubmissionLink({
+      orgId: orgIdFromClaims(caller),
+      formId: normStr(body.formId),
+      submissionId: normStr(body.submissionId),
+      customerId: normStr(body.customerId),
+      customerName: normStr(body.customerName),
+      cwId: normStr(body.cwId) || null,
+      byUid: (caller as { uid?: string })?.uid || null,
+    });
+    res.status(200).json({ ok: true, ...out });
+  },
+  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
+);
+
+/** GET /submissionLinksGet?formId= — authed staff; existing submission→customer links. */
+export const submissionLinksGet_http = secureHandler(
+  async (req, res) => {
+    const caller = req.user!;
+    const formId = normStr((req.query as Record<string, unknown>)?.formId);
+    const links = await listSubmissionLinks(orgIdFromClaims(caller), formId);
+    res.status(200).json({ ok: true, links });
+  },
+  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+);

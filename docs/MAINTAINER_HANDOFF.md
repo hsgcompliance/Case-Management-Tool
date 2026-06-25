@@ -18,6 +18,9 @@ Households DB v2 is an internal operations system for housing/grant case work. I
 - Google Drive customer folder tooling
 - Reporting, admin pages, dev tools, tours, and internal game overlays
 
+For Budget Digest behavior, budget-display org config, and the planned line-item /
+split-goal digest manager work, see `docs/BUDGET_DIGEST_WORKFLOW.md`.
+
 ## Runtime Stack
 
 - Web: Next.js 15, React 19, TypeScript, Firebase client SDK, React Query
@@ -30,6 +33,7 @@ Households DB v2 is an internal operations system for housing/grant case work. I
 
 - `web/src/app/(protected)/page.tsx` - protected app landing/dashboard area
 - `web/src/features/tools/toolsDefs.tsx` - tool/report registration surface
+- `web/src/features/admin/org-config/orgConfigToolDefs.tsx` - Org Config tools, including Display Configuration (`/admin/org-config/display-config`)
 - `web/src/client/api.ts` - HTTP client plumbing
 - `web/src/hooks/queryKeys.ts` - React Query key definitions
 - `functions/src/index.ts` - exported Cloud Functions
@@ -104,9 +108,12 @@ Never commit extracted customer, grant, ledger, payment, auth, Jotform, or Drive
 Prefer package scripts:
 
 - `npm run deploy:hosting`
+- `npm run deploy:hosting:all`
 - `npm run deploy:functions`
 - `npm run deploy:functions:missing`
 - `npm run deploy:functions-hosting`
+
+`deploy:hosting` and `deploy:functions-hosting` deploy web hosting only (`hosting:web`). Use the `:all`/`--hosting-all` paths only when every configured hosting target should deploy.
 
 Use reset deploy scripts only after reading their flags and understanding the function deletion behavior.
 

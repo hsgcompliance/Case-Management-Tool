@@ -49,6 +49,8 @@ export const GrantBudgetManagerRow = z
     category: z.string().nullable().optional(),
     vendor: z.string().nullable().optional(),
     status: z.string().nullable().optional(),
+    reversalOf: z.string().nullable().optional(),
+    reversedByLedgerItemIds: z.array(z.string()).optional(),
     isWritable: z.boolean().optional().default(false),
     lockedReason: z.string().nullable().optional(),
     rowState: z.enum(["clean", "changed", "new", "deleted"]).optional().default("clean"),

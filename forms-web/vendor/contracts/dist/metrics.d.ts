@@ -1,0 +1,497 @@
+import { z } from "zod";
+export declare const NameRef: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>;
+export type TNameRef = z.infer<typeof NameRef>;
+export declare const CustomerRefLite: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodNullable<z.ZodString>;
+    caseManagerId: z.ZodNullable<z.ZodString>;
+    caseManagerName: z.ZodNullable<z.ZodString>;
+    population: z.ZodEnum<{
+        unknown: "unknown";
+        Youth: "Youth";
+        Individual: "Individual";
+        Family: "Family";
+    }>;
+    active: z.ZodBoolean;
+}, z.core.$strip>;
+export type TCustomerRefLite = z.infer<typeof CustomerRefLite>;
+export declare const PopulationSummary: z.ZodObject<{
+    customerTotal: z.ZodNumber;
+    activeCustomerTotal: z.ZodNumber;
+    inactiveCustomerTotal: z.ZodNumber;
+    caseManagerTotal: z.ZodNumber;
+    caseManagers: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type TPopulationSummary = z.infer<typeof PopulationSummary>;
+export declare const SystemSummaryMetrics: z.ZodObject<{
+    updatedAt: z.ZodAny;
+    reconciledAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    caseManagers: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+    }, z.core.$strip>;
+    customers: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+    }, z.core.$strip>;
+    populations: z.ZodObject<{
+        youth: z.ZodObject<{
+            customerTotal: z.ZodNumber;
+            activeCustomerTotal: z.ZodNumber;
+            inactiveCustomerTotal: z.ZodNumber;
+            caseManagerTotal: z.ZodNumber;
+            caseManagers: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                name: z.ZodNullable<z.ZodString>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>;
+        family: z.ZodObject<{
+            customerTotal: z.ZodNumber;
+            activeCustomerTotal: z.ZodNumber;
+            inactiveCustomerTotal: z.ZodNumber;
+            caseManagerTotal: z.ZodNumber;
+            caseManagers: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                name: z.ZodNullable<z.ZodString>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>;
+        individual: z.ZodObject<{
+            customerTotal: z.ZodNumber;
+            activeCustomerTotal: z.ZodNumber;
+            inactiveCustomerTotal: z.ZodNumber;
+            caseManagerTotal: z.ZodNumber;
+            caseManagers: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                name: z.ZodNullable<z.ZodString>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
+    enrollments: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+    }, z.core.$strip>;
+    grants: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type TSystemSummaryMetrics = z.infer<typeof SystemSummaryMetrics>;
+export declare const SystemMonthMetrics: z.ZodObject<{
+    month: z.ZodString;
+    updatedAt: z.ZodAny;
+    reconciledAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    tasks: z.ZodObject<{
+        total: z.ZodNumber;
+        open: z.ZodNumber;
+        done: z.ZodNumber;
+    }, z.core.$strip>;
+    payments: z.ZodObject<{
+        total: z.ZodNumber;
+        unpaid: z.ZodNumber;
+        amount: z.ZodNumber;
+    }, z.core.$strip>;
+    spending: z.ZodObject<{
+        spent: z.ZodNumber;
+        projected: z.ZodNumber;
+        grantsWithActiveSpendItems: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>;
+    jotform: z.ZodObject<{
+        submissionsTotal: z.ZodNumber;
+        locallyTrackedOnly: z.ZodBoolean;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type TSystemMonthMetrics = z.infer<typeof SystemMonthMetrics>;
+export declare const CaseManagerSummaryMetrics: z.ZodObject<{
+    uid: z.ZodString;
+    caseManager: z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>;
+    updatedAt: z.ZodAny;
+    reconciledAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    customers: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+        byPopulation: z.ZodObject<{
+            youth: z.ZodNumber;
+            family: z.ZodNumber;
+            individual: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.core.$strip>;
+        refs: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodNullable<z.ZodString>;
+            caseManagerId: z.ZodNullable<z.ZodString>;
+            caseManagerName: z.ZodNullable<z.ZodString>;
+            population: z.ZodEnum<{
+                unknown: "unknown";
+                Youth: "Youth";
+                Individual: "Individual";
+                Family: "Family";
+            }>;
+            active: z.ZodBoolean;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>;
+    enrollments: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+        byPopulation: z.ZodObject<{
+            youth: z.ZodNumber;
+            family: z.ZodNumber;
+            individual: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
+    acuity: z.ZodObject<{
+        scoreSum: z.ZodNumber;
+        scoreCount: z.ZodNumber;
+        scoreAvg: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strip>;
+    tasks: z.ZodObject<{
+        openThisMonth: z.ZodNumber;
+        openNextMonth: z.ZodNumber;
+        byType: z.ZodObject<{
+            assessment: z.ZodObject<{
+                thisMonth: z.ZodNumber;
+                nextMonth: z.ZodNumber;
+            }, z.core.$strip>;
+            compliance: z.ZodObject<{
+                thisMonth: z.ZodNumber;
+                nextMonth: z.ZodNumber;
+            }, z.core.$strip>;
+            other: z.ZodObject<{
+                thisMonth: z.ZodNumber;
+                nextMonth: z.ZodNumber;
+            }, z.core.$strip>;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
+    payments: z.ZodObject<{
+        unpaidThisMonth: z.ZodNumber;
+        unpaidNextMonth: z.ZodNumber;
+        unpaidTotal: z.ZodNumber;
+        amountThisMonth: z.ZodNumber;
+        amountNextMonth: z.ZodNumber;
+        amountTotal: z.ZodNumber;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type TCaseManagerSummaryMetrics = z.infer<typeof CaseManagerSummaryMetrics>;
+export declare const CaseManagerMonthMetrics: z.ZodObject<{
+    month: z.ZodString;
+    uid: z.ZodString;
+    name: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    updatedAt: z.ZodAny;
+    reconciledAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    tasks: z.ZodObject<{
+        total: z.ZodNumber;
+        open: z.ZodNumber;
+        done: z.ZodNumber;
+    }, z.core.$strip>;
+    payments: z.ZodObject<{
+        unpaidCount: z.ZodNumber;
+        unpaidAmount: z.ZodNumber;
+    }, z.core.$strip>;
+    spending: z.ZodOptional<z.ZodObject<{
+        projected: z.ZodNumber;
+        spent: z.ZodNumber;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type TCaseManagerMonthMetrics = z.infer<typeof CaseManagerMonthMetrics>;
+export declare const GrantSummaryMetrics: z.ZodObject<{
+    grantId: z.ZodString;
+    grant: z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>;
+    updatedAt: z.ZodAny;
+    reconciledAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    enrollments: z.ZodObject<{
+        total: z.ZodNumber;
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+        byPopulation: z.ZodObject<{
+            youth: z.ZodNumber;
+            family: z.ZodNumber;
+            individual: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
+    customers: z.ZodObject<{
+        uniqueTotal: z.ZodNumber;
+        activeUniqueTotal: z.ZodNumber;
+        inactiveUniqueTotal: z.ZodNumber;
+        refs: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodNullable<z.ZodString>;
+            caseManagerId: z.ZodNullable<z.ZodString>;
+            caseManagerName: z.ZodNullable<z.ZodString>;
+            population: z.ZodEnum<{
+                unknown: "unknown";
+                Youth: "Youth";
+                Individual: "Individual";
+                Family: "Family";
+            }>;
+            active: z.ZodBoolean;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>;
+    caseManagers: z.ZodObject<{
+        total: z.ZodNumber;
+        refs: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>;
+    spending: z.ZodObject<{
+        projected: z.ZodNumber;
+        spent: z.ZodNumber;
+        projectedInWindow: z.ZodNumber;
+        spentInWindow: z.ZodNumber;
+        lineItemsActive: z.ZodNumber;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type TGrantSummaryMetrics = z.infer<typeof GrantSummaryMetrics>;
+export declare const GrantMonthMetrics: z.ZodObject<{
+    month: z.ZodString;
+    grantId: z.ZodString;
+    name: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    updatedAt: z.ZodAny;
+    reconciledAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    enrollments: z.ZodObject<{
+        active: z.ZodNumber;
+        inactive: z.ZodNumber;
+        total: z.ZodNumber;
+    }, z.core.$strip>;
+    payments: z.ZodObject<{
+        unpaidCount: z.ZodNumber;
+        unpaidAmount: z.ZodNumber;
+    }, z.core.$strip>;
+    spending: z.ZodObject<{
+        projected: z.ZodNumber;
+        spent: z.ZodNumber;
+        activeLineItems: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type TGrantMonthMetrics = z.infer<typeof GrantMonthMetrics>;
+export declare const MetricChipId: z.ZodEnum<{
+    "system.caseManagers.total": "system.caseManagers.total";
+    "system.customers.total": "system.customers.total";
+    "system.population.youth.caseManagers": "system.population.youth.caseManagers";
+    "system.population.youth.customers": "system.population.youth.customers";
+    "system.population.family.caseManagers": "system.population.family.caseManagers";
+    "system.population.family.customers": "system.population.family.customers";
+    "system.population.individual.caseManagers": "system.population.individual.caseManagers";
+    "system.population.individual.customers": "system.population.individual.customers";
+    "system.month.tasks.total": "system.month.tasks.total";
+    "system.month.payments.total": "system.month.payments.total";
+    "system.month.spending.spent": "system.month.spending.spent";
+    "system.month.spending.projected": "system.month.spending.projected";
+    "system.month.jotform.submissions": "system.month.jotform.submissions";
+    "cm.customers.total": "cm.customers.total";
+    "cm.tasks.total": "cm.tasks.total";
+    "cm.acuity.sum": "cm.acuity.sum";
+    "grant.enrollments.total": "grant.enrollments.total";
+    "grant.customers.total": "grant.customers.total";
+    "grant.spending.spent": "grant.spending.spent";
+    "grant.spending.projected": "grant.spending.projected";
+}>;
+export type TMetricChipId = z.infer<typeof MetricChipId>;
+export declare const MetricChipDefinition: z.ZodObject<{
+    id: z.ZodEnum<{
+        "system.caseManagers.total": "system.caseManagers.total";
+        "system.customers.total": "system.customers.total";
+        "system.population.youth.caseManagers": "system.population.youth.caseManagers";
+        "system.population.youth.customers": "system.population.youth.customers";
+        "system.population.family.caseManagers": "system.population.family.caseManagers";
+        "system.population.family.customers": "system.population.family.customers";
+        "system.population.individual.caseManagers": "system.population.individual.caseManagers";
+        "system.population.individual.customers": "system.population.individual.customers";
+        "system.month.tasks.total": "system.month.tasks.total";
+        "system.month.payments.total": "system.month.payments.total";
+        "system.month.spending.spent": "system.month.spending.spent";
+        "system.month.spending.projected": "system.month.spending.projected";
+        "system.month.jotform.submissions": "system.month.jotform.submissions";
+        "cm.customers.total": "cm.customers.total";
+        "cm.tasks.total": "cm.tasks.total";
+        "cm.acuity.sum": "cm.acuity.sum";
+        "grant.enrollments.total": "grant.enrollments.total";
+        "grant.customers.total": "grant.customers.total";
+        "grant.spending.spent": "grant.spending.spent";
+        "grant.spending.projected": "grant.spending.projected";
+    }>;
+    label: z.ZodString;
+    scope: z.ZodEnum<{
+        grant: "grant";
+        system: "system";
+        caseManager: "caseManager";
+    }>;
+    period: z.ZodEnum<{
+        month: "month";
+        current: "current";
+        allTime: "allTime";
+    }>;
+    valueType: z.ZodEnum<{
+        currency: "currency";
+        count: "count";
+    }>;
+    supportsDrilldown: z.ZodBoolean;
+    drilldownKind: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        lineItems: "lineItems";
+        caseManagers: "caseManagers";
+        customers: "customers";
+        grants: "grants";
+    }>>>;
+}, z.core.$strip>;
+export type TMetricChipDefinition = z.infer<typeof MetricChipDefinition>;
+export declare const MetricWorkspaceChipInstance: z.ZodObject<{
+    instanceId: z.ZodString;
+    chipId: z.ZodEnum<{
+        "system.caseManagers.total": "system.caseManagers.total";
+        "system.customers.total": "system.customers.total";
+        "system.population.youth.caseManagers": "system.population.youth.caseManagers";
+        "system.population.youth.customers": "system.population.youth.customers";
+        "system.population.family.caseManagers": "system.population.family.caseManagers";
+        "system.population.family.customers": "system.population.family.customers";
+        "system.population.individual.caseManagers": "system.population.individual.caseManagers";
+        "system.population.individual.customers": "system.population.individual.customers";
+        "system.month.tasks.total": "system.month.tasks.total";
+        "system.month.payments.total": "system.month.payments.total";
+        "system.month.spending.spent": "system.month.spending.spent";
+        "system.month.spending.projected": "system.month.spending.projected";
+        "system.month.jotform.submissions": "system.month.jotform.submissions";
+        "cm.customers.total": "cm.customers.total";
+        "cm.tasks.total": "cm.tasks.total";
+        "cm.acuity.sum": "cm.acuity.sum";
+        "grant.enrollments.total": "grant.enrollments.total";
+        "grant.customers.total": "grant.customers.total";
+        "grant.spending.spent": "grant.spending.spent";
+        "grant.spending.projected": "grant.spending.projected";
+    }>;
+    size: z.ZodDefault<z.ZodEnum<{
+        sm: "sm";
+        md: "md";
+        lg: "lg";
+    }>>;
+    scopeOverride: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        caseManagerUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        grantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$strip>>>;
+    monthMode: z.ZodDefault<z.ZodEnum<{
+        current: "current";
+        selected: "selected";
+    }>>;
+    selectedMonth: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    visible: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strip>;
+export type TMetricWorkspaceChipInstance = z.infer<typeof MetricWorkspaceChipInstance>;
+export declare const MetricWorkspaceLayout: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    chips: z.ZodArray<z.ZodObject<{
+        instanceId: z.ZodString;
+        chipId: z.ZodEnum<{
+            "system.caseManagers.total": "system.caseManagers.total";
+            "system.customers.total": "system.customers.total";
+            "system.population.youth.caseManagers": "system.population.youth.caseManagers";
+            "system.population.youth.customers": "system.population.youth.customers";
+            "system.population.family.caseManagers": "system.population.family.caseManagers";
+            "system.population.family.customers": "system.population.family.customers";
+            "system.population.individual.caseManagers": "system.population.individual.caseManagers";
+            "system.population.individual.customers": "system.population.individual.customers";
+            "system.month.tasks.total": "system.month.tasks.total";
+            "system.month.payments.total": "system.month.payments.total";
+            "system.month.spending.spent": "system.month.spending.spent";
+            "system.month.spending.projected": "system.month.spending.projected";
+            "system.month.jotform.submissions": "system.month.jotform.submissions";
+            "cm.customers.total": "cm.customers.total";
+            "cm.tasks.total": "cm.tasks.total";
+            "cm.acuity.sum": "cm.acuity.sum";
+            "grant.enrollments.total": "grant.enrollments.total";
+            "grant.customers.total": "grant.customers.total";
+            "grant.spending.spent": "grant.spending.spent";
+            "grant.spending.projected": "grant.spending.projected";
+        }>;
+        size: z.ZodDefault<z.ZodEnum<{
+            sm: "sm";
+            md: "md";
+            lg: "lg";
+        }>>;
+        scopeOverride: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            caseManagerUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            grantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$strip>>>;
+        monthMode: z.ZodDefault<z.ZodEnum<{
+            current: "current";
+            selected: "selected";
+        }>>;
+        selectedMonth: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        visible: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    updatedAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+}, z.core.$strip>;
+export type TMetricWorkspaceLayout = z.infer<typeof MetricWorkspaceLayout>;
+export declare const MetricWorkspacePrefs: z.ZodObject<{
+    layouts: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodString;
+        chips: z.ZodArray<z.ZodObject<{
+            instanceId: z.ZodString;
+            chipId: z.ZodEnum<{
+                "system.caseManagers.total": "system.caseManagers.total";
+                "system.customers.total": "system.customers.total";
+                "system.population.youth.caseManagers": "system.population.youth.caseManagers";
+                "system.population.youth.customers": "system.population.youth.customers";
+                "system.population.family.caseManagers": "system.population.family.caseManagers";
+                "system.population.family.customers": "system.population.family.customers";
+                "system.population.individual.caseManagers": "system.population.individual.caseManagers";
+                "system.population.individual.customers": "system.population.individual.customers";
+                "system.month.tasks.total": "system.month.tasks.total";
+                "system.month.payments.total": "system.month.payments.total";
+                "system.month.spending.spent": "system.month.spending.spent";
+                "system.month.spending.projected": "system.month.spending.projected";
+                "system.month.jotform.submissions": "system.month.jotform.submissions";
+                "cm.customers.total": "cm.customers.total";
+                "cm.tasks.total": "cm.tasks.total";
+                "cm.acuity.sum": "cm.acuity.sum";
+                "grant.enrollments.total": "grant.enrollments.total";
+                "grant.customers.total": "grant.customers.total";
+                "grant.spending.spent": "grant.spending.spent";
+                "grant.spending.projected": "grant.spending.projected";
+            }>;
+            size: z.ZodDefault<z.ZodEnum<{
+                sm: "sm";
+                md: "md";
+                lg: "lg";
+            }>>;
+            scopeOverride: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                caseManagerUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$strip>>>;
+            monthMode: z.ZodDefault<z.ZodEnum<{
+                current: "current";
+                selected: "selected";
+            }>>;
+            selectedMonth: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            visible: z.ZodDefault<z.ZodBoolean>;
+        }, z.core.$strip>>;
+        updatedAt: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    }, z.core.$strip>>>;
+    defaultLayoutId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>;
+export type TMetricWorkspacePrefs = z.infer<typeof MetricWorkspacePrefs>;

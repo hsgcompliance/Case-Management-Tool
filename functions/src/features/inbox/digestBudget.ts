@@ -34,6 +34,35 @@ type GrantBudgetRow = {
   projectedBalance: number;
   pctUsed: number;          // spent / total
   pctAllocated: number;     // projectedSpend / total
+  display: {
+    showGrantTotals: boolean;
+    showLineItems: boolean;
+    showSplitGoals: boolean;
+  };
+  lineItems: Array<{
+    id: string;
+    label: string;
+    total: number;
+    spent: number;
+    projected: number;
+    projectedSpend: number;
+    balance: number;
+    projectedBalance: number;
+    pctAllocated: number;
+    splitGoals: Array<{
+      id: string;
+      label: string;
+      startDate: string;
+      endDate: string;
+      total: number;
+      spent: number;
+      projected: number;
+      projectedSpend: number;
+      balance: number;
+      projectedBalance: number;
+      pctAllocated: number;
+    }>;
+  }>;
 };
 
 type BudgetDigestData = {
@@ -77,6 +106,22 @@ function monthLabel(ym: string): string {
   } catch { return ym; }
 }
 
+function lineItemDisplayConfig(grant: Record<string, unknown>, lineItem: Record<string, unknown>) {
+  const grantDigest = ((grant.budget as any)?.digestDisplay ?? {}) as Record<string, unknown>;
+  const itemDisplay = (lineItem.display && typeof lineItem.display === "object" ? lineItem.display : {}) as Record<string, unknown>;
+  const mainLevel = String(itemDisplay.mainDisplayLevel || grantDigest.mainDisplayLevel || "grant");
+  return {
+    appearInDigest: itemDisplay.appearInDigest !== false,
+    showLineItems: itemDisplay.showLineItemTotal !== false && (mainLevel === "lineItem" || mainLevel === "split" || itemDisplay.showLineItemTotal === true || itemDisplay.showSplitGoals === true),
+    showSplitGoals: itemDisplay.showSplitGoals === true || mainLevel === "split",
+  };
+}
+
+function periodText(startDate: string, endDate: string) {
+  if (!startDate && !endDate) return "Date range TBD";
+  return `${startDate || "TBD"}-${endDate || "TBD"}`;
+}
+
 // ── Data builder ──────────────────────────────────────────────────────────────
 
 export async function buildBudgetDigestData(opts: {
@@ -109,9 +154,56 @@ export async function buildBudgetDigestData(opts: {
     const projectedSpend  = Number(bt.projectedSpend  || spent + projected);
     const balance         = Number(bt.balance         ?? total - spent);
     const projectedBalance = Number(bt.projectedBalance ?? total - projectedSpend);
+    const digestDisplay = ((g.budget as any)?.digestDisplay ?? {}) as Record<string, unknown>;
+    const mainLevel = String(digestDisplay.mainDisplayLevel || "grant");
+    const showGrantTotals = digestDisplay.showGrantTotals !== false;
+    const showLineItems = mainLevel === "lineItem" || mainLevel === "split";
+    const showSplitGoals = mainLevel === "split";
 
     // Skip grants with no budget configured
     if (!total) continue;
+
+    const lineItems = (Array.isArray((g.budget as any)?.lineItems) ? (g.budget as any).lineItems : [])
+      .filter((li: Record<string, unknown>) => lineItemDisplayConfig(g, li).appearInDigest)
+      .map((li: Record<string, unknown>) => {
+        const liTotal = Number(li.amount || 0);
+        const liSpent = Number(li.spent || 0);
+        const liProjected = Number(li.projected || 0);
+        const liProjectedSpend = liSpent + liProjected;
+        const liDisplay = lineItemDisplayConfig(g, li);
+        return {
+          id: String(li.id || ""),
+          label: String(li.label || li.id || "Line item"),
+          total: liTotal,
+          spent: liSpent,
+          projected: liProjected,
+          projectedSpend: liProjectedSpend,
+          balance: liTotal - liSpent,
+          projectedBalance: liTotal - liProjectedSpend,
+          pctAllocated: pct(liProjectedSpend, liTotal),
+          splitGoals: liDisplay.showSplitGoals
+            ? (Array.isArray(li.splitGoals) ? li.splitGoals : []).map((goal: Record<string, unknown>, index: number) => {
+                const goalTotal = Number(goal.amount || 0);
+                const goalSpent = Number(goal.spent || 0);
+                const goalProjected = Number(goal.projected || 0);
+                const goalProjectedSpend = goalSpent + goalProjected;
+                return {
+                  id: String(goal.id || `${li.id || "li"}_${index}`),
+                  label: String(goal.label || `Cycle ${index + 1}`),
+                  startDate: String(goal.startDate || ""),
+                  endDate: String(goal.endDate || ""),
+                  total: goalTotal,
+                  spent: goalSpent,
+                  projected: goalProjected,
+                  projectedSpend: goalProjectedSpend,
+                  balance: goalTotal - goalSpent,
+                  projectedBalance: goalTotal - goalProjectedSpend,
+                  pctAllocated: pct(goalProjectedSpend, goalTotal),
+                };
+              })
+            : [],
+        };
+      });
 
     grants.push({
       id: doc.id,
@@ -125,6 +217,12 @@ export async function buildBudgetDigestData(opts: {
       projectedBalance,
       pctUsed:       pct(spent,          total),
       pctAllocated:  pct(projectedSpend,  total),
+      display: {
+        showGrantTotals,
+        showLineItems,
+        showSplitGoals,
+      },
+      lineItems: showLineItems || showSplitGoals ? lineItems : [],
     });
   }
 
@@ -156,6 +254,25 @@ export function buildBudgetDigestHtml(data: BudgetDigestData): string {
   const grantRows = grants.map((g) => {
     const [bgColor, fgColor] = statusColor(g.pctAllocated);
     const barW = Math.min(100, g.pctAllocated);
+    const childRows = g.lineItems.map((li) => {
+      const splitRows = li.splitGoals.map((goal) => `
+        <div style="border-left:2px solid ${BORDER};margin-left:14px;padding:6px 0 6px 10px">
+          <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:${TEXT}">
+            <span>${esc(goal.label)} <span style="color:${MUTED};font-size:11px">${esc(periodText(goal.startDate, goal.endDate))}</span></span>
+            <strong>${fmt$(goal.projectedSpend)} / ${fmt$(goal.total)}</strong>
+          </div>
+          <div style="font-size:11px;color:${goal.projectedBalance < 0 ? DANGER_TEXT : MUTED};margin-top:2px">Projected balance ${fmt$(goal.projectedBalance)}</div>
+        </div>`).join("");
+      return `
+        <div style="border-top:1px solid ${BORDER};padding:9px 0">
+          <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;color:${TEXT}">
+            <strong>${esc(li.label)}</strong>
+            <strong>${fmt$(li.projectedSpend)} / ${fmt$(li.total)}</strong>
+          </div>
+          <div style="font-size:11px;color:${li.projectedBalance < 0 ? DANGER_TEXT : MUTED};margin-top:2px">Projected balance ${fmt$(li.projectedBalance)}</div>
+          ${splitRows}
+        </div>`;
+    }).join("");
     return `
   <div style="background:${BG_CARD};border:1px solid ${BORDER};border-radius:10px;margin-bottom:12px;overflow:hidden">
     <div style="background:${BG_SECT};border-bottom:1px solid ${BORDER};padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
@@ -195,6 +312,7 @@ export function buildBudgetDigestHtml(data: BudgetDigestData): string {
           </td>
         </tr>
       </table>
+      ${childRows ? `<div style="margin-top:10px">${childRows}</div>` : ""}
     </div>
   </div>`;
   }).join("");

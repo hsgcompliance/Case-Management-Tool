@@ -56,8 +56,9 @@ All deploy scripts live in `scripts/` and are wired to `npm run` aliases. They p
 |---|---|---|
 | **functions** | `npm run deploy:functions` | All functions, chunked (safe — won't delete unrecognized deployed fns) |
 | **functions** (missing only) | `npm run deploy:functions:missing` | Diff-based — deploys only fns not yet in Firebase. Fastest for new additions. |
-| **web** | `npm run deploy:hosting` | Next.js hosting only |
-| **functions + web** | `npm run deploy:functions-hosting` | Functions (all) + hosting in one pass |
+| **web** | `npm run deploy:hosting` | Web Firebase Hosting only (`hosting:web`) |
+| **all hosting targets** | `npm run deploy:hosting:all` | Every configured Firebase Hosting target |
+| **functions + web** | `npm run deploy:functions-hosting` | Functions (all) + web hosting in one pass |
 | **git only** | *(manual)* `git add -A && git commit -m "..." && git push` | Commit + push with no Firebase deploy |
 | **graph** | *(see below)* | Incremental graph rebuild — run after code edits |
 | **ALL** | `npm run contracts:update && npm run deploy:functions-hosting` | Contracts → functions → hosting → git push |
@@ -80,15 +81,15 @@ npm run deploy:functions -- --start-at=<functionName> --no-build
 npm run deploy:reset-functions-hosting
 ```
 
-### Windows: clear the Next build cache before a web build/deploy
+### Windows: Next build cache handling before web build/deploy
 On Windows the `next build` step intermittently fails with
 `EPERM: operation not permitted, rename '...\.next\cache\webpack\...\N.pack_' -> '...N.pack'`
 (a stale webpack cache-pack lock). It compiles fine, then dies during "Generating
-static pages". Before building or deploying web hosting, clear the cache and use a
-long timeout:
+static pages". The web hosting deploy helper clears the cache automatically; clear
+it manually before direct `build:web` runs and use a long timeout:
 ```powershell
 Remove-Item -Recurse -Force web\.next\cache -ErrorAction SilentlyContinue
-npm run deploy:hosting        # or build:web
+npm run build:web
 ```
 A clean re-run succeeds; the error is a flaky file lock, not a code failure.
 

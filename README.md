@@ -52,6 +52,8 @@ npm run deploy:functions
 npm run deploy:functions-hosting
 ```
 
+`deploy:hosting` targets only the web Firebase Hosting site (`hosting:web`). Use `npm run deploy:hosting:all` only when every configured hosting target should deploy.
+
 For high-risk backend deploys, read `scripts/README.md` and the deploy script options first. Some scripts intentionally support dry runs or `--no-push`.
 
 ## Before Changing Code

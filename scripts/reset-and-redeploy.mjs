@@ -13,6 +13,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
+import { acquireDeployCheckouts } from "./lib/deployCheckouts.mjs";
 
 const PROJECT = process.argv[2] || "housing-db-v2";
 const DEPLOY_HOSTING = process.argv.includes("--hosting");
@@ -21,6 +22,10 @@ const HOSTING_ONLY = process.argv.includes("--hosting-only");
 const { shouldPush, commitMsg } = parsePushArgs();
 const REGION = "us-central1";
 const BATCH_SIZE = 20;
+const checkoutKeys = [
+  ...(HOSTING_ONLY ? [] : ["functions:all"]),
+  ...(DEPLOY_HOSTING || HOSTING_ONLY || DELETE_HOSTING_SSR ? ["hosting:all", "functions:ssrhousingdbv2"] : []),
+];
 
 function run(cmd, args, { allowFailure = false, stdio = "inherit" } = {}) {
   const result = spawnSync(cmd, args, {
@@ -198,15 +203,23 @@ function deploy() {
   }
 }
 
-if (DELETE_HOSTING_SSR) {
-  deleteHostingSsrFunctions();
-}
+const releaseDeployTargets = acquireDeployCheckouts(checkoutKeys, {
+  description: HOSTING_ONLY ? "hosting reset/redeploy" : "functions reset/redeploy",
+});
 
-if (!HOSTING_ONLY) {
-  deleteAllFunctions();
-}
+try {
+  if (DELETE_HOSTING_SSR) {
+    deleteHostingSsrFunctions();
+  }
 
-deploy();
+  if (!HOSTING_ONLY) {
+    deleteAllFunctions();
+  }
+
+  deploy();
+} finally {
+  releaseDeployTargets();
+}
 
 if (shouldPush) {
   pushCurrentBranchToGithub({ commitMsg });

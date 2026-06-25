@@ -437,6 +437,70 @@ export const GrantLineItemCap = z
 
 export type TGrantLineItemCap = z.infer<typeof GrantLineItemCap>;
 
+export const GrantBudgetSplitMode = z.enum(["none", "fixed", "monthly", "quarterly", "custom"]);
+export type TGrantBudgetSplitMode = z.infer<typeof GrantBudgetSplitMode>;
+
+export const GrantBudgetRollForwardBehavior = z.enum([
+  "none",
+  "rollToNext",
+  "rollToEnd",
+  "rebalanceFuture",
+  "manual",
+]);
+export type TGrantBudgetRollForwardBehavior = z.infer<typeof GrantBudgetRollForwardBehavior>;
+
+export const GrantBudgetDisplayLevel = z.enum(["grant", "lineItem", "split"]);
+export type TGrantBudgetDisplayLevel = z.infer<typeof GrantBudgetDisplayLevel>;
+
+export const GrantBudgetDateRange = z
+  .object({
+    startDate: z.string().trim().nullish(),
+    endDate: z.string().trim().nullish(),
+  })
+  .passthrough();
+export type TGrantBudgetDateRange = z.infer<typeof GrantBudgetDateRange>;
+
+export const GrantBudgetSplitGoal = z
+  .object({
+    id: z.string().trim().min(1).optional(),
+    label: z.string().trim().nullish(),
+    startDate: z.string().trim().nullish(),
+    endDate: z.string().trim().nullish(),
+    amount: Num,
+    spent: Num.optional(),
+    projected: Num.optional(),
+    balance: Num.optional(),
+    projectedBalance: Num.optional(),
+    includeAllBudgetItems: z.boolean().optional(),
+    notes: z.string().trim().nullish(),
+  })
+  .passthrough();
+export type TGrantBudgetSplitGoal = z.infer<typeof GrantBudgetSplitGoal>;
+
+export const GrantBudgetItemDisplayConfig = z
+  .object({
+    showGrantTotal: z.boolean().optional(),
+    showLineItemTotal: z.boolean().optional(),
+    showSplitGoals: z.boolean().optional(),
+    appearInDigest: z.boolean().optional(),
+    displayAs: z.enum(["main", "nested"]).optional(),
+    mainDisplayLevel: GrantBudgetDisplayLevel.optional(),
+    groupUnderParentGrant: z.boolean().optional(),
+    expandedByDefault: z.boolean().optional(),
+  })
+  .passthrough();
+export type TGrantBudgetItemDisplayConfig = z.infer<typeof GrantBudgetItemDisplayConfig>;
+
+export const GrantBudgetBreakdownValidation = z
+  .object({
+    status: z.enum(["ok", "warning"]).default("ok"),
+    message: z.string().trim().optional(),
+    splitTotal: Num.optional(),
+    variance: Num.optional(),
+  })
+  .passthrough();
+export type TGrantBudgetBreakdownValidation = z.infer<typeof GrantBudgetBreakdownValidation>;
+
 export const GrantBudgetLineItem = z
   .object({
     id: Id.optional(), // server fills if missing
@@ -464,6 +528,18 @@ export const GrantBudgetLineItem = z
     /** USD cap per enrolled customer on this line item. Only enforced if capEnabled. */
     perCustomerCap: z.number().min(0).nullish(),
     capEnabled: z.boolean().default(false),
+
+    /**
+     * Optional planning breakdown under this line item. The line-item amount
+     * remains the budget source of truth; split goals are planning windows.
+     */
+    splitMode: GrantBudgetSplitMode.optional().default("none"),
+    rollForward: GrantBudgetRollForwardBehavior.optional().default("none"),
+    splitStartDate: z.string().trim().nullish(),
+    splitEndDate: z.string().trim().nullish(),
+    splitGoals: z.array(GrantBudgetSplitGoal).optional().default([]),
+    display: GrantBudgetItemDisplayConfig.nullish(),
+    breakdownValidation: GrantBudgetBreakdownValidation.nullish(),
   })
   .passthrough();
 
@@ -497,6 +573,17 @@ export const GrantBudget = z
     total: Num,
     totals: GrantBudgetTotals.nullish(),
     lineItems: z.array(GrantBudgetLineItem).default([]),
+
+    digestDisplay: z
+      .object({
+        showOverallSummary: z.boolean().optional().default(true),
+        showGrantTotals: z.boolean().optional().default(true),
+        mainDisplayLevel: GrantBudgetDisplayLevel.optional().default("grant"),
+        expandNestedRowsByDefault: z.boolean().optional().default(false),
+        groupChildrenUnderParentGrant: z.boolean().optional().default(true),
+      })
+      .passthrough()
+      .nullish(),
 
     /**
      * When true, this grant/program tracks per-customer allocations and shows

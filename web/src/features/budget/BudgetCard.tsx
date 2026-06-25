@@ -176,8 +176,71 @@ function getBudgetLineItems(grant: Grant) {
       amount: fromCents(toCents(Number(item.amount || 0))),
       spent,
       projected,
+      splitMode: String(item.splitMode || "none"),
+      splitGoals: Array.isArray(item.splitGoals)
+        ? item.splitGoals.map((goal: Record<string, unknown>, index: number) => ({
+            id: String(goal.id || `${item.id || "li"}_split_${index}`),
+            label: String(goal.label || `Cycle ${index + 1}`),
+            startDate: String(goal.startDate || ""),
+            endDate: String(goal.endDate || ""),
+            amount: fromCents(toCents(Number(goal.amount || 0))),
+            spent: fromCents(toCents(Number(goal.spent || 0))),
+            projected: fromCents(toCents(Number(goal.projected || 0))),
+          }))
+        : [],
     };
   });
+}
+
+function CompactBudgetChildRows({
+  grant,
+  drawsDownBudget,
+}: {
+  grant: Grant;
+  drawsDownBudget: boolean;
+}) {
+  const lineItems = getBudgetLineItems(grant).filter((item) => item.id && item.amount > 0);
+  if (!lineItems.length) return null;
+  return (
+    <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+      <div className="space-y-2">
+        {lineItems.slice(0, 6).map((item) => {
+          const projectedSpend = item.spent + item.projected;
+          const available = item.amount - projectedSpend;
+          return (
+            <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate text-xs font-semibold text-slate-700 dark:text-slate-200">{item.label}</span>
+                <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-200">{fmtUsd(item.amount)}</span>
+              </div>
+              <div className="mt-1 grid grid-cols-3 gap-2 text-[10px] tabular-nums text-slate-500 dark:text-slate-400">
+                <span>{fmtUsd(item.spent)} spent</span>
+                <span>{fmtUsd(projectedSpend)} projected</span>
+                <span className={drawsDownBudget && available < 0 ? "text-red-500" : "text-emerald-600"}>{fmtUsd(available)} avail.</span>
+              </div>
+              {item.splitGoals.length > 0 && (
+                <div className="mt-2 space-y-1 border-l border-slate-200 pl-2 dark:border-slate-700">
+                  {item.splitGoals.slice(0, 4).map((goal) => {
+                    const goalProjectedSpend = goal.spent + goal.projected;
+                    const goalAvailable = goal.amount - goalProjectedSpend;
+                    const period = goal.startDate || goal.endDate ? `${goal.startDate || "TBD"}-${goal.endDate || "TBD"}` : "Date range TBD";
+                    return (
+                      <div key={goal.id} className="flex items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                        <span className="min-w-0 truncate">{goal.label} · {period}</span>
+                        <span className={drawsDownBudget && goalAvailable < 0 ? "shrink-0 font-semibold text-red-500" : "shrink-0 font-semibold text-slate-600 dark:text-slate-300"}>
+                          {fmtUsd(goalProjectedSpend)} / {fmtUsd(goal.amount)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function filterAllocationRows(
@@ -526,41 +589,44 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
       ) : isBillableFinancialModel ? (
         <BillableFinancialModelCardBody grant={grant} activeEnrollments={gm?.enrollments?.active} />
       ) : (
-        <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
-          {/* Total row */}
-          <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
-            <span className="text-xs text-slate-500 dark:text-slate-400">
-              {drawsDownBudget ? "Total" : "Reference"}
-            </span>
-            <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
-              {fmtUsd(budget.total)}
-            </span>
-          </div>
+        <>
+          <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
+            {/* Total row */}
+            <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {drawsDownBudget ? "Total" : "Reference"}
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+                {fmtUsd(budget.total)}
+              </span>
+            </div>
 
-          <MetricRow
-            label={isBillingMode ? "Recorded Spend" : "Spent"}
-            value={fmtUsd(budget.spent)}
-            valueClass="text-amber-700 dark:text-amber-400"
-          />
-          {drawsDownBudget ? (
             <MetricRow
-              label="Remaining"
-              value={fmtUsd(budget.remaining)}
-              valueClass="text-slate-700 dark:text-slate-200"
+              label={isBillingMode ? "Recorded Spend" : "Spent"}
+              value={fmtUsd(budget.spent)}
+              valueClass="text-amber-700 dark:text-amber-400"
             />
-          ) : null}
-          <MetricRow
-            label={isBillingMode ? "Projected Activity" : "Projected to Spend"}
-            value={fmtUsd(budget.projectedToSpend)}
-            valueClass={drawsDownBudget && budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
-            dimmed={budget.projectedToSpend === 0}
-          />
-          <MetricRow
-            label={drawsDownBudget ? "Available" : "Activity Total"}
-            value={fmtUsd(drawsDownBudget ? budget.available : budget.projectedToSpend)}
-            valueClass={availClass}
-          />
-        </div>
+            {drawsDownBudget ? (
+              <MetricRow
+                label="Remaining"
+                value={fmtUsd(budget.remaining)}
+                valueClass="text-slate-700 dark:text-slate-200"
+              />
+            ) : null}
+            <MetricRow
+              label={isBillingMode ? "Projected Activity" : "Projected to Spend"}
+              value={fmtUsd(budget.projectedToSpend)}
+              valueClass={drawsDownBudget && budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
+              dimmed={budget.projectedToSpend === 0}
+            />
+            <MetricRow
+              label={drawsDownBudget ? "Available" : "Activity Total"}
+              value={fmtUsd(drawsDownBudget ? budget.available : budget.projectedToSpend)}
+              valueClass={availClass}
+            />
+          </div>
+          {!lineItemId && <CompactBudgetChildRows grant={grant} drawsDownBudget={drawsDownBudget} />}
+        </>
       )}
 
       {/* Footer */}

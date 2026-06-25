@@ -1,0 +1,27 @@
+import { getAuthed } from "./authedApi";
+
+export type FormsCustomer = {
+  id: string;
+  name: string;
+  caseManagerName: string | null;
+  cwId: string | null;
+};
+
+// Minimal customer index (name + id + CWID + CM) — cached once, filtered client-side.
+// We intentionally cache only these fields, never the full customer doc.
+let cache: Promise<FormsCustomer[]> | null = null;
+
+export function loadCustomers(force = false): Promise<FormsCustomer[]> {
+  if (!cache || force) {
+    cache = getAuthed<{ ok: true; items: FormsCustomer[] }>("formsCustomerSearch", {})
+      .then((o) => o.items ?? [])
+      .catch(() => []);
+  }
+  return cache;
+}
+
+export function filterCustomers(list: FormsCustomer[], q: string, limit = 12): FormsCustomer[] {
+  const ql = q.trim().toLowerCase();
+  if (!ql) return list.slice(0, limit);
+  return list.filter((c) => `${c.name} ${c.cwId ?? ""}`.toLowerCase().includes(ql)).slice(0, limit);
+}

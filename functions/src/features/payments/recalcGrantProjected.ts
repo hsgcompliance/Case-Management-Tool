@@ -75,6 +75,67 @@ function queueAmountCents(row: any): number {
   return 0;
 }
 
+function budgetRowDate(row: any): string {
+  return (
+    toDateOnly(row?.dueDate) ||
+    toDateOnly(row?.date) ||
+    toDateOnly(row?.paymentDate) ||
+    toDateOnly(row?.serviceDate) ||
+    toDateOnly(row?.postedAt) ||
+    toDateOnly(row?.createdAt) ||
+    toDateOnly(row?.ts?.toDate ? row.ts.toDate() : row?.ts) ||
+    ""
+  );
+}
+
+function dateInRange(date: string, start?: unknown, end?: unknown): boolean {
+  if (!date) return false;
+  const s = String(start || "").slice(0, 10);
+  const e = String(end || "").slice(0, 10);
+  if (!s || !e) return false;
+  return date >= s && date <= e;
+}
+
+function addSplitAmount(
+  splitAcc: Record<string, Record<string, { spentCents: number; projectedCents: number }>>,
+  lineItem: any,
+  kind: "spent" | "projected",
+  amountCents: number,
+  date: string,
+) {
+  if (!lineItem || !amountCents || !date) return;
+  const lineItemId = String(lineItem?.id || "");
+  if (!lineItemId || !Array.isArray(lineItem?.splitGoals)) return;
+  for (const goal of lineItem.splitGoals as any[]) {
+    const goalId = String(goal?.id || "");
+    if (!goalId || !dateInRange(date, goal?.startDate, goal?.endDate)) continue;
+    const byGoal = splitAcc[lineItemId] ?? (splitAcc[lineItemId] = {});
+    const acc = byGoal[goalId] ?? (byGoal[goalId] = { spentCents: 0, projectedCents: 0 });
+    if (kind === "spent") acc.spentCents += amountCents;
+    else acc.projectedCents += amountCents;
+  }
+}
+
+function applySplitRollups(lineItem: any, splitAcc: Record<string, { spentCents: number; projectedCents: number }> | undefined) {
+  if (!Array.isArray(lineItem?.splitGoals)) return lineItem;
+  return {
+    ...lineItem,
+    splitGoals: lineItem.splitGoals.map((goal: any) => {
+      const acc = splitAcc?.[String(goal?.id || "")] ?? { spentCents: 0, projectedCents: 0 };
+      const amountCents = toBudgetCents(goal?.amount);
+      const spentCents = Math.max(0, acc.spentCents);
+      const projectedCents = Math.max(0, acc.projectedCents);
+      return {
+        ...goal,
+        spent: fromBudgetCents(spentCents),
+        projected: fromBudgetCents(projectedCents),
+        balance: fromBudgetCents(amountCents - spentCents),
+        projectedBalance: fromBudgetCents(amountCents - spentCents - projectedCents),
+      };
+    }),
+  };
+}
+
 /** Decide if a ledger row counts toward grant window. */
 function isLedgerInWindow(row: any, win: GrantWindowISO): boolean {
   // Prefer explicit dueDate; fallback to date; fallback to ts.
@@ -149,6 +210,7 @@ export async function recalcProjectedForGrant(
 
   // Working LI map (objects we will write back)
   const liById: Record<string, any> = {};
+  const splitAccByLineId: Record<string, Record<string, { spentCents: number; projectedCents: number }>> = {};
 
   for (const li of originalLineItems) {
     const id = String(li?.id || "");
@@ -210,6 +272,7 @@ export async function recalcProjectedForGrant(
         if (dueISO && isInGrantWindow(dueISO, win)) {
           acc.projectedWinCents += amtCents;
         }
+        addSplitAmount(splitAccByLineId, liById[liId], "projected", amtCents, dueISO);
         const paymentId = String(p?.id || "").trim();
         if (paymentId) countedEnrollmentProjectionKeys.add(`${doc.id}:${paymentId}`);
       }
@@ -266,6 +329,7 @@ export async function recalcProjectedForGrant(
     if (dueISO && isInGrantWindow(dueISO, win)) {
       acc.projectedWinCents += amtCents;
     }
+    addSplitAmount(splitAccByLineId, liById[liId], "projected", amtCents, budgetRowDate(row));
   }
 
   // --------- Pass 2: spent from ledger (authoritative) ----------
@@ -299,6 +363,7 @@ export async function recalcProjectedForGrant(
     if (isLedgerInWindow(row, win)) {
       acc.spentWinCents += amtCents;
     }
+    addSplitAmount(splitAccByLineId, liById[liId], "spent", amtCents, budgetRowDate(row));
   }
 
   // --------- materialize numeric fields onto line items ----------
@@ -331,7 +396,7 @@ export async function recalcProjectedForGrant(
     base.spent = spentCents / 100;
     base.spentInWindow = spentWinCents / 100;
 
-    return base;
+    return applySplitRollups(base, splitAccByLineId[id]);
   });
 
   // Over-cap bookkeeping per LI (based on total, not windowed)

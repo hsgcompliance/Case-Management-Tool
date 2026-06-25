@@ -17,6 +17,11 @@ export const RUNTIME = {
 export const ALLOWED_ORIGINS: any = defineString("ALLOWED_ORIGINS");
 export const ENFORCE_APP_CHECK: any = defineString("APP_CHECK_ENFORCE");
 export const WEB_BASE_URL: any = defineString("WEB_BASE_URL");
+// Base URL of the separately-deployed Forms surface (forms-web hosting target).
+// Used to build tokenized render URLs (e.g. https://housing-db-forms.web.app).
+// NOTE: deliberately named FORMS_APP_BASE_URL — do not reuse FORMS_BASE_URL, which
+// is an orphaned legacy var (= https://api.jotform.com) in .env.housing-db-v2.
+export const FORMS_APP_BASE_URL: any = defineString("FORMS_APP_BASE_URL");
 export const GMAIL_SENDER: any = defineString("GMAIL_SENDER");
 export const MAIL_FROM_NAME: any = defineString("MAIL_FROM_NAME");
 export const GOOGLE_API_SCOPES: any = defineString("GOOGLE_API_SCOPES");

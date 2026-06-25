@@ -10,7 +10,7 @@ export default function SignInPage() {
   const { signIn, signInWithGoogle, loading, reloadProfile } = useAuth();
   const params = useSearchParams();
   const router = useRouter();
-  const next = params.get("next") || "/reports";
+  const next = params.get("next") || "/customers";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

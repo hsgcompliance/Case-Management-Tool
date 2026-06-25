@@ -645,20 +645,23 @@ Use safe scripts:
 
 ```powershell
 npm run deploy:hosting
+npm run deploy:hosting:all
 npm run deploy:functions
 npm run deploy:functions:missing
 npm run deploy:functions-hosting
 ```
 
+`deploy:hosting` and `deploy:functions-hosting` deploy web hosting only (`hosting:web`). Use `deploy:hosting:all` only when every configured hosting target should deploy.
+
 Use `--no-push` variants when the deploy script should not automatically commit and push.
 
 #### Windows: clear the Next.js build cache before a web build or hosting deploy
 
-On Windows the `next build` step (run during web build and hosting deploy) intermittently fails with a file-lock error like `EPERM: operation not permitted, rename '...\.next\cache\webpack\...\N.pack_' -> '...N.pack'`. The code compiles successfully and then fails during "Generating static pages" — it is a stale webpack cache lock, not a code defect. Before building or deploying web hosting, clear the cache and allow a long timeout:
+On Windows the `next build` step (run during web build and hosting deploy) intermittently fails with a file-lock error like `EPERM: operation not permitted, rename '...\.next\cache\webpack\...\N.pack_' -> '...N.pack'`. The code compiles successfully and then fails during "Generating static pages" — it is a stale webpack cache lock, not a code defect. The hosting deploy helper clears this cache automatically. Before direct web builds, clear the cache manually and allow a long timeout:
 
 ```powershell
 Remove-Item -Recurse -Force web\.next\cache -ErrorAction SilentlyContinue
-npm run deploy:hosting
+npm run build:web
 ```
 
 A clean re-run succeeds. Do not treat this `EPERM` as a real build failure.
@@ -971,10 +974,13 @@ Use safe npm scripts instead of raw Firebase commands:
 
 ```powershell
 npm run deploy:hosting
+npm run deploy:hosting:all
 npm run deploy:functions
 npm run deploy:functions:missing
 npm run deploy:functions-hosting
 ```
+
+`deploy:hosting` and `deploy:functions-hosting` deploy web hosting only (`hosting:web`). Use `deploy:hosting:all` only when every configured hosting target should deploy.
 
 Use `--no-push` variants when the deploy script should not automatically commit and push.
 

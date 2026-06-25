@@ -44,6 +44,7 @@ import {
   stageLabelFromQueueSource,
 } from "@widgets/jotform/jotformSubmissionView";
 import { paymentTypeLabel, PaymentTypeChip, paymentNoteMeta } from "@entities/payments/PaymentTypeLabel";
+import FormSessionLauncherButton from "@entities/payments/FormSessionLauncherButton";
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror SpendingTool internals without importing them)
@@ -1847,6 +1848,16 @@ function CardSpendCard({
           {actionError ? <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{actionError}</div> : null}
           {actionMessage ? <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{actionMessage}</div> : null}
           <div className="grid grid-cols-1 gap-2">
+            {queueId ? (
+              <FormSessionLauncherButton
+                workflowId="credit-card-checkout"
+                paymentQueueId={queueId}
+                customerId={row.customerId}
+                grantId={row.grantId}
+                creditCardId={row.creditCardId}
+                disabled={anyMutating || saving}
+              />
+            ) : null}
             <button
               className="btn btn-sm btn-primary w-full py-2.5"
               disabled={anyMutating || saving || row.workflowState === "closed"}
@@ -2444,6 +2455,15 @@ function InvoiceSpendCard({
         {actionError ? <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{actionError}</div> : null}
         {actionMessage ? <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{actionMessage}</div> : null}
         <div className="grid grid-cols-1 gap-2">
+          {row.paymentQueueItem?.id ? (
+            <FormSessionLauncherButton
+              workflowId="invoice-request"
+              paymentQueueId={String(row.paymentQueueItem.id)}
+              customerId={row.customerId}
+              grantId={row.grantId}
+              disabled={anyMutating || saving}
+            />
+          ) : null}
           <button
             className="btn btn-sm btn-primary w-full py-2.5"
             disabled={anyMutating || saving || row.workflowState === "closed"}

@@ -10,10 +10,16 @@ export type BudgetGroupItem = {
   grantId: string;
   /** If set, shows only this specific line item. Absent = whole-grant card. */
   lineItemId?: string;
+  /** If set with lineItemId, targets one split goal/cycle under that line item. */
+  splitGoalId?: string;
   labelOverride?: string;
   /** Color key from COLOR_KEYS in BudgetConfigModal */
   color?: string;
   cardType?: "standard" | "budget" | "client-allocation" | "allocation" | "billable";
+  displayLevel?: "grant" | "lineItem" | "split";
+  appearInDigest?: boolean;
+  groupUnderParentGrant?: boolean;
+  nested?: boolean;
 };
 
 export type BudgetGroupCfg = {
@@ -31,6 +37,13 @@ export type BudgetGroupCfg = {
 export type BudgetItemCfg = {
   /** Hide this grant entirely from the Budget page. */
   visible?: boolean;
+  showGrantTotal?: boolean;
+  showLineItemTotals?: boolean;
+  showSplitGoals?: boolean;
+  appearInDigest?: boolean;
+  mainDisplayLevel?: "grant" | "lineItem" | "split";
+  groupChildrenUnderParentGrant?: boolean;
+  expandedByDefault?: boolean;
 };
 
 export type ProgramGroupCfg = {
@@ -61,6 +74,13 @@ export type OrgDisplayConfig = {
     groups: BudgetGroupCfg[];
     /** Top-level visibility overrides, keyed by grant doc ID. */
     items: Record<string, BudgetItemCfg>;
+    digest?: {
+      showOverallSummary?: boolean;
+      showGrantTotals?: boolean;
+      mainDisplayLevel?: "grant" | "lineItem" | "split";
+      expandNestedRowsByDefault?: boolean;
+      groupChildrenUnderParentGrant?: boolean;
+    };
   };
   programDisplay: {
     groups: ProgramGroupCfg[];
@@ -86,7 +106,17 @@ export type OrgDisplayConfig = {
 // ─── Default config ───────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: OrgDisplayConfig = {
-  budgetDisplay: { groups: [], items: {} },
+  budgetDisplay: {
+    groups: [],
+    items: {},
+    digest: {
+      showOverallSummary: true,
+      showGrantTotals: true,
+      mainDisplayLevel: "grant",
+      expandNestedRowsByDefault: false,
+      groupChildrenUnderParentGrant: true,
+    },
+  },
   digestsEnabled: {},
   programDisplay: {
     groups: [
@@ -164,6 +194,10 @@ async function fetchOrgConfig(): Promise<OrgConfigQueryResult> {
       groups: rawGroups.map(hydrateBudgetGroup),
       items:
         (value?.budgetDisplay?.items as Record<string, BudgetItemCfg> | undefined) ?? {},
+      digest: {
+        ...DEFAULT_CONFIG.budgetDisplay.digest,
+        ...((value?.budgetDisplay?.digest as OrgDisplayConfig["budgetDisplay"]["digest"] | undefined) ?? {}),
+      },
     },
     digestsEnabled: (value?.digestsEnabled as Record<string, boolean> | undefined) ?? {},
     programDisplay: {

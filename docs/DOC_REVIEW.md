@@ -12,6 +12,7 @@ This directory uses two classes of docs:
 - `NODE_UPGRADE.md` - package and Node upgrade changelog.
 - `docs/MAINTAINER_HANDOFF.md` - app map, workflows, deploy notes, and graphify guidance.
 - `docs/ARCHITECTURE_SPINE.md` - canonical frontend/backend architecture rules.
+- `docs/BUDGET_DIGEST_WORKFLOW.md` - Budget Digest data path, org config hooks, manager roles, and future configuration plan.
 - `docs/CONTRACTS_WORKFLOW.md` - shared schema and endpoint alignment process.
 - `docs/PRIVACY_AND_REPO_HYGIENE.md` - privacy, secret, archive, and local-only rules.
 - `docs/PRODUCT_BACKLOG_NOTES.md` - sanitized product backlog context extracted from old prompts.
