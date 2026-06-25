@@ -1492,7 +1492,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             {grantsSection.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold text-slate-950">Grants</span>
+                  <span className="text-lg font-bold text-slate-950">Grants</span>
                   <span className="text-xs text-slate-400">budget tracking</span>
                 </div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -1504,7 +1504,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             {programsSection.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold text-slate-950">Programs</span>
+                  <span className="text-lg font-bold text-slate-950">Programs</span>
                   <span className="text-xs text-slate-400">non-end-dated enrollment tracking</span>
                 </div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

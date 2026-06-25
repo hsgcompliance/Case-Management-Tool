@@ -228,6 +228,19 @@ export const PaymentQueuePatchBody = z.object({
 });
 export type TPaymentQueuePatchBody = z.infer<typeof PaymentQueuePatchBody>;
 
+export const PaymentQueueBulkDesignateBody = z.object({
+  items: z.array(z.object({
+    id: z.string().min(1),
+    grantId: z.string().nullable().optional(),
+    lineItemId: z.string().nullable().optional(),
+    post: z.boolean().optional(),
+  })).min(1).max(500),
+  pipelineId: z.string().nullable().optional(),
+  postedBy: z.string().optional(),
+  localModificationReason: z.string().optional(),
+});
+export type TPaymentQueueBulkDesignateBody = z.infer<typeof PaymentQueueBulkDesignateBody>;
+
 export const PaymentQueueRecomputeGrantBody = z.object({
   grantId: z.string().min(1),
   dryRun: z.boolean().optional().default(false),

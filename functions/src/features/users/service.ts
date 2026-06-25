@@ -1,5 +1,5 @@
 // functions/src/features/users/service.ts
-import { authAdmin, db, FieldValue, orgIdFromClaims, WEB_BASE_URL} from "../../core";
+import { authAdmin, db, FieldValue, orgIdFromClaims, WEB_BASE_URL, newBulkWriter} from "../../core";
 import type { UserRecord } from "firebase-admin/auth";
 import * as logger from "firebase-functions/logger";
 import { ensureOrgConfigDefaults } from "../orgs/service";
@@ -171,6 +171,86 @@ function mergeRecordsDeep(left: Record<string, unknown>, right: Record<string, u
       : value;
   }
   return out;
+}
+
+function trimOrNull(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+}
+
+function contactCaseManagerIdsFromCustomer(input: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  const add = (value: unknown) => {
+    const id = trimOrNull(value);
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  add(input.caseManagerId);
+  add(input.secondaryCaseManagerId);
+  if (Array.isArray(input.otherContacts)) {
+    for (const contact of input.otherContacts) add((contact as Record<string, unknown> | null)?.uid);
+  }
+  return ids.slice(0, 5);
+}
+
+async function cascadeInactiveUserOffPrimaryCustomers(uid: string): Promise<{
+  scanned: number;
+  updated: number;
+  promoted: number;
+  unassigned: number;
+}> {
+  const userId = trimOrNull(uid);
+  if (!userId) return { scanned: 0, updated: 0, promoted: 0, unassigned: 0 };
+
+  const snap = await db
+    .collection("customers")
+    .where("caseManagerId", "==", userId)
+    .where("active", "==", true)
+    .get();
+
+  if (snap.empty) return { scanned: 0, updated: 0, promoted: 0, unassigned: 0 };
+
+  const writer = newBulkWriter(2);
+  let scanned = 0;
+  let updated = 0;
+  let promoted = 0;
+  let unassigned = 0;
+
+  snap.forEach((doc) => {
+    scanned += 1;
+    const row = (doc.data() || {}) as Record<string, unknown>;
+    const secondaryId = trimOrNull(row.secondaryCaseManagerId);
+    const secondaryName = trimOrNull(row.secondaryCaseManagerName);
+    const patch: Record<string, unknown> = {
+      caseManagerId: secondaryId,
+      caseManagerName: secondaryName,
+      secondaryCaseManagerId: null,
+      secondaryCaseManagerName: null,
+      updatedAt: FieldValue.serverTimestamp(),
+      system: {
+        lastWriter: "usersSetActive",
+        lastWriteAt: FieldValue.serverTimestamp(),
+      },
+    };
+    patch.contactCaseManagerIds = contactCaseManagerIdsFromCustomer({
+      ...row,
+      ...patch,
+    });
+
+    writer.set(doc.ref, patch, { merge: true });
+    updated += 1;
+    if (secondaryId) promoted += 1;
+    else unassigned += 1;
+  });
+
+  if (updated) await writer.close();
+  logger.info("usersSetActive_cascade_primary_customers", {
+    uid: userId,
+    scanned,
+    updated,
+    promoted,
+    unassigned,
+  });
+  return { scanned, updated, promoted, unassigned };
 }
 
 export function normalizeUserExtrasForRead(rawExtras: unknown): Record<string, unknown> {
@@ -464,6 +544,10 @@ export async function setUserActiveService(input: SetActiveBodyIn) {
 
   await authAdmin.updateUser(uid, { disabled: !active });
   await authAdmin.revokeRefreshTokens(uid);
+
+  if (!active) {
+    await cascadeInactiveUserOffPrimaryCustomers(uid);
+  }
 
   if (active) {
     await db.collection("userTasks").doc(`userverify|${uid}`).delete().catch(() => {});
