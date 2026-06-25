@@ -4,6 +4,7 @@ import {
   FieldValue,
   RUNTIME,
   isoNow,
+  newBulkWriter,
 } from "../../core";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
 import {
@@ -77,6 +78,30 @@ function isActiveEnrollment(row: any): boolean {
   return true;
 }
 
+function displayCustomerName(c: any): string | null {
+  const name = String(c?.name || c?.fullName || "").trim();
+  if (name) return name;
+  const parts = [c?.firstName, c?.lastName].map((v) => String(v || "").trim()).filter(Boolean);
+  return parts.join(" ").trim() || null;
+}
+
+function sourceIsEnrollmentOwned(row: any): boolean {
+  const source = String(row?.source || "").trim().toLowerCase();
+  if (source === "enrollment" || source === "projection") return true;
+  const originSource = String(row?.origin?.paymentQueueSource || "").trim().toLowerCase();
+  return originSource === "projection";
+}
+
+function patchIfChanged(
+  patch: Record<string, unknown>,
+  row: Record<string, unknown>,
+  field: string,
+  next: string | null,
+) {
+  const prev = String(row[field] || "").trim() || null;
+  if (prev !== next) patch[field] = next;
+}
+
 async function syncCustomerCaseManagerToEnrollments(
   customerId: string,
   before: any,
@@ -137,6 +162,101 @@ async function syncCustomerCaseManagerToEnrollments(
 
   if (writes) {
     await batch.commit();
+  }
+}
+
+async function syncCustomerSnapshotsToOperationalRecords(
+  customerId: string,
+  before: any,
+  after: any
+) {
+  if (!customerId) return;
+
+  const nextName = displayCustomerName(after);
+  const prevName = displayCustomerName(before);
+  const nextCmId = String(after?.caseManagerId || "").trim() || null;
+  const prevCmId = String(before?.caseManagerId || "").trim() || null;
+  const nextCmName = String(after?.caseManagerName || "").trim() || null;
+  const prevCmName = String(before?.caseManagerName || "").trim() || null;
+
+  const nameChanged = nextName !== prevName;
+  const cmChanged = nextCmId !== prevCmId || nextCmName !== prevCmName;
+  if (!nameChanged && !cmChanged) return;
+
+  const [queueSnap, ledgerSnap, spendSnap] = await Promise.all([
+    db.collection("paymentQueue").where("customerId", "==", customerId).get(),
+    db.collection("ledger").where("customerId", "==", customerId).get(),
+    db.collectionGroup("spends").where("customerId", "==", customerId).get(),
+  ]);
+
+  const writer = newBulkWriter(2);
+  let queueWrites = 0;
+  let ledgerWrites = 0;
+  let spendWrites = 0;
+
+  queueSnap.forEach((doc) => {
+    const row = doc.data() || {};
+    if (!sourceIsEnrollmentOwned(row)) return;
+    const patch: Record<string, unknown> = {};
+    if (nameChanged) patchIfChanged(patch, row, "customer", nextName);
+    if (cmChanged) {
+      patchIfChanged(patch, row, "caseManagerId", nextCmId);
+      patchIfChanged(patch, row, "caseManagerName", nextCmName);
+    }
+    if (!Object.keys(patch).length) return;
+    const now = isoNow();
+    patch.updatedAtISO = now;
+    patch.system = {
+      ...((row.system && typeof row.system === "object") ? row.system : {}),
+      lastWriter: FN_CUSTOMER_UPDATE,
+      lastWriteAt: now,
+    };
+    writer.set(doc.ref, patch, { merge: true });
+    queueWrites += 1;
+  });
+
+  ledgerSnap.forEach((doc) => {
+    const row = doc.data() || {};
+    if (!sourceIsEnrollmentOwned(row)) return;
+    const patch: Record<string, unknown> = {};
+    if (nameChanged) patchIfChanged(patch, row, "customerNameAtSpend", nextName);
+    if (cmChanged) patchIfChanged(patch, row, "caseManagerId", nextCmId);
+    if (!Object.keys(patch).length) return;
+    const now = isoNow();
+    patch.updatedAt = FieldValue.serverTimestamp();
+    patch.system = {
+      ...((row.system && typeof row.system === "object") ? row.system : {}),
+      lastWriter: FN_CUSTOMER_UPDATE,
+      lastWriteAt: now,
+    };
+    writer.set(doc.ref, patch, { merge: true });
+    ledgerWrites += 1;
+  });
+
+  spendSnap.forEach((doc) => {
+    const row = doc.data() || {};
+    if (!sourceIsEnrollmentOwned(row)) return;
+    const patch: Record<string, unknown> = {};
+    if (nameChanged) patchIfChanged(patch, row, "customerNameAtSpend", nextName);
+    if (cmChanged) patchIfChanged(patch, row, "caseManagerId", nextCmId);
+    if (!Object.keys(patch).length) return;
+    patch.updatedAt = FieldValue.serverTimestamp();
+    writer.set(doc.ref, patch, { merge: true });
+    spendWrites += 1;
+  });
+
+  if (queueWrites || ledgerWrites || spendWrites) {
+    await writer.close();
+    console.info("[customerCascade] synced operational snapshots", {
+      customerId,
+      queueWrites,
+      ledgerWrites,
+      spendWrites,
+      nameChanged,
+      cmChanged,
+    });
+  } else {
+    await writer.close();
   }
 }
 
@@ -255,6 +375,17 @@ export const onCustomerUpdate = onDocumentUpdated(
 
     if (changedKeys.includes("caseManagerId") || changedKeys.includes("caseManagerName")) {
       await syncCustomerCaseManagerToEnrollments(String(e.params.id || ""), before, after);
+    }
+
+    if (
+      changedKeys.includes("caseManagerId") ||
+      changedKeys.includes("caseManagerName") ||
+      changedKeys.includes("firstName") ||
+      changedKeys.includes("lastName") ||
+      changedKeys.includes("fullName") ||
+      changedKeys.includes("name")
+    ) {
+      await syncCustomerSnapshotsToOperationalRecords(String(e.params.id || ""), before, after);
     }
 
     // Customer became inactive → close all active enrollments + void their projections.
