@@ -53,6 +53,7 @@ function FormPicker({ forms, value, onChange }: { forms: JfForm[]; value: JfForm
 
 export default function SubmissionManagerPage() {
   const [forms, setForms] = useState<JfForm[]>([]);
+  const [windowDays, setWindowDays] = useState(30);
   const [form, setForm] = useState<JfForm | null>(null);
   const [subs, setSubs] = useState<JfSubmission[]>([]);
   const [sel, setSel] = useState<JfSubmission | null>(null);
@@ -64,8 +65,9 @@ export default function SubmissionManagerPage() {
   const [cloning, setCloning] = useState(false);
 
   useEffect(() => {
-    listForms().then(setForms).catch((e: unknown) => setError((e as Error)?.message || "Failed to load forms.")).finally(() => setLoadingForms(false));
-  }, []);
+    setLoadingForms(true);
+    listForms(windowDays).then(setForms).catch((e: unknown) => setError((e as Error)?.message || "Failed to load forms.")).finally(() => setLoadingForms(false));
+  }, [windowDays]);
 
   useEffect(() => {
     if (!form) return;
@@ -112,6 +114,19 @@ export default function SubmissionManagerPage() {
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <FormPicker forms={forms} value={form} onChange={setForm} />
+          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs">
+            {([{ d: 30, l: "Month" }, { d: 365, l: "Year" }, { d: 730, l: "2yr" }] as const).map((o) => (
+              <button
+                key={o.d}
+                type="button"
+                onClick={() => setWindowDays(o.d)}
+                title="Limit to forms edited within this window"
+                className={`px-2.5 py-2 font-semibold ${windowDays === o.d ? "bg-indigo-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
+              >
+                {o.l}
+              </button>
+            ))}
+          </div>
           {form ? (
             <>
               <a
@@ -192,10 +207,17 @@ export default function SubmissionManagerPage() {
                   <div className="flex flex-wrap gap-2">
                     <CustomerLinkButton
                       formId={form.id}
+                      formName={form.title}
                       submissionId={sel.id}
                       recommendName={getSubmissionLabel(sel)}
                       linked={links[sel.id]}
-                      onLinked={(l) => setLinks((prev) => ({ ...prev, [sel.id]: l }))}
+                      onLinked={(c) =>
+                        setLinks((prev) => {
+                          const existing = prev[sel.id]?.customers ?? [];
+                          const customers = existing.some((x) => x.customerId === c.customerId) ? existing : [...existing, c];
+                          return { ...prev, [sel.id]: { submissionId: sel.id, customers } };
+                        })
+                      }
                     />
                     <a
                       href={`https://www.jotform.com/inbox/${form.id}/${sel.id}`}
