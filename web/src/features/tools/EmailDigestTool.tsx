@@ -8,6 +8,7 @@ import { useAuth } from "@app/auth/AuthProvider";
 import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import { toast } from "@lib/toast";
 import { isAdminLike } from "@lib/roles";
+import { BudgetDigestConfigEditor } from "@features/budget/BudgetDigestConfigEditor";
 
 // Types
 
@@ -367,6 +368,8 @@ export function EmailDigestMain() {
   const [forUid, setForUid]       = React.useState<string | null>(null);
   const [forUidName, setForUidName] = React.useState("");
   const [savingDisable, setSavingDisable] = React.useState(false);
+  const [showBudgetConfig, setShowBudgetConfig] = React.useState(false);
+  const [savingBudgetConfig, setSavingBudgetConfig] = React.useState(false);
 
   const { data: orgConfig } = useOrgConfig();
   const saveOrgConfig = useSaveOrgConfig();
@@ -489,6 +492,19 @@ export function EmailDigestMain() {
     }
   };
 
+  const handleSaveBudgetConfig = async (next: NonNullable<typeof orgConfig>) => {
+    setSavingBudgetConfig(true);
+    try {
+      await saveOrgConfig.mutateAsync(next);
+      toast("Budget digest settings saved.", { type: "success" });
+      setShowBudgetConfig(false);
+    } catch (e: unknown) {
+      toast(errorMessage(e, "Failed to save budget digest settings."), { type: "error" });
+    } finally {
+      setSavingBudgetConfig(false);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="flex h-full min-h-[360px] items-center justify-center text-sm text-slate-400">
@@ -538,24 +554,59 @@ export function EmailDigestMain() {
           })}
         </div>
 
-        {/* Global disable toggle - admin only */}
         {isAdmin && orgConfig && (
-          <button
-            type="button"
-            onClick={handleToggleDisable}
-            disabled={savingDisable}
-            className={[
-              "shrink-0 rounded-full border text-xs font-semibold px-3 py-1 transition-colors",
-              isDisabled(activeTab)
-                ? "bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:border-red-700 dark:text-red-300"
-                : "bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-300",
-            ].join(" ")}
-            title={isDisabled(activeTab) ? "Re-enable scheduled sends for this digest" : "Disable scheduled sends for this digest"}
-          >
-            {savingDisable ? "Saving..." : isDisabled(activeTab) ? "Enable Digest" : "Disable Digest"}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {activeTab === "budget" ? (
+              <button
+                type="button"
+                onClick={() => setShowBudgetConfig(true)}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+              >
+                Budget Config
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleToggleDisable}
+              disabled={savingDisable}
+              className={[
+                "rounded-full border text-xs font-semibold px-3 py-1 transition-colors",
+                isDisabled(activeTab)
+                  ? "bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:border-red-700 dark:text-red-300"
+                  : "bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-300",
+              ].join(" ")}
+              title={isDisabled(activeTab) ? "Re-enable scheduled sends for this digest" : "Disable scheduled sends for this digest"}
+            >
+              {savingDisable ? "Saving..." : isDisabled(activeTab) ? "Enable Digest" : "Disable Digest"}
+            </button>
+          </div>
         )}
       </div>
+
+      {showBudgetConfig && orgConfig ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div className="text-sm font-semibold text-slate-900">Budget Digest Settings</div>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"
+                onClick={() => setShowBudgetConfig(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-4">
+              <BudgetDigestConfigEditor
+                config={orgConfig}
+                saving={savingBudgetConfig}
+                compact
+                onSave={handleSaveBudgetConfig}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Body */}
       {loading ? (

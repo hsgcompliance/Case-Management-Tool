@@ -197,6 +197,14 @@ export default function SubmissionManagerPage() {
                       linked={links[sel.id]}
                       onLinked={(l) => setLinks((prev) => ({ ...prev, [sel.id]: l }))}
                     />
+                    <a
+                      href={`https://www.jotform.com/inbox/${form.id}/${sel.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                    >
+                      Open in inbox ↗
+                    </a>
                     <button type="button" disabled={cloning} onClick={() => void editClone()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
                       {cloning ? "Cloning…" : "Edit a clone"}
                     </button>
