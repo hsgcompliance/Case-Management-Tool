@@ -8,6 +8,8 @@ export default function IntakeFormsPage() {
       heading="Intake forms"
       description="Eligibility, disclosures, and releases. Forms auto-appear here when a kind=intake webhook arrives."
       forms={forms}
+      showCustomerHeader
+      customerNav
     />
   );
 }

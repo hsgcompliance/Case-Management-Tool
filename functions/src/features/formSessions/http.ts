@@ -12,7 +12,7 @@ import {
   FormSessionResolveBody,
   FormSessionCompleteBody,
 } from "./schemas";
-import { createFormSession, resolveFormSession, completeFormSession, listFormSessions, listCustomersForForms } from "./service";
+import { createFormSession, resolveFormSession, completeFormSession, listFormSessions, listCustomersForForms, getCustomerDetailForForms } from "./service";
 import { summarizeCreditCards } from "../creditCards/service";
 
 /** Resolve target org for org-scoped ops (mirrors jotform/http getTargetOrg). */
@@ -69,6 +69,28 @@ export const formsCustomerSearch_http = secureHandler(
     const query = (req.query as Record<string, unknown>) || {};
     const items = await listCustomersForForms(targetOrg, Number(query.limit) || 5000);
     res.status(200).json({ ok: true, items, count: items.length });
+  },
+  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+);
+
+/**
+ * GET /formsCustomerDetail?id= — authed staff; full(er) customer doc view + the
+ * normalized household object for the forms-app header. Org-scoped (the service
+ * rejects cross-org reads).
+ */
+export const formsCustomerDetail_http = secureHandler(
+  async (req, res) => {
+    const caller = req.user!;
+    const targetOrg = getTargetOrg(req, req.query);
+    void caller;
+    const q = (req.query || {}) as Record<string, unknown>;
+    const id = normId(q.id) || normStr(q.id);
+    const detail = await getCustomerDetailForForms(targetOrg, String(id || ""));
+    if (!detail) {
+      res.status(404).json({ ok: false, error: "not_found" });
+      return;
+    }
+    res.status(200).json({ ok: true, detail });
   },
   { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
 );

@@ -1,0 +1,234 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { loadCustomers, type FormsCustomer } from "@/lib/customersApi";
+import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
+import { useCurrentCustomer } from "@/context/CurrentCustomer";
+import { formatDob } from "@/lib/format";
+
+// Tabbed customer header for the Intake / All forms pages.
+//   • Customer tab — the current customer sourced from the customer DOC (not the
+//     minimal search index): CWID / Name / DOB / CM / population / status.
+//   • Household tab — a first-pass NORMALIZED HOUSEHOLD object: the canonical fields
+//     plus the customer's linked Jotform submissions organized by form.
+// Details read CurrentCustomer context, so they persist across every iframe form
+// view. With `nav` on (Intake), ◀ ▶ step through the loaded customer index.
+//
+// Editability + true multi-member family linking + per-form field normalization are
+// the noted fine-tuning steps layered on top of this shape.
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="truncate text-sm font-semibold text-slate-900">{value || "—"}</div>
+    </div>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "rounded-t-lg border-b-2 px-3 py-1.5 text-xs font-semibold transition",
+        active ? "border-indigo-500 text-indigo-700" : "border-transparent text-slate-400 hover:text-slate-600",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CustomerTab({ detail, fallback }: { detail: CustomerDetail | null; fallback: FormsCustomer }) {
+  const name = detail?.name ?? fallback.name;
+  const cwId = detail?.cwId ?? fallback.cwId ?? "—";
+  const dob = formatDob(detail?.dob ?? fallback.dob);
+  const cm = detail?.caseManagerName ?? fallback.caseManagerName ?? "—";
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+      <Field label="Name" value={name} />
+      <Field label="CWID" value={cwId} />
+      <Field label="DOB" value={dob} />
+      <Field label="Case manager" value={cm} />
+      {detail?.secondaryCaseManagerName ? <Field label="Secondary CM" value={detail.secondaryCaseManagerName} /> : null}
+      {detail?.population ? <Field label="Population" value={detail.population} /> : null}
+      {detail?.status ? <Field label="Status" value={detail.status} /> : null}
+      {detail?.acuityScore != null ? <Field label="Acuity" value={String(detail.acuityScore)} /> : null}
+    </div>
+  );
+}
+
+function HouseholdTab({ detail, loading }: { detail: CustomerDetail | null; loading: boolean }) {
+  if (loading && !detail) return <div className="py-2 text-xs text-slate-400">Loading household…</div>;
+  const hh = detail?.household;
+  if (!hh) return <div className="py-2 text-xs text-slate-400">No household data yet.</div>;
+
+  return (
+    <div className="space-y-3">
+      {/* Normalized household object */}
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Normalized household</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+          {hh.normalized.map((f) => (
+            <Field key={f.key} label={f.label} value={f.value} />
+          ))}
+        </div>
+      </div>
+
+      {/* Members */}
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Members ({hh.memberCount})
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {hh.members.map((m, i) => (
+            <span
+              key={`${m.name}-${i}`}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-slate-600 ring-1 ring-slate-200"
+            >
+              <span className="font-semibold text-slate-800">{m.name}</span>
+              <span className="text-slate-400">{m.relation}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Linked form inputs, organized by form */}
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Form inputs ({hh.formCount})
+        </div>
+        {hh.forms.length === 0 ? (
+          <p className="text-xs text-slate-400">
+            No linked submissions yet — link a submission to this customer (Submissions tab) to populate the household.
+          </p>
+        ) : (
+          <div className="max-h-44 space-y-1 overflow-auto">
+            {hh.forms.map((g) => (
+              <div
+                key={g.formId || g.formName}
+                className="flex items-center justify-between gap-3 rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-slate-200"
+              >
+                <span className="min-w-0 truncate text-xs font-medium text-slate-700">{g.formName}</span>
+                <span className="shrink-0 text-[10px] text-slate-400">
+                  {g.count} {g.count === 1 ? "submission" : "submissions"}
+                  {g.latestLinkedAt ? ` · ${g.latestLinkedAt.slice(0, 10)}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
+  const { customer, setCustomer } = useCurrentCustomer();
+  const [all, setAll] = useState<FormsCustomer[] | null>(null);
+  const [tab, setTab] = useState<"customer" | "household">("customer");
+  const [detail, setDetail] = useState<CustomerDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!nav) return;
+    let alive = true;
+    loadCustomers().then((rows) => { if (alive) setAll(rows); });
+    return () => { alive = false; };
+  }, [nav]);
+
+  useEffect(() => {
+    if (!customer) { setDetail(null); return; }
+    let alive = true;
+    setLoading(true);
+    getCustomerDetail(customer.id)
+      .then((d) => { if (alive) setDetail(d); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [customer?.id]);
+
+  const index = useMemo(() => {
+    if (!nav || !all || !customer) return -1;
+    return all.findIndex((c) => c.id === customer.id);
+  }, [nav, all, customer]);
+
+  const canPrev = nav && index > 0;
+  const canNext = nav && index >= 0 && all != null && index < all.length - 1;
+  const step = (delta: number) => {
+    if (!all || index < 0) return;
+    const next = all[index + delta];
+    if (next) setCustomer(next);
+  };
+
+  if (!customer) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-400">
+        No customer selected — use the search above to set the current customer.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-indigo-100 bg-indigo-50/40">
+      {/* Identity + nav bar */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        {nav ? (
+          <button
+            type="button"
+            onClick={() => step(-1)}
+            disabled={!canPrev}
+            title="Previous customer"
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30"
+          >
+            ◀
+          </button>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-bold text-slate-900">
+            {customer.name}
+            {customer.cwId ? <span className="font-normal text-slate-400"> · {customer.cwId}</span> : null}
+          </div>
+          {nav && index >= 0 && all ? (
+            <div className="text-[10px] text-slate-400">{index + 1} of {all.length}</div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          disabled
+          title="Editing customer details — coming soon"
+          className="hidden shrink-0 cursor-not-allowed rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-300 sm:block"
+        >
+          Edit ✎
+        </button>
+        {nav ? (
+          <button
+            type="button"
+            onClick={() => step(1)}
+            disabled={!canNext}
+            title="Next customer"
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-30"
+          >
+            ▶
+          </button>
+        ) : null}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-indigo-100 px-3">
+        <TabButton active={tab === "customer"} onClick={() => setTab("customer")}>Customer</TabButton>
+        <TabButton active={tab === "household"} onClick={() => setTab("household")}>
+          Household{detail?.household ? ` · ${detail.household.formCount}` : ""}
+        </TabButton>
+      </div>
+
+      {/* Tab content */}
+      <div className="px-3 py-3">
+        {tab === "customer" ? (
+          <CustomerTab detail={detail} fallback={customer} />
+        ) : (
+          <HouseholdTab detail={detail} loading={loading} />
+        )}
+      </div>
+    </div>
+  );
+}

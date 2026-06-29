@@ -486,11 +486,13 @@ export type FormsCustomerItem = {
   name: string;
   caseManagerName: string | null;
   cwId: string | null;
+  dob: string | null;
 };
 
 /**
- * Minimal customer index for the forms app — name + id + CWID + CM only (NOT the
- * full customer doc). The client caches this list once and filters client-side.
+ * Minimal customer index for the forms app — name + id + CWID + CM + DOB only (NOT
+ * the full customer doc). DOB powers the customer-details header on the intake / all
+ * forms pages. The client caches this list once and filters client-side.
  */
 export async function listCustomersForForms(orgId: string, limit = 5000): Promise<FormsCustomerItem[]> {
   const org = normId(orgId);
@@ -506,9 +508,157 @@ export async function listCustomersForForms(orgId: string, limit = 5000): Promis
         name: name || String(r.id),
         caseManagerName: String(r.caseManagerName || "").trim() || null,
         cwId: String(r.cwId || "").trim() || null,
+        dob: String(r.dob || "").trim() || null,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* ───────────────────────── customer detail + household ─────────────────────────
+ * Full(er) customer view for the forms-app header — sourced from the customer doc
+ * (not the minimal search index). Also assembles a first-pass NORMALIZED HOUSEHOLD
+ * object: the canonical fields we can assert today (head of household, CWID, DOB,
+ * CM, population, status) plus the customer's linked Jotform submissions organized
+ * by form. True multi-member family linking + per-form field normalization are the
+ * fine-tuning steps layered on top of this shape.
+ */
+const sTrim = (v: unknown): string => (typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim());
+
+export type FormsLinkedSubmission = {
+  formId: string;
+  formName: string | null;
+  submissionId: string;
+  alias: string | null;
+  cwId: string | null;
+  linkedAt: string | null;
+  linkedBy: string | null;
+};
+
+export type FormsHouseholdField = { key: string; label: string; value: string };
+export type FormsHouseholdFormGroup = { formId: string; formName: string; count: number; latestLinkedAt: string | null };
+export type FormsHouseholdMember = { name: string; cwId: string | null; dob: string | null; relation: string };
+
+export type FormsHouseholdObject = {
+  headOfHousehold: string;
+  cwId: string | null;
+  memberCount: number;
+  members: FormsHouseholdMember[];
+  /** The normalized household object — labeled key/value rows the UI renders as-is. */
+  normalized: FormsHouseholdField[];
+  /** Form inputs organized by source form (one row per linked Jotform). */
+  forms: FormsHouseholdFormGroup[];
+  formCount: number;
+};
+
+export type FormsCustomerDetail = {
+  id: string;
+  name: string;
+  firstName: string | null;
+  lastName: string | null;
+  cwId: string | null;
+  dob: string | null;
+  caseManagerName: string | null;
+  secondaryCaseManagerName: string | null;
+  population: string | null;
+  status: string | null;
+  acuityScore: number | null;
+  otherContacts: Array<{ name: string | null; role: string | null }>;
+  linkedSubmissions: FormsLinkedSubmission[];
+  household: FormsHouseholdObject;
+};
+
+export async function getCustomerDetailForForms(orgId: string, customerId: string): Promise<FormsCustomerDetail | null> {
+  const org = normId(orgId);
+  const id = normId(customerId);
+  if (!org || !id) return null;
+
+  const snap = await db.collection("customers").doc(id).get();
+  if (!snap.exists) return null;
+  const r = (snap.data() || {}) as Record<string, any>;
+  if (normId(r.orgId) !== org) return null; // org isolation — never leak cross-org
+
+  const firstName = sTrim(r.firstName);
+  const lastName = sTrim(r.lastName);
+  const name = [firstName, lastName].filter(Boolean).join(" ") || sTrim(r.fullName) || sTrim(r.name) || id;
+  const cwId = sTrim(r.cwId);
+  const dob = sTrim(r.dob);
+  const caseManagerName = sTrim(r.caseManagerName);
+  const secondaryCaseManagerName = sTrim(r.secondaryCaseManagerName);
+  const population = sTrim(r.population);
+  const status = sTrim(r.status);
+  const acuityScore = Number.isFinite(Number(r.acuityScore)) ? Number(r.acuityScore) : null;
+
+  const otherContacts = Array.isArray(r.otherContacts)
+    ? r.otherContacts.slice(0, 5).map((c: any) => ({ name: sTrim(c?.name) || null, role: sTrim(c?.role) || null }))
+    : [];
+
+  const rawLinks = Array.isArray(r?.meta?.linkedSubmissions) ? r.meta.linkedSubmissions : [];
+  const linkedSubmissions: FormsLinkedSubmission[] = rawLinks
+    .map((l: any) => ({
+      formId: sTrim(l?.formId),
+      formName: sTrim(l?.formName) || null,
+      submissionId: sTrim(l?.submissionId),
+      alias: sTrim(l?.alias) || null,
+      cwId: sTrim(l?.cwId) || null,
+      linkedAt: sTrim(l?.linkedAt) || null,
+      linkedBy: sTrim(l?.linkedBy) || null,
+    }))
+    .filter((l: FormsLinkedSubmission) => l.submissionId);
+
+  // Organize form inputs: group linked submissions by source form.
+  const byForm = new Map<string, FormsHouseholdFormGroup>();
+  for (const l of linkedSubmissions) {
+    const key = l.formId || l.formName || l.submissionId;
+    const g = byForm.get(key) || {
+      formId: l.formId,
+      formName: l.formName || (l.formId ? `Form ${l.formId}` : "Form"),
+      count: 0,
+      latestLinkedAt: null as string | null,
+    };
+    g.count += 1;
+    if (l.linkedAt && (!g.latestLinkedAt || l.linkedAt > g.latestLinkedAt)) g.latestLinkedAt = l.linkedAt;
+    byForm.set(key, g);
+  }
+  const forms = [...byForm.values()].sort((a, b) => (b.latestLinkedAt || "").localeCompare(a.latestLinkedAt || ""));
+
+  // Normalized household object — the fields we can canonically assert today.
+  const normalized: FormsHouseholdField[] = [
+    { key: "headOfHousehold", label: "Head of household", value: name },
+    { key: "cwId", label: "CWID", value: cwId },
+    { key: "dob", label: "Date of birth", value: dob },
+    { key: "caseManager", label: "Case manager", value: caseManagerName },
+    { key: "secondaryCaseManager", label: "Secondary case manager", value: secondaryCaseManagerName },
+    { key: "population", label: "Population", value: population },
+    { key: "status", label: "Status", value: status },
+    { key: "linkedForms", label: "Linked submissions", value: String(linkedSubmissions.length) },
+  ].filter((f) => f.value !== "");
+
+  const household: FormsHouseholdObject = {
+    headOfHousehold: name,
+    cwId: cwId || null,
+    memberCount: 1, // head only until family linking exists; grows in fine-tuning
+    members: [{ name, cwId: cwId || null, dob: dob || null, relation: "Head of household" }],
+    normalized,
+    forms,
+    formCount: linkedSubmissions.length,
+  };
+
+  return {
+    id,
+    name,
+    firstName: firstName || null,
+    lastName: lastName || null,
+    cwId: cwId || null,
+    dob: dob || null,
+    caseManagerName: caseManagerName || null,
+    secondaryCaseManagerName: secondaryCaseManagerName || null,
+    population: population || null,
+    status: status || null,
+    acuityScore,
+    otherContacts,
+    linkedSubmissions,
+    household,
+  };
 }
 
 /* ───────────────────────── staff list ─────────────────────────
