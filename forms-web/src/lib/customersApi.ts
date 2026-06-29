@@ -5,6 +5,7 @@ export type FormsCustomer = {
   name: string;
   caseManagerName: string | null;
   cwId: string | null;
+  dob: string | null;
 };
 
 // Minimal customer index (name + id + CWID + CM) — cached once, filtered client-side.

@@ -2,18 +2,39 @@ import { useState } from "react";
 import type { FormDef } from "@/lib/formsCatalog";
 import { JotformEmbed } from "./JotformEmbed";
 import { SendToCustomerModal } from "./SendToCustomerModal";
+import { CreditCardCards } from "./CreditCardCards";
+import { CustomerDetailsHeader } from "./CustomerDetailsHeader";
+import { ReferencePanel } from "./ReferencePanel";
 
 export function FormsCategoryView({
   heading,
   description,
   forms,
+  /** Purchases: keep the credit-card spend cards in view (list AND open-form). */
+  showCreditCards = false,
+  /** Intake / All forms: show the current-customer details header. */
+  showCustomerHeader = false,
+  /** Intake: enable prev/next nav through the customer index in the header. */
+  customerNav = false,
 }: {
   heading: string;
   description?: string;
   forms: FormDef[];
+  showCreditCards?: boolean;
+  showCustomerHeader?: boolean;
+  customerNav?: boolean;
 }) {
   const [selected, setSelected] = useState<FormDef | null>(null);
   const [sendForm, setSendForm] = useState<FormDef | null>(null);
+
+  // Persisted across both list and open-form views so the context (card spend,
+  // current customer) stays visible while a form is being filled in the iframe.
+  const persistentContext = (
+    <>
+      {showCustomerHeader ? <CustomerDetailsHeader nav={customerNav} /> : null}
+      {showCreditCards ? <CreditCardCards /> : null}
+    </>
+  );
 
   if (selected) {
     return (
@@ -25,14 +46,21 @@ export function FormsCategoryView({
         >
           ← Back to {heading}
         </button>
+        {persistentContext}
         <h2 className="text-base font-semibold text-slate-900">{selected.title}</h2>
-        <JotformEmbed formId={selected.id} title={selected.title} debug />
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+          <div className="min-w-0 flex-1">
+            <JotformEmbed formId={selected.id} title={selected.title} debug />
+          </div>
+          <ReferencePanel className="lg:w-80 lg:shrink-0" />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {persistentContext}
       <div>
         <h2 className="text-base font-semibold text-slate-900">{heading}</h2>
         {description ? <p className="text-sm text-slate-500">{description}</p> : null}

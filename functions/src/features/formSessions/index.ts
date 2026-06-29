@@ -6,5 +6,6 @@ export {
   completeFormSession_http as completeFormSession,
   listFormSessions_http as listFormSessions,
   formsCustomerSearch_http as formsCustomerSearch,
+  formsCustomerDetail_http as formsCustomerDetail,
   formsCreditCardsSummary_http as formsCreditCardsSummary,
 } from "./http";
