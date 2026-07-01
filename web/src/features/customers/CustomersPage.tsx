@@ -67,7 +67,7 @@ function writePersistedFilters(patch: Partial<PersistedFilters>) {
 
 type ActiveMode = "all" | "active" | "inactive";
 type DeletedMode = "exclude" | "include" | "only";
-type CustomersPageMode = "legacy" | "new";
+type CustomersPageMode = "sheet" | "card";
 type ScopeMode = "all" | "my" | "primary" | "secondary";
 type PopulationFilter = "all" | "Youth" | "Individual" | "Family" | "unknown";
 type TierFilter = "all" | "1" | "2" | "3";
@@ -77,8 +77,8 @@ type CustomerSortMode =
   | "last-added"
   | "first-updated"
   | "last-updated"
-  | "highest-acuity"
-  | "lowest-acuity";
+  | "tier-asc"
+  | "tier-desc";
 type CardPoolMode = "mine" | "all";
 
 function defaultScopeMode(myUid: string, isCM: boolean): ScopeMode {
@@ -91,8 +91,8 @@ function toActiveQuery(mode: ActiveMode) {
 }
 
 function readCustomersPageMode(user: CompositeUser | null | undefined): CustomersPageMode {
-  // Default to "new" unless user has explicitly saved "legacy"
-  return user?.extras?.customersPageMode === "legacy" ? "legacy" : "new";
+  // Stored on userExtras as "legacy" | "new"; default to "card" unless user explicitly saved "legacy"
+  return user?.extras?.customersPageMode === "legacy" ? "sheet" : "card";
 }
 
 function normName(c: TCustomerEntity) {
@@ -195,11 +195,12 @@ function matchesTierFilter(customer: TCustomerEntity, filter: TierFilter): boole
 
 function sortCustomerRows(rows: TCustomerEntity[], mode: CustomerSortMode): TCustomerEntity[] {
   const compareName = (a: TCustomerEntity, b: TCustomerEntity) => displayName(a).localeCompare(displayName(b));
+  const tierOf = (c: TCustomerEntity) => {
+    const t = (c as { tier?: number | null }).tier;
+    return typeof t === "number" ? t : null;
+  };
 
   return [...rows].sort((a, b) => {
-    const aScore = typeof a.acuityScore === "number" ? a.acuityScore : null;
-    const bScore = typeof b.acuityScore === "number" ? b.acuityScore : null;
-
     if (mode === "alphabetical") return compareName(a, b);
     if (mode === "first-added") return asTime(a.createdAt) - asTime(b.createdAt) || compareName(a, b);
     if (mode === "last-added") return asTime(b.createdAt) - asTime(a.createdAt) || compareName(a, b);
@@ -209,16 +210,17 @@ function sortCustomerRows(rows: TCustomerEntity[], mode: CustomerSortMode): TCus
     if (mode === "last-updated") {
       return asTime(b.updatedAt || b.createdAt) - asTime(a.updatedAt || a.createdAt) || compareName(a, b);
     }
-    if (mode === "lowest-acuity") {
-      if (aScore == null && bScore == null) return compareName(a, b);
-      if (aScore == null) return 1;
-      if (bScore == null) return -1;
-      return aScore - bScore || compareName(a, b);
+    if (mode === "tier-asc" || mode === "tier-desc") {
+      // Untiered customers always sort to the bottom regardless of direction.
+      const aTier = tierOf(a);
+      const bTier = tierOf(b);
+      if (aTier == null && bTier == null) return compareName(a, b);
+      if (aTier == null) return 1;
+      if (bTier == null) return -1;
+      const delta = mode === "tier-asc" ? aTier - bTier : bTier - aTier;
+      return delta || compareName(a, b);
     }
-    if (aScore == null && bScore == null) return compareName(a, b);
-    if (aScore == null) return 1;
-    if (bScore == null) return -1;
-    return bScore - aScore || compareName(a, b);
+    return compareName(a, b);
   });
 }
 
@@ -275,7 +277,7 @@ export function CustomersPage() {
     writePersistedFilters({ enrollmentStatuses: v });
   }, []);
 
-  const [pageMode, setPageMode] = React.useState<CustomersPageMode>("new");
+  const [pageMode, setPageMode] = React.useState<CustomersPageMode>("card");
   const [cardPoolMode, _setCardPoolMode] = React.useState<CardPoolMode>(persisted.current.cardPoolMode ?? "all");
   const setCardPoolMode = React.useCallback((v: CardPoolMode) => { _setCardPoolMode(v); writePersistedFilters({ cardPoolMode: v }); }, []);
 
@@ -659,7 +661,7 @@ export function CustomersPage() {
       void qc.invalidateQueries({ queryKey: qk.enrollments.root, exact: false });
       void qc.refetchQueries({ queryKey: qk.enrollments.root, exact: false, type: "active" });
     }
-    if (pageMode === "new") {
+    if (pageMode === "card") {
       setCardPoolMode("all");
     } else {
       void refetch();
@@ -673,7 +675,8 @@ export function CustomersPage() {
       setPageMode(nextMode);
       setMenuOpen(false);
       try {
-        await updateMe.mutateAsync({ customersPageMode: nextMode });
+        // Persisted contract value is still "legacy" | "new"
+        await updateMe.mutateAsync({ customersPageMode: nextMode === "sheet" ? "legacy" : "new" });
       } catch {
         setPageMode(prevMode);
       }
@@ -687,32 +690,32 @@ export function CustomersPage() {
         type="button"
         className={[
           "rounded px-3 py-1 transition",
-          pageMode === "legacy"
+          pageMode === "sheet"
             ? "bg-slate-900 text-white dark:bg-slate-200 dark:text-slate-900"
             : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700",
         ].join(" ")}
-        onClick={() => void setCustomersPageMode("legacy")}
+        onClick={() => void setCustomersPageMode("sheet")}
         disabled={updateMe.isPending}
       >
-        Legacy
+        Sheet
       </button>
       <button
         type="button"
         className={[
           "rounded px-3 py-1 transition",
-          pageMode === "new"
+          pageMode === "card"
             ? "bg-slate-900 text-white dark:bg-slate-200 dark:text-slate-900"
             : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700",
         ].join(" ")}
-        onClick={() => void setCustomersPageMode("new")}
+        onClick={() => void setCustomersPageMode("card")}
         disabled={updateMe.isPending}
       >
-        New
+        Card
       </button>
     </div>
   );
 
-  const metricsBar = pageMode === "new" ? <CustomersMetricsBar myUid={myUid} /> : undefined;
+  const metricsBar = pageMode === "card" ? <CustomersMetricsBar myUid={myUid} /> : undefined;
 
   return (
     <ListStyleLayout metricsBar={metricsBar}>
@@ -765,7 +768,7 @@ export function CustomersPage() {
           }
         />
 
-        {pageMode === "new" ? (
+        {pageMode === "card" ? (
           <CustomersNewStateView
             myUid={myUid}
             isAdminUser={isAdminUser}
@@ -835,6 +838,7 @@ export function CustomersPage() {
               <table className="table">
                 <thead>
                   <tr>
+                    <th className="w-1">#</th>
                     <th>Name</th>
                     <th>Case Manager</th>
                     <th>Secondary Contact</th>
@@ -848,7 +852,7 @@ export function CustomersPage() {
                 <tbody>
                   {newPageIsLoading && newPageDisplayRows.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-3 text-gray-600" colSpan={7}>
+                      <td className="px-4 py-3 text-gray-600" colSpan={8}>
                         Loading...
                       </td>
                     </tr>
@@ -856,7 +860,7 @@ export function CustomersPage() {
 
                   {isNewPageError && !newPageIsLoading ? (
                     <tr>
-                      <td className="px-4 py-3 text-red-600" colSpan={7}>
+                      <td className="px-4 py-3 text-red-600" colSpan={8}>
                         Error loading customers.
                       </td>
                     </tr>
@@ -864,7 +868,7 @@ export function CustomersPage() {
 
                   {!newPageIsLoading && !isNewPageError && newPageDisplayRows.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-8 text-center text-gray-600" colSpan={7}>
+                      <td className="px-4 py-8 text-center text-gray-600" colSpan={8}>
                         {search.trim()
                           ? "No customers match your search. Try a different name or ID, or expand the filters."
                           : "No customers found. Try expanding your filters or adjusting the scope."}
@@ -872,7 +876,7 @@ export function CustomersPage() {
                     </tr>
                   ) : null}
 
-                  {newPageDisplayRows.map((c) => {
+                  {newPageDisplayRows.map((c, idx) => {
                     const id = String(c?.id || "");
                     const status = String(c?.status || "-");
                     const secondaryUid = String(
@@ -883,6 +887,7 @@ export function CustomersPage() {
 
                     return (
                       <tr key={id} onClick={() => openDetailModal(id)} title="Open customer">
+                        <td className="text-slate-400">{idx + 1}</td>
                         <td>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium text-slate-900">{displayName(c)}</span>
