@@ -1,8 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { callFunction } from "@/lib/functionsApi";
 import { qk } from "@hooks/queryKeys";
 import { RQ_DEFAULTS } from "@hooks/base";
+import { useOptimisticMutation } from "@hooks/optimistic";
+
+export interface EnrollmentCompliance {
+  caseworthyEntryComplete?: boolean | null;
+  caseworthyExitComplete?: boolean | null;
+  hmisEntryComplete?: boolean | null;
+  hmisExitComplete?: boolean | null;
+}
 
 export interface Enrollment {
   id: string;
@@ -20,6 +29,7 @@ export interface Enrollment {
   nextDue?: { date?: string; amount?: number };
   rentCertDue?: string;
   caseManagerName?: string;
+  compliance?: EnrollmentCompliance;
   updatedAt?: string;
   createdAt?: string;
 }
@@ -66,6 +76,7 @@ async function fetchEnrollments(customerId: string): Promise<Enrollment[]> {
       nextDue: data.nextDue,
       rentCertDue: data.rentCertDue,
       caseManagerName: data.caseManagerName,
+      compliance: data.compliance,
       updatedAt: data.updatedAt?.toDate?.()?.toISOString() ?? data.updatedAt,
       createdAt: data.createdAt?.toDate?.()?.toISOString() ?? data.createdAt,
     };
@@ -111,4 +122,41 @@ export function useCustomersByGrant(grantId: string | null) {
     enabled: !!grantId,
     staleTime: 5 * 60_000,
   });
+}
+
+export interface EnrollmentUpdateInput {
+  id: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  active?: boolean;
+  status?: string;
+  compliance?: EnrollmentCompliance;
+}
+
+/** Optimistically patch an enrollment's dates/lifecycle/compliance via enrollmentsUpsert. */
+export function useUpdateEnrollment(customerId: string | undefined) {
+  return useOptimisticMutation<void, EnrollmentUpdateInput>(
+    async (vars) => {
+      const { id, ...patch } = vars;
+      await callFunction("enrollmentsUpsert", [{ id, ...patch }]);
+    },
+    {
+      makePatches: (vars) => [
+        {
+          key: qk.enrollments.byCustomer(customerId ?? ""),
+          update: (prev: Enrollment[] | undefined) =>
+            (prev ?? []).map((e) =>
+              e.id === vars.id
+                ? {
+                    ...e,
+                    ...vars,
+                    compliance: vars.compliance ? { ...e.compliance, ...vars.compliance } : e.compliance,
+                  }
+                : e,
+            ),
+        },
+      ],
+      revalidateAfterMs: 4000,
+    },
+  );
 }

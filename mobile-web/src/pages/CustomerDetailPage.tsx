@@ -2,8 +2,8 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import type { User } from "firebase/auth";
 import { useAuth } from "@/hooks/useAuth";
-import { useCustomer, useOrgCustomers, usePatchCustomer, useMarkCustomerInactive, getWorkbookLink, type Customer, type DriveFolderRef } from "@/hooks/useCustomers";
-import { useCustomerEnrollments, type Enrollment } from "@/hooks/useCustomerEnrollments";
+import { useCustomer, useOrgCustomers, usePatchCustomer, useMarkCustomerInactive, useToggleCustomerActive, getWorkbookLink, type Customer, type DriveFolderRef } from "@/hooks/useCustomers";
+import { useCustomerEnrollments, useUpdateEnrollment, type Enrollment } from "@/hooks/useCustomerEnrollments";
 import { useCustomerSessions } from "@/hooks/useCustomerSessions";
 import { useWorkbookData } from "@/hooks/useWorkbookData";
 import { useDriveIntegration } from "@/hooks/useCalendarIntegration";
@@ -12,6 +12,9 @@ import { useCreateActivity } from "@/hooks/useCreateActivity";
 import { useEditActivity, useDeleteActivity, type SessionEditFields } from "@/hooks/useEditActivity";
 import { SyncChip, SyncButton } from "@/components/SyncControls";
 import { CustomerFolderSection } from "@/components/CustomerFolderSection";
+import { WorkbookLinkSection } from "@/components/WorkbookLinkSection";
+import { ProgramEditSheet, type ProgramEditPatch } from "@/components/ProgramEditSheet";
+import { EnrollProgramSheet } from "@/components/EnrollProgramSheet";
 import { DATE_RANGE_CHIPS, type DateRangeKey } from "@/lib/dateRange";
 import { listOutbox, removeOutbox, subscribeOutbox, type OutboxEntry } from "@/lib/sessionOutbox";
 import type { SyncState } from "@/lib/sessionSync";
@@ -407,9 +410,13 @@ function SessionEditSheet({
 function CaseManagementTab({
   customer,
   enrollments,
+  autoEditPrimary,
+  onAutoEditHandled,
 }: {
   customer: Customer;
   enrollments: Enrollment[];
+  autoEditPrimary?: boolean;
+  onAutoEditHandled?: () => void;
 }) {
   const { user } = useAuth();
   const { data: orgCustomers = [] } = useOrgCustomers(user);
@@ -419,6 +426,13 @@ function CaseManagementTab({
   const [editingSecondary, setEditingSecondary] = useState(false);
   const [primaryDraft, setPrimaryDraft] = useState(customer.caseManagerId ?? "");
   const [secondaryDraft, setSecondaryDraft] = useState(customer.secondaryCaseManagerId ?? "");
+
+  useEffect(() => {
+    if (!autoEditPrimary) return;
+    setPrimaryDraft(customer.caseManagerId ?? "");
+    setEditingPrimary(true);
+    onAutoEditHandled?.();
+  }, [autoEditPrimary, customer.caseManagerId, onAutoEditHandled]);
 
   const knownCMs = useMemo(() => {
     const seen = new Map<string, string>();
@@ -603,7 +617,33 @@ function CaseManagementTab({
 
 type Tab = "info" | "cm" | "enrollments" | "plan" | "sessions";
 
-function InfoTab({ customer, activeEnrollments }: { customer: Customer; activeEnrollments: Enrollment[] }) {
+function StatusToggle({ customer }: { customer: Customer }) {
+  const toggleActive = useToggleCustomerActive(customer.id);
+  const isActive = customer.active !== false;
+
+  return (
+    <button
+      type="button"
+      onClick={() => toggleActive.mutate({ active: !isActive })}
+      disabled={toggleActive.isPending}
+      className={`text-sm font-medium px-3 py-1 rounded-full transition-colors active:scale-95 disabled:opacity-60 ${
+        isActive ? "bg-green-100 text-green-700 active:bg-green-200" : "bg-slate-100 text-slate-500 active:bg-slate-200"
+      }`}
+    >
+      {toggleActive.isPending ? "Saving…" : isActive ? "Active" : "Inactive"}
+    </button>
+  );
+}
+
+function InfoTab({
+  customer,
+  activeEnrollments,
+  onReassignCM,
+}: {
+  customer: Customer;
+  activeEnrollments: Enrollment[];
+  onReassignCM: () => void;
+}) {
   const age = calcAge(customer.dob);
   const markInactive = useMarkCustomerInactive(customer.id);
   const [confirmingInactive, setConfirmingInactive] = useState(false);
@@ -618,9 +658,7 @@ function InfoTab({ customer, activeEnrollments }: { customer: Customer; activeEn
     <div className="p-4 flex flex-col gap-3">
       {/* Status */}
       <div className="flex items-center gap-2">
-        <span className={`text-sm font-medium px-3 py-1 rounded-full ${customer.active !== false ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-          {customer.active !== false ? "Active" : "Inactive"}
-        </span>
+        <StatusToggle customer={customer} />
         {customer.population && (
           <span className={`text-sm font-medium px-3 py-1 rounded-full ${populationColors(customer.population).bg} ${populationColors(customer.population).text}`}>
             {customer.population}
@@ -635,7 +673,21 @@ function InfoTab({ customer, activeEnrollments }: { customer: Customer; activeEn
         {customer.hmisId && <InfoField label="HMIS ID" value={customer.hmisId} />}
         {customer.phone && <InfoField label="Phone" value={customer.phone} />}
         {customer.email && <InfoField label="Email" value={customer.email} />}
-        <InfoField label="Case Manager" value={customer.caseManagerName} />
+      </div>
+
+      {/* Case Manager + reassign */}
+      <div className="rounded-xl border border-slate-100 bg-white px-3.5 py-3 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Case Manager</p>
+          <p className="text-sm font-medium text-slate-900 truncate">{customer.caseManagerName || "Unassigned"}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onReassignCM}
+          className="text-xs font-semibold text-indigo-600 active:text-indigo-800 flex-shrink-0"
+        >
+          Reassign
+        </button>
       </div>
 
       {/* Notes */}
@@ -698,9 +750,133 @@ function InfoTab({ customer, activeEnrollments }: { customer: Customer; activeEn
   );
 }
 
-function EnrollmentsTab({ enrollments, loading }: { enrollments: Enrollment[]; loading: boolean }) {
+// Wraps a program card with a left-swipe "Close Today" reveal action (active
+// enrollments only) and routes plain taps to the edit sheet.
+function SwipeCloseRow({
+  swipeEnabled,
+  closing,
+  onOpen,
+  onCloseToday,
+  children,
+}: {
+  swipeEnabled: boolean;
+  closing: boolean;
+  onOpen: () => void;
+  onCloseToday: () => void;
+  children: React.ReactNode;
+}) {
+  const REVEAL = 92;
+  const [dragX, setDragX] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const dragging = useRef(false);
+  const wasDragged = useRef(false);
+  const startX = useRef(0);
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!swipeEnabled) return;
+    dragging.current = true;
+    wasDragged.current = false;
+    startX.current = e.clientX;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragging.current) return;
+    const delta = e.clientX - startX.current;
+    if (Math.abs(delta) > 6) wasDragged.current = true;
+    const base = revealed ? -REVEAL : 0;
+    const next = Math.min(0, Math.max(-REVEAL, base + delta));
+    setDragX(next);
+  }
+  function endDrag() {
+    if (!dragging.current) return;
+    dragging.current = false;
+    const shouldReveal = dragX <= -REVEAL / 2;
+    setRevealed(shouldReveal);
+    setDragX(shouldReveal ? -REVEAL : 0);
+  }
+  function handleClick() {
+    // A drag-to-reveal gesture ends with a trailing click on the same element —
+    // swallow it so the reveal doesn't immediately collapse before it can be tapped.
+    if (wasDragged.current) {
+      wasDragged.current = false;
+      return;
+    }
+    if (revealed) {
+      setRevealed(false);
+      setDragX(0);
+      return;
+    }
+    onOpen();
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl">
+      {swipeEnabled && (
+        <div className="absolute inset-y-0 right-0 flex items-stretch">
+          <button
+            type="button"
+            onClick={() => {
+              onCloseToday();
+              setRevealed(false);
+              setDragX(0);
+            }}
+            disabled={closing}
+            className="w-[92px] flex flex-col items-center justify-center gap-1 bg-red-600 text-white active:bg-red-700 disabled:opacity-60"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+            <span className="text-[11px] font-semibold">{closing ? "Closing…" : "Close Today"}</span>
+          </button>
+        </div>
+      )}
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onClick={handleClick}
+        style={{
+          transform: `translateX(${dragX}px)`,
+          transition: dragging.current ? "none" : "transform 200ms ease",
+          touchAction: swipeEnabled ? "pan-y" : undefined,
+        }}
+        className="relative"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function EnrollmentsTab({ customer, enrollments, loading }: { customer: Customer; enrollments: Enrollment[]; loading: boolean }) {
   const active = enrollments.filter(isActiveEnrollment);
   const past = enrollments.filter((e) => !isActiveEnrollment(e));
+
+  const updateEnrollment = useUpdateEnrollment(customer.id);
+  const [editing, setEditing] = useState<Enrollment | null>(null);
+  const [enrolling, setEnrolling] = useState(false);
+  const [closingId, setClosingId] = useState<string | null>(null);
+
+  async function handleSaveEdit(patch: ProgramEditPatch) {
+    if (!editing) return;
+    await updateEnrollment.mutateAsync({ id: editing.id, ...patch });
+    setEditing(null);
+  }
+
+  async function handleCloseToday(e: Enrollment) {
+    setClosingId(e.id);
+    try {
+      await updateEnrollment.mutateAsync({
+        id: e.id,
+        active: false,
+        status: "closed",
+        endDate: new Date().toISOString().slice(0, 10),
+      });
+    } finally {
+      setClosingId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -712,6 +888,35 @@ function EnrollmentsTab({ enrollments, loading }: { enrollments: Enrollment[]; l
 
   return (
     <div className="p-4 flex flex-col gap-4">
+      {editing && (
+        <ProgramEditSheet
+          enrollment={editing}
+          onClose={() => setEditing(null)}
+          onSave={(patch) => void handleSaveEdit(patch)}
+          saving={updateEnrollment.isPending}
+        />
+      )}
+
+      {enrolling && (
+        <EnrollProgramSheet
+          customer={customer}
+          enrollments={enrollments}
+          onClose={() => setEnrolling(false)}
+          onEnrolled={() => setEnrolling(false)}
+        />
+      )}
+
+      <button
+        type="button"
+        onClick={() => setEnrolling(true)}
+        className="w-full rounded-2xl bg-indigo-600 py-3.5 text-sm font-semibold text-white flex items-center justify-center gap-2 active:bg-indigo-700 transition-colors shadow-sm"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+        Enroll in Program
+      </button>
+
       <section>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Active</p>
@@ -720,7 +925,22 @@ function EnrollmentsTab({ enrollments, loading }: { enrollments: Enrollment[]; l
         {active.length === 0 ? (
           <p className="text-sm text-slate-400 italic py-1">No active enrollments</p>
         ) : (
-          <div className="flex flex-col gap-3">{active.map((e) => <EnrollmentCard key={e.id} enrollment={e} />)}</div>
+          <div className="flex flex-col gap-3">
+            {active.map((e) => (
+              <SwipeCloseRow
+                key={e.id}
+                swipeEnabled
+                closing={closingId === e.id}
+                onOpen={() => setEditing(e)}
+                onCloseToday={() => void handleCloseToday(e)}
+              >
+                <EnrollmentCard enrollment={e} />
+              </SwipeCloseRow>
+            ))}
+          </div>
+        )}
+        {active.length > 0 && (
+          <p className="text-[11px] text-slate-400 mt-2">Tap a program to edit · swipe left to close today</p>
         )}
       </section>
 
@@ -730,7 +950,13 @@ function EnrollmentsTab({ enrollments, loading }: { enrollments: Enrollment[]; l
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Past</p>
             <span className="text-xs text-slate-400">{past.length}</span>
           </div>
-          <div className="flex flex-col gap-3">{past.map((e) => <EnrollmentCard key={e.id} enrollment={e} />)}</div>
+          <div className="flex flex-col gap-3">
+            {past.map((e) => (
+              <SwipeCloseRow key={e.id} swipeEnabled={false} closing={false} onOpen={() => setEditing(e)} onCloseToday={() => {}}>
+                <EnrollmentCard enrollment={e} />
+              </SwipeCloseRow>
+            ))}
+          </div>
         </section>
       )}
 
@@ -1267,10 +1493,7 @@ function PlanTab({ customer }: { customer: Customer }) {
   if (data && data.kind === "not_linked") {
     return (
       <div className="p-4">
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white/50 p-4 text-center">
-          <p className="text-sm font-medium text-slate-500">No workbook linked</p>
-          <p className="text-xs text-slate-400 mt-1">Link a TSS workbook in the web app to see goals and notes here.</p>
-        </div>
+        <WorkbookLinkSection customer={customer} onLinked={() => void wb.refetch()} />
       </div>
     );
   }
@@ -1356,9 +1579,15 @@ export function CustomerDetailPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("info");
+  const [autoEditPrimaryCM, setAutoEditPrimaryCM] = useState(false);
 
   const { data: customer, isLoading: loadingCustomer } = useCustomer(id);
   const { data: enrollments = [], isLoading: loadingEnrollments } = useCustomerEnrollments(id);
+
+  const handleReassignCM = () => {
+    setAutoEditPrimaryCM(true);
+    setActiveTab("cm");
+  };
 
   const pop = populationColors(customer?.population);
 
@@ -1456,11 +1685,19 @@ export function CustomerDetailPage() {
           <InfoTab
             customer={customer}
             activeEnrollments={enrollments.filter(isActiveEnrollment)}
+            onReassignCM={handleReassignCM}
           />
         )}
-        {activeTab === "cm" && <CaseManagementTab customer={customer} enrollments={enrollments} />}
+        {activeTab === "cm" && (
+          <CaseManagementTab
+            customer={customer}
+            enrollments={enrollments}
+            autoEditPrimary={autoEditPrimaryCM}
+            onAutoEditHandled={() => setAutoEditPrimaryCM(false)}
+          />
+        )}
         {activeTab === "enrollments" && (
-          <EnrollmentsTab enrollments={enrollments} loading={loadingEnrollments} />
+          <EnrollmentsTab customer={customer} enrollments={enrollments} loading={loadingEnrollments} />
         )}
         {activeTab === "plan" && <PlanTab customer={customer} />}
         {activeTab === "sessions" && <SessionsTab customer={customer} user={user} />}

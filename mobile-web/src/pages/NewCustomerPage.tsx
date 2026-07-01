@@ -1,12 +1,13 @@
 import { useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { doc, updateDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 import { useOrgCustomers } from "@/hooks/useCustomers";
 import { useGrants, type Grant } from "@/hooks/useGrants";
 import { useCreateCustomer } from "@/hooks/useCreateCustomer";
 import { useEnrollCustomer } from "@/hooks/useEnrollCustomer";
+import { useOrgGDriveConfig } from "@/hooks/useOrgGDriveConfig";
+import { GoogleIntegrations } from "@/lib/googleIntegrations";
+import { BuildFolderSheet } from "@/components/BuildFolderSheet";
 import { findDuplicates, DUP_WARN_THRESHOLD, type DupMatch, type DupCandidate, type DupTier } from "@/lib/duplicateScore";
 
 type Step = 1 | 2 | 3 | 4;
@@ -234,6 +235,8 @@ export function NewCustomerPage() {
   const { data: grants = [], isLoading: loadingGrants } = useGrants(user);
   const createCustomer = useCreateCustomer(user);
   const enrollCustomer = useEnrollCustomer();
+  const gdriveCfg = useOrgGDriveConfig(user);
+  const hasFolderTemplates = (gdriveCfg.data?.templates?.length ?? 0) > 0;
 
   const knownCMs = useMemo(() => {
     const seen = new Map<string, string>();
@@ -278,13 +281,17 @@ export function NewCustomerPage() {
   const [drafts, setDrafts] = useState<EnrollmentDraft[]>([]);
 
   // Step 4
-  const [driveUrl, setDriveUrl] = useState("");
+  const [pasteUrl, setPasteUrl] = useState("");
   const [enrolledCount, setEnrolledCount] = useState(0);
+  const [showBuildFolder, setShowBuildFolder] = useState(false);
+  const [folderResult, setFolderResult] = useState<{ name: string } | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const canStep1 = firstName.trim().length > 0 && lastName.trim().length > 0;
   const canStep2 = !!population;
   const canStep3 = drafts.length > 0;
-  const driveFolderId = parseDriveFolderId(driveUrl);
+  const pasteFolderId = parseDriveFolderId(pasteUrl);
 
   const resolvedCMId = isMeCM ? (user?.uid ?? "") : primaryCMId;
   const resolvedCMName = isMeCM
@@ -391,23 +398,28 @@ export function NewCustomerPage() {
   const handleCreate = useCallback(() => executeCreate(drafts), [executeCreate, drafts]);
   const handleSkipPrograms = useCallback(() => executeCreate([]), [executeCreate]);
 
-  const handleFinish = useCallback(async () => {
+  const linkPasted = useCallback(async () => {
     const id = createdId;
-    if (!id) { navigate("/", { replace: true }); return; }
-
-    if (driveFolderId) {
-      try {
-        await updateDoc(doc(db, "customers", id), {
-          "meta.driveFolderId": driveFolderId,
-          "meta.driveFolders": [{ id: driveFolderId, name: "Drive folder", alias: null }],
-        });
-      } catch {
-        // non-fatal
-      }
+    const url = pasteUrl.trim();
+    if (!id || !url) return;
+    setLinking(true);
+    setLinkError(null);
+    try {
+      const resp = await GoogleIntegrations.linkCustomerFolder({ customerId: id, folderUrl: url });
+      if (!resp.ok) { setLinkError(resp.error || "Could not link folder."); return; }
+      setFolderResult({ name: "Linked folder" });
+      setPasteUrl("");
+    } catch (e) {
+      setLinkError(e instanceof Error ? e.message : "Could not link folder.");
+    } finally {
+      setLinking(false);
     }
+  }, [createdId, pasteUrl]);
 
-    navigate(`/customers/${id}`, { replace: true });
-  }, [createdId, driveFolderId, navigate]);
+  const handleFinish = useCallback(() => {
+    const id = createdId;
+    navigate(id ? `/customers/${id}` : "/", { replace: true });
+  }, [createdId, navigate]);
 
   // ─── Dupe interstitial ────────────────────────────────────────────────────────
 
@@ -589,17 +601,64 @@ export function NewCustomerPage() {
           </p>
         </div>
       </div>
-      <div className="flex flex-col gap-3">
-        <p className="text-sm font-semibold text-slate-900">Link a Google Drive folder (optional)</p>
-        <p className="text-xs text-slate-500">Paste a folder URL or ID. To build a new folder with templates, use the web app.</p>
-        <input className={inputCls} value={driveUrl} onChange={(e) => setDriveUrl(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
-        {driveUrl.trim() && !driveFolderId && (
-          <p className="text-xs text-red-500">Enter a valid Google Drive folder URL or folder ID.</p>
-        )}
-        {driveFolderId && (
-          <p className="text-xs text-green-600">Folder ID parsed: {driveFolderId.slice(0, 12)}…</p>
-        )}
-      </div>
+
+      {folderResult ? (
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 flex items-start gap-3">
+          <svg className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+          <div>
+            <p className="text-sm font-semibold text-indigo-900">Drive folder linked</p>
+            <p className="text-xs text-indigo-700 mt-0.5">{folderResult.name}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm font-semibold text-slate-900">Google Drive folder (optional)</p>
+
+          {hasFolderTemplates && (
+            <button
+              type="button"
+              onClick={() => setShowBuildFolder(true)}
+              className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white active:bg-indigo-700 transition-colors"
+            >
+              Build folder from templates
+            </button>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-slate-500">{hasFolderTemplates ? "Or paste an existing folder link:" : "Paste a folder URL or ID:"}</p>
+            <input className={inputCls} value={pasteUrl} onChange={(e) => setPasteUrl(e.target.value)} placeholder="https://drive.google.com/drive/folders/…" />
+            {pasteUrl.trim() && !pasteFolderId && (
+              <p className="text-xs text-red-500">Enter a valid Google Drive folder URL or folder ID.</p>
+            )}
+            {linkError && <p className="text-xs text-red-500">{linkError}</p>}
+            <button
+              type="button"
+              disabled={!pasteFolderId || linking}
+              onClick={() => void linkPasted()}
+              className="rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 active:bg-slate-50 disabled:opacity-40 transition-colors"
+            >
+              {linking ? "Linking…" : "Link folder"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showBuildFolder && createdId && (
+        <BuildFolderSheet
+          customerId={createdId}
+          firstName={firstName}
+          lastName={lastName}
+          cwId={cwId}
+          hmisId={hmisId}
+          onClose={() => setShowBuildFolder(false)}
+          onBuilt={(result) => {
+            setShowBuildFolder(false);
+            setFolderResult({ name: result.name });
+          }}
+        />
+      )}
     </div>
   );
 
@@ -685,10 +744,10 @@ export function NewCustomerPage() {
         ) : isFinishStep ? (
           <button
             type="button"
-            onClick={() => void handleFinish()}
+            onClick={handleFinish}
             className="flex-1 py-3 rounded-2xl bg-indigo-600 text-sm font-semibold text-white active:bg-indigo-700 transition-colors"
           >
-            {driveUrl.trim() && !driveFolderId ? "Skip — Go to Customer" : "Go to Customer"}
+            Go to Customer
           </button>
         ) : (
           <button

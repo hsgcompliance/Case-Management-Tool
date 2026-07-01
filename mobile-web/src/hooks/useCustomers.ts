@@ -4,6 +4,7 @@ import { db } from "@/lib/firebase";
 import { callFunction } from "@/lib/functionsApi";
 import { qk } from "@hooks/queryKeys";
 import { RQ_DEFAULTS, RQ_DETAIL } from "@hooks/base";
+import { useOptimisticMutation } from "@hooks/optimistic";
 import type { User } from "firebase/auth";
 
 export interface DriveFolderRef {
@@ -24,6 +25,9 @@ export interface LinkedWorkbookRef {
   spreadsheetUrl?: string;
   spreadsheetName?: string;
   status?: string;
+  variant?: string;
+  workbookVariant?: string;
+  detectedVariant?: string;
 }
 
 export interface CustomerDrive {
@@ -145,6 +149,21 @@ export function buildCustomerFolderName(customer: Pick<Customer, "firstName" | "
   return (cwid ? `${base}_${cwid}` : base).replace(/\s{2,}/g, " ").trim().slice(0, 255);
 }
 
+/**
+ * Name for a template file copied into a built folder: "{Last}, {First} {alias}".
+ * Matches web's `docNameTpl` convention (web/src/hooks/useResolvedDriveConfig.ts)
+ * so files built from mobile look identical to ones built from web.
+ */
+export function buildTemplateDocName(
+  customer: Pick<Customer, "firstName" | "lastName" | "name">,
+  alias: string,
+): string {
+  const first = String(customer.firstName || "").trim();
+  const last = String(customer.lastName || "").trim();
+  const base = last && first ? `${last}, ${first}` : String(customer.name || "").trim();
+  return `${base} ${alias}`.replace(/\s{2,}/g, " ").trim();
+}
+
 function sortByName(a: Customer, b: Customer) {
   return a.name.localeCompare(b.name);
 }
@@ -220,6 +239,27 @@ export function usePatchCustomer(customerId: string) {
       qc.invalidateQueries({ queryKey: qk.customers.root });
     },
   });
+}
+
+/** Optimistically toggle a customer's active flag (quick status chip). No cascade to enrollments. */
+export function useToggleCustomerActive(customerId: string) {
+  return useOptimisticMutation<void, { active: boolean }>(
+    async ({ active }) => {
+      await callFunction("customersUpsert", [{ id: customerId, active }]);
+    },
+    {
+      makePatches: (vars) => [
+        {
+          key: qk.customers.detail(customerId),
+          update: (prev: Customer | null | undefined) => (prev ? { ...prev, active: vars.active } : prev),
+        },
+      ],
+      revalidateAfterMs: 4000,
+      afterSuccess: (_data, _vars, qc) => {
+        qc.invalidateQueries({ queryKey: qk.customers.root });
+      },
+    },
+  );
 }
 
 /** Mark a customer inactive via Cloud Functions, and close any active enrollment IDs passed in. */

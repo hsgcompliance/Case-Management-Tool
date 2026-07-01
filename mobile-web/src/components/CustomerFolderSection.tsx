@@ -1,13 +1,13 @@
 import { useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { useDriveIntegration } from "@/hooks/useCalendarIntegration";
 import { useOrgFolderIndex } from "@/hooks/useOrgFolderIndex";
 import { useOrgGDriveConfig } from "@/hooks/useOrgGDriveConfig";
 import { suggestFolders } from "@/lib/folderMatch";
 import { GoogleIntegrations } from "@/lib/googleIntegrations";
-import { getCustomerDriveFolder, buildCustomerFolderName, type Customer } from "@/hooks/useCustomers";
+import { getCustomerDriveFolder, type Customer } from "@/hooks/useCustomers";
 import { qk } from "@/hooks/queryKeys";
+import { BuildFolderSheet } from "@/components/BuildFolderSheet";
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "never";
@@ -32,17 +32,16 @@ function FolderGlyph({ muted = false }: { muted?: boolean }) {
 export function CustomerFolderSection({ customer }: { customer: Customer }) {
   const { user } = useAuth();
   const qc = useQueryClient();
-  const drive = useDriveIntegration(user ?? null);
   const linked = getCustomerDriveFolder(customer);
 
   const idx = useOrgFolderIndex(linked ? null : user ?? null);
   const cfg = useOrgGDriveConfig(linked ? null : user ?? null);
 
-  const [busy, setBusy] = useState<string | null>(null); // folderId | "build" | "paste" | "refresh"
+  const [busy, setBusy] = useState<string | null>(null); // folderId | "paste" | "refresh"
   const [error, setError] = useState<string | null>(null);
   const [showPaste, setShowPaste] = useState(false);
   const [pasteUrl, setPasteUrl] = useState("");
-  const [variant, setVariant] = useState<"payer" | "nonpayer">("nonpayer");
+  const [showBuild, setShowBuild] = useState(false);
 
   const suggestions = useMemo(
     () => (idx.data ? suggestFolders(idx.data.folders, customer) : []),
@@ -80,60 +79,6 @@ export function CustomerFolderSection({ customer }: { customer: Customer }) {
     } finally { setBusy(null); }
   }
 
-  async function buildFolder() {
-    setError(null);
-    if (!drive.connected) {
-      const res = await drive.connectViaPopup();
-      if (res.result !== "connected") return;
-    }
-    const config = cfg.data;
-    const parentId = String(config?.customerFolderIndex?.activeParentId || "").trim();
-    if (!parentId) { setError("No active folder parent configured for your org."); return; }
-
-    // Map configured templates → build templates. The TSS workbook is flagged by
-    // its `role` ("tssWorkbook", set explicitly or inferred server-side from the
-    // legacy key) so the backend auto-links its copy. We ALWAYS include the
-    // workbook template so every build returns + links a workbook, plus the org's
-    // default templates. Payer/non-payer picks the variant for variant templates.
-    const defaults = config?.buildSettings?.defaultTemplateKeys;
-    const roleOf = (t: { role?: string; key: string }) =>
-      t.role || (t.key === "tss_workbook" ? "tssWorkbook" : undefined);
-    const picked = (config?.templates ?? []).filter((t) => {
-      if (roleOf(t) === "tssWorkbook") return true; // always include the workbook
-      return defaults?.length ? defaults.includes(t.key) : !!t.defaultChecked;
-    });
-    const templates = picked
-      .map((t) => {
-        const role = roleOf(t);
-        const fileId = t.variants ? (variant === "payer" ? t.variants.payer : t.variants.nonpayer) : t.fileId;
-        return { fileId, name: t.alias, ...(role ? { role } : {}) };
-      })
-      .filter((t) => t.fileId);
-
-    const hasWorkbook = templates.some((t) => t.role === "tssWorkbook");
-    if (!hasWorkbook) {
-      setError("No TSS workbook template is configured for your org — folder would build without a workbook.");
-      return;
-    }
-
-    setBusy("build");
-    try {
-      const resp = await GoogleIntegrations.buildCustomerFolder({
-        name: buildCustomerFolderName(customer),
-        parentId,
-        templates,
-        subfolders: config?.buildSettings?.defaultSubfolders ?? [],
-        customerId: customer.id,
-      });
-      if (!resp.ok) { setError(resp.error || "Could not build folder."); return; }
-      if (resp.linked === false) setError(resp.linkError || "Folder built but linking failed.");
-      await afterChange();
-      void qc.invalidateQueries({ queryKey: ["workbook", "data", customer.id] });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not build folder.");
-    } finally { setBusy(null); }
-  }
-
   // ── Linked state ──
   if (linked) {
     return (
@@ -154,7 +99,6 @@ export function CustomerFolderSection({ customer }: { customer: Customer }) {
   }
 
   const hasTemplates = (cfg.data?.templates?.length ?? 0) > 0;
-  const hasVariantTemplate = (cfg.data?.templates ?? []).some((t) => t.variants);
 
   // ── Unlinked state ──
   return (
@@ -210,37 +154,31 @@ export function CustomerFolderSection({ customer }: { customer: Customer }) {
 
       {/* Build a new folder */}
       {hasTemplates && (
-        <div className="flex flex-col gap-2 border-t border-slate-100 pt-3">
-          {hasVariantTemplate && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Workbook:</span>
-              <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-                {(["nonpayer", "payer"] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setVariant(v)}
-                    className={`px-2.5 py-1 text-xs font-semibold capitalize ${variant === v ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}
-                  >
-                    {v === "nonpayer" ? "Non-payer" : "Payer"}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+        <div className="border-t border-slate-100 pt-3">
           <button
             type="button"
-            disabled={busy === "build"}
-            onClick={() => void buildFolder()}
+            onClick={() => setShowBuild(true)}
             className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white active:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            {busy === "build"
-              ? "Building…"
-              : drive.connected
-                ? `Build folder for ${buildCustomerFolderName(customer)}`
-                : "Connect Drive & build folder"}
+            Build a new folder…
           </button>
         </div>
+      )}
+
+      {showBuild && (
+        <BuildFolderSheet
+          customerId={customer.id}
+          firstName={customer.firstName ?? ""}
+          lastName={customer.lastName ?? ""}
+          cwId={customer.cwId}
+          hmisId={customer.hmisId}
+          onClose={() => setShowBuild(false)}
+          onBuilt={() => {
+            setShowBuild(false);
+            void afterChange();
+            void qc.invalidateQueries({ queryKey: ["workbook", "data", customer.id] });
+          }}
+        />
       )}
 
       {/* Paste a folder link */}
