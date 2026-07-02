@@ -512,6 +512,7 @@ export function LogActivityPage() {
             customerId={customer.id}
             draft={note}
             visitLengthMinutes={visitLengthMinutes}
+            contactType={type === "in-person" ? "in person" : type === "phone" ? "phone" : type === "other" ? "on behalf of the customer" : type === "data-entry" ? "data entry (on behalf of the customer)" : null}
             clientLabel={aiConfig.data?.defaultClientLabel ?? "client"}
             staffLabel={aiConfig.data?.defaultStaffLabel ?? "case manager"}
             onAccept={setNote}

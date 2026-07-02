@@ -6109,6 +6109,7 @@ var GenerateCaseNoteSuggestionBodySchema = import_zod5.z.object({
   action: CaseNoteActionSchema,
   program: import_zod5.z.string().max(120).nullish(),
   serviceType: import_zod5.z.string().max(120).nullish(),
+  contactType: import_zod5.z.string().max(60).nullish(),
   visitLengthMinutes: import_zod5.z.number().int().min(0).max(1440).nullish(),
   draft: import_zod5.z.string().max(12e3).nullish(),
   clientLabel: import_zod5.z.string().min(1).max(40).default("client"),
@@ -6125,6 +6126,8 @@ var GenerateCaseNoteSuggestionResponseSchema = import_zod5.z.object({
   requestId: import_zod5.z.string(),
   action: CaseNoteActionSchema,
   model: import_zod5.z.string(),
+  missingOrUnclear: import_zod5.z.array(import_zod5.z.string()).default([]),
+  complianceSuggestions: import_zod5.z.array(import_zod5.z.string()).default([]),
   usage: import_zod5.z.object({ inputTokens: import_zod5.z.number().int().nonnegative(), outputTokens: import_zod5.z.number().int().nonnegative() })
 });
 var RecordCaseNoteSuggestionDecisionBodySchema = import_zod5.z.object({

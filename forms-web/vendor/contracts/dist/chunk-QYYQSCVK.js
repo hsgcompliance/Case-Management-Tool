@@ -39,6 +39,7 @@ var GenerateCaseNoteSuggestionBodySchema = z.object({
   action: CaseNoteActionSchema,
   program: z.string().max(120).nullish(),
   serviceType: z.string().max(120).nullish(),
+  contactType: z.string().max(60).nullish(),
   visitLengthMinutes: z.number().int().min(0).max(1440).nullish(),
   draft: z.string().max(12e3).nullish(),
   clientLabel: z.string().min(1).max(40).default("client"),
@@ -55,6 +56,8 @@ var GenerateCaseNoteSuggestionResponseSchema = z.object({
   requestId: z.string(),
   action: CaseNoteActionSchema,
   model: z.string(),
+  missingOrUnclear: z.array(z.string()).default([]),
+  complianceSuggestions: z.array(z.string()).default([]),
   usage: z.object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative() })
 });
 var RecordCaseNoteSuggestionDecisionBodySchema = z.object({

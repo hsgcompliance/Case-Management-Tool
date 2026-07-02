@@ -5,7 +5,7 @@ import {
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema
-} from "./chunk-YJIMR7SQ.js";
+} from "./chunk-QYYQSCVK.js";
 import "./chunk-MLKGABMK.js";
 export {
   CaseNoteActionSchema,

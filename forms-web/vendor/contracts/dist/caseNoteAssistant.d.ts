@@ -41,6 +41,7 @@ export declare const GenerateCaseNoteSuggestionBodySchema: z.ZodObject<{
     }>;
     program: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     serviceType: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    contactType: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     visitLengthMinutes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     draft: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     clientLabel: z.ZodDefault<z.ZodString>;
@@ -69,6 +70,8 @@ export declare const GenerateCaseNoteSuggestionResponseSchema: z.ZodObject<{
         interview_draft: "interview_draft";
     }>;
     model: z.ZodString;
+    missingOrUnclear: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    complianceSuggestions: z.ZodDefault<z.ZodArray<z.ZodString>>;
     usage: z.ZodObject<{
         inputTokens: z.ZodNumber;
         outputTokens: z.ZodNumber;
