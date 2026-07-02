@@ -1,6 +1,7 @@
 // src/hooks/useGDrive.ts
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMutation } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { GDrive } from '@client/gdrive';
 import type {
   TCustomerFolder,
@@ -69,15 +70,45 @@ export function useGDriveCustomerFolderIndex(
   });
 }
 
+/**
+ * Warm the customer folder index into the *same* cache entry that
+ * useGDriveCustomerFolderIndex reads. Fire-and-forget (e.g. when the new-customer
+ * flow opens) so the folder build step has the index ready instead of stalling on
+ * first load. prefetchQuery respects INDEX_STALE_MS, so this is a no-op when the
+ * index is already cached and fresh.
+ */
+export function prefetchGDriveCustomerFolderIndex(
+  qc: QueryClient,
+  query: { activeParentId?: string; exitedParentId?: string },
+  opts?: { includeDriveToken?: boolean; staleTime?: number }
+) {
+  const normalizedQuery = sanitizeIndexQuery(query);
+  if (!normalizedQuery.activeParentId && !normalizedQuery.exitedParentId) return Promise.resolve();
+  return qc.prefetchQuery({
+    queryKey: qk.gdrive.customerFolderIndex(normalizedQuery as Record<string, unknown>),
+    queryFn: () =>
+      GDrive.customerFolderIndex(normalizedQuery, {
+        includeDriveToken: opts?.includeDriveToken ?? true,
+      }) as Promise<{ ok: boolean; folders: TCustomerFolder[] }>,
+    staleTime: opts?.staleTime ?? INDEX_STALE_MS,
+  });
+}
+
 export function useGDriveBuildCustomerFolder(
   indexQuery: { activeParentId?: string; exitedParentId?: string },
   opts?: {
-    onSuccess?: (folder: {
-      id: string;
-      name: string;
-      url: string;
-      warnings?: Array<{ phase: "template" | "subfolder"; name: string; fileId?: string; error: string }>;
-    }) => void;
+    onSuccess?: (
+      folder: {
+        id: string;
+        name: string;
+        url: string;
+        warnings?: Array<{ phase: "template" | "subfolder"; name: string; fileId?: string; error: string }>;
+      },
+      // The exact variables passed to .mutate()/.mutateAsync() — callers may pass
+      // extra client-only fields (e.g. `variant`) alongside TGDriveBuildCustomerFolderBody
+      // to read back in onSuccess without a round trip through the server.
+      variables: TGDriveBuildCustomerFolderBody & Record<string, unknown>
+    ) => void;
   }
 ) {
   const qc = useQueryClient();
@@ -110,7 +141,7 @@ export function useGDriveBuildCustomerFolder(
           };
           return { ...prev, folders: [newEntry, ...prev.folders] };
         });
-        opts?.onSuccess?.(folder);
+        opts?.onSuccess?.(folder, body);
       }
       // Also invalidate the file list for the new folder's parent
       qc.invalidateQueries({ queryKey: qk.gdrive.list({ folderId: body.parentId }) });

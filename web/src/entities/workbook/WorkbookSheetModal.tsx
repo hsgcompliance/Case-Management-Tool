@@ -143,7 +143,14 @@ export function WorkbookSheetModal({
 
   const content = (
     // Root never blocks the page by itself; only the frozen backdrop does.
-    <div className="fixed inset-0 z-[10050] pointer-events-none">
+    // Rendered via createPortal but still a React-tree child of the card that
+    // opened it, so clicks here bubble through the React tree (not the DOM
+    // tree) back up to the card's onClick (which opens the customer modal)
+    // unless stopped here.
+    <div
+      className="fixed inset-0 z-[10050] pointer-events-none"
+      onClick={(e) => e.stopPropagation()}
+    >
       {mode === "frozen" ? (
         <>
           <div className="absolute inset-0 bg-black/40 pointer-events-auto" />

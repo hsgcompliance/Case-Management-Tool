@@ -10,12 +10,12 @@ import { toast } from "@lib/toast";
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import type { TGrant as Grant } from "@types";
+import { EnrollmentControlsEditor, EnrollmentControlsSummary } from "../EnrollmentControlsEditor";
 import {
   buildGrantProgramPayload,
+  copyLineItemInvoicing,
   copyGrantProgramToDraft,
   createInitialGrantProgramDraft,
-  DEFAULT_ELIGIBILITY,
-  DEFAULT_LEVEL_OF_ASSISTANCE,
   type FlowInvoiceOption,
   type FlowLineItem,
   type GrantProgramFinancialModel,
@@ -46,6 +46,8 @@ const LINE_ITEM_TYPES = [
   { id: "program-spending", label: "Program Spending" },
   { id: "customer-support-service", label: "Customer Support Service" },
 ];
+
+const RENTAL_ASSISTANCE_TAG = "rental-assistance";
 
 function isoToday() {
   return new Date().toISOString().slice(0, 10);
@@ -80,6 +82,7 @@ function nextLineItem(): FlowLineItem {
     type: null,
     perCustomerCap: null,
     capEnabled: false,
+    invoicing: { functionalGroup: "", grantCode: "", programCode: "", hmisCode: "", expenseCategories: [], descriptionTemplates: [] },
   };
 }
 
@@ -172,7 +175,7 @@ function KeyValueEditor({
     const cleaned: Record<string, string> = {};
     for (const [key, raw] of Object.entries(next)) {
       const k = key.trim();
-      if (k) cleaned[k] = String(raw ?? "").trim();
+      if (k) cleaned[k] = String(raw ?? "");
     }
     onChange(cleaned);
   };
@@ -268,21 +271,47 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
   const fetchGrantById = useFetchGrantById();
   const { data: activeGrants = [] } = useGrants({ active: true, limit: 500 }, { staleTime: 60_000 });
   const { data: inactiveGrants = [] } = useGrants({ active: false, limit: 500 }, { staleTime: 60_000 });
-  const allGrants = React.useMemo(() => [...(activeGrants as Grant[]), ...(inactiveGrants as Grant[])], [activeGrants, inactiveGrants]);
+  const allGrants = React.useMemo(() => {
+    const byId = new Map<string, Grant>();
+    for (const grant of [...(activeGrants as Grant[]), ...(inactiveGrants as Grant[])]) {
+      const id = String(grant?.id || "").trim();
+      if (id) byId.set(id, grant);
+    }
+    return Array.from(byId.values());
+  }, [activeGrants, inactiveGrants]);
   const [step, setStep] = React.useState<FlowStep>(1);
   const [draft, setDraft] = React.useState<GrantProgramFlowDraft>(() =>
-    createInitialGrantProgramDraft({ status: "draft", startDate: isoToday(), ...(initialCreateData || {}) }),
+    createInitialGrantProgramDraft({ status: "active", startDate: isoToday(), ...(initialCreateData || {}) }),
   );
   const [showDescriptionSection, setShowDescriptionSection] = React.useState(() => true);
   const [showServicesSection, setShowServicesSection] = React.useState(() => true);
+  const [showEligibilitySection, setShowEligibilitySection] = React.useState(() => true);
+  const [showAssistanceSection, setShowAssistanceSection] = React.useState(() => true);
   const [copying, setCopying] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [tagDraft, setTagDraft] = React.useState("");
+
+  const rentalTagged = draft.tags.some((t) => t.toLowerCase() === RENTAL_ASSISTANCE_TAG);
+  const addTag = () => {
+    const t = tagDraft.trim();
+    if (!t) return;
+    setDraft((prev) =>
+      prev.tags.some((x) => x.toLowerCase() === t.toLowerCase()) ? prev : { ...prev, tags: [...prev.tags, t] },
+    );
+    setTagDraft("");
+  };
+  const removeTag = (tag: string) =>
+    setDraft((prev) => ({ ...prev, tags: prev.tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()) }));
+  const toggleRental = (on: boolean) =>
+    setDraft((prev) => {
+      const base = prev.tags.filter((t) => t.toLowerCase() !== RENTAL_ASSISTANCE_TAG);
+      return { ...prev, tags: on ? [...base, RENTAL_ASSISTANCE_TAG] : base };
+    });
 
   const payload = React.useMemo(() => buildGrantProgramPayload(draft), [draft]);
   const capabilities = React.useMemo(() => getGrantFinancialCapabilities(payload), [payload]);
   const missingName = draft.name.trim().length === 0;
-  const missingStartDate = draft.startDate.trim().length === 0;
-  const canSave = !missingName && !missingStartDate;
+  const canSave = !missingName;
   const canContinue = step !== 1 || canSave;
 
   const setFinancialModel = (model: GrantProgramFinancialModel) => {
@@ -297,8 +326,21 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
 
   const updateLineItem = (index: number, patch: Partial<FlowLineItem>) => {
     setDraft((prev) => {
+      if (!prev.lineItems[index]) return prev;
       const lineItems = prev.lineItems.slice();
       lineItems[index] = { ...lineItems[index], ...patch };
+      return { ...prev, lineItems };
+    });
+  };
+  const copyPreviousLineItemInvoicing = (index: number) => {
+    if (index < 1) return;
+    setDraft((prev) => {
+      if (!prev.lineItems[index] || !prev.lineItems[index - 1]) return prev;
+      const lineItems = prev.lineItems.slice();
+      lineItems[index] = {
+        ...lineItems[index],
+        invoicing: copyLineItemInvoicing(lineItems[index - 1]),
+      };
       return { ...prev, lineItems };
     });
   };
@@ -309,7 +351,14 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
     try {
       const source = await fetchGrantById(grantId);
       if (!source) return;
-      setDraft((prev) => copyGrantProgramToDraft(source as Record<string, unknown>, prev));
+      setDraft((current) => {
+        const copied = copyGrantProgramToDraft(source as Record<string, unknown>, current);
+        setShowDescriptionSection(!!copied.description);
+        setShowServicesSection(Array.isArray(copied.servicesOffered) && copied.servicesOffered.length > 0);
+        setShowEligibilitySection(!!copied.eligibility && Object.keys(copied.eligibility).length > 0);
+        setShowAssistanceSection(!!copied.levelOfAssistance && Object.keys(copied.levelOfAssistance).length > 0);
+        return copied;
+      });
       toast("Grant/program copied into the builder.", { type: "success" });
     } catch (error) {
       toast(toApiError(error).error, { type: "error" });
@@ -320,7 +369,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
 
   const onSubmit = async () => {
     if (!canSave) {
-      toast("Name and start date are required.", { type: "error" });
+      toast("Name is required.", { type: "error" });
       return;
     }
     setSaving(true);
@@ -384,7 +433,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
           <label className="field">
             <span className="label">Start date</span>
             <input
-              className={["input", missingStartDate ? "border-red-300 bg-red-50/40" : ""].join(" ")}
+              className="input"
               type="date"
               value={draft.startDate}
               onChange={(e) => {
@@ -392,23 +441,8 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
                 setDraft((prev) => ({ ...prev, startDate: value }));
               }}
             />
-            {missingStartDate ? <span className="text-xs text-red-700">Start date is required before you can continue.</span> : null}
+            <span className="text-xs text-slate-500">Optional. Leave blank when the cycle dates are not known yet.</span>
           </label>
-          {draft.kind === "grant" ? (
-            <label className="field">
-              <span className="label">Close / end date encouraged</span>
-              <input
-                className="input"
-                type="date"
-                min={draft.startDate || undefined}
-                value={draft.endDate}
-                onChange={(e) => {
-                  const value = e.currentTarget.value;
-                  setDraft((prev) => ({ ...prev, endDate: value }));
-                }}
-              />
-            </label>
-          ) : null}
         </div>
 
         <div className="space-y-3">
@@ -443,11 +477,6 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
           </div>
         </div>
       </div>
-      {draft.kind === "grant" && !draft.endDate ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Funding grants usually need a close date for reporting and enrollment caps. You can still create this draft without one.
-        </div>
-      ) : null}
     </StepFrame>
   ) : step === 2 ? (
     <StepFrame
@@ -469,6 +498,39 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
             }}
           />
         </label>
+        <label className="field">
+          <span className="label">Previous cycle</span>
+          <select className="select" value={draft.previousGrantId} onChange={(e) => setDraft((prev) => ({ ...prev, previousGrantId: e.currentTarget.value }))}>
+            <option value="">None</option>
+            {allGrants.map((grant) => <option key={String(grant.id)} value={String(grant.id)}>{String(grant.name || grant.id)}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="label">Next cycle</span>
+          <select className="select" value={draft.nextGrantId} onChange={(e) => setDraft((prev) => ({ ...prev, nextGrantId: e.currentTarget.value }))}>
+            <option value="">None</option>
+            {allGrants.map((grant) => <option key={String(grant.id)} value={String(grant.id)}>{String(grant.name || grant.id)}</option>)}
+          </select>
+        </label>
+        <div className="field md:col-span-2">
+          <span className="label">Linked enrollment requirement</span>
+          <div className="grid gap-2 md:grid-cols-[140px_1fr]">
+            <select className="select" value={draft.linkedEnrollmentOperator} onChange={(e) => {
+              const value = e.currentTarget.value as "all" | "any";
+              setDraft((prev) => ({ ...prev, linkedEnrollmentOperator: value }));
+            }}>
+              <option value="all">All selected</option>
+              <option value="any">Any selected</option>
+            </select>
+            <select className="select min-h-28" multiple value={draft.linkedEnrollmentGrantIds} onChange={(e) => {
+              const values = Array.from(e.currentTarget.selectedOptions, (option) => option.value);
+              setDraft((prev) => ({ ...prev, linkedEnrollmentGrantIds: values }));
+            }}>
+              {allGrants.map((grant) => <option key={String(grant.id)} value={String(grant.id)}>{String(grant.name || grant.id)}</option>)}
+            </select>
+          </div>
+          <span className="text-xs text-slate-500">Used to surface warnings only. Hold Ctrl/Cmd to select multiple enrollments.</span>
+        </div>
         <label className="field">
           <span className="label">Duration label</span>
           <input
@@ -500,6 +562,23 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
               }));
             }}
           />
+        </label>
+        <label className="field">
+          <span className="label">Default authorization window</span>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={120}
+            step={1}
+            value={draft.authorizationMonths}
+            placeholder="No default"
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setDraft((prev) => ({ ...prev, authorizationMonths: value }));
+            }}
+          />
+          <span className="text-xs text-slate-500">Months used to suggest the end date for each new enrollment.</span>
         </label>
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 md:col-span-2">
           <label className="flex items-start gap-3">
@@ -533,7 +612,75 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
             </label>
           ) : null}
         </div>
+        <div className="md:col-span-2">
+          <EnrollmentControlsEditor
+            value={draft.complianceConfig}
+            onChange={(complianceConfig) => setDraft((prev) => ({ ...prev, complianceConfig }))}
+          />
+        </div>
+        <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-sm font-semibold text-slate-900">Tags</div>
+          <div className="mt-1 text-xs text-slate-500">Free-form labels for grouping and reporting.</div>
+          <div className="mt-3 space-y-3">
+            {draft.tags.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {draft.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-700"
+                  >
+                    {t}
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-red-600"
+                      onClick={() => removeTag(t)}
+                      aria-label={`Remove ${t}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500">No tags yet.</div>
+            )}
+            <div className="flex gap-2">
+              <input
+                className="input h-9 flex-1"
+                placeholder="Add a tag and press Enter"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTag();
+                  }
+                }}
+              />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addTag}>
+                Add
+              </button>
+            </div>
+            {draft.kind === "grant" ? (
+              <label className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-2.5 py-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-emerald-600"
+                  checked={rentalTagged}
+                  onChange={(e) => toggleRental(e.currentTarget.checked)}
+                />
+                <span className="text-xs font-semibold text-emerald-900">Rental Assistance</span>
+                <span className="text-xs text-emerald-800/75">Budget grouping and reporting</span>
+              </label>
+            ) : null}
+          </div>
+        </div>
       </div>
+      {draft.kind === "grant" && !draft.endDate ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Funding grants usually need a close date for reporting and enrollment caps. You can still create this draft without one.
+        </div>
+      ) : null}
     </StepFrame>
   ) : step === 3 ? (
     <StepFrame
@@ -580,14 +727,34 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
             setShowServicesSection(true);
           }}>Add Services</button>
         )}
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-2 text-sm font-semibold text-slate-900">Eligibility criteria</div>
-          <KeyValueEditor value={draft.eligibility} defaults={DEFAULT_ELIGIBILITY} onChange={(eligibility) => setDraft((prev) => ({ ...prev, eligibility }))} />
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-2 text-sm font-semibold text-slate-900">Assistance / prioritization levels</div>
-          <KeyValueEditor value={draft.levelOfAssistance} defaults={DEFAULT_LEVEL_OF_ASSISTANCE} onChange={(levelOfAssistance) => setDraft((prev) => ({ ...prev, levelOfAssistance }))} />
-        </div>
+        {showEligibilitySection ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">Eligibility criteria</div>
+              <button type="button" className="btn btn-ghost btn-xs text-red-600" onClick={() => {
+                setDraft((prev) => ({ ...prev, eligibility: {} }));
+                setShowEligibilitySection(false);
+              }}>Delete field</button>
+            </div>
+            <KeyValueEditor value={draft.eligibility} defaults={{}} onChange={(eligibility) => setDraft((prev) => ({ ...prev, eligibility }))} />
+          </div>
+        ) : (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowEligibilitySection(true)}>Add Eligibility Criteria</button>
+        )}
+        {showAssistanceSection ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">Assistance / prioritization levels</div>
+              <button type="button" className="btn btn-ghost btn-xs text-red-600" onClick={() => {
+                setDraft((prev) => ({ ...prev, levelOfAssistance: {} }));
+                setShowAssistanceSection(false);
+              }}>Delete field</button>
+            </div>
+            <KeyValueEditor value={draft.levelOfAssistance} defaults={{}} onChange={(levelOfAssistance) => setDraft((prev) => ({ ...prev, levelOfAssistance }))} />
+          </div>
+        ) : (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAssistanceSection(true)}>Add Assistance Levels</button>
+        )}
       </div>
     </StepFrame>
   ) : step === 4 ? (
@@ -688,6 +855,7 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
                           />
                         </td>
                         <td className="py-2 text-right">
+                          {index > 0 ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyPreviousLineItemInvoicing(index)}>Copy invoice config</button> : null}
                           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft((prev) => ({ ...prev, lineItems: prev.lineItems.filter((_, i) => i !== index) }))}>Remove</button>
                         </td>
                       </tr>
@@ -696,62 +864,23 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
                 </table>
               </div>
             ) : null}
+            {draft.lineItems.map((item, index) => (
+              <div key={`invoice-${item.id || index}`} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-slate-900">{item.label || `Line item ${index + 1}`} invoicing</div>
+                  {index > 0 ? <button type="button" className="btn btn-secondary btn-xs" onClick={() => copyPreviousLineItemInvoicing(index)}>Copy from previous</button> : null}
+                </div>
+                <div className="grid gap-3 md:grid-cols-4">
+                  {([ ["functionalGroup", "Functional group"], ["grantCode", "Grant code"], ["programCode", "FE / program code"], ["hmisCode", "HMIS code"] ] as const).map(([key, label]) => (
+                    <label className="field" key={key}><span className="label">{label}</span><input className="input" value={item.invoicing[key]} onChange={(e) => updateLineItem(index, { invoicing: { ...item.invoicing, [key]: e.currentTarget.value } })} /></label>
+                  ))}
+                </div>
+                <InvoiceOptionsEditor title="Allowed expense categories" codeLabel="Code" options={item.invoicing.expenseCategories} onChange={(expenseCategories) => updateLineItem(index, { invoicing: { ...item.invoicing, expenseCategories } })} />
+                <InvoiceOptionsEditor title="Description examples" codeLabel="Example" options={item.invoicing.descriptionTemplates} onChange={(descriptionTemplates) => updateLineItem(index, { invoicing: { ...item.invoicing, descriptionTemplates } })} />
+              </div>
+            ))}
           </div>
 
-          <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Invoicing details</div>
-              <div className="mt-1 text-xs text-slate-500">Optional codes and invoice helper lists used by billing and payment workflows.</div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="field">
-                <span className="label">Functional group</span>
-                <input
-                  className="input"
-                  value={draft.invoicing.functionalGroup}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, functionalGroup: value } }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span className="label">Grant code</span>
-                <input
-                  className="input"
-                  value={draft.invoicing.grantCode}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, grantCode: value } }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span className="label">FE / program code</span>
-                <input
-                  className="input"
-                  value={draft.invoicing.programCode}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, programCode: value } }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span className="label">HMIS code</span>
-                <input
-                  className="input"
-                  value={draft.invoicing.hmisCode}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, hmisCode: value } }));
-                  }}
-                />
-              </label>
-            </div>
-            <InvoiceOptionsEditor title="Allowed expense categories" codeLabel="Code" options={draft.invoicing.expenseCategories} onChange={(expenseCategories) => setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, expenseCategories } }))} />
-            <InvoiceOptionsEditor title="Description examples" codeLabel="Example" options={draft.invoicing.descriptionTemplates} onChange={(descriptionTemplates) => setDraft((prev) => ({ ...prev, invoicing: { ...prev.invoicing, descriptionTemplates } }))} />
-          </div>
         </div>
       )}
     </StepFrame>
@@ -859,8 +988,12 @@ export function NewGrantProgramFlow({ initialCreateData, onClose, onCreated }: P
         </ReviewBlock>
         <ReviewBlock title="Services">
           <div>{draft.servicesOffered.length} service row(s)</div>
-          <div>{Object.keys(draft.eligibility).length || Object.keys(DEFAULT_ELIGIBILITY).length} eligibility row(s)</div>
-          <div>{Object.keys(draft.levelOfAssistance).length || Object.keys(DEFAULT_LEVEL_OF_ASSISTANCE).length} assistance level row(s)</div>
+          <div>{Object.keys(draft.eligibility).length} eligibility row(s)</div>
+          <div>{Object.keys(draft.levelOfAssistance).length} assistance level row(s)</div>
+        </ReviewBlock>
+        <ReviewBlock title="Enrollment configuration">
+          <div className="mb-2">Default authorization: {draft.authorizationMonths ? `${draft.authorizationMonths} months` : "none"}</div>
+          <EnrollmentControlsSummary value={draft.complianceConfig} />
         </ReviewBlock>
         <ReviewBlock title="Tasks and display">
           <div>{draft.tasks.length} task definition(s)</div>

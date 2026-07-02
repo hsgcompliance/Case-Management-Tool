@@ -61,6 +61,13 @@ export const CustomerMeta = z
     // customerDrive.folderId for new resolvers and mirror writes during migration.
     driveFolderId: z.string().nullish(),
     notes: z.string().nullish(),
+
+    // Household / family linking (Customer-Collection-Update). Denormalized
+    // pointer to the canonical households/{id} doc this customer belongs to; the
+    // member list itself lives on the household doc. Scalar = one primary
+    // household per customer. See contracts/src/households.ts.
+    householdId: z.string().trim().nullish(),
+    householdRelationship: z.string().trim().nullish(),
   })
   .passthrough()
   .nullish();
@@ -157,6 +164,7 @@ export const CustomerInputSchema = z
               defaultEmbedSheetName: z.string().nullish(),
               defaultSheetGid: z.union([z.string(), z.number()]).nullish(),
               progressNotesGid: z.union([z.string(), z.number()]).nullish(),
+              variant: z.enum(["payer", "nonpayer"]).nullish(),
               lastValidatedAt: z.string().nullish(),
             })
             .passthrough()

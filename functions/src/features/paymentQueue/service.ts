@@ -56,7 +56,7 @@ function docToItem(doc: FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.Q
   return {...(doc.data() as TPaymentQueueItem), id: doc.id};
 }
 
-function projectionQueueDocId(enrollmentId: string, paymentId: string): string {
+export function projectionQueueDocId(enrollmentId: string, paymentId: string): string {
   return `projection_${String(enrollmentId || '').trim()}_${String(paymentId || '').trim()}`;
 }
 
@@ -92,7 +92,7 @@ type ProjectionQueueState = {
   reopenReason?: string | null;
 };
 
-function buildProjectionQueueItem(args: {
+export function buildProjectionQueueItem(args: {
   context: ProjectionQueueContext;
   payment: Record<string, unknown>;
   prev?: TPaymentQueueItem | null;

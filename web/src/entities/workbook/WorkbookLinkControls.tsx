@@ -15,6 +15,7 @@ import { FileTypeIcon, SHEETS_MIME, FOLDER_MIME } from "@entities/gdrive/FileTyp
 import { isScopeError } from "@entities/ui/PermissionErrorBanner";
 import type { ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
 import { isGoogleReauthError, GOOGLE_REAUTH_ISSUE } from "@lib/googleAuthError";
+import type { WorkbookTemplateVariant } from "./WorkbookVariantDialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,47 @@ function apiIssue(resp: unknown, fallback: string): WorkbookLinkIssue {
     missingPermissions: Array.isArray(r.missingPermissions) ? (r.missingPermissions as string[]) : undefined,
     reconnectService:   typeof r.reconnectService === "string" ? r.reconnectService : undefined,
   };
+}
+
+// ── Variant picker — payer status for the workbook about to be linked ───────────
+// Determines AI case note assistant eligibility once linked (payer-only).
+
+function VariantPicker({
+  variant,
+  onChange,
+  disabled,
+}: {
+  variant: WorkbookTemplateVariant;
+  onChange: (variant: WorkbookTemplateVariant) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="font-medium text-slate-600">Workbook type</span>
+      <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+        <button
+          type="button"
+          className={`rounded-md px-2 py-1 font-medium transition ${
+            variant === "nonpayer" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          }`}
+          disabled={disabled}
+          onClick={() => onChange("nonpayer")}
+        >
+          Non-payer
+        </button>
+        <button
+          type="button"
+          className={`rounded-md px-2 py-1 font-medium transition ${
+            variant === "payer" ? "bg-emerald-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+          }`}
+          disabled={disabled}
+          onClick={() => onChange("payer")}
+        >
+          Payer
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── URL input form ────────────────────────────────────────────────────────────
@@ -291,6 +333,7 @@ export function WorkbookLinkControls({
   const [urlInput,    setUrlInput]    = React.useState("");
   const [urlSaving,   setUrlSaving]   = React.useState(false);
   const [urlError,    setUrlError]    = React.useState<WorkbookLinkIssue | null>(null);
+  const [variant,     setVariant]     = React.useState<WorkbookTemplateVariant>("nonpayer");
 
   const [candidates,       setCandidates]       = React.useState<CandidateItem[] | null>(null);
   const [candidatesLoading, setCandidatesLoading] = React.useState(false);
@@ -355,7 +398,7 @@ export function WorkbookLinkControls({
     try {
       const resp = (await (api as any).postWith(
         "attachCustomerWorkbookByUrl",
-        { customerId, workbookUrl: url, ...(enrollmentId ? { enrollmentId } : {}) },
+        { customerId, workbookUrl: url, variant, ...(enrollmentId ? { enrollmentId } : {}) },
         driveHeaders(),
       )) as Record<string, unknown>;
       if (resp?.ok) {
@@ -379,7 +422,7 @@ export function WorkbookLinkControls({
     try {
       const resp = (await (api as any).postWith(
         "attachCustomerWorkbookCandidate",
-        { customerId, spreadsheetId: item.id, spreadsheetName: item.name, ...(enrollmentId ? { enrollmentId } : {}) },
+        { customerId, spreadsheetId: item.id, spreadsheetName: item.name, variant, ...(enrollmentId ? { enrollmentId } : {}) },
         driveHeaders(),
       )) as Record<string, unknown>;
       if (resp?.ok) {
@@ -402,7 +445,7 @@ export function WorkbookLinkControls({
     try {
       const resp = (await (api as any).postWith(
         "convertCustomerWorkbookXlsx",
-        { customerId, fileId: item.id, fileName: item.name, ...(enrollmentId ? { enrollmentId } : {}) },
+        { customerId, fileId: item.id, fileName: item.name, variant, ...(enrollmentId ? { enrollmentId } : {}) },
         driveHeaders(),
       )) as Record<string, unknown>;
       if (resp?.ok) {
@@ -421,6 +464,9 @@ export function WorkbookLinkControls({
 
   return (
     <div className="space-y-4">
+      {!isViewer && (
+        <VariantPicker variant={variant} onChange={setVariant} disabled={urlSaving || !!attachingId || !!convertingId} />
+      )}
       {!isViewer && (
         <UrlInputForm
           value={urlInput}

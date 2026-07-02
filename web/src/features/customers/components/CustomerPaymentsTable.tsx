@@ -7,6 +7,7 @@ import { PaymentTypeBadge } from "@entities/payments/PaymentTypeLabel";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
+import { RentCertToggle, type RentCertToggleValue } from "@entities/dialogs/payments/RentCertToggle";
 
 type Props = {
   rows: CustomerPaymentRow[];
@@ -14,7 +15,7 @@ type Props = {
   onAdjustSchedule?: (row: CustomerPaymentRow, key: string) => void;
   onDeleteRow?: (row: CustomerPaymentRow, key: string) => void;
   rowIssues?: Record<string, { label: string } | undefined>;
-  rentCertStatuses?: Record<string, "none" | "due" | "completed" | undefined>;
+  rentCertStatuses?: Record<string, RentCertToggleValue | undefined>;
   selectedKey?: string | null;
   renderSelectedRowDetail?: (row: CustomerPaymentRow, key: string) => React.ReactNode;
   onTogglePaid?: (row: CustomerPaymentRow, nextPaid: boolean) => void | Promise<void>;
@@ -23,6 +24,7 @@ type Props = {
     field: "hmisComplete" | "caseworthyComplete",
     nextValue: boolean,
   ) => void | Promise<void>;
+  onSetRentCert?: (row: CustomerPaymentRow, status: RentCertToggleValue) => void | Promise<void>;
   busyPaid?: boolean;
   busyCompliance?: boolean;
 };
@@ -30,43 +32,6 @@ type Props = {
 function paymentDate(p: unknown): string {
   const payment = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
   return safeISODate10(payment.dueDate || payment.date) || "";
-}
-
-function RentCertChip({ status }: { status: "none" | "due" | "completed" | undefined }) {
-  const normalized = status || "none";
-  const config =
-    normalized === "completed"
-      ? {
-          label: "Rent Cert Completed",
-          flag: "OK",
-          className: "border-emerald-300 bg-emerald-50 text-emerald-800",
-        }
-      : normalized === "due"
-      ? {
-          label: "Rent Cert Due",
-          flag: "!",
-          className: "border-amber-300 bg-amber-50 text-amber-800",
-        }
-      : {
-          label: "No Rent Cert Due",
-          flag: "",
-          className: "border-slate-200 bg-slate-50 text-slate-500",
-        };
-
-  return (
-    <span
-      title={config.label}
-      className={[
-        "inline-flex min-w-[9.75rem] items-center justify-between gap-2 rounded border px-2 py-1 text-xs font-semibold leading-none",
-        config.className,
-      ].join(" ")}
-    >
-      <span>{config.label}</span>
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm border border-current text-[10px] leading-none">
-        {config.flag}
-      </span>
-    </span>
-  );
 }
 
 export default function CustomerPaymentsTable({
@@ -80,6 +45,7 @@ export default function CustomerPaymentsTable({
   renderSelectedRowDetail,
   onTogglePaid,
   onToggleCompliance,
+  onSetRentCert,
   busyPaid = false,
   busyCompliance = false,
 }: Props) {
@@ -255,7 +221,12 @@ export default function CustomerPaymentsTable({
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <RentCertChip status={rentCertStatuses?.[key]} />
+                    <RentCertToggle
+                      value={rentCertStatuses?.[key] ?? "notDue"}
+                      disabled={!onSetRentCert}
+                      title="Rent cert due date is the month prior to the payment date."
+                      onChange={(next) => void onSetRentCert?.(row, next)}
+                    />
                   </td>
                   <td className="px-3 py-2 text-base font-semibold leading-snug text-slate-900">
                     {formatEnrollmentLabel(row.enrollment, { fallback: String(row.enrollmentId || "") })}

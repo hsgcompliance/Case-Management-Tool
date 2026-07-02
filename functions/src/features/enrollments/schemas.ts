@@ -31,6 +31,11 @@ export const EnrollmentsBulkEnrollBody = E.EnrollmentsBulkEnrollBody;
 export const EnrollmentsCheckOverlapsQuery = E.EnrollmentsCheckOverlapsQuery;
 export const EnrollmentsCheckDualQuery = E.EnrollmentsCheckDualQuery;
 export const EnrollmentsMigrateBody = E.EnrollmentsMigrateBody;
+export const EnrollmentsContinuumSummaryQuery = E.EnrollmentsContinuumSummaryQuery;
+export const EnrollmentsAllocationSetBody = E.EnrollmentsAllocationSetBody;
+export const EnrollmentsCycleRolloverPreviewBody = E.EnrollmentsCycleRolloverPreviewBody;
+export const EnrollmentsCycleRolloverRunBody = E.EnrollmentsCycleRolloverRunBody;
+export const EnrollmentsLinkedProgramsReconcileBody = E.EnrollmentsLinkedProgramsReconcileBody;
 export const EnrollmentsUndoMigrationBody = E.EnrollmentsUndoMigrationBody;
 export const EnrollmentsAdminReverseLedgerEntryBody =
   E.EnrollmentsAdminReverseLedgerEntryBody;

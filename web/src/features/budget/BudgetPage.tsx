@@ -2,7 +2,7 @@
 "use client";
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toApiError } from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
 import { ListStyleLayout } from "@entities/Page/listStyle";
@@ -33,6 +33,7 @@ import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
 import { shouldShowInBudgetWorkspace } from "@features/grants/financialVisibility";
 import { HelpButton } from "@entities/help/HelpButton";
 import { useReconcileGrantBudgets } from "@hooks/useGrantBudgetManager";
+import { getPinnedBudgetGroupKeys, sortPinnedBudgetGroups, togglePinnedBudgetGroup } from "./budgetGroupPins";
 
 type FilterMode = "active" | "inactive";
 type ViewMode = "custom" | "all";
@@ -87,7 +88,7 @@ function buildSections(
     return {
       grantsById,
       sections: visible.length > 0
-        ? [{ key: "_all", label: "All Grants", color: undefined, cols: 3,
+        ? [{ key: "_all", label: "All Grants", color: undefined, cols: 3, layout: undefined,
             items: visible.map((g) => ({ id: String(g.id), grantId: String(g.id) })) }]
         : [],
     };
@@ -106,10 +107,10 @@ function buildSections(
     const allItems = visible.map((g) => ({ id: String(g.id), grantId: String(g.id) }));
     const sections = [
       ...(rentalAssistanceItems.length > 0 && !searchLower
-        ? [{ key: RENTAL_ASSISTANCE_TAG, label: "Rental Assistance", color: "emerald", cols: 3, items: rentalAssistanceItems }]
+        ? [{ key: RENTAL_ASSISTANCE_TAG, label: "Rental Assistance", color: "emerald", cols: 3, layout: undefined, items: rentalAssistanceItems }]
         : []),
       ...(allItems.length > 0
-        ? [{ key: "_all", label: "All Grants", color: undefined, cols: 3, items: allItems }]
+        ? [{ key: "_all", label: "All Grants", color: undefined, cols: 3, layout: undefined, items: allItems }]
         : []),
     ];
     return { grantsById, sections };
@@ -135,7 +136,7 @@ function buildSections(
           );
         });
       }
-      return { key: grp.key, label: grp.label, color: grp.color, cols: grp.cols ?? 3, items };
+      return { key: grp.key, label: grp.label, color: grp.color, cols: grp.cols ?? 3, layout: grp.layout, items };
     })
     .filter((s) => s.items.length > 0);
 
@@ -247,6 +248,8 @@ export function BudgetPage() {
   const qc = useQueryClient();
   const searchParams = useSearchParams();
   const { profile } = useAuth();
+  const { user } = useAuth();
+  const uid = user?.uid || "";
   const [filter, setFilter] = useState<FilterMode>("active");
   const [viewMode, setViewMode] = useState<ViewMode>("custom");
   const [search, setSearch] = useState("");
@@ -280,10 +283,13 @@ export function BudgetPage() {
     [activeData],
   );
 
-  const { grantsById, sections } = useMemo(
+  const { data: pinnedGroupKeys = [] } = useQuery({ queryKey: ["userExtras", uid, "pinnedBudgetGroupKeys"], queryFn: () => getPinnedBudgetGroupKeys(uid), enabled: !!uid });
+  const toggleGroupPin = useMutation({ mutationFn: (key: string) => togglePinnedBudgetGroup(uid, key), onSuccess: (keys) => qc.setQueryData(["userExtras", uid, "pinnedBudgetGroupKeys"], keys) });
+  const { grantsById, sections: unsortedSections } = useMemo(
     () => buildSections(sourceGrants, config, search, viewMode),
     [sourceGrants, config, search, viewMode],
   );
+  const sections = useMemo(() => sortPinnedBudgetGroups(unsortedSections, pinnedGroupKeys), [unsortedSections, pinnedGroupKeys]);
   const orderedGrantIds = useMemo(
     () => Array.from(new Set(sections.flatMap((section) => section.items.map((item) => String(item.grantId || "")).filter(Boolean)))),
     [sections],
@@ -580,6 +586,9 @@ export function BudgetPage() {
                   label={s.label}
                   color={s.color}
                   cols={s.cols}
+                  layout={s.layout}
+                  pinned={pinnedGroupKeys.includes(s.key)}
+                  onTogglePin={uid ? () => toggleGroupPin.mutate(s.key) : undefined}
                   items={s.items}
                   grantsById={grantsById}
                   onOpen={onOpen}

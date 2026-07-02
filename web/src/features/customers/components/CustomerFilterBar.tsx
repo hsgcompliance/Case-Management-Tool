@@ -18,8 +18,8 @@ type CustomerSortMode =
   | "last-added"
   | "first-updated"
   | "last-updated"
-  | "highest-acuity"
-  | "lowest-acuity";
+  | "tier-asc"
+  | "tier-desc";
 
 type FilterOption<T extends string> = { value: T; label: string };
 
@@ -57,6 +57,8 @@ const SORT_OPTIONS: Array<FilterOption<CustomerSortMode>> = [
   { value: "last-added", label: "Last Added" },
   { value: "first-updated", label: "First Updated" },
   { value: "last-updated", label: "Last Updated" },
+  { value: "tier-asc", label: "Tier 1→3" },
+  { value: "tier-desc", label: "Tier 3→1" },
 ];
 
 const ENROLLMENT_STATUS_OPTIONS: Array<{ value: EnrollmentStatusBucket; label: string }> = [

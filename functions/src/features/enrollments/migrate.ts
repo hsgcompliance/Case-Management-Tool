@@ -82,8 +82,7 @@ function deleteFutureTasksAfter(dateISO: string, schedule: any[]) {
  *   rebuildScheduleMeta?: boolean;
  * }
  */
-export const migrateEnrollment = secureHandler(
-  async (req, res) => {
+export async function migrateEnrollmentHandler(req: any, res: any) {
     const user = (req as any).user || {};
     const callerOrgId = requireOrg(user);
 
@@ -374,11 +373,13 @@ export const migrateEnrollment = secureHandler(
           : [];
         const isFutureTask = (t: any) =>
           String(t?.dueDate || "").slice(0, 10) >= String(cutover || "");
+        const taskIsComplete = (t: any) =>
+          t?.completed === true || ["done", "verified"].includes(String(t?.status || "").toLowerCase());
         const futureTasks = moveTasks
-          ? taskSchedule.filter(isFutureTask)
+          ? taskSchedule.filter((t: any) => isFutureTask(t) && !taskIsComplete(t))
           : [];
         const stayTasks = moveTasks
-          ? taskSchedule.filter((t: any) => !isFutureTask(t))
+          ? taskSchedule.filter((t: any) => !isFutureTask(t) || taskIsComplete(t))
           : taskSchedule;
 
         const newTaskId = (t: any) =>
@@ -764,7 +765,10 @@ export const migrateEnrollment = secureHandler(
     );
 
     res.status(200).json(result);
-  },
+}
+
+export const migrateEnrollment = secureHandler(
+  migrateEnrollmentHandler,
   { auth: "user", requireOrg: true, methods: ["POST", "OPTIONS"] }
 );
 

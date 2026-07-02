@@ -19,6 +19,7 @@ import { toApiError } from "@client/api";
 import { fmtCurrencyUSD } from "@lib/formatters";
 import type { EnrollmentsMigrateReq, TGrant } from "@types";
 import type { Enrollment } from "@client/enrollments";
+import { GrantLinkingAdminPanel } from "../GrantLinkingAdminPanel";
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
 
@@ -938,6 +939,12 @@ export function AdminTab({ grantId, grant }: { grantId: string; grant: TGrant | 
 
   return (
     <div className="mt-4 space-y-4">
+      {grant ? (
+        <GrantLinkingAdminPanel
+          grant={grant as TGrant & { id?: string }}
+          grants={allGrants as Array<TGrant & { id?: string }>}
+        />
+      ) : null}
       {/* Warning banner */}
       <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 dark:border-orange-900/40 dark:bg-orange-950/20">
         <span className="text-lg">⚠️</span>

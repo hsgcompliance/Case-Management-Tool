@@ -479,6 +479,11 @@ export type TGrantBudgetSplitGoal = z.infer<typeof GrantBudgetSplitGoal>;
 
 export const GrantBudgetItemDisplayConfig = z
   .object({
+    /** Budget card cycle presentation. Missing values preserve the legacy total view. */
+    cycleDisplayMode: z.enum(["split", "total"]).optional(),
+    /** Explicit digest participation. `appearInDigest` remains a legacy read alias. */
+    displayOnDigest: z.boolean().optional(),
+    digestDisplayMode: z.enum(["currentCycle", "total", "both"]).optional(),
     showGrantTotal: z.boolean().optional(),
     showLineItemTotal: z.boolean().optional(),
     showSplitGoals: z.boolean().optional(),
@@ -500,6 +505,26 @@ export const GrantBudgetBreakdownValidation = z
   })
   .passthrough();
 export type TGrantBudgetBreakdownValidation = z.infer<typeof GrantBudgetBreakdownValidation>;
+
+export const GrantInvoiceOption = z.object({
+  id: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  code: z.string().trim().nullish(),
+  template: z.string().trim().nullish(),
+  enabled: z.boolean().optional(),
+  custom: z.boolean().optional(),
+}).passthrough();
+export type TGrantInvoiceOption = z.infer<typeof GrantInvoiceOption>;
+
+export const GrantLineItemInvoicing = z.object({
+  functionalGroup: z.string().trim().nullish(),
+  grantCode: z.string().trim().nullish(),
+  programCode: z.string().trim().nullish(),
+  hmisCode: z.string().trim().nullish(),
+  expenseCategories: z.array(GrantInvoiceOption).nullish(),
+  descriptionTemplates: z.array(GrantInvoiceOption).nullish(),
+}).passthrough();
+export type TGrantLineItemInvoicing = z.infer<typeof GrantLineItemInvoicing>;
 
 export const GrantBudgetLineItem = z
   .object({
@@ -540,6 +565,8 @@ export const GrantBudgetLineItem = z
     splitGoals: z.array(GrantBudgetSplitGoal).optional().default([]),
     display: GrantBudgetItemDisplayConfig.nullish(),
     breakdownValidation: GrantBudgetBreakdownValidation.nullish(),
+    /** Invoice metadata for this line item. Grant-level invoicing remains legacy read compatibility. */
+    invoicing: GrantLineItemInvoicing.nullish(),
   })
   .passthrough();
 
@@ -752,16 +779,6 @@ export type TGrantPins = z.infer<typeof GrantPins>;
 export const GrantInvoicingFrequency = z.enum(["monthly", "quarterly", "annually", "on-demand"]);
 export type TGrantInvoicingFrequency = z.infer<typeof GrantInvoicingFrequency>;
 
-export const GrantInvoiceOption = z.object({
-  id: z.string().trim().min(1),
-  label: z.string().trim().min(1),
-  code: z.string().trim().nullish(),
-  template: z.string().trim().nullish(),
-  enabled: z.boolean().optional(),
-  custom: z.boolean().optional(),
-}).passthrough();
-export type TGrantInvoiceOption = z.infer<typeof GrantInvoiceOption>;
-
 /**
  * Optional invoicing metadata stored on the grant doc.
  * Covers grant codes, contract references, funder contacts, and billing details.
@@ -817,6 +834,43 @@ export const GrantEnrollmentDefaults = z
   .passthrough();
 export type TGrantEnrollmentDefaults = z.infer<typeof GrantEnrollmentDefaults>;
 
+export const GrantCycleLink = z
+  .object({
+    previousGrantId: Id.nullable().optional(),
+    nextGrantId: Id.nullable().optional(),
+  })
+  .passthrough();
+export type TGrantCycleLink = z.infer<typeof GrantCycleLink>;
+
+export const GrantEnrollmentLinkRule = z
+  .object({
+    targetGrantId: Id,
+    onEnroll: z.literal("ensureActive").default("ensureActive"),
+    onAllSourcesClosed: z.literal("flagShouldUnenroll").default("flagShouldUnenroll"),
+  })
+  .passthrough();
+export type TGrantEnrollmentLinkRule = z.infer<typeof GrantEnrollmentLinkRule>;
+
+export const GrantEnrollmentRequirement = z
+  .object({
+    operator: z.enum(["all", "any"]).default("all"),
+    targetGrantIds: z.array(Id).min(1).max(20),
+    behavior: z.literal("warnOnly").default("warnOnly"),
+  })
+  .passthrough();
+export type TGrantEnrollmentRequirement = z.infer<typeof GrantEnrollmentRequirement>;
+
+export const GrantLinking = z
+  .object({
+    cycle: GrantCycleLink.nullish(),
+    /** Enrollment eligibility requirement. Consumers surface warnings only. */
+    enrollmentRequirement: GrantEnrollmentRequirement.nullish(),
+    /** Legacy enrollment automation rules retained for read compatibility. */
+    enrollmentRules: z.array(GrantEnrollmentLinkRule).max(20).default([]),
+  })
+  .passthrough();
+export type TGrantLinking = z.infer<typeof GrantLinking>;
+
 /** ---------- Grant (INPUT) ---------- */
 export const GrantInputSchema = z
   .object({
@@ -863,6 +917,9 @@ export const GrantInputSchema = z
 
     /** Optional enrollment defaults such as TSS authorization windows. */
     enrollmentDefaults: GrantEnrollmentDefaults.nullish(),
+
+    /** Explicit lifecycle links. Navigation-only related* fields below do not drive automation. */
+    linking: GrantLinking.nullish(),
 
     /** Optional documents expected for payment/invoice processing. */
     invoiceDocuments: z.array(z.string().trim()).nullish(),

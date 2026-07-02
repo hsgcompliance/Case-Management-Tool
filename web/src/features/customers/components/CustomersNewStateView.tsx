@@ -19,8 +19,8 @@ type CustomerSortMode =
   | "last-added"
   | "first-updated"
   | "last-updated"
-  | "highest-acuity"
-  | "lowest-acuity";
+  | "tier-asc"
+  | "tier-desc";
 
 type CustomersNewStateViewProps = {
   myUid: string;

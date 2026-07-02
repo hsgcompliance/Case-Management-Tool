@@ -11,12 +11,16 @@ import {
   PRIORITY_META,
   type Priority,
 } from "@entities/ui/DynamicFormFields";
-import type { TGrant as Grant, TGrantComplianceConfig } from "@types";
+import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
-import { TSS_COMPLIANCE_CONFIG } from "../creation/grantProgramFlowModel";
 import { parseGrantMaxAssistanceMonths } from "@hdb/contracts";
 import { grantDriveTemplates, inferDriveTemplateType, parseDriveFileId } from "../driveTemplates";
+import {
+  EnrollmentControlsEditor,
+  EnrollmentControlsSummary,
+  LEGACY_COMPLIANCE_CONFIG,
+} from "../EnrollmentControlsEditor";
 
 function normalizeEligibility(value: unknown): Record<string, string> {
   if (!value) return {};
@@ -107,129 +111,6 @@ function emptyBudget() {
   return { total: 0, lineItems: [] };
 }
 
-const LEGACY_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
-  preset: "hmisCaseworthy",
-  active: [
-    { key: "caseworthyEntryComplete", label: "CW Entry", field: "compliance.caseworthyEntryComplete", type: "boolean" },
-    { key: "hmisEntryComplete", label: "HMIS Entry", field: "compliance.hmisEntryComplete", type: "boolean" },
-  ],
-  inactive: [
-    { key: "caseworthyExitComplete", label: "CW Exit", field: "compliance.caseworthyExitComplete", type: "boolean" },
-    { key: "hmisExitComplete", label: "HMIS Exit", field: "compliance.hmisExitComplete", type: "boolean" },
-  ],
-};
-
-const NO_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
-  preset: "none",
-  active: [],
-  inactive: [],
-};
-
-type EnrollmentControlChip = {
-  id: string;
-  label: string;
-  active?: NonNullable<TGrantComplianceConfig["active"]>;
-  inactive?: NonNullable<TGrantComplianceConfig["inactive"]>;
-};
-
-const ENROLLMENT_CONTROL_CHIPS: EnrollmentControlChip[] = [
-  {
-    id: "cw-entry",
-    label: "CW Entry",
-    active: [
-      { key: "caseworthyEntryComplete", label: "CW Entry", field: "compliance.caseworthyEntryComplete", type: "boolean" },
-    ],
-  },
-  {
-    id: "cw-exit",
-    label: "CW Exit",
-    inactive: [
-      { key: "caseworthyExitComplete", label: "CW Exit", field: "compliance.caseworthyExitComplete", type: "boolean" },
-    ],
-  },
-  {
-    id: "hmis",
-    label: "HMIS Entry + Exit",
-    active: [
-      { key: "hmisEntryComplete", label: "HMIS Entry", field: "compliance.hmisEntryComplete", type: "boolean" },
-    ],
-    inactive: [
-      { key: "hmisExitComplete", label: "HMIS Exit", field: "compliance.hmisExitComplete", type: "boolean" },
-    ],
-  },
-  {
-    id: "medicaid-active",
-    label: "Medicaid Active",
-    active: [
-      { key: "medicaidActive", label: "Medicaid Active", field: "medicaid.active", type: "boolean" },
-    ],
-  },
-  {
-    id: "tss-active",
-    label: "TSS Active",
-    active: [
-      { key: "tssActive", label: "TSS Active", field: "tss.active", type: "boolean" },
-    ],
-  },
-];
-
-function complianceControlsFrom(config: unknown): {
-  active: NonNullable<TGrantComplianceConfig["active"]>;
-  inactive: NonNullable<TGrantComplianceConfig["inactive"]>;
-} {
-  const raw = config && typeof config === "object" ? (config as TGrantComplianceConfig) : {};
-  return {
-    active: Array.isArray(raw.active) ? raw.active : [],
-    inactive: Array.isArray(raw.inactive) ? raw.inactive : [],
-  };
-}
-
-function controlKey(control: Record<string, unknown>) {
-  return String(control.field || control.key || "").trim();
-}
-
-function hasControl(list: Array<Record<string, unknown>>, control: Record<string, unknown>) {
-  const key = controlKey(control);
-  return !!key && list.some((entry) => controlKey(entry) === key);
-}
-
-function addEnrollmentControlChip(config: unknown, chip: EnrollmentControlChip): TGrantComplianceConfig {
-  const current = complianceControlsFrom(config);
-  const active = [...current.active];
-  const inactive = [...current.inactive];
-  for (const control of chip.active || []) {
-    if (!hasControl(active as Array<Record<string, unknown>>, control)) active.push(control);
-  }
-  for (const control of chip.inactive || []) {
-    if (!hasControl(inactive as Array<Record<string, unknown>>, control)) inactive.push(control);
-  }
-  return { preset: "custom", active, inactive };
-}
-
-function removeEnrollmentControl(config: unknown, target: Record<string, unknown>): TGrantComplianceConfig {
-  const current = complianceControlsFrom(config);
-  const key = controlKey(target);
-  return {
-    preset: current.active.length + current.inactive.length > 1 ? "custom" : "none",
-    active: current.active.filter((control) => controlKey(control as Record<string, unknown>) !== key),
-    inactive: current.inactive.filter((control) => controlKey(control as Record<string, unknown>) !== key),
-  };
-}
-
-function addCustomEnrollmentControl(config: unknown, label: string): TGrantComplianceConfig {
-  const cleanLabel = label.trim();
-  if (!cleanLabel) return (config && typeof config === "object" ? config : NO_COMPLIANCE_CONFIG) as TGrantComplianceConfig;
-  const key = cleanLabel
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || `custom_${Date.now().toString(36)}`;
-  return addEnrollmentControlChip(config, {
-    id: key,
-    label: cleanLabel,
-    active: [{ key, label: cleanLabel, field: `compliance.${key}`, type: "boolean" }],
-  });
-}
-
 function financialModelOf(model: Record<string, any>, grant: Grant | null): FinancialModel {
   const raw = String((model.financialConfig ?? grant?.financialConfig ?? {})?.model || "").trim();
   if (raw === "budgeted" || raw === "billable" || raw === "serviceOnly") return raw;
@@ -258,11 +139,6 @@ function hasRentalAssistanceTag(value: unknown): boolean {
   return normalizeTags(value).some((tag) => tag.toLowerCase() === RENTAL_ASSISTANCE_TAG);
 }
 
-function setRentalAssistanceTag(model: Record<string, any>, enabled: boolean) {
-  const tags = normalizeTags(model.tags).filter((tag) => tag.toLowerCase() !== RENTAL_ASSISTANCE_TAG);
-  return { ...model, tags: enabled ? [...tags, RENTAL_ASSISTANCE_TAG] : tags };
-}
-
 type InvoiceOption = {
   id: string;
   label: string;
@@ -286,31 +162,6 @@ const DEFAULT_DESCRIPTION_TEMPLATES: InvoiceOption[] = [
   { id: "prorated-rental-assistance", label: "Prorated Rental Assistance", template: "J. Doe: Feb Prorated Rent" },
   { id: "deposit-assistance", label: "Deposit Assistance", template: "J. Doe: DA" },
   { id: "utility-assistance", label: "Utility Assistance", template: "J. Doe: March Util Assistance" },
-];
-
-const DEFAULT_ELIGIBILITY: Record<string, string> = {
-  "Housing Status": "Experiencing Category 1 Homelessness",
-  "Sustainability Requirement": "Must demonstrate sustainability",
-  "Unit Rent limit": "Lesser of FMR & Rent Reasonable",
-  "Age Requirement": "None",
-  "Income Limits": "None",
-  "Asset Limit": "No more than 2x 80% FMR for unit size",
-  "Landlord Restrictions": "Cannot be HRDC Property",
-  "Sobriety Requirement": "None",
-};
-
-const DEFAULT_LEVEL_OF_ASSISTANCE: Record<string, string> = {
-  "Deposit Only": "MAP 0-3",
-  "Short-Term (1-3mo)": "MAP 4-7",
-  "Medium-Term (4-24mo)": "MAP 8+",
-};
-
-const DEFAULT_INVOICE_DOCUMENTS = [
-  "Lease",
-  "Landlord Verification Form",
-  "CaseWorthy PPI",
-  "MOU",
-  "Rent Cert Letter",
 ];
 
 function listFromUnknown(value: unknown): string[] {
@@ -441,6 +292,7 @@ const PROMOTED_DETAIL_KEYS = [
   "maximumAssistance",
   "description",
   "invoicing",
+  "linking",
   "invoiceDocuments",
   "levelOfAssistance",
   "servicesOffered",
@@ -525,7 +377,7 @@ function InvoiceInfoPanel({ value, invoiceDocuments = [] }: { value: unknown; in
   );
 }
 
-function InvoiceInfoEditor({
+export function InvoiceInfoEditor({
   model,
   setModel,
 }: {
@@ -808,14 +660,14 @@ function KeyValueRecommendedEditor({
   title,
   description,
   value,
-  defaults,
   onChange,
+  onDelete,
 }: {
   title: string;
   description?: string;
   value: Record<string, string>;
-  defaults: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
+  onDelete?: () => void;
 }) {
   const rows = Object.entries(value);
   const commit = (next: Record<string, string>) => {
@@ -843,9 +695,12 @@ function KeyValueRecommendedEditor({
   };
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div>
-        <div className="text-sm font-semibold text-slate-800">{title}</div>
-        {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">{title}</div>
+          {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+        </div>
+        {onDelete ? <button type="button" className="btn btn-ghost btn-xs text-red-600" onClick={onDelete}>Delete field</button> : null}
       </div>
       {rows.length ? (
         <div className="space-y-2">
@@ -885,11 +740,6 @@ function KeyValueRecommendedEditor({
         <button type="button" className="btn btn-secondary btn-sm" onClick={addRow}>
           Add Row
         </button>
-        {Object.keys(defaults).length ? (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => commit(defaults)}>
-            Use Defaults
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -899,22 +749,25 @@ function ListRecommendedEditor({
   title,
   description,
   value,
-  defaults,
   onChange,
+  onDelete,
 }: {
   title: string;
   description?: string;
   value: string[];
-  defaults: string[];
   onChange: (next: string[]) => void;
+  onDelete?: () => void;
 }) {
   const rows = value;
   const commit = (next: string[]) => onChange(next.map((item) => String(item || "").trim()).filter(Boolean));
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div>
-        <div className="text-sm font-semibold text-slate-800">{title}</div>
-        {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">{title}</div>
+          {description ? <p className="mt-1 text-xs text-slate-500">{description}</p> : null}
+        </div>
+        {onDelete ? <button type="button" className="btn btn-ghost btn-xs text-red-600" onClick={onDelete}>Delete field</button> : null}
       </div>
       {rows.length ? (
         <div className="space-y-2">
@@ -944,11 +797,6 @@ function ListRecommendedEditor({
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => commit([...rows, ""])}>
           Add Document
         </button>
-        {defaults.length ? (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => commit(defaults)}>
-            Use Defaults
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -970,6 +818,18 @@ function RecommendedGrantInfoEditor({
   const invoiceDocuments = invoiceDocumentsFrom((Object.keys(model || {}).length ? model : grant) as Record<string, any> | null);
   const duration = String(model.duration ?? grant?.duration ?? "");
   const maxLength = maxAssistanceInputValue(model, grant);
+  const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set());
+  const hideField = (field: string, clear: () => void) => {
+    clear();
+    setHiddenFields((current) => new Set(current).add(field));
+  };
+  const restoreField = (field: string) => {
+    setHiddenFields((current) => {
+      const next = new Set(current);
+      next.delete(field);
+      return next;
+    });
+  };
 
   return (
     <div className="md:col-span-2 space-y-4">
@@ -1001,29 +861,44 @@ function RecommendedGrantInfoEditor({
         </label>
       </div>
 
-      <KeyValueRecommendedEditor
-        title="Eligibility Criteria"
-        description="Optional criteria for this grant. Add rows or apply defaults when needed."
-        value={eligibility}
-        defaults={DEFAULT_ELIGIBILITY}
-        onChange={(next) => setModel((m) => ({ ...m, eligibility: next }))}
-      />
+      {!hiddenFields.has("eligibility") ? (
+        <KeyValueRecommendedEditor
+          title="Eligibility Criteria"
+          description="Optional criteria for this grant."
+          value={eligibility}
+          onChange={(next) => setModel((m) => ({ ...m, eligibility: next }))}
+          onDelete={() => hideField("eligibility", () => setModel((m) => ({ ...m, eligibility: {} })))}
+        />
+      ) : null}
 
-      <KeyValueRecommendedEditor
-        title="Level of Assistance"
-        description="Optional internal guidance for what assistance level is expected."
-        value={level}
-        defaults={DEFAULT_LEVEL_OF_ASSISTANCE}
-        onChange={(next) => setModel((m) => ({ ...m, levelOfAssistance: next }))}
-      />
+      {!hiddenFields.has("levelOfAssistance") ? (
+        <KeyValueRecommendedEditor
+          title="Level of Assistance"
+          description="Optional internal guidance for what assistance level is expected."
+          value={level}
+          onChange={(next) => setModel((m) => ({ ...m, levelOfAssistance: next }))}
+          onDelete={() => hideField("levelOfAssistance", () => setModel((m) => ({ ...m, levelOfAssistance: {} })))}
+        />
+      ) : null}
 
-      <ListRecommendedEditor
-        title="Invoice Docs"
-        description="Optional default documents expected before payment/invoice processing."
-        value={invoiceDocuments}
-        defaults={DEFAULT_INVOICE_DOCUMENTS}
-        onChange={(next) => setModel((m) => ({ ...m, invoiceDocuments: next }))}
-      />
+      {!hiddenFields.has("invoiceDocuments") ? (
+        <ListRecommendedEditor
+          title="Invoice Docs"
+          description="Optional documents expected before payment or invoice processing."
+          value={invoiceDocuments}
+          onChange={(next) => setModel((m) => ({ ...m, invoiceDocuments: next }))}
+          onDelete={() => hideField("invoiceDocuments", () => setModel((m) => ({ ...m, invoiceDocuments: [] })))}
+        />
+      ) : null}
+
+      {hiddenFields.size ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white p-3">
+          <span className="text-xs font-medium text-slate-500">Add optional field:</span>
+          {hiddenFields.has("eligibility") ? <button type="button" className="btn btn-secondary btn-xs" onClick={() => restoreField("eligibility")}>Eligibility Criteria</button> : null}
+          {hiddenFields.has("levelOfAssistance") ? <button type="button" className="btn btn-secondary btn-xs" onClick={() => restoreField("levelOfAssistance")}>Level of Assistance</button> : null}
+          {hiddenFields.has("invoiceDocuments") ? <button type="button" className="btn btn-secondary btn-xs" onClick={() => restoreField("invoiceDocuments")}>Invoice Docs</button> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1046,6 +921,9 @@ function GrantInfoPanel({
   const eligibility   = g.eligibility;
   const levelRows     = Object.entries(levelOfAssistanceFrom(g));
   const invoiceDocs   = invoiceDocumentsFrom(g);
+  const financialModel = financialModelOf(g, g as Grant);
+  const financialConfig = (g.financialConfig ?? FINANCIAL_MODEL_PRESETS[financialModel]) as Record<string, unknown>;
+  const authorizationMonths = Number(g.enrollmentDefaults?.authorizationMonths || 0);
 
   const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
   const hasEligibility = Object.keys(normalizeEligibility(eligibility)).length > 0;
@@ -1066,6 +944,33 @@ function GrantInfoPanel({
           <div className="text-xs text-slate-400 mb-0.5">End Date</div>
           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
             {endDate ? fmtMDY(endDate) : "—"}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-[1fr_1.35fr]">
+        <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Financial model</div>
+          <div className="mt-1 text-sm font-semibold text-slate-900">
+            {financialModel === "budgeted" ? "Budgeted spend-down" : financialModel === "billable" ? "Billable ledger" : "Service only"}
+          </div>
+          <div className="mt-1 text-xs text-slate-600">
+            {financialModel === "budgeted"
+              ? "Line-item amounts are spend-down allocations."
+              : financialModel === "billable"
+                ? `Billing and allocation enabled; ledger mode ${String(financialConfig.ledgerMode || "billing")}.`
+                : "Budget, billing, allocation, and ledger activity are off."}
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Enrollment controls</div>
+            {authorizationMonths > 0 ? (
+              <span className="text-xs font-semibold text-slate-600">Default authorization: {authorizationMonths} months</span>
+            ) : null}
+          </div>
+          <div className="mt-2">
+            <EnrollmentControlsSummary value={g.complianceConfig} />
           </div>
         </div>
       </div>
@@ -1167,14 +1072,14 @@ export function DetailsTab({
     const raw = iso10(startB.buf);
     const iso = toISOOrEmpty(raw);
     console.debug("[DetailsTab] commit startDate ->", { raw, iso });
-    setModel((m) => ({ ...m, startDate: iso }));
+    setModel((m) => ({ ...m, startDate: iso || null }));
   }, [startB.buf, setModel]);
 
   const commitEnd = useCallback(() => {
     const raw = iso10(endB.buf);
     const iso = toISOOrEmpty(raw);
     console.debug("[DetailsTab] commit endDate ->", { raw, iso });
-    setModel((m) => ({ ...m, endDate: iso }));
+    setModel((m) => ({ ...m, endDate: iso || null }));
   }, [endB.buf, setModel]);
 
   const onStatus = useCallback(
@@ -1192,18 +1097,7 @@ export function DetailsTab({
   const financialModel = financialModelOf(model, grant);
   const financialConfig = (model.financialConfig ?? grant?.financialConfig ?? FINANCIAL_MODEL_PRESETS[financialModel]) as Record<string, any>;
   const hasFinancialActivity = financialModel !== "serviceOnly";
-  const complianceConfig = (model.complianceConfig ?? grant?.complianceConfig ?? LEGACY_COMPLIANCE_CONFIG) as Record<string, any>;
-  const complianceControls = [
-    ...(Array.isArray(complianceConfig.active) ? complianceConfig.active : []),
-    ...(Array.isArray(complianceConfig.inactive) ? complianceConfig.inactive : []),
-  ];
-  const [customControlLabel, setCustomControlLabel] = useState("");
-  const addCustomControl = useCallback(() => {
-    const label = customControlLabel.trim();
-    if (!label) return;
-    setModel((m) => ({ ...m, complianceConfig: addCustomEnrollmentControl(m.complianceConfig ?? complianceConfig, label) }));
-    setCustomControlLabel("");
-  }, [complianceConfig, customControlLabel, setModel]);
+  const complianceConfig = model.complianceConfig ?? grant?.complianceConfig ?? LEGACY_COMPLIANCE_CONFIG;
   const driveTemplates = grantDriveTemplates((model ?? grant) as Record<string, unknown>);
   const updateDriveTemplate = (index: number, patch: Record<string, unknown>) => {
     setModel((m) => {
@@ -1244,23 +1138,6 @@ export function DetailsTab({
   const rentalAssistanceTagged = hasRentalAssistanceTag(model.tags ?? grant?.tags);
   const additionalFieldCount = Object.keys(dynamicValue || {}).length;
   const [advancedOpen, setAdvancedOpen] = useState(additionalFieldCount > 0);
-  const seededRecommendedRef = useRef(false);
-
-  useEffect(() => {
-    if (!editing || seededRecommendedRef.current) return;
-    seededRecommendedRef.current = true;
-    setModel((m) => {
-      const next = { ...(m || {}) };
-      if (isGrantKind && !String(next.duration ?? grant?.duration ?? "").trim()) {
-        next.duration = "1 Year";
-      }
-      if (isGrantKind && !grantMaxMonthsFrom(next) && !grantMaxMonthsFrom(grant as any)) {
-        next.maxAssistanceMonths = 24;
-        next.lengthOfAssistance = "24 months";
-      }
-      return next;
-    });
-  }, [editing, grant, isGrantKind, setModel]);
 
   const STATUS_CHIP: Record<string, string> = {
     active: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300",
@@ -1387,7 +1264,7 @@ export function DetailsTab({
             </div>
           </div>
 
-          <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+          <div className="grid gap-4 md:col-span-2 md:grid-cols-3">
             <label>
               <div className="text-slate-500 dark:text-slate-400">Duration Label</div>
               <input
@@ -1414,6 +1291,31 @@ export function DetailsTab({
               />
               <div className="mt-1 text-xs text-slate-500">
                 Leave blank for indefinite assistance.
+              </div>
+            </label>
+            <label>
+              <div className="text-slate-500 dark:text-slate-400">Default Authorization Window</div>
+              <input
+                className="input pointer-events-auto mt-1"
+                type="number"
+                min={1}
+                max={120}
+                step={1}
+                value={String(model.enrollmentDefaults?.authorizationMonths ?? grant?.enrollmentDefaults?.authorizationMonths ?? "")}
+                placeholder="No default"
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setModel((current) => ({
+                    ...current,
+                    enrollmentDefaults: {
+                      ...(current.enrollmentDefaults ?? grant?.enrollmentDefaults ?? {}),
+                      authorizationMonths: value ? Number(value) : null,
+                    },
+                  }));
+                }}
+              />
+              <div className="mt-1 text-xs text-slate-500">
+                Sets the suggested end date for new enrollments.
               </div>
             </label>
           </div>
@@ -1525,70 +1427,11 @@ export function DetailsTab({
             </div>
           ) : null}
 
-          <div className="md:col-span-2 rounded-md border border-slate-200 bg-white p-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Enrollment Controls</div>
-                <div className="mt-1 text-xs text-slate-500">
-                  These controls appear on the customer enrollment tab and enrollment quick modal.
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => ({ ...m, complianceConfig: LEGACY_COMPLIANCE_CONFIG }))}>
-                  CW/HMIS
-                </button>
-                <button type="button" className="btn btn-secondary btn-xs" onClick={() => setModel((m) => ({ ...m, complianceConfig: TSS_COMPLIANCE_CONFIG }))}>
-                  TSS Controls
-                </button>
-                <button type="button" className="btn btn-ghost btn-xs" onClick={() => setModel((m) => ({ ...m, complianceConfig: NO_COMPLIANCE_CONFIG }))}>
-                  None
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {ENROLLMENT_CONTROL_CHIPS.map((chip) => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800"
-                  onClick={() => setModel((m) => ({ ...m, complianceConfig: addEnrollmentControlChip(m.complianceConfig ?? complianceConfig, chip) }))}
-                >
-                  + {chip.label}
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <input
-                className="input h-8 w-56 text-xs"
-                value={customControlLabel}
-                placeholder="Custom control"
-                onChange={(e) => setCustomControlLabel(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addCustomControl();
-                  }
-                }}
-              />
-              <button type="button" className="btn btn-secondary btn-xs" onClick={addCustomControl}>
-                Add custom
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {complianceControls.length ? complianceControls.map((control: any) => (
-                <button
-                  key={`${control.field || control.key}`}
-                  type="button"
-                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
-                  title="Remove enrollment control"
-                  onClick={() => setModel((m) => ({ ...m, complianceConfig: removeEnrollmentControl(m.complianceConfig ?? complianceConfig, control) }))}
-                >
-                  {String(control.label || control.key)} <span aria-hidden="true">x</span>
-                </button>
-              )) : (
-                <span className="text-xs text-slate-500">No enrollment controls configured.</span>
-              )}
-            </div>
+          <div className="md:col-span-2">
+            <EnrollmentControlsEditor
+              value={complianceConfig}
+              onChange={(next) => setModel((current) => ({ ...current, complianceConfig: next }))}
+            />
           </div>
 
           <div className="md:col-span-2 rounded-md border border-slate-200 bg-white p-3">
@@ -1671,28 +1514,6 @@ export function DetailsTab({
               )}
             </div>
           </div>
-
-          {isGrantKind ? (
-            <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-2.5 py-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 rounded border-slate-300 accent-emerald-600"
-                  checked={rentalAssistanceTagged}
-                  onChange={(e) => {
-                    const checked = e.currentTarget.checked;
-                    setModel((m) => setRentalAssistanceTag(m || {}, checked));
-                  }}
-                />
-                <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">
-                  Rental Assistance
-                </span>
-                <span className="text-xs text-emerald-800/75 dark:text-emerald-200/75">
-                  Budget grouping and reporting
-                </span>
-              </label>
-            </div>
-          ) : null}
 
           {/* ── Pins ──────────────────────────────────────────────────────── */}
           {isGrantKind && (
@@ -1829,9 +1650,6 @@ export function DetailsTab({
           {/* Promoted fields in edit mode */}
           <div className="md:col-span-2">
             <PromotedField label="Description" fieldKey="description" multiline editing={editing} model={model} setModel={setModel} grant={grant as any} />
-          </div>
-          <div className="md:col-span-2">
-            <InvoiceInfoEditor model={model} setModel={setModel} />
           </div>
           <RecommendedGrantInfoEditor model={model} setModel={setModel} grant={grant as any} />
         </div>
@@ -1981,7 +1799,7 @@ function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
     "budget", "assessments", "tasks", "meta",
     "updatedAt", "createdAt", "deleted", "active", "orgId",
     "startDate", "endDate", "kind",
-    "tags", "eligibility", "lengthOfAssistance",
+    "tags", "eligibility", "lengthOfAssistance", "linking",
     "invoicing", "invoiceDocuments", "levelOfAssistance",
     "Invoice Docs", "Invoice Documents", "Level of Assistance", "Maximum Length of Assistance",
     "description", "servicesOffered", "duration", "maxAmount", "maximumAmount", "maxAssistanceAmount",

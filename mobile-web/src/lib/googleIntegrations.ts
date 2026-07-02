@@ -101,5 +101,77 @@ export const GoogleIntegrations = {
   // Re-sync the cached folder index from the org's index sheet (on-demand).
   refreshFolderIndex: () =>
     callFunction<{ ok: boolean; count?: number; deleted?: number; error?: string }>("customerFolderIndexRefresh", {}),
+
+  // ── TSS workbook linking ────────────────────────────────────────────────────
+  // Mirrors the web flows: link an existing sheet (by URL or by scanning the
+  // customer folder), convert an .xlsx/.xls into a native Sheet, or build a fresh
+  // workbook from the org's configured TSS template. The backend resolves the
+  // customer + its folder server-side and writes customerDrive.linkedWorkbooks.tss.
+
+  // List the Google Sheets / Excel files in the customer's linked Drive folder.
+  // status: "ok" | "folder_missing" | "google_drive_not_connected".
+  listWorkbookCandidates: (customerId: string) =>
+    callFunction<WorkbookCandidatesResponse>(
+      "listCustomerFolderWorkbookCandidates",
+      { customerId },
+      { method: "GET" },
+    ),
+
+  // Link an existing Google Sheet by pasted URL.
+  linkWorkbookByUrl: (body: { customerId: string; workbookUrl: string; enrollmentId?: string; variant?: "payer" | "nonpayer" }) =>
+    callFunction<WorkbookActionResponse>("attachCustomerWorkbookByUrl", body),
+
+  // Link a sheet chosen from the folder candidate list.
+  linkWorkbookCandidate: (body: {
+    customerId: string;
+    spreadsheetId: string;
+    spreadsheetName?: string;
+    enrollmentId?: string;
+    variant?: "payer" | "nonpayer";
+  }) => callFunction<WorkbookActionResponse>("attachCustomerWorkbookCandidate", body),
+
+  // Convert an .xlsx/.xls file in the folder into a native Sheet, then link it.
+  convertWorkbookXlsx: (body: { customerId: string; fileId: string; fileName?: string; enrollmentId?: string; variant?: "payer" | "nonpayer" }) =>
+    callFunction<WorkbookActionResponse & { converted?: boolean }>("convertCustomerWorkbookXlsx", body),
+
+  // Copy the org's configured TSS template (payer / non-payer) into the customer
+  // folder and link the copy. Source ids are resolved server-side from org config.
+  buildWorkbookFromTemplate: (body: { customerId: string; variant: "payer" | "nonpayer"; enrollmentId?: string }) =>
+    callFunction<WorkbookActionResponse & { copiedFromTemplateId?: string }>("copyCustomerWorkbookFromTemplate", body),
+
+  // Toggle the payer/non-payer variant on an already-linked workbook. Pure
+  // metadata write (no Drive call) — controls AI case note assistant eligibility.
+  setWorkbookVariant: (body: { customerId: string; variant: "payer" | "nonpayer" }) =>
+    callFunction<WorkbookActionResponse>("setCustomerWorkbookVariant", body),
+};
+
+// ── Workbook linking response shapes ──────────────────────────────────────────
+
+export type WorkbookActionResponse = {
+  ok: boolean;
+  error?: string;
+  category?: string;
+  reconnectService?: string;
+  hint?: string;
+  workbook?: { spreadsheetId: string; spreadsheetUrl: string; spreadsheetName?: string };
+};
+
+export type WorkbookCandidate = {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink: string;
+  modifiedTime: string | null;
+  iconLink: string | null;
+  isFolder: boolean;
+  isSpreadsheet: boolean;
+};
+
+export type WorkbookCandidatesResponse = {
+  ok: boolean;
+  status?: "ok" | "folder_missing" | "google_drive_not_connected";
+  folderId?: string;
+  items?: WorkbookCandidate[];
+  error?: string;
 };
 

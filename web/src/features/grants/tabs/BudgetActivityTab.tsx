@@ -7,7 +7,7 @@ import { useGrantActivity } from "@hooks/useGrants";
 import { useUsers } from "@hooks/useUsers";
 import { SpendDetailModal, type SpendRow } from "@features/widgets/spending/SpendDetailModal";
 import { computeRentCertDues } from "@features/customers/components/paymentScheduleUtils";
-import { fmtMDY, safeISODate10, toISODate, toMillisAny } from "@lib/date";
+import { fmtMDY, monthFromYM, safeISODate10, toISODate, todayISO, toMillisAny } from "@lib/date";
 import {
   GrantBudgetSandboxModal,
   type GrantBudgetSandboxLineItem,
@@ -669,6 +669,8 @@ function normalizeSplitGoalsForLineItem(lineItem: any, num: (n: unknown, fallbac
 
 function SplitConfigModal({
   lineItem,
+  grantStartDate,
+  grantEndDate,
   num,
   currency,
   editing,
@@ -676,17 +678,34 @@ function SplitConfigModal({
   onClose,
 }: {
   lineItem: any;
+  grantStartDate?: string;
+  grantEndDate?: string;
   num: (n: unknown, fallback?: number) => number;
   currency: (n: number) => string;
   editing: boolean;
   onCommit: (patch: Partial<any>) => void;
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState(() => normalizeSplitGoalsForLineItem(lineItem || {}, num));
+  const [draft, setDraft] = useState(() => normalizeSplitGoalsForLineItem({
+    ...lineItem,
+    splitStartDate: lineItem?.splitStartDate || grantStartDate || null,
+    splitEndDate: lineItem?.splitEndDate || grantEndDate || null,
+  }, num));
+  const [displayOpen, setDisplayOpen] = useState(false);
+  const [cyclesExpanded, setCyclesExpanded] = useState(false);
   const amount = num(draft.amount, num(lineItem?.amount, 0));
   const splitTotal = moneyFromCents((draft.splitGoals || []).reduce((sum: number, goal: any) => sum + moneyCents(goal.amount), 0));
   const variance = moneyFromCents(moneyCents(amount) - moneyCents(splitTotal));
   const hasWarning = draft.splitMode !== "none" && (draft.splitGoals || []).length > 0 && Math.abs(moneyCents(variance)) > 0;
+
+  const allGoals: any[] = draft.splitGoals || [];
+  const today = todayISO();
+  const currentGoalIndex = allGoals.findIndex((goal) => (!goal.startDate || goal.startDate <= today) && (!goal.endDate || goal.endDate >= today));
+  const visibleGoalRows = cyclesExpanded
+    ? allGoals.map((goal, index) => ({ goal, index }))
+    : currentGoalIndex >= 0
+    ? [{ goal: allGoals[currentGoalIndex], index: currentGoalIndex }]
+    : [];
 
   const setMode = (mode: SplitMode) => {
     setDraft((prev: any) => {
@@ -744,17 +763,31 @@ function SplitConfigModal({
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Roll-forward</span>
-              <select className="input w-full" disabled={!editing} value={draft.rollForward} onChange={(e) => setDraft((prev: any) => ({ ...prev, rollForward: e.currentTarget.value as RollForward }))}>
+              <select
+                className="input w-full"
+                disabled={!editing}
+                value={draft.rollForward}
+                onChange={(event) => {
+                  const rollForward = event.currentTarget.value as RollForward;
+                  setDraft((prev: any) => ({ ...prev, rollForward }));
+                }}
+              >
                 {ROLL_FORWARD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Start</span>
-              <input className="input w-full" type="date" disabled={!editing} value={draft.splitStartDate || ""} onChange={(e) => setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitStartDate: e.currentTarget.value }, num))} />
+              <input className="input w-full" type="date" disabled={!editing} value={draft.splitStartDate || ""} onChange={(event) => {
+                const splitStartDate = event.currentTarget.value;
+                setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitStartDate }, num));
+              }} />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">End</span>
-              <input className="input w-full" type="date" disabled={!editing} value={draft.splitEndDate || ""} onChange={(e) => setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitEndDate: e.currentTarget.value }, num))} />
+              <input className="input w-full" type="date" disabled={!editing} value={draft.splitEndDate || ""} onChange={(event) => {
+                const splitEndDate = event.currentTarget.value;
+                setDraft((prev: any) => normalizeSplitGoalsForLineItem({ ...prev, splitEndDate }, num));
+              }} />
             </label>
           </div>
 
@@ -762,59 +795,23 @@ function SplitConfigModal({
             Planned cycles total {currency(splitTotal)}. Variance from line item total: <span className="font-semibold">{currency(variance)}</span>.
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-950">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Digest / Display</div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {[
-                ["appearInDigest", "Appear in digest"],
-                ["showLineItemTotal", "Show line item total"],
-                ["showSplitGoals", "Show split goals"],
-              ].map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 accent-sky-600"
-                    disabled={!editing}
-                    checked={(draft.display?.[key] ?? true) !== false}
-                    onChange={(e) => setDraft((prev: any) => ({
-                      ...prev,
-                      display: { ...(prev.display || {}), [key]: e.currentTarget.checked },
-                    }))}
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Display as</span>
-                <select
-                  className="input w-full"
-                  disabled={!editing}
-                  value={draft.display?.displayAs || "nested"}
-                  onChange={(e) => setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), displayAs: e.currentTarget.value } }))}
-                >
-                  <option value="nested">Nested under grant</option>
-                  <option value="main">Main row/card</option>
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Main level</span>
-                <select
-                  className="input w-full"
-                  disabled={!editing}
-                  value={draft.display?.mainDisplayLevel || "grant"}
-                  onChange={(e) => setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), mainDisplayLevel: e.currentTarget.value } }))}
-                >
-                  <option value="grant">Grant</option>
-                  <option value="lineItem">Line item</option>
-                  <option value="split">Split goal / cycle</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+              <span>
+                {cyclesExpanded
+                  ? `Showing all ${allGoals.length} cycle${allGoals.length === 1 ? "" : "s"}`
+                  : currentGoalIndex >= 0
+                  ? "Showing current cycle only"
+                  : allGoals.length > 0
+                  ? "No cycle covers today's date"
+                  : "No split goals configured"}
+              </span>
+              {allGoals.length > 0 && (
+                <button type="button" className="font-semibold text-sky-600 hover:text-sky-800" onClick={() => setCyclesExpanded((v) => !v)}>
+                  {cyclesExpanded ? "Collapse to current cycle" : `Show all cycles (${allGoals.length})`}
+                </button>
+              )}
+            </div>
             <table className="table text-sm">
               <thead>
                 <tr>
@@ -828,12 +825,12 @@ function SplitConfigModal({
                 </tr>
               </thead>
               <tbody>
-                {(draft.splitGoals || []).length === 0 ? (
-                  <tr><td colSpan={editing ? 7 : 6} className="text-slate-400">No split goals configured.</td></tr>
+                {visibleGoalRows.length === 0 ? (
+                  <tr><td colSpan={editing ? 7 : 6} className="text-slate-400">{allGoals.length === 0 ? "No split goals configured." : "No cycle covers today's date."}</td></tr>
                 ) : (
-                  (draft.splitGoals || []).map((goal: any, index: number) => (
+                  visibleGoalRows.map(({ goal, index }) => (
                     <tr key={goal.id || index}>
-                      <td>{editing ? <input className="input text-sm" value={goal.label || ""} onChange={(e) => updateGoal(index, { label: e.currentTarget.value })} /> : String(goal.label || `Cycle ${index + 1}`)}</td>
+                      <td>{editing ? <input className="input text-sm" value={goal.label || ""} onChange={(e) => updateGoal(index, { label: e.currentTarget.value })} /> : (draft.splitMode === "monthly" && /^\d{4}-\d{2}$/.test(String(goal.label || "")) ? monthFromYM(goal.label) : String(goal.label || `Cycle ${index + 1}`))}</td>
                       <td>{editing ? <input className="input text-sm" type="date" value={goal.startDate || ""} onChange={(e) => updateGoal(index, { startDate: e.currentTarget.value })} /> : (goal.startDate || "TBD")}</td>
                       <td>{editing ? <input className="input text-sm" type="date" value={goal.endDate || ""} onChange={(e) => updateGoal(index, { endDate: e.currentTarget.value })} /> : (goal.endDate || "TBD")}</td>
                       <td className="text-right">{editing ? <input className="input w-28 text-right text-sm" type="number" value={num(goal.amount, 0)} onChange={(e) => updateGoal(index, { amount: Number(e.currentTarget.value) })} /> : currency(num(goal.amount, 0))}</td>
@@ -853,6 +850,112 @@ function SplitConfigModal({
               <button type="button" className="btn btn-secondary btn-sm" onClick={addGoal}>+ Custom Cycle</button>
             </div>
           )}
+
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              aria-expanded={displayOpen}
+              onClick={() => setDisplayOpen((open) => !open)}
+            >
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Digest / Display</span>
+                <span className="mt-0.5 block text-xs text-slate-500">Optional placement and digest visibility settings.</span>
+              </span>
+              <span className="text-xs font-semibold text-slate-500">{displayOpen ? "Collapse" : "Expand"}</span>
+            </button>
+            {displayOpen ? (
+              <div className="border-t border-slate-200 px-4 py-3 dark:border-slate-700">
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    ["appearInDigest", "Appear in digest"],
+                    ["showLineItemTotal", "Show line item total"],
+                    ["showSplitGoals", "Show split goals"],
+                  ].map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 accent-sky-600"
+                        disabled={!editing}
+                        checked={(draft.display?.[key] ?? true) !== false}
+                        onChange={(event) => {
+                          const checked = event.currentTarget.checked;
+                          setDraft((prev: any) => ({
+                            ...prev,
+                            display: { ...(prev.display || {}), [key]: checked },
+                          }));
+                        }}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-sky-600" disabled={!editing} checked={(draft.display?.displayOnDigest ?? draft.display?.appearInDigest ?? false) === true} onChange={(event) => {
+                      const displayOnDigest = event.currentTarget.checked;
+                      setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), displayOnDigest } }));
+                    }} />
+                    <span>Display this line item on Budget Digest</span>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Digest display</span>
+                    <select className="input w-full" disabled={!editing} value={draft.display?.digestDisplayMode || "total"} onChange={(event) => {
+                      const digestDisplayMode = event.currentTarget.value;
+                      setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), digestDisplayMode } }));
+                    }}>
+                      <option value="currentCycle">Current cycle</option>
+                      <option value="total">Total only</option>
+                      <option value="both">Current cycle and total</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Budget card cycles</span>
+                    <select className="input w-full" disabled={!editing} value={draft.display?.cycleDisplayMode || "total"} onChange={(event) => {
+                      const cycleDisplayMode = event.currentTarget.value;
+                      setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), cycleDisplayMode } }));
+                    }}>
+                      <option value="total">Show total</option>
+                      <option value="split">Show cycle split</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Display as</span>
+                    <select
+                      className="input w-full"
+                      disabled={!editing}
+                      value={draft.display?.displayAs || "nested"}
+                      onChange={(event) => {
+                        const displayAs = event.currentTarget.value;
+                        setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), displayAs } }));
+                      }}
+                    >
+                      <option value="nested">Nested under grant</option>
+                      <option value="main">Main row/card</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Main level</span>
+                    <select
+                      className="input w-full"
+                      disabled={!editing}
+                      value={draft.display?.mainDisplayLevel || "grant"}
+                      onChange={(event) => {
+                        const mainDisplayLevel = event.currentTarget.value;
+                        setDraft((prev: any) => ({ ...prev, display: { ...(prev.display || {}), mainDisplayLevel } }));
+                      }}
+                    >
+                      <option value="grant">Grant</option>
+                      <option value="lineItem">Line item</option>
+                      <option value="split">Split goal / cycle</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
@@ -882,6 +985,7 @@ export function BudgetActivityTab({
   num,
   grantId,
   drawsDownBudget = true,
+  canManageBudget = false,
 }: {
   editing: boolean;
   model: Record<string, any>;
@@ -892,6 +996,7 @@ export function BudgetActivityTab({
   num: (n: unknown, fallback?: number) => number;
   grantId?: string;
   drawsDownBudget?: boolean;
+  canManageBudget?: boolean;
 }) {
   const activityQ = useGrantActivity(grantId ?? "", 2000);
   const allActivity: any[] = useMemo(() => (Array.isArray(activityQ.data) ? activityQ.data : []), [activityQ.data]);
@@ -1050,12 +1155,18 @@ export function BudgetActivityTab({
     for (const enrollment of enrollments as any[]) {
       const enrollmentId = String(enrollment?.id || "").trim();
       if (!enrollmentId) continue;
+      for (const payment of Array.isArray(enrollment?.payments) ? enrollment.payments : []) {
+        const targetDate = dateIso10(payment?.dueDate || payment?.date);
+        const explicitDue = dateIso10(payment?.rentCert?.dueDate);
+        if (targetDate && explicitDue) map.set(`${enrollmentId}:${targetDate}`, explicitDue);
+      }
       const dues = computeRentCertDues(Array.isArray(enrollment?.payments) ? enrollment.payments : [], {
         enrollmentId,
         enrollmentLabel: String(enrollment?.grantName || enrollment?.name || enrollmentId),
       });
       for (const due of dues) {
-        map.set(`${enrollmentId}:${due.targetPaymentDate}`, due.dueDate);
+        const key = `${enrollmentId}:${due.targetPaymentDate}`;
+        if (!map.has(key)) map.set(key, due.dueDate);
       }
     }
     return map;
@@ -1405,10 +1516,10 @@ export function BudgetActivityTab({
           type="button"
           className="btn btn-secondary btn-sm"
           onClick={() => setSandboxOpen(true)}
-          disabled={!sandboxSeedRows.length}
-          title={sandboxSeedRows.length ? tip("Open a local scratch workspace for budget projections.") : tip("No activity rows are available for sandboxing yet.")}
+          disabled={!grantId}
+          title={grantId ? tip("Open the canonical Budget Manager for this grant.") : tip("Save the grant before opening Budget Manager.")}
         >
-          Open Sandbox
+          Open Budget Manager
         </button>
       </div>
 
@@ -1671,7 +1782,11 @@ export function BudgetActivityTab({
                   </tr>
                 );
 
-                const splitGoals = Array.isArray(li.splitGoals) ? li.splitGoals : [];
+                // Budget display config: the per-line-item "Show split goals" toggle
+                // (set in the line item split config) controls whether the configured
+                // split windows are listed in this display. Defaults to shown.
+                const showSplitGoals = (li.display?.showSplitGoals ?? true) !== false;
+                const splitGoals = showSplitGoals && Array.isArray(li.splitGoals) ? li.splitGoals : [];
                 const splitRows = splitGoals.length > 0 ? splitGoals.map((goal: any, goalIndex: number) => {
                   const goalAmount = num(goal.amount, 0);
                   const goalSpent = num(goal.spent, 0);
@@ -1804,6 +1919,8 @@ export function BudgetActivityTab({
       {splitConfigIdx !== null && budget.lineItems[splitConfigIdx] && (
         <SplitConfigModal
           lineItem={budget.lineItems[splitConfigIdx]}
+          grantStartDate={isoDate(model?.startDate)}
+          grantEndDate={isoDate(model?.endDate)}
           num={num}
           currency={currency}
           editing={editing}
@@ -1815,6 +1932,9 @@ export function BudgetActivityTab({
       <GrantBudgetSandboxModal
         isOpen={sandboxOpen}
         onClose={() => setSandboxOpen(false)}
+        grantIds={grantId ? [grantId] : []}
+        readOnly={!canManageBudget}
+        canSave={canManageBudget}
         grantId={grantId ?? ""}
         grantName={String(model?.name || grantId || "Grant")}
         seedRows={sandboxSeedRows}

@@ -31,9 +31,12 @@ __export(grants_exports, {
   GrantComplianceConfig: () => GrantComplianceConfig,
   GrantComplianceControl: () => GrantComplianceControl,
   GrantCompliancePreset: () => GrantCompliancePreset,
+  GrantCycleLink: () => GrantCycleLink,
   GrantDriveTemplate: () => GrantDriveTemplate,
   GrantDriveTemplateType: () => GrantDriveTemplateType,
   GrantEnrollmentDefaults: () => GrantEnrollmentDefaults,
+  GrantEnrollmentLinkRule: () => GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement: () => GrantEnrollmentRequirement,
   GrantEntity: () => GrantEntity,
   GrantFinancialConfig: () => GrantFinancialConfig,
   GrantFinancialConfigPatch: () => GrantFinancialConfigPatch,
@@ -45,7 +48,9 @@ __export(grants_exports, {
   GrantKind: () => GrantKind,
   GrantLedgerMode: () => GrantLedgerMode,
   GrantLineItemCap: () => GrantLineItemCap,
+  GrantLineItemInvoicing: () => GrantLineItemInvoicing,
   GrantLineItemType: () => GrantLineItemType,
+  GrantLinking: () => GrantLinking,
   GrantPatchBody: () => GrantPatchBody,
   GrantPinDigest: () => GrantPinDigest,
   GrantPinImportant: () => GrantPinImportant,
@@ -406,6 +411,11 @@ var GrantBudgetSplitGoal = z.object({
   notes: z.string().trim().nullish()
 }).passthrough();
 var GrantBudgetItemDisplayConfig = z.object({
+  /** Budget card cycle presentation. Missing values preserve the legacy total view. */
+  cycleDisplayMode: z.enum(["split", "total"]).optional(),
+  /** Explicit digest participation. `appearInDigest` remains a legacy read alias. */
+  displayOnDigest: z.boolean().optional(),
+  digestDisplayMode: z.enum(["currentCycle", "total", "both"]).optional(),
   showGrantTotal: z.boolean().optional(),
   showLineItemTotal: z.boolean().optional(),
   showSplitGoals: z.boolean().optional(),
@@ -420,6 +430,22 @@ var GrantBudgetBreakdownValidation = z.object({
   message: z.string().trim().optional(),
   splitTotal: Num.optional(),
   variance: Num.optional()
+}).passthrough();
+var GrantInvoiceOption = z.object({
+  id: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  code: z.string().trim().nullish(),
+  template: z.string().trim().nullish(),
+  enabled: z.boolean().optional(),
+  custom: z.boolean().optional()
+}).passthrough();
+var GrantLineItemInvoicing = z.object({
+  functionalGroup: z.string().trim().nullish(),
+  grantCode: z.string().trim().nullish(),
+  programCode: z.string().trim().nullish(),
+  hmisCode: z.string().trim().nullish(),
+  expenseCategories: z.array(GrantInvoiceOption).nullish(),
+  descriptionTemplates: z.array(GrantInvoiceOption).nullish()
 }).passthrough();
 var GrantBudgetLineItem = z.object({
   id: Id.optional(),
@@ -452,7 +478,9 @@ var GrantBudgetLineItem = z.object({
   splitEndDate: z.string().trim().nullish(),
   splitGoals: z.array(GrantBudgetSplitGoal).optional().default([]),
   display: GrantBudgetItemDisplayConfig.nullish(),
-  breakdownValidation: GrantBudgetBreakdownValidation.nullish()
+  breakdownValidation: GrantBudgetBreakdownValidation.nullish(),
+  /** Invoice metadata for this line item. Grant-level invoicing remains legacy read compatibility. */
+  invoicing: GrantLineItemInvoicing.nullish()
 }).passthrough();
 var GrantBudgetTotals = z.object({
   total: Num,
@@ -570,14 +598,6 @@ var GrantPins = z.object({
   important: GrantPinImportant.nullish()
 }).passthrough();
 var GrantInvoicingFrequency = z.enum(["monthly", "quarterly", "annually", "on-demand"]);
-var GrantInvoiceOption = z.object({
-  id: z.string().trim().min(1),
-  label: z.string().trim().min(1),
-  code: z.string().trim().nullish(),
-  template: z.string().trim().nullish(),
-  enabled: z.boolean().optional(),
-  custom: z.boolean().optional()
-}).passthrough();
 var GrantInvoicing = z.object({
   /** Grant identifier used on invoices / reimbursement requests */
   grantCode: z.string().trim().nullish(),
@@ -623,6 +643,27 @@ var GrantEnrollmentDefaults = z.object({
   serviceStatus: z.enum(["active", "paused"]).nullable().optional(),
   medicaidStatus: z.enum(["active", "closed"]).nullable().optional()
 }).passthrough();
+var GrantCycleLink = z.object({
+  previousGrantId: Id.nullable().optional(),
+  nextGrantId: Id.nullable().optional()
+}).passthrough();
+var GrantEnrollmentLinkRule = z.object({
+  targetGrantId: Id,
+  onEnroll: z.literal("ensureActive").default("ensureActive"),
+  onAllSourcesClosed: z.literal("flagShouldUnenroll").default("flagShouldUnenroll")
+}).passthrough();
+var GrantEnrollmentRequirement = z.object({
+  operator: z.enum(["all", "any"]).default("all"),
+  targetGrantIds: z.array(Id).min(1).max(20),
+  behavior: z.literal("warnOnly").default("warnOnly")
+}).passthrough();
+var GrantLinking = z.object({
+  cycle: GrantCycleLink.nullish(),
+  /** Enrollment eligibility requirement. Consumers surface warnings only. */
+  enrollmentRequirement: GrantEnrollmentRequirement.nullish(),
+  /** Legacy enrollment automation rules retained for read compatibility. */
+  enrollmentRules: z.array(GrantEnrollmentLinkRule).max(20).default([])
+}).passthrough();
 var GrantInputSchema = z.object({
   id: Id.optional(),
   name: z.string().trim().min(1),
@@ -658,6 +699,8 @@ var GrantInputSchema = z.object({
   invoicing: GrantInvoicing.nullish(),
   /** Optional enrollment defaults such as TSS authorization windows. */
   enrollmentDefaults: GrantEnrollmentDefaults.nullish(),
+  /** Explicit lifecycle links. Navigation-only related* fields below do not drive automation. */
+  linking: GrantLinking.nullish(),
   /** Optional documents expected for payment/invoice processing. */
   invoiceDocuments: z.array(z.string().trim()).nullish(),
   /** Optional internal guidance mapping assistance levels to eligibility criteria. */
@@ -828,6 +871,8 @@ export {
   GrantBudgetSplitGoal,
   GrantBudgetItemDisplayConfig,
   GrantBudgetBreakdownValidation,
+  GrantInvoiceOption,
+  GrantLineItemInvoicing,
   GrantBudgetLineItem,
   GrantBudgetTotals,
   GrantBudget,
@@ -842,9 +887,12 @@ export {
   GrantPinInvoice,
   GrantPins,
   GrantInvoicingFrequency,
-  GrantInvoiceOption,
   GrantInvoicing,
   GrantEnrollmentDefaults,
+  GrantCycleLink,
+  GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement,
+  GrantLinking,
   GrantInputSchema,
   Grant,
   GrantEntity,

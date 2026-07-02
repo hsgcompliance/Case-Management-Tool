@@ -132,6 +132,11 @@ export const endpointsStrict = {
   enrollmentsMigrate: { method: 'POST', path: 'enrollmentsMigrate' },
   enrollmentsUndoMigration: { method: 'POST', path: 'enrollmentsUndoMigration' },
   enrollmentsAdminReverseLedgerEntry: { method: 'POST', path: 'enrollmentsAdminReverseLedgerEntry' },
+  enrollmentsContinuumSummary: { method: 'GET', path: 'enrollmentsContinuumSummary' },
+  enrollmentsAllocationSet: { method: 'POST', path: 'enrollmentsAllocationSet' },
+  enrollmentsCycleRolloverPreview: { method: 'POST', path: 'enrollmentsCycleRolloverPreview' },
+  enrollmentsCycleRolloverRun: { method: 'POST', path: 'enrollmentsCycleRolloverRun' },
+  enrollmentsLinkedProgramsReconcile: { method: 'POST', path: 'enrollmentsLinkedProgramsReconcile' },
 
   // GRANTS
   grantsUpsert:       { method: 'POST',  path: 'grantsUpsert' },
@@ -182,6 +187,7 @@ export const endpointsStrict = {
   paymentsBulkCopySchedule:      { method: 'POST', path: 'paymentsBulkCopySchedule' },
   paymentsSpend:                 { method: 'POST', path: 'paymentsSpend' },
   paymentsUpdateCompliance:      { method: 'POST', path: 'paymentsUpdateCompliance' },
+  paymentsRentCertSet:           { method: 'POST', path: 'paymentsRentCertSet' },
   paymentsDeleteRows:            { method: 'POST', path: 'paymentsDeleteRows' },
   paymentsUpdateGrantBudget:     { method: 'POST', path: 'paymentsUpdateGrantBudget' },
   paymentsRecalcGrantProjected:  { method: 'POST', path: 'paymentsRecalcGrantProjected' },
@@ -246,6 +252,16 @@ export const endpointsStrict = {
   customersBackfillNames:        { method: 'POST',  path: 'customersBackfillNames' },
   customersBackfillCaseManagerNames: { method: 'POST', path: 'customersBackfillCaseManagerNames' },
   customersBackfillAssistanceLength: { method: 'POST', path: 'customersBackfillAssistanceLength' },
+
+  // HOUSEHOLDS
+  householdsUpsert:              { method: 'POST',  path: 'householdsUpsert' },
+  householdsPatch:               { method: 'PATCH', path: 'householdsPatch' },
+  householdsAddMember:           { method: 'POST',  path: 'householdsAddMember' },
+  householdsRemoveMember:        { method: 'POST',  path: 'householdsRemoveMember' },
+  householdsSetHead:             { method: 'POST',  path: 'householdsSetHead' },
+  householdsDelete:              { method: 'POST',  path: 'householdsDelete' },
+  householdsGet:                 { method: 'GET',   path: 'householdsGet' },
+  householdsList:                { method: 'GET',   path: 'householdsList' },
 
   // CREDIT CARDS
   creditCardsUpsert:             { method: 'POST',  path: 'creditCardsUpsert' },
@@ -823,7 +839,8 @@ export function createApi({
     const effBackoff = backoffOverrideMs ?? backoffMs;
 
     let attempt = 0;
-    let retriedAuth = false;
+    let authRetryCount = 0;
+    const MAX_AUTH_RETRIES = 2;
     const startedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
     const stopPending =
@@ -872,13 +889,19 @@ export function createApi({
 
               const authFailure = isAuthFailure(resp.status, data);
 
-              if (!retriedAuth && authFailure) {
-                retriedAuth = true;
+              if (authRetryCount < MAX_AUTH_RETRIES && authFailure) {
+                authRetryCount++;
+                // Second attempt gets a short backoff — gives a transient blip
+                // (App Check propagation, backend revocation-check hiccup) a
+                // chance to clear before we treat this as a real session death.
+                if (authRetryCount > 1) {
+                  await new Promise((r) => setTimeout(r, 400));
+                }
                 await forceFreshAuthTokens();
                 return exec();
               }
 
-              if (retriedAuth && authFailure && shouldForceFullLogin(name, resp.status)) {
+              if (authRetryCount >= MAX_AUTH_RETRIES && authFailure && shouldForceFullLogin(name, resp.status)) {
                 await requireFullLogin(normalizeErrorCode(data?.error || data?.message || 'session_expired'));
               }
 

@@ -26,6 +26,7 @@ type Options = {
   minInstances?: number;
   timeoutSeconds?: number;
   memory?: "128MiB" | "256MiB" | "512MiB" | "1GiB" | "2GiB" | "4GiB" | "8GiB" | "16GiB" | "32GiB";
+  serviceAccount?: string;
 };
 
 const readBoolParam = (s: string | null | undefined) =>
@@ -108,6 +109,7 @@ export function secureHandler(
     minInstances,
     timeoutSeconds,
     memory,
+    serviceAccount,
   } = opts;
 
   return onRequest(
@@ -117,6 +119,7 @@ export function secureHandler(
       minInstances: minInstances ?? RUNTIME.minInstances,
       ...(timeoutSeconds ? { timeoutSeconds } : {}),
       ...(memory ? { memory } : {}),
+      ...(serviceAccount ? { serviceAccount } : {}),
       secrets: secrets as never,
     },
     async (req, res) => {

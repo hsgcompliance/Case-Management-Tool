@@ -25,6 +25,7 @@ export * from "./endpointMap";
 // ------------------------------
 export * as assessments from "./assessments";
 export * as customers from "./customers";
+export * as households from "./households";
 export * as creditCards from "./creditCards";
 export * as enrollments from "./enrollments";
 export * as formSessions from "./formSessions";
@@ -43,6 +44,9 @@ export * as metrics from "./metrics";
 export * as tss from "./tss";
 export * as transactionWindows from "./transactionWindows";
 export * as cmActivities from "./cmActivities";
+export * as caseNoteAssistant from "./caseNoteAssistant";
+export { GenerateCaseNoteSuggestionBodySchema, GenerateCaseNoteSuggestionResponseSchema, RecordCaseNoteSuggestionDecisionBodySchema } from "./caseNoteAssistant";
+export type { TCaseNoteAction, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
 
 // ------------------------------
 // Top-level TYPE exports (leaf modules only)
@@ -122,6 +126,50 @@ export type {
   TCustomersBackfillAssistanceLengthBody,
   TCustomersBackfillAssistanceLengthResp,
 } from "./customers";
+
+// Households (family / household linking)
+export type {
+  THouseholdRelationship,
+  THouseholdStatus,
+  THouseholdMember,
+  HouseholdInput,
+  THouseholdEntity,
+  THouseholdsUpsertBody,
+  THouseholdsUpsertResp,
+  THouseholdsPatchRow,
+  THouseholdsPatchBody,
+  THouseholdsPatchResp,
+  THouseholdsAddMemberBody,
+  THouseholdsAddMemberResp,
+  THouseholdsRemoveMemberBody,
+  THouseholdsRemoveMemberResp,
+  THouseholdsSetHeadBody,
+  THouseholdsSetHeadResp,
+  THouseholdsDeleteBody,
+  THouseholdsDeleteResp,
+  THouseholdsGetQuery,
+  THouseholdsGetResp,
+  THouseholdsListQuery,
+  THouseholdsListResp,
+} from "./households";
+export {
+  HouseholdRelationship,
+  HouseholdStatus,
+  HouseholdMember,
+  HouseholdInputSchema,
+  HouseholdEntity,
+  HouseholdsUpsertBody,
+  HouseholdsPatchRow,
+  HouseholdsPatchBody,
+  HouseholdsAddMemberBody,
+  HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody,
+  HouseholdsDeleteBody,
+  HouseholdsGetQuery,
+  HouseholdsListQuery,
+  householdRelationshipLabel,
+  deriveHeadCustomerId,
+} from "./households";
 
 // Credit cards
 export type {

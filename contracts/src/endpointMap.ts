@@ -142,6 +142,29 @@ import type {
 } from "./customers";
 
 /* ============================================================================
+   Households
+============================================================================ */
+
+import type {
+  THouseholdsUpsertBody,
+  THouseholdsUpsertResp,
+  THouseholdsPatchBody,
+  THouseholdsPatchResp,
+  THouseholdsAddMemberBody,
+  THouseholdsAddMemberResp,
+  THouseholdsRemoveMemberBody,
+  THouseholdsRemoveMemberResp,
+  THouseholdsSetHeadBody,
+  THouseholdsSetHeadResp,
+  THouseholdsDeleteBody,
+  THouseholdsDeleteResp,
+  THouseholdsGetQuery,
+  THouseholdsGetResp,
+  THouseholdsListQuery,
+  THouseholdsListResp,
+} from "./households";
+
+/* ============================================================================
    Credit Cards
 ============================================================================ */
 import type {
@@ -199,6 +222,24 @@ export type CustomersBackfillCaseManagerNamesReq = TCustomersBackfillCaseManager
 export type CustomersBackfillCaseManagerNamesResp = TCustomersBackfillCaseManagerNamesResp;
 export type CustomersBackfillAssistanceLengthReq = TCustomersBackfillAssistanceLengthBody;
 export type CustomersBackfillAssistanceLengthResp = TCustomersBackfillAssistanceLengthResp;
+
+// ----- household aliases (Req/Resp) -----
+export type HouseholdsUpsertReq = THouseholdsUpsertBody;
+export type HouseholdsUpsertResp = THouseholdsUpsertResp;
+export type HouseholdsPatchReq = THouseholdsPatchBody;
+export type HouseholdsPatchResp = THouseholdsPatchResp;
+export type HouseholdsAddMemberReq = THouseholdsAddMemberBody;
+export type HouseholdsAddMemberResp = THouseholdsAddMemberResp;
+export type HouseholdsRemoveMemberReq = THouseholdsRemoveMemberBody;
+export type HouseholdsRemoveMemberResp = THouseholdsRemoveMemberResp;
+export type HouseholdsSetHeadReq = THouseholdsSetHeadBody;
+export type HouseholdsSetHeadResp = THouseholdsSetHeadResp;
+export type HouseholdsDeleteReq = THouseholdsDeleteBody;
+export type HouseholdsDeleteResp = THouseholdsDeleteResp;
+export type HouseholdsGetReq = THouseholdsGetQuery;
+export type HouseholdsGetResp = THouseholdsGetResp;
+export type HouseholdsListReq = THouseholdsListQuery;
+export type HouseholdsListResp = THouseholdsListResp;
 
 // ----- credit card aliases -----
 export type TCreditCardInput = TCreditCard;
@@ -495,6 +536,16 @@ import type {
   TEnrollmentsListResp,
   TEnrollmentsMigrateBody,
   TEnrollmentsMigrateResp,
+  TEnrollmentsContinuumSummaryQuery,
+  TEnrollmentsContinuumSummaryResp,
+  TEnrollmentsAllocationSetBody,
+  TEnrollmentsAllocationSetResp,
+  TEnrollmentsCycleRolloverPreviewBody,
+  TEnrollmentsCycleRolloverPreviewResp,
+  TEnrollmentsCycleRolloverRunBody,
+  TEnrollmentsCycleRolloverRunResp,
+  TEnrollmentsLinkedProgramsReconcileBody,
+  TEnrollmentsLinkedProgramsReconcileResp,
   TEnrollmentsPatchBody,
   TEnrollmentsPatchRow,
   TEnrollmentsPatchResp,
@@ -546,6 +597,17 @@ export type EnrollmentsListResp = TEnrollmentsListResp;
 export type EnrollmentsMigrateReq = TEnrollmentsMigrateBody;
 export type EnrollmentsMigrateResp = TEnrollmentsMigrateResp;
 
+export type EnrollmentsContinuumSummaryReq = TEnrollmentsContinuumSummaryQuery;
+export type EnrollmentsContinuumSummaryResp = TEnrollmentsContinuumSummaryResp;
+export type EnrollmentsAllocationSetReq = TEnrollmentsAllocationSetBody;
+export type EnrollmentsAllocationSetResp = TEnrollmentsAllocationSetResp;
+export type EnrollmentsCycleRolloverPreviewReq = TEnrollmentsCycleRolloverPreviewBody;
+export type EnrollmentsCycleRolloverPreviewResp = TEnrollmentsCycleRolloverPreviewResp;
+export type EnrollmentsCycleRolloverRunReq = TEnrollmentsCycleRolloverRunBody;
+export type EnrollmentsCycleRolloverRunResp = TEnrollmentsCycleRolloverRunResp;
+export type EnrollmentsLinkedProgramsReconcileReq = TEnrollmentsLinkedProgramsReconcileBody;
+export type EnrollmentsLinkedProgramsReconcileResp = TEnrollmentsLinkedProgramsReconcileResp;
+
 export type EnrollmentsPatchReq = TEnrollmentsPatchBody;
 export type EnrollmentsPatchResp = TEnrollmentsPatchResp;
 export type EnrollmentsPatchRow = TEnrollmentsPatchRow;
@@ -574,6 +636,7 @@ import type {
   TPaymentsBulkCopyScheduleBody,
   TPaymentsGenerateProjectionsBody,
   TPaymentsUpdateComplianceBody,
+  TPaymentsRentCertSetBody,
   TPaymentsDeleteRowsBody,
   TPaymentsUpdateGrantBudgetBody,
   TPaymentsUpsertProjectionsBody,
@@ -622,6 +685,8 @@ export type PaymentsUpdateComplianceReq = TPaymentsUpdateComplianceBody;
 export type PaymentsUpdateComplianceResp = Ok<
   { id: string } & Partial<TEnrollmentEntity>
 >;
+export type PaymentsRentCertSetReq = TPaymentsRentCertSetBody;
+export type PaymentsRentCertSetResp = Ok<{ enrollmentId: string; paymentId: string; rentCert: TPayment["rentCert"] }>;
 
 export type PaymentsDeleteRowsReq = TPaymentsDeleteRowsBody;
 export type PaymentsDeleteRowsResp = Ok<TPaymentsDeleteRowsResp> | Err;
@@ -1011,6 +1076,9 @@ export type ToursStructureResp = Ok<{ structure: Partial<TourFlowT> }>;
 export type HealthResp = Ok<Record<string, unknown>>;
 export type CreateSessionResp = Ok<Record<string, unknown>>;
 
+import type { TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp } from "./caseNoteAssistant";
+import type { TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
+
 /* ============================================================================
    EndpointMap (canonical)
 ============================================================================ */
@@ -1038,6 +1106,16 @@ export interface EndpointMap {
   customersBackfillCaseManagerNames: { req: CustomersBackfillCaseManagerNamesReq; resp: CustomersBackfillCaseManagerNamesResp };
   customersBackfillAssistanceLength: { req: CustomersBackfillAssistanceLengthReq; resp: CustomersBackfillAssistanceLengthResp };
 
+  // HOUSEHOLDS
+  householdsUpsert: { req: HouseholdsUpsertReq; resp: HouseholdsUpsertResp };
+  householdsPatch: { req: HouseholdsPatchReq; resp: HouseholdsPatchResp };
+  householdsAddMember: { req: HouseholdsAddMemberReq; resp: HouseholdsAddMemberResp };
+  householdsRemoveMember: { req: HouseholdsRemoveMemberReq; resp: HouseholdsRemoveMemberResp };
+  householdsSetHead: { req: HouseholdsSetHeadReq; resp: HouseholdsSetHeadResp };
+  householdsDelete: { req: HouseholdsDeleteReq; resp: HouseholdsDeleteResp };
+  householdsGet: { req: HouseholdsGetReq; resp: HouseholdsGetResp };
+  householdsList: { req: HouseholdsListReq; resp: HouseholdsListResp };
+
   // CREDIT CARDS
   creditCardsUpsert: { req: CreditCardsUpsertReq; resp: CreditCardsUpsertResp };
   creditCardsPatch: { req: CreditCardsPatchReq; resp: CreditCardsPatchResp };
@@ -1061,6 +1139,11 @@ export interface EndpointMap {
   enrollmentsCheckDual: { req: EnrollmentsCheckDualReq; resp: EnrollmentsCheckDualResp };
   enrollmentsBackfillNames: { req: EnrollmentsBackfillNamesReq; resp: EnrollmentsBackfillNamesResp };
   enrollmentsMigrate: { req: EnrollmentsMigrateReq; resp: EnrollmentsMigrateResp };
+  enrollmentsContinuumSummary: { req: EnrollmentsContinuumSummaryReq; resp: EnrollmentsContinuumSummaryResp };
+  enrollmentsAllocationSet: { req: EnrollmentsAllocationSetReq; resp: EnrollmentsAllocationSetResp };
+  enrollmentsCycleRolloverPreview: { req: EnrollmentsCycleRolloverPreviewReq; resp: EnrollmentsCycleRolloverPreviewResp };
+  enrollmentsCycleRolloverRun: { req: EnrollmentsCycleRolloverRunReq; resp: EnrollmentsCycleRolloverRunResp };
+  enrollmentsLinkedProgramsReconcile: { req: EnrollmentsLinkedProgramsReconcileReq; resp: EnrollmentsLinkedProgramsReconcileResp };
   enrollmentsUndoMigration: { req: EnrollmentsUndoMigrationReq; resp: EnrollmentsUndoMigrationResp };
   enrollmentsAdminReverseLedgerEntry: { req: EnrollmentsAdminReverseLedgerEntryReq; resp: EnrollmentsAdminReverseLedgerEntryResp };
   enrollmentsVoidProjections: { req: EnrollmentsVoidProjectionsReq; resp: EnrollmentsVoidProjectionsResp };
@@ -1116,6 +1199,7 @@ export interface EndpointMap {
   paymentsBulkCopySchedule: { req: PaymentsBulkCopyScheduleReq; resp: PaymentsBulkCopyScheduleResp };
   paymentsSpend: { req: PaymentsSpendReq; resp: PaymentsSpendResp };
   paymentsUpdateCompliance: { req: PaymentsUpdateComplianceReq; resp: PaymentsUpdateComplianceResp };
+  paymentsRentCertSet: { req: PaymentsRentCertSetReq; resp: PaymentsRentCertSetResp };
   paymentsDeleteRows: { req: PaymentsDeleteRowsReq; resp: PaymentsDeleteRowsResp };
   paymentsUpdateGrantBudget: { req: PaymentsUpdateGrantBudgetReq; resp: PaymentsUpdateGrantBudgetResp };
   paymentsRecalcGrantProjected: { req: PaymentsRecalcGrantProjectedReq; resp: PaymentsRecalcGrantProjectedResp };
@@ -1212,6 +1296,8 @@ export interface EndpointMap {
   toursStructure: { req: ToursStructureReq; resp: ToursStructureResp };
 
   // MISC
+  generateCaseNoteSuggestion: { req: TGenerateCaseNoteSuggestionReq; resp: TGenerateCaseNoteSuggestionResp };
+  recordCaseNoteSuggestionDecision: { req: TRecordCaseNoteSuggestionDecisionReq; resp: TRecordCaseNoteSuggestionDecisionResp };
   createSession: { req: Record<string, unknown>; resp: CreateSessionResp };
   health: { req: void; resp: HealthResp };
 }

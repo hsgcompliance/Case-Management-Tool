@@ -177,7 +177,7 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
             <div>
               <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Other Contacts</div>
               <div className="mt-1 text-xs text-slate-500">
-                Caseload-only contacts. Up to 3. They appear on caseload views but do not receive acuity credit.
+                Caseload-only contacts. Up to 3. They appear on caseload views but do not count toward caseload metrics.
               </div>
             </div>
           </div>

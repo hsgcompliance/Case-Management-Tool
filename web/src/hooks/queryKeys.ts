@@ -40,6 +40,7 @@ export const qk = {
     byCustomer: (customerId: string, filters?: Record<string, unknown>) =>
       ["enrollments", "byCustomer", customerId, stable(filters || {})] as const,
     detail: (id: string) => ["enrollments", "detail", id] as const,
+    continuum: (id: string) => ["enrollments", "continuum", id] as const,
   },
   payments: {
     root: ["payments"] as const,

@@ -11,10 +11,11 @@ import {
   usePaymentsProjectionsAdjust,
   usePaymentsSpend,
   usePaymentsUpdateCompliance,
+  usePaymentRentCert,
   type PaymentScheduleBuildInput,
   type PaymentsProjectionsAdjustInput,
 } from "@hooks/usePayments";
-import { useCustomerEnrollments } from "@hooks/useEnrollments";
+import { useCustomerEnrollments, useEnrollmentAllocationSet, useEnrollmentContinuumSummary } from "@hooks/useEnrollments";
 import { useGrants } from "@hooks/useGrants";
 import { useLedgerEntries } from "@hooks/useLedger";
 import { useTasksList, type TasksListItem } from "@hooks/useTasks";
@@ -46,7 +47,7 @@ type SelectedPayment = {
   row: CustomerPaymentRow;
 };
 
-type RentCertStatus = "none" | "due" | "completed";
+type RentCertStatus = "notDue" | "due" | "completed" | "effective";
 
 function paymentDate(p: TPayment): string {
   const legacyDate = (p as Record<string, unknown>).date;
@@ -144,6 +145,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   const deleteRows = usePaymentsDeleteRows();
   const buildScheduleMutation = usePaymentsBuildSchedule();
   const adjustMutation = usePaymentsProjectionsAdjust();
+  const rentCertMutation = usePaymentRentCert();
 
   const [selected, setSelected] = React.useState<SelectedPayment | null>(null);
   const [paidDialogOpen, setPaidDialogOpen] = React.useState(false);
@@ -167,16 +169,21 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     return m;
   }, [grants]);
 
-  const grantEnrollments = React.useMemo(() => {
+  const fundedEnrollments = React.useMemo(() => {
     return enrollments.filter((enrollment) => {
       const grantId = String(enrollment?.grantId || "").trim();
-      return isOpenEnrollment(enrollment) && !!grantId && (grantBudgetById.get(grantId) || 0) > 0;
+      return !!grantId && (grantBudgetById.get(grantId) || 0) > 0;
     });
   }, [enrollments, grantBudgetById]);
 
+  const grantEnrollments = React.useMemo(
+    () => fundedEnrollments.filter(isOpenEnrollment),
+    [fundedEnrollments],
+  );
+
   const grantEnrollmentIds = React.useMemo(
-    () => new Set(grantEnrollments.map((enrollment) => String(enrollment.id || ""))),
-    [grantEnrollments],
+    () => new Set(fundedEnrollments.map((enrollment) => String(enrollment.id || ""))),
+    [fundedEnrollments],
   );
 
   React.useEffect(() => {
@@ -204,6 +211,29 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     () => Array.from(new Set(filteredRows.map((row) => String(row.enrollmentId || "")).filter(Boolean))),
     [filteredRows],
   );
+  const continuumSeedId = enrollmentFilterId !== "all"
+    ? enrollmentFilterId
+    : String(grantEnrollments[0]?.id || "");
+  const { data: continuumData } = useEnrollmentContinuumSummary(continuumSeedId);
+  const continuum = continuumData as any;
+  const allocationSet = useEnrollmentAllocationSet();
+
+  const editAllocation = async (enrollment: any) => {
+    const current = enrollment.editableAllocation == null ? "" : String(enrollment.editableAllocation);
+    const raw = window.prompt("Client allocation amount. Leave blank to use the calculated schedule amount.", current);
+    if (raw == null) return;
+    const amount = raw.trim() === "" ? null : Number(raw);
+    if (amount != null && (!Number.isFinite(amount) || amount < 0)) {
+      toast("Allocation must be a non-negative amount.", { type: "error" });
+      return;
+    }
+    try {
+      await allocationSet.mutateAsync({ enrollmentId: enrollment.id, amount, note: null });
+      toast("Client allocation updated.", { type: "success" });
+    } catch (error) {
+      toast(toApiError(error).error || "Failed to update allocation.", { type: "error" });
+    }
+  };
 
   const { data: rentCertTasks = [] } = useTasksList(
     filteredEnrollmentIds.length
@@ -212,31 +242,45 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     { enabled: filteredEnrollmentIds.length > 0 },
   );
 
-  const rentCertStatusByPaymentKey = React.useMemo(() => {
+  const rentCertStateByPaymentKey = React.useMemo(() => {
     const tasksByPaymentKey = new Map<string, TasksListItem[]>();
     for (const task of rentCertTasks) {
       if (!isRentCertTask(task)) continue;
       const enrollmentId = String((task as Record<string, unknown>).enrollmentId || "").trim();
+      const linkedPaymentId = String((task as Record<string, unknown>).rentCertPaymentId || "").trim();
       const targetDate = rentCertTargetDate(task);
       if (!enrollmentId || !targetDate) continue;
-      const key = `${enrollmentId}:${targetDate}`;
+      const key = `${enrollmentId}:${linkedPaymentId || targetDate}`;
       const list = tasksByPaymentKey.get(key) || [];
       list.push(task);
       tasksByPaymentKey.set(key, list);
     }
 
-    const next: Record<string, RentCertStatus> = {};
+    const statuses: Record<string, RentCertStatus> = {};
+    const dueDates: Record<string, string> = {};
     for (const row of filteredRows) {
       const payment = row.payment as Record<string, unknown>;
       const pid = String(payment?.id || "").trim();
       const enrollmentId = String(row.enrollmentId || "").trim();
       if (!pid || !enrollmentId) continue;
+      const linkedRentCert = payment?.rentCert && typeof payment.rentCert === "object"
+        ? payment.rentCert as Record<string, unknown>
+        : null;
+      if (linkedRentCert?.dueDate) {
+        const status = String(linkedRentCert.status || "due");
+        statuses[`${enrollmentId}:${pid}`] =
+          status === "completed" ? "completed" : status === "effective" ? "effective" : "due";
+        dueDates[`${enrollmentId}:${pid}`] = String(linkedRentCert.dueDate).slice(0, 10);
+        continue;
+      }
       const targetDate = paymentDate(row.payment);
-      const tasks = targetDate ? tasksByPaymentKey.get(`${enrollmentId}:${targetDate}`) || [] : [];
-      next[`${enrollmentId}:${pid}`] =
-        tasks.length === 0 ? "none" : tasks.every(rentCertDone) ? "completed" : "due";
+      const tasks = tasksByPaymentKey.get(`${enrollmentId}:${pid}`) || (targetDate ? tasksByPaymentKey.get(`${enrollmentId}:${targetDate}`) || [] : []);
+      statuses[`${enrollmentId}:${pid}`] =
+        tasks.length === 0 ? "notDue" : tasks.every(rentCertDone) ? "completed" : "due";
+      const legacyDueDate = tasks.map((task) => safeISODate10((task as Record<string, unknown>).dueDate)).find(Boolean);
+      if (legacyDueDate) dueDates[`${enrollmentId}:${pid}`] = legacyDueDate;
     }
-    return next;
+    return { statuses, dueDates };
   }, [filteredRows, rentCertTasks]);
 
   const ledgerPaymentKeys = React.useMemo(() => {
@@ -588,6 +632,20 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     }
   };
 
+  const setRentCert = async (row: CustomerPaymentRow, status: RentCertStatus) => {
+    const enrollmentId = String(row.enrollmentId || "").trim();
+    const payment = row.payment as Record<string, any>;
+    const paymentId = String(payment?.id || "").trim();
+    if (!enrollmentId || !paymentId) return;
+    try {
+      // Due date is derived server-side as the month prior to the payment date.
+      await rentCertMutation.mutateAsync({ enrollmentId, paymentId, status });
+      toast(status === "notDue" ? "Rent cert cleared." : "Rent cert updated.", { type: "success" });
+    } catch (error) {
+      toast(toApiError(error).error || "Failed to update rent cert.", { type: "error" });
+    }
+  };
+
   const buildSchedule = async (payload: PaymentScheduleBuildInput) => {
     setError(null);
     const summary = summarizePaymentScheduleBuild(payload, builderEnrollments);
@@ -679,6 +737,27 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           ) : null}
         </div>
       </div>
+
+      {continuum?.ok ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900 dark:bg-sky-950/20">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div><div className="text-xs font-medium uppercase text-slate-500">Assistance received</div><div className="text-xl font-semibold">{continuum.assistanceMonthsReceived} months</div></div>
+            <div><div className="text-xs font-medium uppercase text-slate-500">Continuum allocation</div><div className="text-xl font-semibold">{fmtCurrencyUSD(continuum.allocation.effective)}</div></div>
+            <div><div className="text-xs font-medium uppercase text-slate-500">Grant cycles</div><div className="text-xl font-semibold">{continuum.enrollments.length}</div></div>
+          </div>
+          <div className="mt-3 space-y-1 border-t border-sky-200 pt-2 dark:border-sky-900">
+            {continuum.enrollments.map((enrollment: any) => (
+              <div key={enrollment.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span>{enrollment.grantName || enrollment.grantId} · {enrollment.startDate || "?"}–{enrollment.endDate || "open"}</span>
+                <span className="flex items-center gap-2">
+                  <span>{fmtCurrencyUSD(enrollment.effectiveAllocation)}{enrollment.editableAllocation == null ? " calculated" : " assigned"}</span>
+                  <button className="btn-ghost btn-xs" type="button" disabled={allocationSet.isPending} onClick={() => void editAllocation(enrollment)}>Edit</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {buildScheduleMutation.isPending && buildSummary ? (
         <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
@@ -834,7 +913,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           <CustomerPaymentsTable
             rows={filteredRows}
             rowIssues={rowIssues}
-            rentCertStatuses={rentCertStatusByPaymentKey}
+            rentCertStatuses={rentCertStateByPaymentKey.statuses}
             selectedKey={selected?.paymentKey || null}
           renderSelectedRowDetail={() =>
             selected ? (
@@ -924,6 +1003,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           }
           onTogglePaid={togglePaidInline}
           onToggleCompliance={toggleComplianceInline}
+          onSetRentCert={setRentCert}
           busyPaid={spend.isPending}
           busyCompliance={compliance.isPending}
           onManage={selectRow}
@@ -983,6 +1063,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         enrollments={adjustEnrollments}
         initialEnrollmentId={adjustInitialEnrollmentId}
         paymentIssues={rowIssues}
+        rentCertDueDates={rentCertStateByPaymentKey.dueDates}
         onCancel={() => setAdjustOpen(false)}
         onApply={(payload) => void applyAdjustments(payload)}
       />

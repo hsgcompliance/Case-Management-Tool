@@ -4,6 +4,7 @@ import { computeGrantLineItemOverCap } from "@hdb/contracts";
 import { db, FieldValue, computeBudgetTotals, normId } from "../../core";
 import { RUNTIME } from "../../core/env";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
+import { syncContinuumRentCertReminders } from "../enrollments/continuity";
 import {
   changedTopLevelKeys,
   debugTriggerEvent,
@@ -94,6 +95,7 @@ export const onEnrollmentPaymentsChange = onDocumentWritten(
       customerName: after.customerName ? String(after.customerName) : null,
       payments: a as Array<Record<string, unknown>>,
     });
+    await syncContinuumRentCertReminders(enrollmentId);
   }
 );
 

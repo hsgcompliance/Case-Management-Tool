@@ -17,9 +17,12 @@ import {
   GrantComplianceConfig,
   GrantComplianceControl,
   GrantCompliancePreset,
+  GrantCycleLink,
   GrantDriveTemplate,
   GrantDriveTemplateType,
   GrantEnrollmentDefaults,
+  GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement,
   GrantEntity,
   GrantFinancialConfig,
   GrantFinancialConfigPatch,
@@ -31,7 +34,9 @@ import {
   GrantKind,
   GrantLedgerMode,
   GrantLineItemCap,
+  GrantLineItemInvoicing,
   GrantLineItemType,
+  GrantLinking,
   GrantPatchBody,
   GrantPinDigest,
   GrantPinImportant,
@@ -62,7 +67,7 @@ import {
   normalizeGrantFinancialConfig,
   parseGrantMaxAssistanceMonths,
   shouldRetainGrantBudget
-} from "./chunk-CD4U5KDR.js";
+} from "./chunk-EEXJMPYI.js";
 import {
   toArray
 } from "./chunk-AXFMCCQR.js";
@@ -86,9 +91,12 @@ export {
   GrantComplianceConfig,
   GrantComplianceControl,
   GrantCompliancePreset,
+  GrantCycleLink,
   GrantDriveTemplate,
   GrantDriveTemplateType,
   GrantEnrollmentDefaults,
+  GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement,
   GrantEntity,
   GrantFinancialConfig,
   GrantFinancialConfigPatch,
@@ -100,7 +108,9 @@ export {
   GrantKind,
   GrantLedgerMode,
   GrantLineItemCap,
+  GrantLineItemInvoicing,
   GrantLineItemType,
+  GrantLinking,
   GrantPatchBody,
   GrantPinDigest,
   GrantPinImportant,

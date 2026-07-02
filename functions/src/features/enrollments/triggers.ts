@@ -14,6 +14,7 @@ import {
 } from "../../core/triggerDebug";
 import { syncCustomerAssistanceLength } from "../customers/assistanceLength";
 import { applyGrantEnrollmentDefaults } from "./defaults";
+import { reconcileEnrollmentLinkAutomation } from "./linkAutomation";
 
 const FN_ENROLLMENT_CREATE_DEFAULTS = "onEnrollmentCreateDefaults";
 const FN_ENROLLMENT_NORMALIZE = "onEnrollmentNormalize";
@@ -140,6 +141,7 @@ export const onEnrollmentCreateDefaults = onDocumentCreated(
     if (customerId) {
       await syncCustomerAssistanceLength(customerId);
     }
+    await reconcileEnrollmentLinkAutomation({ id, ...e, ...patch });
   }
 );
 
@@ -260,6 +262,7 @@ export const onEnrollmentNormalize = onDocumentUpdated(
       if (nextCustomerId) {
         await syncCustomerAssistanceLength(nextCustomerId);
       }
+      await reconcileEnrollmentLinkAutomation({ id, ...after, ...patch });
     }
   }
 );
@@ -291,6 +294,7 @@ export const onEnrollmentDelete = onDocumentDeleted(
     if (customerId) {
       await syncCustomerAssistanceLength(customerId);
     }
+    await reconcileEnrollmentLinkAutomation({ id: String(event.params.id), ...before, deleted: true, active: false, status: "deleted" });
     debugTriggerEvent({
       fn: FN_ENROLLMENT_DELETE,
       event: event as any,

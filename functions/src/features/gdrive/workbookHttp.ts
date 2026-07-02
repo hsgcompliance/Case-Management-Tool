@@ -12,6 +12,7 @@ import {
   attachWorkbookCandidate,
   convertXlsxAndAttach,
   copyWorkbookFromTemplate,
+  setWorkbookVariant,
 } from "./workbookService";
 import { ScopeMissingError } from "./service";
 import {
@@ -52,6 +53,7 @@ const AttachByUrlBody = z.object({
   customerId: z.string().min(1),
   workbookUrl: z.string().min(1),
   enrollmentId: z.string().optional(),
+  variant: z.enum(["payer", "nonpayer"]).optional(),
 });
 
 export const attachCustomerWorkbookByUrl = secureHandler(
@@ -67,6 +69,7 @@ export const attachCustomerWorkbookByUrl = secureHandler(
         uid,
         workbookUrl: body.workbookUrl,
         enrollmentId: body.enrollmentId,
+        variant: body.variant,
         googleAccessToken: readGoogleAccessToken(req),
       });
       res.json({ ok: true, ...result });
@@ -143,6 +146,7 @@ const AttachCandidateBody = z.object({
   spreadsheetId: z.string().min(1),
   spreadsheetName: z.string().optional(),
   enrollmentId: z.string().optional(),
+  variant: z.enum(["payer", "nonpayer"]).optional(),
 });
 
 export const attachCustomerWorkbookCandidate = secureHandler(
@@ -159,6 +163,7 @@ export const attachCustomerWorkbookCandidate = secureHandler(
         spreadsheetId: body.spreadsheetId,
         spreadsheetName: body.spreadsheetName,
         enrollmentId: body.enrollmentId,
+        variant: body.variant,
         googleAccessToken: readGoogleAccessToken(req),
       });
       res.json({ ok: true, ...result });
@@ -195,6 +200,7 @@ const ConvertXlsxBody = z.object({
   fileId: z.string().min(1),
   fileName: z.string().optional(),
   enrollmentId: z.string().optional(),
+  variant: z.enum(["payer", "nonpayer"]).optional(),
 });
 
 export const convertCustomerWorkbookXlsx = secureHandler(
@@ -211,6 +217,7 @@ export const convertCustomerWorkbookXlsx = secureHandler(
         fileId: body.fileId,
         fileName: body.fileName,
         enrollmentId: body.enrollmentId,
+        variant: body.variant,
         googleAccessToken: readGoogleAccessToken(req),
       });
       res.json({ ok: true, ...result });
@@ -405,5 +412,45 @@ export const getWorkbookData = secureHandler(
     secrets: SECRETS,
     memory: "512MiB",
     timeoutSeconds: 60,
+  },
+);
+
+// ── POST setCustomerWorkbookVariant ──────────────────────────────────────────
+// Toggles the payer / non-payer variant on an already-linked TSS workbook.
+// Pure Firestore metadata write (no Drive call) — used by the Integrations tab
+// and workbook detail panel to control AI case-note assistant eligibility.
+
+const SetWorkbookVariantBody = z.object({
+  customerId: z.string().min(1),
+  variant: z.enum(["payer", "nonpayer"]),
+});
+
+export const setCustomerWorkbookVariant = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    requireOrg(caller);
+
+    try {
+      const body = SetWorkbookVariantBody.parse(req.body ?? {});
+      const result = await setWorkbookVariant({
+        customerId: body.customerId,
+        uid,
+        variant: body.variant,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      const isZod = err?.name === "ZodError";
+      const msg = isZod ? "invalid_request" : String(err?.message || "set_workbook_variant_failed");
+      const code = isZod ? 400 : Number(err?.code);
+      res.status(isZod ? 400 : (Number.isFinite(code) && code >= 400 && code <= 599 ? code : 500)).json({
+        ok: false,
+        error: msg,
+      });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
   },
 );

@@ -22,6 +22,7 @@ import {
 import type {Request, Response} from 'express';
 import {computeGrantLineItemOverCap} from '@hdb/contracts';
 import {writeLedgerEntry} from '../ledger/service';
+import {buildProjectionQueueItem, projectionQueueDocId} from '../paymentQueue/service';
 import {PaymentsSpendBody, type TPaymentsSpendBody} from './schemas';
 import {
   assertOrgAccess,
@@ -222,6 +223,10 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
       const lastSpendSnap = await trx.get(lastSpendQuery);
       const lastEdgeId = lastSpendSnap.empty ? '0' : (lastSpendSnap.docs[0].id || '0');
 
+      const projectionQueueId = projectionQueueDocId(enrollmentId, paymentId);
+      const projectionQueueRef = db.collection('paymentQueue').doc(projectionQueueId);
+      const projectionQueueSnap = await trx.get(projectionQueueRef);
+
       // Stable key for this logical action.
       // Includes lastEdgeId to separate cycles (pay -> reverse -> pay).
       const computedKey = makeIdempoKey([
@@ -406,6 +411,8 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
           app: 'hdb' as const,
           baseId: paymentId,
           sourcePath: `customerEnrollments/${enrollmentId}/spends/${safeSpendEntry.id}`,
+          paymentQueueId: projectionQueueId,
+          paymentQueueSource: 'projection' as const,
           idempotencyKey: idemKey,
         },
 
@@ -425,6 +432,39 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
 
       writeLedgerEntry(trx, led);
 
+      const previousQueueItem = projectionQueueSnap.exists ? projectionQueueSnap.data() as any : null;
+      const projectionQueueItem = buildProjectionQueueItem({
+        context: {
+          orgId: e.orgId ? String(e.orgId) : grant?.orgId ? String(grant.orgId) : null,
+          enrollmentId,
+          grantId,
+          customerId,
+          customerName: customerNameAtSpend,
+        },
+        payment: payments[idx] as Record<string, unknown>,
+        prev: previousQueueItem,
+        now: paidAtISO,
+        state: reverse ? {
+          queueStatus: 'pending',
+          ledgerEntryId: null,
+          reversalEntryId: safeSpendEntry.id,
+          postedAt: null,
+          postedBy: null,
+          reopenedAt: paidAtISO,
+          reopenedBy: uid,
+          reopenReason: 'Payment marked unpaid',
+        } : {
+          queueStatus: 'posted',
+          ledgerEntryId: safeSpendEntry.id,
+          reversalEntryId: previousQueueItem?.reversalEntryId ?? null,
+          postedAt: paidAtISO,
+          postedBy: uid,
+          reopenedAt: null,
+          reopenedBy: null,
+          reopenReason: null,
+        },
+      });
+
       // ---- writes ----
       trx.update(gRef, {
         'budget.lineItems': lineItems,
@@ -442,6 +482,7 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
 
       // Spends subcollection: still written for reversal linkage and idempotency key lookup.
       trx.set(eRef.collection('spends').doc(safeSpendEntry.id), safeSpendEntry);
+      trx.set(projectionQueueRef, removeUndefinedDeep(projectionQueueItem), {merge: false});
 
       if (cmUid && /^\d{4}-\d{2}$/.test(dueMonth)) {
         trx.set(
@@ -468,8 +509,8 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
       }
     }, 'paymentsSpend');
 
-    // paymentQueue projection sync is now handled by the onEnrollmentPaymentsChange trigger,
-    // which fires when the enrollment document is updated above.
+    // The projection queue spend state is written atomically above. The enrollment
+    // trigger remains the canonical schedule-shape reconciler and preserves posted rows.
 
     return res.status(200).json({ok: true});
   } catch (err: any) {

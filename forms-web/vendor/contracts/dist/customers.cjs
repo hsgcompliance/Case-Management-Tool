@@ -139,7 +139,13 @@ var CustomerMeta = import_zod2.z.object({
   // Legacy primary folder pointer kept for backward compatibility. Prefer
   // customerDrive.folderId for new resolvers and mirror writes during migration.
   driveFolderId: import_zod2.z.string().nullish(),
-  notes: import_zod2.z.string().nullish()
+  notes: import_zod2.z.string().nullish(),
+  // Household / family linking (Customer-Collection-Update). Denormalized
+  // pointer to the canonical households/{id} doc this customer belongs to; the
+  // member list itself lives on the household doc. Scalar = one primary
+  // household per customer. See contracts/src/households.ts.
+  householdId: import_zod2.z.string().trim().nullish(),
+  householdRelationship: import_zod2.z.string().trim().nullish()
 }).passthrough().nullish();
 var AssistanceLength = import_zod2.z.object({
   firstDateOfAssistance: ISO10.nullish(),
@@ -204,6 +210,7 @@ var CustomerInputSchema = import_zod2.z.object({
         defaultEmbedSheetName: import_zod2.z.string().nullish(),
         defaultSheetGid: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.number()]).nullish(),
         progressNotesGid: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.number()]).nullish(),
+        variant: import_zod2.z.enum(["payer", "nonpayer"]).nullish(),
         lastValidatedAt: import_zod2.z.string().nullish()
       }).passthrough().nullish()
     }).passthrough().nullish()

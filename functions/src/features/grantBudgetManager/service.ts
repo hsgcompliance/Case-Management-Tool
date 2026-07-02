@@ -238,6 +238,8 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
       sourceId: doc.id,
       ledgerItemId: doc.id,
       paymentQueueItemId: null,
+      enrollmentId: row.enrollmentId ? String(row.enrollmentId) : queueRow.enrollmentId ? String(queueRow.enrollmentId) : null,
+      paymentId: row.paymentId ? String(row.paymentId) : queueRow.paymentId ? String(queueRow.paymentId) : null,
       grantId,
       lineItemId: row.lineItemId ? String(row.lineItemId) : null,
       customerId: row.customerId ? String(row.customerId) : null,
@@ -274,6 +276,8 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
       sourceId: doc.id,
       ledgerItemId: row.ledgerEntryId ? String(row.ledgerEntryId) : null,
       paymentQueueItemId: doc.id,
+      enrollmentId: row.enrollmentId ? String(row.enrollmentId) : null,
+      paymentId: row.paymentId ? String(row.paymentId) : row.submissionId ? String(row.submissionId) : null,
       grantId,
       lineItemId: row.lineItemId ? String(row.lineItemId) : null,
       customerId: row.customerId ? String(row.customerId) : null,
@@ -297,6 +301,30 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
     (normalized as Record<string, unknown>).grantName = grantName;
     rows.push(normalized);
   }
+  const enrollmentIds = Array.from(new Set(rows.map((row) => String(row.enrollmentId || "").trim()).filter(Boolean)));
+  if (enrollmentIds.length) {
+    const enrollmentDocs = await db.getAll(...enrollmentIds.map((id) => db.collection("customerEnrollments").doc(id)));
+    const enrollmentById = new Map(enrollmentDocs.filter((snap) => snap.exists).map((snap) => [snap.id, snap.data() || {}]));
+    for (const row of rows) {
+      const enrollment = enrollmentById.get(String(row.enrollmentId || "")) as Record<string, unknown> | undefined;
+      const payments = Array.isArray(enrollment?.payments) ? enrollment.payments as Array<Record<string, unknown>> : [];
+      const payment = payments.find((item) => String(item?.id || "") === String(row.paymentId || ""));
+      const rentCert = payment?.rentCert && typeof payment.rentCert === "object" ? payment.rentCert as Record<string, unknown> : null;
+      const tasks = Array.isArray(enrollment?.taskSchedule) ? enrollment.taskSchedule as Array<Record<string, unknown>> : [];
+      const targetDate = String(payment?.dueDate || payment?.date || "").slice(0, 10);
+      const legacyTask = tasks.find((task) => {
+        const id = String(task.defId || task.id || "").toLowerCase();
+        const text = `${String(task.title || task.type || "")} ${String(task.notes || task.note || "")}`.toLowerCase();
+        if (!id.startsWith("payment_rent_cert_") && !id.startsWith("pay_cert_") && !text.includes("rent cert")) return false;
+        const direct = String(task.targetPaymentDate || "").slice(0, 10);
+        const matched = String(task.defId || task.id || "").match(/(\d{4}-\d{2}-\d{2})(?:_[a-z]+)?$/i)?.[1] || "";
+        return (direct || matched) === targetDate;
+      });
+      row.rentCertDueOn = rentCert?.dueDate
+        ? String(rentCert.dueDate).slice(0, 10)
+        : legacyTask?.dueDate ? String(legacyTask.dueDate).slice(0, 10) : null;
+    }
+  }
   return rows;
 }
 
@@ -317,6 +345,10 @@ function validateLineItem(grants: Map<string, Record<string, unknown>>, row: TGr
   const li = lineItemsForGrant(row.grantId, grant).find((item) => item.id === row.lineItemId);
   if (!li) return "invalid_line_item";
   if (li.locked) return "locked_line_item";
+  if (row.sourceType === "newProjection" || row.rowState === "new") {
+    if (!String(row.customerId || row.customerName || "").trim()) return "customer_required";
+    if (!Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0) return "positive_amount_required";
+  }
   return null;
 }
 

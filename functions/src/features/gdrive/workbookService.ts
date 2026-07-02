@@ -77,6 +77,7 @@ export type WorkbookMeta = {
   updatedAt: string;
   linkedBy: string;
   linkedEnrollmentId?: string;
+  variant?: "payer" | "nonpayer";
 };
 
 export type FolderItem = {
@@ -144,9 +145,10 @@ export async function attachWorkbookByUrl(args: {
   uid: string;
   workbookUrl: string;
   enrollmentId?: string;
+  variant?: "payer" | "nonpayer";
   googleAccessToken?: string;
 }): Promise<{ workbook: WorkbookMeta }> {
-  const { customerId, uid, workbookUrl, enrollmentId, googleAccessToken } = args;
+  const { customerId, uid, workbookUrl, enrollmentId, variant, googleAccessToken } = args;
 
   const spreadsheetId = extractSpreadsheetId(workbookUrl);
   if (!spreadsheetId) {
@@ -172,6 +174,7 @@ export async function attachWorkbookByUrl(args: {
     linkedAt: now,
     updatedAt: now,
     linkedBy: uid,
+    ...(variant ? { variant } : {}),
     ...(enrollmentId ? { linkedEnrollmentId: enrollmentId } : {}),
   };
 
@@ -256,9 +259,10 @@ export async function attachWorkbookCandidate(args: {
   spreadsheetId: string;
   spreadsheetName?: string;
   enrollmentId?: string;
+  variant?: "payer" | "nonpayer";
   googleAccessToken?: string;
 }): Promise<{ workbook: WorkbookMeta }> {
-  const { customerId, uid, spreadsheetId, spreadsheetName: nameHint, enrollmentId, googleAccessToken } = args;
+  const { customerId, uid, spreadsheetId, spreadsheetName: nameHint, enrollmentId, variant, googleAccessToken } = args;
 
   // The candidate came from a mime-filtered folder listing, so its name and type
   // are already known client-side — linking needs NO Drive call. Only when the
@@ -279,6 +283,7 @@ export async function attachWorkbookCandidate(args: {
     linkedAt: now,
     updatedAt: now,
     linkedBy: uid,
+    ...(variant ? { variant } : {}),
     ...(enrollmentId ? { linkedEnrollmentId: enrollmentId } : {}),
   };
 
@@ -313,9 +318,10 @@ export async function convertXlsxAndAttach(args: {
   fileId: string;
   fileName?: string;
   enrollmentId?: string;
+  variant?: "payer" | "nonpayer";
   googleAccessToken?: string;
 }): Promise<{ workbook: WorkbookMeta; converted: true }> {
-  const { customerId, uid, fileId, fileName, enrollmentId, googleAccessToken } = args;
+  const { customerId, uid, fileId, fileName, enrollmentId, variant, googleAccessToken } = args;
 
   // Writable Drive client (folder surface — fallback chain, user OAuth preferred).
   const drive = await getDriveClient({
@@ -399,6 +405,7 @@ export async function convertXlsxAndAttach(args: {
     linkedAt: now,
     updatedAt: now,
     linkedBy: uid,
+    ...(variant ? { variant } : {}),
     ...(enrollmentId ? { linkedEnrollmentId: enrollmentId } : {}),
   };
 
@@ -496,6 +503,7 @@ export async function copyWorkbookFromTemplate(args: {
     linkedAt: now,
     updatedAt: now,
     linkedBy: uid,
+    variant,
     ...(enrollmentId ? { linkedEnrollmentId: enrollmentId } : {}),
   };
 
@@ -506,4 +514,37 @@ export async function copyWorkbookFromTemplate(args: {
     .set({ customerDrive: { linkedWorkbooks: { tss: workbook } } }, { merge: true });
 
   return { workbook, copiedFromTemplateId: sourceId };
+}
+
+/**
+ * Sets (or changes) the payer/non-payer variant on an already-linked TSS
+ * workbook. Pure metadata write — no Drive call. Used by the Integrations tab
+ * and workbook detail panel to toggle AI case-note eligibility (the case note
+ * assistant only allows customers whose linked workbook variant is "payer").
+ */
+export async function setWorkbookVariant(args: {
+  customerId: string;
+  uid: string;
+  variant: "payer" | "nonpayer";
+}): Promise<{ workbook: WorkbookMeta }> {
+  const { customerId, uid, variant } = args;
+
+  const customerDoc = await getCustomerDoc(customerId);
+  if (!customerDoc) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+
+  const cDrive = customerDoc.customerDrive as Record<string, unknown> | null | undefined;
+  const linkedWorkbooks = cDrive?.linkedWorkbooks as Record<string, unknown> | null | undefined;
+  const existing = linkedWorkbooks?.tss as WorkbookMeta | null | undefined;
+  if (!existing?.spreadsheetId) throw Object.assign(new Error("workbook_not_linked"), { code: 404 });
+
+  const now = isoNow();
+  const workbook: WorkbookMeta = { ...existing, variant, updatedAt: now };
+
+  await admin
+    .firestore()
+    .collection("customers")
+    .doc(customerId)
+    .set({ customerDrive: { linkedWorkbooks: { tss: { variant, updatedAt: now, updatedBy: uid } } } }, { merge: true });
+
+  return { workbook };
 }

@@ -39,6 +39,9 @@ export declare const GrantBudgetManagerRow: z.ZodObject<{
     sourceId: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     ledgerItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     paymentQueueItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    enrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    paymentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    rentCertDueOn: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     grantId: z.ZodString;
     lineItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -129,6 +132,9 @@ export declare const GrantBudgetManagerSaveBody: z.ZodObject<{
         sourceId: z.ZodDefault<z.ZodOptional<z.ZodString>>;
         ledgerItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         paymentQueueItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        enrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        paymentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        rentCertDueOn: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         grantId: z.ZodString;
         lineItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;

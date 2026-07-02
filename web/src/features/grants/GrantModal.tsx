@@ -27,7 +27,7 @@ import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { isAdminLike, isViewerLike } from "@lib/roles";
 import { toApiError } from "@client/api";
 import type { TGrant as Grant, ISODate } from "@types";
-import { DetailsTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab, AdminTab } from "./tabs";
+import { DetailsTab, ConfigTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab, AdminTab } from "./tabs";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 import { GrantAdminMenu } from "./GrantAdminMenu";
@@ -226,6 +226,7 @@ const pickNonMeta = (obj: Record<string, unknown>) => {
     if (k === "orgId" || k === "kind" || k === "deleted") continue;
     if (
       k === "tags" ||
+      k === "linking" ||
       k === "eligibility" ||
       k === "lengthOfAssistance" ||
       k === "invoiceDocuments" ||
@@ -249,6 +250,9 @@ const OPTIONAL_UNSET_FIELDS = [
   "maxLengthOfAssistance",
   "maximumLengthOfAssistance",
   "servicesOffered",
+  "tags",
+  "invoicing",
+  "linking",
 ] as const;
 
 function isEmptyOptionalValue(value: unknown): boolean {
@@ -289,9 +293,10 @@ const grantKindOf = (row: Record<string, unknown>): "grant" | "program" => {
   return total <= 0 ? "program" : "grant";
 };
 
-type GrantTab = "details" | "budget" | "tasks" | "assessments" | "allocation" | "admin";
+type GrantTab = "details" | "config" | "budget" | "tasks" | "assessments" | "allocation" | "admin";
 
 const tabFromQuery = (tab: string | null): GrantTab => {
+  if (tab === "config") return "config";
   if (tab === "budget" || tab === "activity") return "budget";
   if (tab === "tasks") return "tasks";
   if (tab === "assessments") return "assessments";
@@ -312,6 +317,26 @@ type Props = {
 
 const STATUS_OPTS = ["active", "draft", "closed"] as const;
 
+/**
+ * GrantDetailModal — grant/program detail + edit surface
+ * (Details, Config, Budget & Activity, Allocation, Tasks, Assessments, Admin tabs).
+ *
+ * ── MOUNTING ──────────────────────────────────────────────────────────────────
+ * This component is NOT opened directly anywhere in the app shell. It is always
+ * rendered through GrantWorkspaceModal (in `pageMode`) — the surface actually
+ * opened from the Budget/Programs pages, pinned grant cards, RentalAssistanceTool,
+ * and the intercepting /grants/[grantId] route — plus the full-page
+ * /grants/[grantId] route. The standalone <Modal> branch below is effectively
+ * legacy and is not the live surface.
+ *
+ * NEW grant/program CREATION does not use this component at all: it uses
+ * creation/NewGrantProgramFlow (the multi-step "grant workspace" builder that
+ * GrantWorkspaceModal renders when grantId is null/"new").
+ *
+ * ⚠️ KEEP THE TWO IN SYNC: any config control added to the tabs here
+ * (e.g. Tags, Links, Line item / Invoice config) must be mirrored into
+ * creation/NewGrantProgramFlow so the create path stays equivalent.
+ */
 export default function GrantDetailModal({
   grantId,
   onClose,
@@ -340,11 +365,11 @@ export default function GrantDetailModal({
   });
   const { data: activeGrants = [] } = useGrants(
     { active: true, limit: 200 },
-    { enabled: isCreate },
+    { enabled: true },
   );
   const { data: inactiveGrants = [] } = useGrants(
     { active: false, limit: 200 },
-    { enabled: isCreate },
+    { enabled: true },
   );
   const allGrants: Grant[] = useMemo(
     () => [...(activeGrants as Grant[]), ...(inactiveGrants as Grant[])],
@@ -486,8 +511,7 @@ export default function GrantDetailModal({
     return window.confirm("You have unsaved changes. Discard them?");
   };
 
-  const saveDisabled =
-    !String(model?.name ?? "").trim() || !String(model?.startDate ?? "").trim();
+  const saveDisabled = !String(model?.name ?? "").trim();
 
   const toggleEditing = () => {
     if (editing) {
@@ -502,7 +526,7 @@ export default function GrantDetailModal({
     try {
       if (!canEditGrant) return;
       if (saveDisabled) {
-        toast("Name and Start Date are required.", { type: "error" });
+        toast("Name is required.", { type: "error" });
         return;
       }
       setSaving(true);
@@ -510,8 +534,8 @@ export default function GrantDetailModal({
       const clean = stripServerManagedForWrite(stripId(model));
       const updates: Record<string, unknown> = {
         ...clean,
-        startDate: safeISODate10(clean.startDate) || "",
-        endDate: safeISODate10(clean.endDate) || "",
+        startDate: safeISODate10(clean.startDate) || null,
+        endDate: safeISODate10(clean.endDate) || null,
       };
       if (!canEditKind && !isCreate && grant?.kind) {
         updates.kind = grant.kind;
@@ -916,6 +940,7 @@ export default function GrantDetailModal({
           currency={currency}
           STATUS_OPTS={STATUS_OPTS}
           financialCapabilities={financialVisibility.capabilities}
+          allGrants={allGrants}
         />
       )}
 
@@ -1034,6 +1059,7 @@ function TabsRouter(props: {
   currency: (n: number) => string;
   STATUS_OPTS: readonly string[];
   financialCapabilities: ReturnType<typeof getGrantFinancialVisibility>["capabilities"];
+  allGrants: Grant[];
 }) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<GrantTab>(tabFromQuery(searchParams.get("tab")));
@@ -1050,6 +1076,7 @@ function TabsRouter(props: {
 
   const TAB_LABELS: Record<GrantTab, string> = {
     details:     "Details",
+    config:      "Config",
     budget:      "Budget & Activity",
     tasks:       "Tasks",
     assessments: "Assessments",
@@ -1060,7 +1087,7 @@ function TabsRouter(props: {
   return (
     <>
       <div className="tabs mt-4" data-tour="grant-tabs">
-        {(["details", "budget", "allocation", "tasks", "assessments", "admin"] as const)
+        {(["details", "config", "budget", "allocation", "tasks", "assessments", "admin"] as const)
           .filter((t) => {
             if (t === "budget")     return props.showBudgetTab;
             if (t === "allocation") return props.showAllocationTab;
@@ -1096,6 +1123,16 @@ function TabsRouter(props: {
         />
       )}
 
+      {tab === "config" && (
+        <ConfigTab
+          editing={props.editing}
+          model={props.model}
+          setModel={props.setModel}
+          grant={props.grant}
+          allGrants={props.allGrants}
+        />
+      )}
+
       {tab === "budget" && props.showBudgetTab && (
         <BudgetActivityTab
           editing={props.editing}
@@ -1107,6 +1144,7 @@ function TabsRouter(props: {
           num={num}
           grantId={props.grantId}
           drawsDownBudget={props.financialCapabilities.drawsDownBudget}
+          canManageBudget={!!props.isAdmin}
         />
       )}
 

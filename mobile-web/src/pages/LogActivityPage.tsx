@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,6 +15,9 @@ import { enqueueOutbox, isOnline } from "@/lib/sessionOutbox";
 import { buildProgressNoteValues, staffInitials } from "@/lib/sessionSync";
 import type { CustomerOption } from "@/components/CustomerPicker";
 import type { TCmActivityType } from "@hdb/contracts";
+import { sessionDurationMinutes } from "@/lib/sessionDuration";
+import { CaseNoteAssistant } from "@/components/CaseNoteAssistant";
+import { useCaseNoteAssistantConfig } from "@/hooks/useCaseNoteAssistant";
 
 const TYPES: { value: TCmActivityType; label: string; emoji: string }[] = [
   { value: "in-person",  label: "In Person",    emoji: "🤝" },
@@ -204,6 +207,12 @@ export function LogActivityPage() {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [note, setNote] = useState("");
+  const aiConfig = useCaseNoteAssistantConfig();
+  const workbookVariant = String(customerDetail?.customerDrive?.linkedWorkbooks?.tss?.variant ?? customerDetail?.customerDrive?.linkedWorkbooks?.tss?.workbookVariant ?? customerDetail?.customerDrive?.linkedWorkbooks?.tss?.detectedVariant ?? "").toLowerCase();
+  const showCaseNoteAssistant = aiConfig.data?.enabled === true && prefs.allowAiAssistance && !!workbookLink && workbookVariant === "payer";
+  const visitLengthMinutes = useMemo(() => {
+    return sessionDurationMinutes(startTime, endTime);
+  }, [startTime, endTime]);
 
   // Calendar toggle — requires a connection AND a start time (calendar events
   // need a time; an all-day "session" isn't useful). Default-on only when a
@@ -492,6 +501,17 @@ export function LogActivityPage() {
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 placeholder:text-slate-400 resize-none"
           />
         </div>
+
+        {showCaseNoteAssistant && customer ? (
+          <CaseNoteAssistant
+            customerId={customer.id}
+            draft={note}
+            visitLengthMinutes={visitLengthMinutes}
+            clientLabel={aiConfig.data?.defaultClientLabel ?? "client"}
+            staffLabel={aiConfig.data?.defaultStaffLabel ?? "case manager"}
+            onAccept={setNote}
+          />
+        ) : null}
 
         {/* Calendar toggle */}
         <div className="bg-white rounded-xl border border-slate-200 px-4 py-3.5 flex items-center gap-3">

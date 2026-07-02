@@ -232,6 +232,49 @@ export declare const TaskScheduleMeta: z.ZodObject<{
         nanoseconds: z.ZodNumber;
     }, z.core.$strip>]>>>>;
 }, z.core.$loose>;
+export declare const EnrollmentContinuity: z.ZodObject<{
+    continuumId: z.ZodString;
+    kind: z.ZodDefault<z.ZodLiteral<"grantCycle">>;
+    previousEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    nextEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    rolloverSource: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        admin: "admin";
+        migration: "migration";
+        backfill: "backfill";
+    }>>>;
+    cutoffDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$loose>;
+export type TEnrollmentContinuity = z.infer<typeof EnrollmentContinuity>;
+export declare const EnrollmentClientAllocation: z.ZodObject<{
+    amount: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+        seconds: z.ZodNumber;
+        nanoseconds: z.ZodNumber;
+    }, z.core.$strip>]>>>>;
+    updatedBy: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$loose>;
+export type TEnrollmentClientAllocation = z.infer<typeof EnrollmentClientAllocation>;
+export declare const EnrollmentProgramAutomation: z.ZodObject<{
+    targetGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    createdByRule: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$loose>;
+export type TEnrollmentProgramAutomation = z.infer<typeof EnrollmentProgramAutomation>;
+export declare const EnrollmentUnenrollmentReview: z.ZodObject<{
+    required: z.ZodDefault<z.ZodBoolean>;
+    reason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    flaggedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+        seconds: z.ZodNumber;
+        nanoseconds: z.ZodNumber;
+    }, z.core.$strip>]>>>>;
+    clearedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+        seconds: z.ZodNumber;
+        nanoseconds: z.ZodNumber;
+    }, z.core.$strip>]>>>>;
+}, z.core.$loose>;
+export type TEnrollmentUnenrollmentReview = z.infer<typeof EnrollmentUnenrollmentReview>;
 /** Primary enrollment record. */
 export declare const Enrollment: z.ZodObject<{
     id: z.ZodString;
@@ -251,6 +294,45 @@ export declare const Enrollment: z.ZodObject<{
         grantId: z.ZodString;
         cutover: z.ZodString;
     }, z.core.$strip>>>;
+    continuity: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        continuumId: z.ZodString;
+        kind: z.ZodDefault<z.ZodLiteral<"grantCycle">>;
+        previousEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        nextEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        rolloverSource: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            admin: "admin";
+            migration: "migration";
+            backfill: "backfill";
+        }>>>;
+        cutoffDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>;
+    clientAllocation: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        amount: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+        updatedBy: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>;
+    programAutomation: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        targetGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        createdByRule: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$loose>>>;
+    unenrollmentReview: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        required: z.ZodDefault<z.ZodBoolean>;
+        reason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        flaggedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+        clearedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+    }, z.core.$loose>>>;
     active: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     status: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         active: "active";
@@ -349,6 +431,20 @@ export declare const Enrollment: z.ZodObject<{
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>>;
     spends: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -609,6 +705,45 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         grantId: z.ZodString;
         cutover: z.ZodString;
     }, z.core.$strip>>>>;
+    continuity: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        continuumId: z.ZodString;
+        kind: z.ZodDefault<z.ZodLiteral<"grantCycle">>;
+        previousEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        nextEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        rolloverSource: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            admin: "admin";
+            migration: "migration";
+            backfill: "backfill";
+        }>>>;
+        cutoffDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>>;
+    clientAllocation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        amount: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+        updatedBy: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>>;
+    programAutomation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        targetGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        createdByRule: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$loose>>>>;
+    unenrollmentReview: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        required: z.ZodDefault<z.ZodBoolean>;
+        reason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        flaggedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+        clearedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+    }, z.core.$loose>>>>;
     active: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
     status: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         active: "active";
@@ -707,6 +842,20 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>>>;
     spends: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -927,6 +1076,45 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         grantId: z.ZodString;
         cutover: z.ZodString;
     }, z.core.$strip>>>>;
+    continuity: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        continuumId: z.ZodString;
+        kind: z.ZodDefault<z.ZodLiteral<"grantCycle">>;
+        previousEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        nextEnrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        rolloverSource: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            admin: "admin";
+            migration: "migration";
+            backfill: "backfill";
+        }>>>;
+        cutoffDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>>;
+    clientAllocation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        amount: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+        note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+        updatedBy: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>>;
+    programAutomation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        targetGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        createdByRule: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$loose>>>>;
+    unenrollmentReview: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        required: z.ZodDefault<z.ZodBoolean>;
+        reason: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        sourceEnrollmentIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        flaggedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+        clearedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{
+            seconds: z.ZodNumber;
+            nanoseconds: z.ZodNumber;
+        }, z.core.$strip>]>>>>;
+    }, z.core.$loose>>>>;
     active: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
     status: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         active: "active";
@@ -1025,6 +1213,20 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>>>;
     spends: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -1421,6 +1623,109 @@ export type TEnrollmentsMigrateResp = Ok<{
     fromGrantId: string;
     toGrantId: string;
 }>;
+export declare const EnrollmentsContinuumSummaryQuery: z.ZodObject<{
+    enrollmentId: z.ZodString;
+}, z.core.$loose>;
+export type TEnrollmentsContinuumSummaryQuery = z.infer<typeof EnrollmentsContinuumSummaryQuery>;
+export type TEnrollmentsContinuumSummaryResp = Ok<{
+    continuumId: string;
+    currentEnrollmentId: string | null;
+    assistanceMonthsReceived: number;
+    assistanceMonthKeys: string[];
+    allocation: {
+        editable: number;
+        calculated: number;
+        effective: number;
+    };
+    enrollments: Array<{
+        id: string;
+        grantId: string;
+        grantName: string | null;
+        startDate: string | null;
+        endDate: string | null;
+        editableAllocation: number | null;
+        calculatedAllocation: number;
+        effectiveAllocation: number;
+    }>;
+    rentCertEvents: Array<{
+        targetDate: string;
+        dueDate: string;
+        enrollmentId: string;
+        paymentId: string;
+        source: "calculated" | "manual";
+    }>;
+}>;
+export declare const EnrollmentsAllocationSetBody: z.ZodObject<{
+    enrollmentId: z.ZodString;
+    amount: z.ZodNullable<z.ZodNumber>;
+    note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$loose>;
+export type TEnrollmentsAllocationSetBody = z.infer<typeof EnrollmentsAllocationSetBody>;
+export type TEnrollmentsAllocationSetResp = Ok<{
+    enrollmentId: string;
+}>;
+export declare const EnrollmentsCycleRolloverPreviewBody: z.ZodObject<{
+    grantId: z.ZodString;
+    cutoverDate: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+export type TEnrollmentsCycleRolloverPreviewBody = z.infer<typeof EnrollmentsCycleRolloverPreviewBody>;
+export declare const EnrollmentCycleRolloverPreviewItem: z.ZodObject<{
+    enrollmentId: z.ZodString;
+    customerId: z.ZodString;
+    customerName: z.ZodNullable<z.ZodString>;
+    eligible: z.ZodBoolean;
+    blockers: z.ZodArray<z.ZodString>;
+    warnings: z.ZodArray<z.ZodString>;
+    futureUnpaidPayments: z.ZodNumber;
+    futureOpenReminders: z.ZodNumber;
+    calculatedAllocation: z.ZodNumber;
+}, z.core.$strip>;
+export type TEnrollmentCycleRolloverPreviewItem = z.infer<typeof EnrollmentCycleRolloverPreviewItem>;
+export type TEnrollmentsCycleRolloverPreviewResp = Ok<{
+    fromGrantId: string;
+    toGrantId: string;
+    cutoverDate: string;
+    sourceCloseDate: string;
+    blockers: string[];
+    warnings: string[];
+    items: TEnrollmentCycleRolloverPreviewItem[];
+}>;
+export declare const EnrollmentsCycleRolloverRunBody: z.ZodObject<{
+    grantId: z.ZodString;
+    cutoverDate: z.ZodOptional<z.ZodString>;
+    enrollmentIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    confirm: z.ZodLiteral<"ROLLOVER">;
+}, z.core.$loose>;
+export type TEnrollmentsCycleRolloverRunBody = z.infer<typeof EnrollmentsCycleRolloverRunBody>;
+export type TEnrollmentsCycleRolloverRunResp = Ok<{
+    fromGrantId: string;
+    toGrantId: string;
+    cutoverDate: string;
+    results: Array<{
+        enrollmentId: string;
+        ok: boolean;
+        destinationEnrollmentId?: string;
+        skipped?: string;
+        error?: string;
+    }>;
+}>;
+export declare const EnrollmentsLinkedProgramsReconcileBody: z.ZodObject<{
+    grantIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    dryRun: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$loose>;
+export type TEnrollmentsLinkedProgramsReconcileBody = z.infer<typeof EnrollmentsLinkedProgramsReconcileBody>;
+export type TEnrollmentsLinkedProgramsReconcileResp = Ok<{
+    dryRun: boolean;
+    sourceEnrollments: number;
+    missingTargets: number;
+    duplicateTargets: number;
+    reconciled: number;
+    issues: Array<{
+        customerId: string;
+        targetGrantId: string;
+        issue: string;
+    }>;
+}>;
 export declare const EnrollmentsUndoMigrationBody: z.ZodObject<{
     migrationId: z.ZodString;
 }, z.core.$loose>;
@@ -1437,8 +1742,8 @@ export declare const EnrollmentsAdminReverseLedgerEntryBody: z.ZodObject<{
     ledgerId: z.ZodString;
     mode: z.ZodOptional<z.ZodEnum<{
         budget: "budget";
-        ledger: "ledger";
         both: "both";
+        ledger: "ledger";
     }>>;
     note: z.ZodOptional<z.ZodString>;
 }, z.core.$loose>;

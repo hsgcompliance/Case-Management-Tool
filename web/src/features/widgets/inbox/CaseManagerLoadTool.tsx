@@ -503,7 +503,6 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
             filenameBase={`case-loads-${month}`}
             columns={[
               { key: "caseManagerName", label: "Case Manager", value: (r: CaseManagerLoadRow) => r.caseManagerName },
-              { key: "acuityScore", label: "Acuity Score", value: (r: CaseManagerLoadRow) => (r.acuityScore === null ? "" : r.acuityScore.toFixed(2)) },
               { key: "openTasks", label: "Open Tasks", value: (r: CaseManagerLoadRow) => r.openTasks },
               { key: "completedTasks", label: "Completed Tasks", value: (r: CaseManagerLoadRow) => r.completedTasks },
               { key: "totalTasks", label: "Total Tasks", value: (r: CaseManagerLoadRow) => r.totalTasks },
@@ -518,7 +517,6 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
         <ToolTable
           headers={[
             "Staff",
-            <span key="acuity" className="block text-right">Acuity</span>,
             <span key="open" className="block text-right">Open Tasks</span>,
             <span key="completed" className="block text-right">Completed</span>,
             <span key="total" className="block text-right">Total</span>,
@@ -534,7 +532,7 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
           rows={
             (workloadQ.isLoading || caseloadData.isLoading) ? (
               <tr>
-                <td colSpan={showLegacyCols ? 7 : 5}>Loading workload...</td>
+                <td colSpan={showLegacyCols ? 6 : 4}>Loading workload...</td>
               </tr>
             ) : pagination.pageRows.length ? (
               pagination.pageRows.map((r) => {
@@ -546,7 +544,6 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
                     onClick={() => setSelectedUid(r.caseManagerId, r)}
                   >
                     <td>{r.caseManagerName}</td>
-                    <td className="text-right">{r.acuityScore === null ? "--" : r.acuityScore.toFixed(2)}</td>
                     <td className="text-right font-semibold">{r.openTasks}</td>
                     <td className="text-right">{r.completedTasks}</td>
                     <td className="text-right">{r.totalTasks}</td>
@@ -557,7 +554,7 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
               })
             ) : (
               <tr>
-                <td colSpan={showLegacyCols ? 7 : 5}>No workload rows found for this month.</td>
+                <td colSpan={showLegacyCols ? 6 : 4}>No workload rows found for this month.</td>
               </tr>
             )
           }
@@ -592,7 +589,7 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             <div className="card-section rounded border border-slate-200">
               <div className="text-xs text-slate-500">Open</div>
               <div className="text-xl font-semibold">{selectedRow.openTasks}</div>
@@ -604,10 +601,6 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
             <div className="card-section rounded border border-slate-200">
               <div className="text-xs text-slate-500">Total</div>
               <div className="text-xl font-semibold">{selectedRow.totalTasks}</div>
-            </div>
-            <div className="card-section rounded border border-slate-200">
-              <div className="text-xs text-slate-500">Acuity Score</div>
-              <div className="text-xl font-semibold">{selectedRow.acuityScore === null ? "--" : selectedRow.acuityScore.toFixed(2)}</div>
             </div>
             <div className="card-section rounded border border-slate-200">
               <div className="text-xs text-slate-500">Customers</div>

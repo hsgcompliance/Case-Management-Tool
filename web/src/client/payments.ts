@@ -25,6 +25,7 @@ import {
   PaymentsBulkCopyScheduleBody,
   PaymentsSpendBody,
   PaymentsUpdateComplianceBody,
+  PaymentsRentCertSetBody,
   PaymentsDeleteRowsBody,
   PaymentsUpdateGrantBudgetBody,
   PaymentsRecalcGrantProjectedBody,
@@ -221,6 +222,12 @@ export const Payments = {
       'paymentsUpdateCompliance',
       PaymentsUpdateComplianceBody.parse(body),
     ) as Promise<PaymentsUpdateComplianceResp>,
+
+  setRentCert: (body: ReqOf<"paymentsRentCertSet">) =>
+    api.post(
+      "paymentsRentCertSet",
+      PaymentsRentCertSetBody.parse(body),
+    ) as Promise<RespOf<"paymentsRentCertSet">>,
 
   deleteRows: (body: ReqOf<"paymentsDeleteRows">) =>
     api.post(

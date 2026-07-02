@@ -13,6 +13,7 @@ import { useEditActivity, useDeleteActivity, type SessionEditFields } from "@/ho
 import { SyncChip, SyncButton } from "@/components/SyncControls";
 import { CustomerFolderSection } from "@/components/CustomerFolderSection";
 import { WorkbookLinkSection } from "@/components/WorkbookLinkSection";
+import { WorkbookVariantToggle } from "@/components/WorkbookVariantToggle";
 import { ProgramEditSheet, type ProgramEditPatch } from "@/components/ProgramEditSheet";
 import { EnrollProgramSheet } from "@/components/EnrollProgramSheet";
 import { DATE_RANGE_CHIPS, type DateRangeKey } from "@/lib/dateRange";
@@ -1486,6 +1487,7 @@ function PlanTab({ customer }: { customer: Customer }) {
           </button>
         </div>
         {link && <WorkbookOpenLink url={link.url} label={link.name} />}
+        {link && <WorkbookVariantToggle customerId={customer.id} variant={customer.customerDrive?.linkedWorkbooks?.tss?.variant} />}
       </div>
     );
   }
@@ -1506,6 +1508,7 @@ function PlanTab({ customer }: { customer: Customer }) {
           <p className="text-xs text-amber-700 mt-1">{data?.kind === "error" ? data.message : "Please try again."}</p>
         </div>
         {link && <WorkbookOpenLink url={link.url} label={link.name} />}
+        {link && <WorkbookVariantToggle customerId={customer.id} variant={customer.customerDrive?.linkedWorkbooks?.tss?.variant} />}
       </div>
     );
   }
@@ -1529,6 +1532,7 @@ function PlanTab({ customer }: { customer: Customer }) {
       )}
 
       <WorkbookOpenLink url={openUrl} label={openLabel} />
+      <WorkbookVariantToggle customerId={customer.id} variant={customer.customerDrive?.linkedWorkbooks?.tss?.variant} />
 
       {/* Goals */}
       <section>

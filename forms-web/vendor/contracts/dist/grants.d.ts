@@ -10,8 +10,8 @@ export declare const GrantStatus: z.ZodEnum<{
 }>;
 export type TGrantStatus = z.infer<typeof GrantStatus>;
 export declare const GrantKind: z.ZodEnum<{
-    grant: "grant";
     program: "program";
+    grant: "grant";
 }>;
 export type TGrantKind = z.infer<typeof GrantKind>;
 export declare const GrantFinancialModel: z.ZodEnum<{
@@ -205,6 +205,16 @@ export declare const GrantBudgetSplitGoal: z.ZodObject<{
 }, z.core.$loose>;
 export type TGrantBudgetSplitGoal = z.infer<typeof GrantBudgetSplitGoal>;
 export declare const GrantBudgetItemDisplayConfig: z.ZodObject<{
+    cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+        split: "split";
+        total: "total";
+    }>>;
+    displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+    digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+        total: "total";
+        currentCycle: "currentCycle";
+        both: "both";
+    }>>;
     showGrantTotal: z.ZodOptional<z.ZodBoolean>;
     showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
     showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -232,6 +242,38 @@ export declare const GrantBudgetBreakdownValidation: z.ZodObject<{
     variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
 }, z.core.$loose>;
 export type TGrantBudgetBreakdownValidation = z.infer<typeof GrantBudgetBreakdownValidation>;
+export declare const GrantInvoiceOption: z.ZodObject<{
+    id: z.ZodString;
+    label: z.ZodString;
+    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    enabled: z.ZodOptional<z.ZodBoolean>;
+    custom: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$loose>;
+export type TGrantInvoiceOption = z.infer<typeof GrantInvoiceOption>;
+export declare const GrantLineItemInvoicing: z.ZodObject<{
+    functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        label: z.ZodString;
+        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        enabled: z.ZodOptional<z.ZodBoolean>;
+        custom: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$loose>>>>;
+    descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        label: z.ZodString;
+        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        enabled: z.ZodOptional<z.ZodBoolean>;
+        custom: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$loose>>>>;
+}, z.core.$loose>;
+export type TGrantLineItemInvoicing = z.infer<typeof GrantLineItemInvoicing>;
 export declare const GrantBudgetLineItem: z.ZodObject<{
     id: z.ZodOptional<z.ZodString>;
     label: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -277,6 +319,16 @@ export declare const GrantBudgetLineItem: z.ZodObject<{
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>>;
     display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+            split: "split";
+            total: "total";
+        }>>;
+        displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+        digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+            total: "total";
+            currentCycle: "currentCycle";
+            both: "both";
+        }>>;
         showGrantTotal: z.ZodOptional<z.ZodBoolean>;
         showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
         showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -301,6 +353,28 @@ export declare const GrantBudgetLineItem: z.ZodObject<{
         message: z.ZodOptional<z.ZodString>;
         splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
         variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+    }, z.core.$loose>>>;
+    invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodString;
+            code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            enabled: z.ZodOptional<z.ZodBoolean>;
+            custom: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$loose>>>>;
+        descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodString;
+            code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            enabled: z.ZodOptional<z.ZodBoolean>;
+            custom: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$loose>>>>;
     }, z.core.$loose>>>;
 }, z.core.$loose>;
 export type TGrantBudgetLineItem = z.infer<typeof GrantBudgetLineItem>;
@@ -378,6 +452,16 @@ export declare const GrantBudget: z.ZodObject<{
             notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
         display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                split: "split";
+                total: "total";
+            }>>;
+            displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+            digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                total: "total";
+                currentCycle: "currentCycle";
+                both: "both";
+            }>>;
             showGrantTotal: z.ZodOptional<z.ZodBoolean>;
             showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
             showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -402,6 +486,28 @@ export declare const GrantBudget: z.ZodObject<{
             message: z.ZodOptional<z.ZodString>;
             splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
             variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+        }, z.core.$loose>>>;
+        invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                label: z.ZodString;
+                code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                enabled: z.ZodOptional<z.ZodBoolean>;
+                custom: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$loose>>>>;
+            descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                label: z.ZodString;
+                code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                enabled: z.ZodOptional<z.ZodBoolean>;
+                custom: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$loose>>>>;
         }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -620,15 +726,6 @@ export declare const GrantInvoicingFrequency: z.ZodEnum<{
     "on-demand": "on-demand";
 }>;
 export type TGrantInvoicingFrequency = z.infer<typeof GrantInvoicingFrequency>;
-export declare const GrantInvoiceOption: z.ZodObject<{
-    id: z.ZodString;
-    label: z.ZodString;
-    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    enabled: z.ZodOptional<z.ZodBoolean>;
-    custom: z.ZodOptional<z.ZodBoolean>;
-}, z.core.$loose>;
-export type TGrantInvoiceOption = z.infer<typeof GrantInvoiceOption>;
 /**
  * Optional invoicing metadata stored on the grant doc.
  * Covers grant codes, contract references, funder contacts, and billing details.
@@ -686,6 +783,46 @@ export declare const GrantEnrollmentDefaults: z.ZodObject<{
     }>>>;
 }, z.core.$loose>;
 export type TGrantEnrollmentDefaults = z.infer<typeof GrantEnrollmentDefaults>;
+export declare const GrantCycleLink: z.ZodObject<{
+    previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$loose>;
+export type TGrantCycleLink = z.infer<typeof GrantCycleLink>;
+export declare const GrantEnrollmentLinkRule: z.ZodObject<{
+    targetGrantId: z.ZodString;
+    onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+    onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+}, z.core.$loose>;
+export type TGrantEnrollmentLinkRule = z.infer<typeof GrantEnrollmentLinkRule>;
+export declare const GrantEnrollmentRequirement: z.ZodObject<{
+    operator: z.ZodDefault<z.ZodEnum<{
+        any: "any";
+        all: "all";
+    }>>;
+    targetGrantIds: z.ZodArray<z.ZodString>;
+    behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+}, z.core.$loose>;
+export type TGrantEnrollmentRequirement = z.infer<typeof GrantEnrollmentRequirement>;
+export declare const GrantLinking: z.ZodObject<{
+    cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$loose>>>;
+    enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        operator: z.ZodDefault<z.ZodEnum<{
+            any: "any";
+            all: "all";
+        }>>;
+        targetGrantIds: z.ZodArray<z.ZodString>;
+        behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+    }, z.core.$loose>>>;
+    enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        targetGrantId: z.ZodString;
+        onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+        onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+    }, z.core.$loose>>>;
+}, z.core.$loose>;
+export type TGrantLinking = z.infer<typeof GrantLinking>;
 /** ---------- Grant (INPUT) ---------- */
 export declare const GrantInputSchema: z.ZodObject<{
     id: z.ZodOptional<z.ZodString>;
@@ -700,8 +837,8 @@ export declare const GrantInputSchema: z.ZodObject<{
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -784,6 +921,16 @@ export declare const GrantInputSchema: z.ZodObject<{
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -808,6 +955,28 @@ export declare const GrantInputSchema: z.ZodObject<{
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -1015,6 +1184,25 @@ export declare const GrantInputSchema: z.ZodObject<{
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -1047,8 +1235,8 @@ export declare const Grant: z.ZodObject<{
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -1131,6 +1319,16 @@ export declare const Grant: z.ZodObject<{
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -1155,6 +1353,28 @@ export declare const Grant: z.ZodObject<{
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -1362,6 +1582,25 @@ export declare const Grant: z.ZodObject<{
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -1392,8 +1631,8 @@ export declare const GrantEntity: z.ZodObject<{
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -1476,6 +1715,16 @@ export declare const GrantEntity: z.ZodObject<{
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -1500,6 +1749,28 @@ export declare const GrantEntity: z.ZodObject<{
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -1707,6 +1978,25 @@ export declare const GrantEntity: z.ZodObject<{
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -1739,8 +2029,8 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -1823,6 +2113,16 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -1847,6 +2147,28 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -2054,6 +2376,25 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -2083,8 +2424,8 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -2167,6 +2508,16 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -2191,6 +2542,28 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -2398,6 +2771,25 @@ export declare const GrantsUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zo
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -2428,8 +2820,8 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -2512,6 +2904,16 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -2536,6 +2938,28 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -2743,6 +3167,25 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -2772,8 +3215,8 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
     deleted: z.ZodOptional<z.ZodBoolean>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     kind: z.ZodOptional<z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>>;
     financialConfig: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         model: z.ZodOptional<z.ZodEnum<{
@@ -2856,6 +3299,16 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                 notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>>;
             display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    split: "split";
+                    total: "total";
+                }>>;
+                displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                    total: "total";
+                    currentCycle: "currentCycle";
+                    both: "both";
+                }>>;
                 showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                 showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                 showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -2880,6 +3333,28 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                 message: z.ZodOptional<z.ZodString>;
                 splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                 variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+            }, z.core.$loose>>>;
+            invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
+                descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    label: z.ZodString;
+                    code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    enabled: z.ZodOptional<z.ZodBoolean>;
+                    custom: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$loose>>>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
         digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -3087,6 +3562,25 @@ export declare const GrantUpsertBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
             active: "active";
             closed: "closed";
         }>>>;
+    }, z.core.$loose>>>;
+    linking: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        }, z.core.$loose>>>;
+        enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            operator: z.ZodDefault<z.ZodEnum<{
+                any: "any";
+                all: "all";
+            }>>;
+            targetGrantIds: z.ZodArray<z.ZodString>;
+            behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+        }, z.core.$loose>>>;
+        enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            targetGrantId: z.ZodString;
+            onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+            onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+        }, z.core.$loose>>>;
     }, z.core.$loose>>>;
     invoiceDocuments: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     levelOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
@@ -3123,8 +3617,8 @@ export declare const GrantsPatchRow: z.ZodPreprocess<z.ZodObject<{
         deleted: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         orgId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         kind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
-            grant: "grant";
             program: "program";
+            grant: "grant";
         }>>>;
         financialConfig: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             model: z.ZodOptional<z.ZodEnum<{
@@ -3207,6 +3701,16 @@ export declare const GrantsPatchRow: z.ZodPreprocess<z.ZodObject<{
                     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>>;
                 display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        split: "split";
+                        total: "total";
+                    }>>;
+                    displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                    digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        total: "total";
+                        currentCycle: "currentCycle";
+                        both: "both";
+                    }>>;
                     showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                     showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                     showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -3231,6 +3735,28 @@ export declare const GrantsPatchRow: z.ZodPreprocess<z.ZodObject<{
                     message: z.ZodOptional<z.ZodString>;
                     splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                     variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+                }, z.core.$loose>>>;
+                invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
+                    descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
             digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -3438,6 +3964,25 @@ export declare const GrantsPatchRow: z.ZodPreprocess<z.ZodObject<{
                 active: "active";
                 closed: "closed";
             }>>>;
+        }, z.core.$loose>>>>;
+        linking: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$loose>>>;
+            enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                operator: z.ZodDefault<z.ZodEnum<{
+                    any: "any";
+                    all: "all";
+                }>>;
+                targetGrantIds: z.ZodArray<z.ZodString>;
+                behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+            }, z.core.$loose>>>;
+            enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                targetGrantId: z.ZodString;
+                onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+                onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+            }, z.core.$loose>>>;
         }, z.core.$loose>>>>;
         invoiceDocuments: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>>;
         levelOfAssistance: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
@@ -3472,8 +4017,8 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
         deleted: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         orgId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         kind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
-            grant: "grant";
             program: "program";
+            grant: "grant";
         }>>>;
         financialConfig: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             model: z.ZodOptional<z.ZodEnum<{
@@ -3556,6 +4101,16 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>>;
                 display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        split: "split";
+                        total: "total";
+                    }>>;
+                    displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                    digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        total: "total";
+                        currentCycle: "currentCycle";
+                        both: "both";
+                    }>>;
                     showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                     showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                     showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -3580,6 +4135,28 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                     message: z.ZodOptional<z.ZodString>;
                     splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                     variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+                }, z.core.$loose>>>;
+                invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
+                    descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
             digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -3787,6 +4364,25 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                 active: "active";
                 closed: "closed";
             }>>>;
+        }, z.core.$loose>>>>;
+        linking: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$loose>>>;
+            enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                operator: z.ZodDefault<z.ZodEnum<{
+                    any: "any";
+                    all: "all";
+                }>>;
+                targetGrantIds: z.ZodArray<z.ZodString>;
+                behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+            }, z.core.$loose>>>;
+            enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                targetGrantId: z.ZodString;
+                onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+                onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+            }, z.core.$loose>>>;
         }, z.core.$loose>>>>;
         invoiceDocuments: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>>;
         levelOfAssistance: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
@@ -3820,8 +4416,8 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
         deleted: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         orgId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         kind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
-            grant: "grant";
             program: "program";
+            grant: "grant";
         }>>>;
         financialConfig: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             model: z.ZodOptional<z.ZodEnum<{
@@ -3904,6 +4500,16 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>>;
                 display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        split: "split";
+                        total: "total";
+                    }>>;
+                    displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                    digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        total: "total";
+                        currentCycle: "currentCycle";
+                        both: "both";
+                    }>>;
                     showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                     showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                     showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -3928,6 +4534,28 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                     message: z.ZodOptional<z.ZodString>;
                     splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                     variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+                }, z.core.$loose>>>;
+                invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
+                    descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
             digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -4135,6 +4763,25 @@ export declare const GrantsPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.Zod
                 active: "active";
                 closed: "closed";
             }>>>;
+        }, z.core.$loose>>>>;
+        linking: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$loose>>>;
+            enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                operator: z.ZodDefault<z.ZodEnum<{
+                    any: "any";
+                    all: "all";
+                }>>;
+                targetGrantIds: z.ZodArray<z.ZodString>;
+                behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+            }, z.core.$loose>>>;
+            enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                targetGrantId: z.ZodString;
+                onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+                onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+            }, z.core.$loose>>>;
         }, z.core.$loose>>>>;
         invoiceDocuments: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>>;
         levelOfAssistance: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
@@ -4169,8 +4816,8 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
         deleted: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         orgId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         kind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
-            grant: "grant";
             program: "program";
+            grant: "grant";
         }>>>;
         financialConfig: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             model: z.ZodOptional<z.ZodEnum<{
@@ -4253,6 +4900,16 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
                     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>>;
                 display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        split: "split";
+                        total: "total";
+                    }>>;
+                    displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                    digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        total: "total";
+                        currentCycle: "currentCycle";
+                        both: "both";
+                    }>>;
                     showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                     showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                     showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -4277,6 +4934,28 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
                     message: z.ZodOptional<z.ZodString>;
                     splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                     variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+                }, z.core.$loose>>>;
+                invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
+                    descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
             digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -4484,6 +5163,25 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
                 active: "active";
                 closed: "closed";
             }>>>;
+        }, z.core.$loose>>>>;
+        linking: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$loose>>>;
+            enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                operator: z.ZodDefault<z.ZodEnum<{
+                    any: "any";
+                    all: "all";
+                }>>;
+                targetGrantIds: z.ZodArray<z.ZodString>;
+                behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+            }, z.core.$loose>>>;
+            enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                targetGrantId: z.ZodString;
+                onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+                onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+            }, z.core.$loose>>>;
         }, z.core.$loose>>>>;
         invoiceDocuments: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>>;
         levelOfAssistance: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
@@ -4517,8 +5215,8 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
         deleted: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         orgId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         kind: z.ZodOptional<z.ZodOptional<z.ZodEnum<{
-            grant: "grant";
             program: "program";
+            grant: "grant";
         }>>>;
         financialConfig: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             model: z.ZodOptional<z.ZodEnum<{
@@ -4601,6 +5299,16 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
                     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>>;
                 display: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    cycleDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        split: "split";
+                        total: "total";
+                    }>>;
+                    displayOnDigest: z.ZodOptional<z.ZodBoolean>;
+                    digestDisplayMode: z.ZodOptional<z.ZodEnum<{
+                        total: "total";
+                        currentCycle: "currentCycle";
+                        both: "both";
+                    }>>;
                     showGrantTotal: z.ZodOptional<z.ZodBoolean>;
                     showLineItemTotal: z.ZodOptional<z.ZodBoolean>;
                     showSplitGoals: z.ZodOptional<z.ZodBoolean>;
@@ -4625,6 +5333,28 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
                     message: z.ZodOptional<z.ZodString>;
                     splitTotal: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
                     variance: z.ZodOptional<z.ZodDefault<z.ZodCoercedNumber<unknown>>>;
+                }, z.core.$loose>>>;
+                invoicing: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                    functionalGroup: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    grantCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    programCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    hmisCode: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                    expenseCategories: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
+                    descriptionTemplates: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        label: z.ZodString;
+                        code: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        template: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                        enabled: z.ZodOptional<z.ZodBoolean>;
+                        custom: z.ZodOptional<z.ZodBoolean>;
+                    }, z.core.$loose>>>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
             digestDisplay: z.ZodOptional<z.ZodNullable<z.ZodObject<{
@@ -4832,6 +5562,25 @@ export declare const GrantPatchBody: z.ZodUnion<readonly [z.ZodPreprocess<z.ZodO
                 active: "active";
                 closed: "closed";
             }>>>;
+        }, z.core.$loose>>>>;
+        linking: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            cycle: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                previousGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                nextGrantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$loose>>>;
+            enrollmentRequirement: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+                operator: z.ZodDefault<z.ZodEnum<{
+                    any: "any";
+                    all: "all";
+                }>>;
+                targetGrantIds: z.ZodArray<z.ZodString>;
+                behavior: z.ZodDefault<z.ZodLiteral<"warnOnly">>;
+            }, z.core.$loose>>>;
+            enrollmentRules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                targetGrantId: z.ZodString;
+                onEnroll: z.ZodDefault<z.ZodLiteral<"ensureActive">>;
+                onAllSourcesClosed: z.ZodDefault<z.ZodLiteral<"flagShouldUnenroll">>;
+            }, z.core.$loose>>>;
         }, z.core.$loose>>>>;
         invoiceDocuments: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>>;
         levelOfAssistance: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
@@ -4872,8 +5621,8 @@ export declare const GrantsListQuery: z.ZodObject<{
     status: z.ZodOptional<z.ZodString>;
     active: z.ZodOptional<z.ZodUnion<readonly [z.ZodPreprocess<z.ZodUnion<readonly [z.ZodLiteral<true>, z.ZodLiteral<false>]>>, z.ZodUnion<readonly [z.ZodBoolean, z.ZodLiteral<"true">, z.ZodLiteral<"false">, z.ZodLiteral<1>, z.ZodLiteral<0>, z.ZodLiteral<"1">, z.ZodLiteral<"0">]>, z.ZodString]>>;
     kind: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
-        grant: "grant";
         program: "program";
+        grant: "grant";
     }>, z.ZodString]>>;
     limit: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
     cursorUpdatedAt: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodObject<{

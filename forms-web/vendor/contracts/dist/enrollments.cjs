@@ -25,23 +25,33 @@ __export(enrollments_exports, {
   EnrollmentActionHistoryRecord: () => EnrollmentActionHistoryRecord,
   EnrollmentActions: () => EnrollmentActions,
   EnrollmentActionsApplyBody: () => EnrollmentActionsApplyBody,
+  EnrollmentClientAllocation: () => EnrollmentClientAllocation,
   EnrollmentCompliance: () => EnrollmentCompliance,
+  EnrollmentContinuity: () => EnrollmentContinuity,
+  EnrollmentCycleRolloverPreviewItem: () => EnrollmentCycleRolloverPreviewItem,
   EnrollmentGetByIdQuery: () => EnrollmentGetByIdQuery,
   EnrollmentMedicaid: () => EnrollmentMedicaid,
   EnrollmentMedicaidStatus: () => EnrollmentMedicaidStatus,
+  EnrollmentProgramAutomation: () => EnrollmentProgramAutomation,
   EnrollmentServiceStatus: () => EnrollmentServiceStatus,
+  EnrollmentUnenrollmentReview: () => EnrollmentUnenrollmentReview,
   EnrollmentsAdminDeleteBody: () => EnrollmentsAdminDeleteBody,
   EnrollmentsAdminDeleteResp: () => EnrollmentsAdminDeleteResp,
   EnrollmentsAdminReverseLedgerEntryBody: () => EnrollmentsAdminReverseLedgerEntryBody,
+  EnrollmentsAllocationSetBody: () => EnrollmentsAllocationSetBody,
   EnrollmentsBackfillNamesBody: () => EnrollmentsBackfillNamesBody,
   EnrollmentsBulkEnrollBody: () => EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery: () => EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery: () => EnrollmentsCheckOverlapsQuery,
+  EnrollmentsContinuumSummaryQuery: () => EnrollmentsContinuumSummaryQuery,
+  EnrollmentsCycleRolloverPreviewBody: () => EnrollmentsCycleRolloverPreviewBody,
+  EnrollmentsCycleRolloverRunBody: () => EnrollmentsCycleRolloverRunBody,
   EnrollmentsDeleteBody: () => EnrollmentsDeleteBody,
   EnrollmentsDeleteCoreOutput: () => EnrollmentsDeleteCoreOutput,
   EnrollmentsDeleteResp: () => EnrollmentsDeleteResp,
   EnrollmentsDeleteResultItem: () => EnrollmentsDeleteResultItem,
   EnrollmentsEnrollCustomerBody: () => EnrollmentsEnrollCustomerBody,
+  EnrollmentsLinkedProgramsReconcileBody: () => EnrollmentsLinkedProgramsReconcileBody,
   EnrollmentsListQuery: () => EnrollmentsListQuery,
   EnrollmentsMigrateBody: () => EnrollmentsMigrateBody,
   EnrollmentsPatchBody: () => EnrollmentsPatchBody,
@@ -147,7 +157,13 @@ var CustomerMeta = import_zod2.z.object({
   // Legacy primary folder pointer kept for backward compatibility. Prefer
   // customerDrive.folderId for new resolvers and mirror writes during migration.
   driveFolderId: import_zod2.z.string().nullish(),
-  notes: import_zod2.z.string().nullish()
+  notes: import_zod2.z.string().nullish(),
+  // Household / family linking (Customer-Collection-Update). Denormalized
+  // pointer to the canonical households/{id} doc this customer belongs to; the
+  // member list itself lives on the household doc. Scalar = one primary
+  // household per customer. See contracts/src/households.ts.
+  householdId: import_zod2.z.string().trim().nullish(),
+  householdRelationship: import_zod2.z.string().trim().nullish()
 }).passthrough().nullish();
 var AssistanceLength = import_zod2.z.object({
   firstDateOfAssistance: ISO10.nullish(),
@@ -212,6 +228,7 @@ var CustomerInputSchema = import_zod2.z.object({
         defaultEmbedSheetName: import_zod2.z.string().nullish(),
         defaultSheetGid: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.number()]).nullish(),
         progressNotesGid: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.number()]).nullish(),
+        variant: import_zod2.z.enum(["payer", "nonpayer"]).nullish(),
         lastValidatedAt: import_zod2.z.string().nullish()
       }).passthrough().nullish()
     }).passthrough().nullish()
@@ -349,6 +366,14 @@ var PaymentCompliance = import_zod2.z.object({
   status: import_zod2.z.string().nullish(),
   note: import_zod2.z.string().nullish()
 });
+var RentCertStatus = import_zod2.z.enum(["due", "completed", "effective"]);
+var PaymentRentCert = import_zod2.z.object({
+  dueDate: import_zod2.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  targetPaymentDate: import_zod2.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: import_zod2.z.enum(["calculated", "manual"]).default("calculated"),
+  taskIds: import_zod2.z.array(import_zod2.z.string()).default([]),
+  status: RentCertStatus.default("due")
+}).passthrough();
 var Payment = import_zod2.z.object({
   id: import_zod2.z.string().optional(),
   // core
@@ -370,7 +395,8 @@ var Payment = import_zod2.z.object({
   notifyCM: import_zod2.z.boolean().nullish(),
   // used by inbox trigger logic
   // compliance
-  compliance: PaymentCompliance.nullish()
+  compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish()
 });
 var PaymentEntity = Payment.extend({
   id: import_zod2.z.string().min(1)
@@ -505,7 +531,8 @@ var PaymentProjectionInput = import_zod2.z.object({
   note: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.array(import_zod2.z.string())]).nullish(),
   vendor: import_zod2.z.string().nullish(),
   comment: import_zod2.z.string().nullish(),
-  compliance: PaymentCompliance.nullish()
+  compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish()
 }).superRefine((v, ctx) => {
   const hasDue = !!v.dueDate;
   const hasDate = !!v.date;
@@ -551,6 +578,13 @@ var PaymentsUpdateComplianceBody = import_zod2.z.object({
   paymentId: import_zod2.z.string().min(1),
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch
+});
+var RentCertToggle = import_zod2.z.enum(["notDue", "due", "completed", "effective"]);
+var PaymentsRentCertSetBody = import_zod2.z.object({
+  enrollmentId: import_zod2.z.string().min(1),
+  paymentId: import_zod2.z.string().min(1),
+  status: RentCertToggle.optional(),
+  dueDate: ISO10ish.nullish()
 });
 var PaymentsDeleteRowsBody = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
@@ -979,6 +1013,32 @@ var TaskScheduleMeta = import_zod2.z.object({
   defs: import_zod2.z.array(import_zod2.z.unknown()).default([]),
   savedAt: TsLike.nullish().optional()
 }).passthrough();
+var EnrollmentContinuity = import_zod2.z.object({
+  continuumId: Id,
+  kind: import_zod2.z.literal("grantCycle").default("grantCycle"),
+  previousEnrollmentId: Id.nullable().optional(),
+  nextEnrollmentId: Id.nullable().optional(),
+  rolloverSource: import_zod2.z.enum(["admin", "migration", "backfill"]).nullish(),
+  cutoffDate: ISO10.nullish()
+}).passthrough();
+var EnrollmentClientAllocation = import_zod2.z.object({
+  amount: import_zod2.z.number().min(0).nullable().optional(),
+  note: import_zod2.z.string().trim().max(1e3).nullable().optional(),
+  updatedAt: TsLike.nullish().optional(),
+  updatedBy: import_zod2.z.string().trim().nullable().optional()
+}).passthrough();
+var EnrollmentProgramAutomation = import_zod2.z.object({
+  targetGrantId: Id.nullish(),
+  sourceEnrollmentIds: import_zod2.z.array(Id).default([]),
+  createdByRule: import_zod2.z.boolean().default(false)
+}).passthrough();
+var EnrollmentUnenrollmentReview = import_zod2.z.object({
+  required: import_zod2.z.boolean().default(false),
+  reason: import_zod2.z.string().trim().nullable().optional(),
+  sourceEnrollmentIds: import_zod2.z.array(Id).default([]),
+  flaggedAt: TsLike.nullish().optional(),
+  clearedAt: TsLike.nullish().optional()
+}).passthrough();
 var Enrollment = import_zod2.z.object({
   id: Id,
   grantId: import_zod2.z.string(),
@@ -991,6 +1051,10 @@ var Enrollment = import_zod2.z.object({
   endDate: import_zod2.z.string().nullable().optional(),
   migratedFrom: import_zod2.z.object({ enrollmentId: import_zod2.z.string(), grantId: import_zod2.z.string(), cutover: import_zod2.z.string() }).nullable().optional(),
   migratedTo: import_zod2.z.object({ enrollmentId: import_zod2.z.string(), grantId: import_zod2.z.string(), cutover: import_zod2.z.string() }).nullable().optional(),
+  continuity: EnrollmentContinuity.nullish(),
+  clientAllocation: EnrollmentClientAllocation.nullish(),
+  programAutomation: EnrollmentProgramAutomation.nullish(),
+  unenrollmentReview: EnrollmentUnenrollmentReview.nullish(),
   active: import_zod2.z.boolean().nullable().optional(),
   status: import_zod2.z.enum(["active", "deleted", "closed"]).nullable().optional(),
   deleted: import_zod2.z.boolean().nullable().optional(),
@@ -1202,6 +1266,35 @@ var EnrollmentsMigrateBody = import_zod2.z.object({
   closeSourceTaskMode: import_zod2.z.enum(["complete", "delete"]).optional(),
   closeSourcePaymentMode: import_zod2.z.enum(["spendUnpaid", "deleteUnpaid", "keep"]).optional()
 }).passthrough();
+var EnrollmentsContinuumSummaryQuery = import_zod2.z.object({ enrollmentId: Id }).passthrough();
+var EnrollmentsAllocationSetBody = import_zod2.z.object({
+  enrollmentId: Id,
+  amount: import_zod2.z.number().min(0).nullable(),
+  note: import_zod2.z.string().trim().max(1e3).nullable().optional()
+}).passthrough();
+var EnrollmentsCycleRolloverPreviewBody = import_zod2.z.object({
+  grantId: Id,
+  cutoverDate: ISO10.optional()
+}).passthrough();
+var EnrollmentCycleRolloverPreviewItem = import_zod2.z.object({
+  enrollmentId: Id,
+  customerId: Id,
+  customerName: import_zod2.z.string().nullable(),
+  eligible: import_zod2.z.boolean(),
+  blockers: import_zod2.z.array(import_zod2.z.string()),
+  warnings: import_zod2.z.array(import_zod2.z.string()),
+  futureUnpaidPayments: import_zod2.z.number().int().nonnegative(),
+  futureOpenReminders: import_zod2.z.number().int().nonnegative(),
+  calculatedAllocation: import_zod2.z.number().nonnegative()
+});
+var EnrollmentsCycleRolloverRunBody = EnrollmentsCycleRolloverPreviewBody.extend({
+  enrollmentIds: import_zod2.z.array(Id).min(1).max(500).optional(),
+  confirm: import_zod2.z.literal("ROLLOVER")
+});
+var EnrollmentsLinkedProgramsReconcileBody = import_zod2.z.object({
+  grantIds: import_zod2.z.array(Id).max(50).optional(),
+  dryRun: import_zod2.z.boolean().default(true)
+}).passthrough();
 var EnrollmentsUndoMigrationBody = import_zod2.z.object({
   migrationId: Id
 }).passthrough();
@@ -1217,23 +1310,33 @@ var EnrollmentsAdminReverseLedgerEntryBody = import_zod2.z.object({
   EnrollmentActionHistoryRecord,
   EnrollmentActions,
   EnrollmentActionsApplyBody,
+  EnrollmentClientAllocation,
   EnrollmentCompliance,
+  EnrollmentContinuity,
+  EnrollmentCycleRolloverPreviewItem,
   EnrollmentGetByIdQuery,
   EnrollmentMedicaid,
   EnrollmentMedicaidStatus,
+  EnrollmentProgramAutomation,
   EnrollmentServiceStatus,
+  EnrollmentUnenrollmentReview,
   EnrollmentsAdminDeleteBody,
   EnrollmentsAdminDeleteResp,
   EnrollmentsAdminReverseLedgerEntryBody,
+  EnrollmentsAllocationSetBody,
   EnrollmentsBackfillNamesBody,
   EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery,
+  EnrollmentsContinuumSummaryQuery,
+  EnrollmentsCycleRolloverPreviewBody,
+  EnrollmentsCycleRolloverRunBody,
   EnrollmentsDeleteBody,
   EnrollmentsDeleteCoreOutput,
   EnrollmentsDeleteResp,
   EnrollmentsDeleteResultItem,
   EnrollmentsEnrollCustomerBody,
+  EnrollmentsLinkedProgramsReconcileBody,
   EnrollmentsListQuery,
   EnrollmentsMigrateBody,
   EnrollmentsPatchBody,

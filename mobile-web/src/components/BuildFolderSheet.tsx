@@ -119,6 +119,25 @@ export function BuildFolderSheet({
       });
       if (!resp.ok || !resp.folder) { setError(resp.error || "Could not build folder."); return; }
       if (resp.linked === false) { setError(resp.linkError || "Folder built but linking failed."); return; }
+
+      // The atomic server-side auto-link (inside gdriveBuildCustomerFolder) writes
+      // the workbook without a variant. Re-apply it here so the chosen Medicaid
+      // toggle actually sticks (controls AI case note assistant eligibility).
+      const builtWorkbook = resp.folder.workbook;
+      if (hasVariantTemplate && builtWorkbook?.spreadsheetId) {
+        try {
+          await GoogleIntegrations.linkWorkbookCandidate({
+            customerId,
+            spreadsheetId: builtWorkbook.spreadsheetId,
+            spreadsheetName: builtWorkbook.name,
+            variant,
+          });
+        } catch {
+          // Non-blocking — the folder + workbook are already linked; the variant
+          // just didn't stick and can be set later from the Plan tab.
+        }
+      }
+
       onBuilt({ url: resp.folder.url, name: resp.folder.name });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not build folder.");

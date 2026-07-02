@@ -66,7 +66,7 @@ export async function callFunction<T = unknown>(
 
   const json = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error((json as { error?: string }).error ?? `HTTP ${resp.status}`);
+    throw new Error((json as { message?: string; error?: string }).message ?? (json as { error?: string }).error ?? `HTTP ${resp.status}`);
   }
   return json as T;
 }

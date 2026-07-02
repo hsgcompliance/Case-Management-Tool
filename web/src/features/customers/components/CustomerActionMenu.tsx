@@ -12,11 +12,12 @@ import { toApiError } from "@client/api";
 import { todayISO } from "./paymentScheduleUtils";
 
 // Selected-state colors for the Tier 1/2/3 mini-cards / pickers.
-// Tier 1 = highest acuity/risk (red) → Tier 3 = lowest (green).
+// Tier 1 = highest risk (red) → Tier 3 = lowest (green).
+// Saturated, high-contrast fills so the active tier reads at a glance on the card.
 export const TIER_SELECTED_CLASS: Record<number, string> = {
-  1: "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-200",
-  2: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200",
-  3: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-200",
+  1: "border-rose-700 bg-rose-600 text-white shadow-sm dark:border-rose-500 dark:bg-rose-700 dark:text-white",
+  2: "border-amber-500 bg-amber-400 text-amber-950 shadow-sm dark:border-amber-400 dark:bg-amber-500 dark:text-amber-950",
+  3: "border-emerald-700 bg-emerald-600 text-white shadow-sm dark:border-emerald-500 dark:bg-emerald-700 dark:text-white",
 };
 
 function displayName(customer: Pick<TCustomerEntity, "name" | "firstName" | "lastName">): string {

@@ -4,7 +4,9 @@ You are working in Households DB v2, a Firebase/Next.js operations app for custo
 
 > **Sync note:** This file is the canonical agent instruction source. If you update it, also update the relevant entries in the `.claude/` project memory (`~/.claude/projects/.../memory/`). The memory captures *why* and *context*; this file captures *what to do*.
 
-> **Local machine shortcut:** If you are operating on `AzureAD+GriffinSeyfried@HRDCL-Energy009` (MINGW64 / Windows dev workstation), the graph is already built, the environment is already configured, and the full first-reads orientation below is optional - the live files are authoritative. You can skip straight to the relevant feature files identified via `graphify-out/GRAPH_REPORT.md`.
+> **Local machine shortcut:** If you are operating on `AzureAD+GriffinSeyfried@HRDCL-Energy009` (MINGW64 / Windows dev workstation, `C:\Users\gseyfried\`), the graph is already built, the environment is already configured, and the full first-reads orientation below is optional - the live files are authoritative. You can skip straight to the relevant feature files identified via `graphify-out/GRAPH_REPORT.md`.
+
+> **No emulators on this workstation:** This machine (`C:\Users\gseyfried\` / `AzureAD+GriffinSeyfried@HRDCL-Energy009`) cannot efficiently run the Firebase emulator suite + auth for a system this large (the full set of Cloud Functions). Do **not** run `npm run emulators` or local auth here for this project - it is slow, unstable, and not worth the time. Verify with builds/unit tests (see [Verification](#verification)) and test backend changes by deploying to a real Firebase environment via the safe deploy scripts instead.
 
 ## First Reads
 
@@ -140,5 +142,7 @@ npm run build:functions
 npm run build:web
 npm -w web run test:unit
 ```
+
+Do **not** rely on the Firebase emulators for verification on this workstation (`C:\Users\gseyfried\` / `AzureAD+GriffinSeyfried@HRDCL-Energy009`) - it cannot efficiently run the emulator suite + auth for this many functions. Prefer builds + unit tests locally, and exercise backend behavior by deploying to a real Firebase environment.
 
 If verification cannot run, report exactly what failed and what risk remains.

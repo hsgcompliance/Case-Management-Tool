@@ -38,9 +38,12 @@ __export(grants_exports, {
   GrantComplianceConfig: () => GrantComplianceConfig,
   GrantComplianceControl: () => GrantComplianceControl,
   GrantCompliancePreset: () => GrantCompliancePreset,
+  GrantCycleLink: () => GrantCycleLink,
   GrantDriveTemplate: () => GrantDriveTemplate,
   GrantDriveTemplateType: () => GrantDriveTemplateType,
   GrantEnrollmentDefaults: () => GrantEnrollmentDefaults,
+  GrantEnrollmentLinkRule: () => GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement: () => GrantEnrollmentRequirement,
   GrantEntity: () => GrantEntity,
   GrantFinancialConfig: () => GrantFinancialConfig,
   GrantFinancialConfigPatch: () => GrantFinancialConfigPatch,
@@ -52,7 +55,9 @@ __export(grants_exports, {
   GrantKind: () => GrantKind,
   GrantLedgerMode: () => GrantLedgerMode,
   GrantLineItemCap: () => GrantLineItemCap,
+  GrantLineItemInvoicing: () => GrantLineItemInvoicing,
   GrantLineItemType: () => GrantLineItemType,
+  GrantLinking: () => GrantLinking,
   GrantPatchBody: () => GrantPatchBody,
   GrantPinDigest: () => GrantPinDigest,
   GrantPinImportant: () => GrantPinImportant,
@@ -481,6 +486,11 @@ var GrantBudgetSplitGoal = import_zod2.z.object({
   notes: import_zod2.z.string().trim().nullish()
 }).passthrough();
 var GrantBudgetItemDisplayConfig = import_zod2.z.object({
+  /** Budget card cycle presentation. Missing values preserve the legacy total view. */
+  cycleDisplayMode: import_zod2.z.enum(["split", "total"]).optional(),
+  /** Explicit digest participation. `appearInDigest` remains a legacy read alias. */
+  displayOnDigest: import_zod2.z.boolean().optional(),
+  digestDisplayMode: import_zod2.z.enum(["currentCycle", "total", "both"]).optional(),
   showGrantTotal: import_zod2.z.boolean().optional(),
   showLineItemTotal: import_zod2.z.boolean().optional(),
   showSplitGoals: import_zod2.z.boolean().optional(),
@@ -495,6 +505,22 @@ var GrantBudgetBreakdownValidation = import_zod2.z.object({
   message: import_zod2.z.string().trim().optional(),
   splitTotal: Num.optional(),
   variance: Num.optional()
+}).passthrough();
+var GrantInvoiceOption = import_zod2.z.object({
+  id: import_zod2.z.string().trim().min(1),
+  label: import_zod2.z.string().trim().min(1),
+  code: import_zod2.z.string().trim().nullish(),
+  template: import_zod2.z.string().trim().nullish(),
+  enabled: import_zod2.z.boolean().optional(),
+  custom: import_zod2.z.boolean().optional()
+}).passthrough();
+var GrantLineItemInvoicing = import_zod2.z.object({
+  functionalGroup: import_zod2.z.string().trim().nullish(),
+  grantCode: import_zod2.z.string().trim().nullish(),
+  programCode: import_zod2.z.string().trim().nullish(),
+  hmisCode: import_zod2.z.string().trim().nullish(),
+  expenseCategories: import_zod2.z.array(GrantInvoiceOption).nullish(),
+  descriptionTemplates: import_zod2.z.array(GrantInvoiceOption).nullish()
 }).passthrough();
 var GrantBudgetLineItem = import_zod2.z.object({
   id: Id.optional(),
@@ -527,7 +553,9 @@ var GrantBudgetLineItem = import_zod2.z.object({
   splitEndDate: import_zod2.z.string().trim().nullish(),
   splitGoals: import_zod2.z.array(GrantBudgetSplitGoal).optional().default([]),
   display: GrantBudgetItemDisplayConfig.nullish(),
-  breakdownValidation: GrantBudgetBreakdownValidation.nullish()
+  breakdownValidation: GrantBudgetBreakdownValidation.nullish(),
+  /** Invoice metadata for this line item. Grant-level invoicing remains legacy read compatibility. */
+  invoicing: GrantLineItemInvoicing.nullish()
 }).passthrough();
 var GrantBudgetTotals = import_zod2.z.object({
   total: Num,
@@ -645,14 +673,6 @@ var GrantPins = import_zod2.z.object({
   important: GrantPinImportant.nullish()
 }).passthrough();
 var GrantInvoicingFrequency = import_zod2.z.enum(["monthly", "quarterly", "annually", "on-demand"]);
-var GrantInvoiceOption = import_zod2.z.object({
-  id: import_zod2.z.string().trim().min(1),
-  label: import_zod2.z.string().trim().min(1),
-  code: import_zod2.z.string().trim().nullish(),
-  template: import_zod2.z.string().trim().nullish(),
-  enabled: import_zod2.z.boolean().optional(),
-  custom: import_zod2.z.boolean().optional()
-}).passthrough();
 var GrantInvoicing = import_zod2.z.object({
   /** Grant identifier used on invoices / reimbursement requests */
   grantCode: import_zod2.z.string().trim().nullish(),
@@ -698,6 +718,27 @@ var GrantEnrollmentDefaults = import_zod2.z.object({
   serviceStatus: import_zod2.z.enum(["active", "paused"]).nullable().optional(),
   medicaidStatus: import_zod2.z.enum(["active", "closed"]).nullable().optional()
 }).passthrough();
+var GrantCycleLink = import_zod2.z.object({
+  previousGrantId: Id.nullable().optional(),
+  nextGrantId: Id.nullable().optional()
+}).passthrough();
+var GrantEnrollmentLinkRule = import_zod2.z.object({
+  targetGrantId: Id,
+  onEnroll: import_zod2.z.literal("ensureActive").default("ensureActive"),
+  onAllSourcesClosed: import_zod2.z.literal("flagShouldUnenroll").default("flagShouldUnenroll")
+}).passthrough();
+var GrantEnrollmentRequirement = import_zod2.z.object({
+  operator: import_zod2.z.enum(["all", "any"]).default("all"),
+  targetGrantIds: import_zod2.z.array(Id).min(1).max(20),
+  behavior: import_zod2.z.literal("warnOnly").default("warnOnly")
+}).passthrough();
+var GrantLinking = import_zod2.z.object({
+  cycle: GrantCycleLink.nullish(),
+  /** Enrollment eligibility requirement. Consumers surface warnings only. */
+  enrollmentRequirement: GrantEnrollmentRequirement.nullish(),
+  /** Legacy enrollment automation rules retained for read compatibility. */
+  enrollmentRules: import_zod2.z.array(GrantEnrollmentLinkRule).max(20).default([])
+}).passthrough();
 var GrantInputSchema = import_zod2.z.object({
   id: Id.optional(),
   name: import_zod2.z.string().trim().min(1),
@@ -733,6 +774,8 @@ var GrantInputSchema = import_zod2.z.object({
   invoicing: GrantInvoicing.nullish(),
   /** Optional enrollment defaults such as TSS authorization windows. */
   enrollmentDefaults: GrantEnrollmentDefaults.nullish(),
+  /** Explicit lifecycle links. Navigation-only related* fields below do not drive automation. */
+  linking: GrantLinking.nullish(),
   /** Optional documents expected for payment/invoice processing. */
   invoiceDocuments: import_zod2.z.array(import_zod2.z.string().trim()).nullish(),
   /** Optional internal guidance mapping assistance levels to eligibility criteria. */
@@ -892,9 +935,12 @@ var GrantsAdminReconcileBudgetBody = import_zod2.z.object({
   GrantComplianceConfig,
   GrantComplianceControl,
   GrantCompliancePreset,
+  GrantCycleLink,
   GrantDriveTemplate,
   GrantDriveTemplateType,
   GrantEnrollmentDefaults,
+  GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement,
   GrantEntity,
   GrantFinancialConfig,
   GrantFinancialConfigPatch,
@@ -906,7 +952,9 @@ var GrantsAdminReconcileBudgetBody = import_zod2.z.object({
   GrantKind,
   GrantLedgerMode,
   GrantLineItemCap,
+  GrantLineItemInvoicing,
   GrantLineItemType,
+  GrantLinking,
   GrantPatchBody,
   GrantPinDigest,
   GrantPinImportant,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSplitGoals, moneyCents } from "./budgetSplitGoals";
+import { applyCompletedCycleRollover, generateSplitGoals, moneyCents } from "./budgetSplitGoals";
 
 describe("generateSplitGoals", () => {
   it("evenly generates monthly split goals and preserves total cents", () => {
@@ -45,5 +45,23 @@ describe("generateSplitGoals", () => {
   it("returns no generated rows for unsupported modes or invalid windows", () => {
     expect(generateSplitGoals("fixed", 1000, "2026-01-01", "2026-12-31")).toEqual([]);
     expect(generateSplitGoals("monthly", 1000, "2026-12-31", "2026-01-01")).toEqual([]);
+  });
+});
+
+describe("applyCompletedCycleRollover", () => {
+  const goals = generateSplitGoals("monthly", 300, "2026-01-01", "2026-03-31");
+
+  it("rolls an unused completed-cycle balance to the next cycle exactly once", () => {
+    const source = goals.map((goal, index) => ({ ...goal, spent: index === 0 ? 40 : 0 }));
+    const once = applyCompletedCycleRollover(source, "rollToNext", "2026-02-01");
+    const twice = applyCompletedCycleRollover(once, "rollToNext", "2026-02-01");
+    expect(once.map((goal) => goal.amount)).toEqual([100, 160, 100]);
+    expect(twice).toEqual(once);
+  });
+
+  it("pushes to the final cycle or deterministically rebalances future cents", () => {
+    const source = goals.map((goal, index) => ({ ...goal, spent: index === 0 ? 39.99 : 0 }));
+    expect(applyCompletedCycleRollover(source, "rollToEnd", "2026-02-01").map((goal) => moneyCents(goal.amount))).toEqual([10000, 10000, 16001]);
+    expect(applyCompletedCycleRollover(source, "rebalanceFuture", "2026-02-01").map((goal) => moneyCents(goal.amount))).toEqual([10000, 13001, 13000]);
   });
 });
