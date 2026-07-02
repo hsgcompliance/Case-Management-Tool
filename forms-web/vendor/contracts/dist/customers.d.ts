@@ -41,6 +41,8 @@ export declare const CustomerMeta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
     }, z.core.$strip>>>;
     driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$loose>>>;
 export declare const AssistanceLength: z.ZodOptional<z.ZodNullable<z.ZodObject<{
     firstDateOfAssistance: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -118,6 +120,8 @@ export declare const CustomerInputSchema: z.ZodObject<{
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
     customerDrive: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -142,6 +146,10 @@ export declare const CustomerInputSchema: z.ZodObject<{
                 defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                 progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                    payer: "payer";
+                    nonpayer: "nonpayer";
+                }>>>;
                 lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
@@ -225,6 +233,8 @@ export declare const CustomerEntity: z.ZodObject<{
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
     customerDrive: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -249,6 +259,10 @@ export declare const CustomerEntity: z.ZodObject<{
                 defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                 progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                    payer: "payer";
+                    nonpayer: "nonpayer";
+                }>>>;
                 lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
@@ -328,6 +342,8 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
     customerDrive: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -352,6 +368,10 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
                 defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                 progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                    payer: "payer";
+                    nonpayer: "nonpayer";
+                }>>>;
                 lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
@@ -429,6 +449,8 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
     customerDrive: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -453,6 +475,10 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
                 defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                 progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                    payer: "payer";
+                    nonpayer: "nonpayer";
+                }>>>;
                 lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
@@ -535,6 +561,8 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
     customerDrive: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -559,6 +587,10 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
                 defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                 progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                    payer: "payer";
+                    nonpayer: "nonpayer";
+                }>>>;
                 lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
@@ -636,6 +668,8 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
     customerDrive: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -660,6 +694,10 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
                 defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                 progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                    payer: "payer";
+                    nonpayer: "nonpayer";
+                }>>>;
                 lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$loose>>>;
         }, z.core.$loose>>>;
@@ -741,6 +779,8 @@ export declare const CustomersPatchRow: z.ZodObject<{
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
         customerDrive: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -765,6 +805,10 @@ export declare const CustomersPatchRow: z.ZodObject<{
                     defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                     defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                     progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                    variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                        payer: "payer";
+                        nonpayer: "nonpayer";
+                    }>>>;
                     lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
@@ -848,6 +892,8 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
         customerDrive: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -872,6 +918,10 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                     defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                     defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                     progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                    variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                        payer: "payer";
+                        nonpayer: "nonpayer";
+                    }>>>;
                     lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
@@ -954,6 +1004,8 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
         customerDrive: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -978,6 +1030,10 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                     defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                     defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                     progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                    variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                        payer: "payer";
+                        nonpayer: "nonpayer";
+                    }>>>;
                     lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
@@ -1066,6 +1122,8 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
         customerDrive: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -1090,6 +1148,10 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                     defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                     defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                     progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                    variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                        payer: "payer";
+                        nonpayer: "nonpayer";
+                    }>>>;
                     lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;
@@ -1172,6 +1234,8 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
         customerDrive: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             folderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -1196,6 +1260,10 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                     defaultEmbedSheetName: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                     defaultSheetGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
                     progressNotesGid: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>>;
+                    variant: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                        payer: "payer";
+                        nonpayer: "nonpayer";
+                    }>>>;
                     lastValidatedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
                 }, z.core.$loose>>>;
             }, z.core.$loose>>>;

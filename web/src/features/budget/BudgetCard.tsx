@@ -9,6 +9,7 @@ import { useTogglePinnedGrant, usePinnedGrantIds } from "@features/grants/Pinned
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
+import { todayISO, fmtMDY } from "@lib/date";
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
@@ -157,6 +158,18 @@ function getLineItemBudget(grant: Grant, lineItemId: string) {
     available: fromCents(amountCents - spentCents - projectedCents),
     rawBudget: (grant as any)?.budget ?? {},
     label: String(li.label ?? li.id ?? ""),
+    cycleDisplayMode: (li.display as { cycleDisplayMode?: string } | null | undefined)?.cycleDisplayMode === "split" ? "split" : "total",
+    splitGoals: Array.isArray(li.splitGoals)
+      ? li.splitGoals.map((goal: Record<string, unknown>, index: number) => ({
+          id: String(goal.id || `${li.id || "li"}_split_${index}`),
+          label: String(goal.label || `Cycle ${index + 1}`),
+          startDate: String(goal.startDate || ""),
+          endDate: String(goal.endDate || ""),
+          amount: fromCents(toCents(Number(goal.amount || 0))),
+          spent: fromCents(toCents(Number(goal.spent || 0))),
+          projected: fromCents(toCents(Number(goal.projected || 0))),
+        }))
+      : [],
   };
 }
 
@@ -177,6 +190,7 @@ function getBudgetLineItems(grant: Grant) {
       spent,
       projected,
       splitMode: String(item.splitMode || "none"),
+      cycleDisplayMode: (item.display as { cycleDisplayMode?: string } | null | undefined)?.cycleDisplayMode === "split" ? "split" : "total",
       splitGoals: Array.isArray(item.splitGoals)
         ? item.splitGoals.map((goal: Record<string, unknown>, index: number) => ({
             id: String(goal.id || `${item.id || "li"}_split_${index}`),
@@ -192,12 +206,73 @@ function getBudgetLineItems(grant: Grant) {
   });
 }
 
+type SplitGoalDisplay = {
+  id: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  amount: number;
+  spent: number;
+  projected: number;
+};
+
+/** The split goal whose date range covers today, or null if the cycles don't cover the current date. */
+function findCurrentSplitGoal(goals: SplitGoalDisplay[]): SplitGoalDisplay | null {
+  const today = todayISO();
+  return goals.find((goal) => (!goal.startDate || goal.startDate <= today) && (!goal.endDate || goal.endDate >= today)) ?? null;
+}
+
+function cyclePeriodLabel(goal: SplitGoalDisplay) {
+  if (!goal.startDate && !goal.endDate) return "Date range TBD";
+  return `${goal.startDate ? fmtMDY(goal.startDate) : "TBD"} – ${goal.endDate ? fmtMDY(goal.endDate) : "TBD"}`;
+}
+
+/** Full metric-row block for the current cycle — mirrors the card's own Total/Spent/Available layout. */
+function CurrentCycleRows({ goal, drawsDownBudget }: { goal: SplitGoalDisplay; drawsDownBudget: boolean }) {
+  const projectedSpend = goal.spent + goal.projected;
+  const available = goal.amount - projectedSpend;
+  const availClass =
+    !drawsDownBudget
+      ? "text-slate-700 dark:text-slate-200"
+      : available < 0
+      ? "text-red-600 dark:text-red-400"
+      : available < goal.amount * 0.1
+      ? "text-amber-600 dark:text-amber-400"
+      : "text-emerald-600 dark:text-emerald-500";
+
+  return (
+    <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
+      <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
+        <span className="text-xs text-slate-500 dark:text-slate-400">This Cycle · {cyclePeriodLabel(goal)}</span>
+        <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">{fmtUsd(goal.amount)}</span>
+      </div>
+      <MetricRow label="Spent" value={fmtUsd(goal.spent)} valueClass="text-amber-700 dark:text-amber-400" />
+      {drawsDownBudget && (
+        <MetricRow label="Remaining" value={fmtUsd(goal.amount - goal.spent)} valueClass="text-slate-700 dark:text-slate-200" />
+      )}
+      <MetricRow
+        label="Projected to Spend"
+        value={fmtUsd(projectedSpend)}
+        valueClass={drawsDownBudget && projectedSpend > goal.amount ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
+        dimmed={projectedSpend === 0}
+      />
+      <MetricRow
+        label={drawsDownBudget ? "Available" : "Activity Total"}
+        value={fmtUsd(drawsDownBudget ? available : projectedSpend)}
+        valueClass={availClass}
+      />
+    </div>
+  );
+}
+
 function CompactBudgetChildRows({
   grant,
   drawsDownBudget,
+  forceSplit = false,
 }: {
   grant: Grant;
   drawsDownBudget: boolean;
+  forceSplit?: boolean;
 }) {
   const lineItems = getBudgetLineItems(grant).filter((item) => item.id && item.amount > 0);
   if (!lineItems.length) return null;
@@ -207,6 +282,7 @@ function CompactBudgetChildRows({
         {lineItems.slice(0, 6).map((item) => {
           const projectedSpend = item.spent + item.projected;
           const available = item.amount - projectedSpend;
+          const currentGoal = (forceSplit || item.cycleDisplayMode === "split") ? findCurrentSplitGoal(item.splitGoals) : null;
           return (
             <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950/40">
               <div className="flex items-center justify-between gap-3">
@@ -218,21 +294,12 @@ function CompactBudgetChildRows({
                 <span>{fmtUsd(projectedSpend)} projected</span>
                 <span className={drawsDownBudget && available < 0 ? "text-red-500" : "text-emerald-600"}>{fmtUsd(available)} avail.</span>
               </div>
-              {item.splitGoals.length > 0 && (
-                <div className="mt-2 space-y-1 border-l border-slate-200 pl-2 dark:border-slate-700">
-                  {item.splitGoals.slice(0, 4).map((goal) => {
-                    const goalProjectedSpend = goal.spent + goal.projected;
-                    const goalAvailable = goal.amount - goalProjectedSpend;
-                    const period = goal.startDate || goal.endDate ? `${goal.startDate || "TBD"}-${goal.endDate || "TBD"}` : "Date range TBD";
-                    return (
-                      <div key={goal.id} className="flex items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400">
-                        <span className="min-w-0 truncate">{goal.label} · {period}</span>
-                        <span className={drawsDownBudget && goalAvailable < 0 ? "shrink-0 font-semibold text-red-500" : "shrink-0 font-semibold text-slate-600 dark:text-slate-300"}>
-                          {fmtUsd(goalProjectedSpend)} / {fmtUsd(goal.amount)}
-                        </span>
-                      </div>
-                    );
-                  })}
+              {currentGoal && (
+                <div className="mt-2 flex items-center justify-between gap-2 border-l border-slate-200 pl-2 text-[10px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  <span className="min-w-0 truncate">This cycle · {cyclePeriodLabel(currentGoal)}</span>
+                  <span className={drawsDownBudget && currentGoal.amount - (currentGoal.spent + currentGoal.projected) < 0 ? "shrink-0 font-semibold text-red-500" : "shrink-0 font-semibold text-slate-600 dark:text-slate-300"}>
+                    {fmtUsd(currentGoal.spent + currentGoal.projected)} / {fmtUsd(currentGoal.amount)}
+                  </span>
                 </div>
               )}
             </div>
@@ -445,6 +512,8 @@ interface BudgetCardProps {
   cardType?: BudgetCardDisplayType;
   labelOverride?: string;
   accentColor?: string;
+  /** Force split-cycle breakdowns to render regardless of the line item's own display.cycleDisplayMode setting. */
+  forceSplit?: boolean;
   onClick: () => void;
   onManageBudget?: (grantId: string) => void;
   selected?: boolean;
@@ -452,7 +521,7 @@ interface BudgetCardProps {
   onSelectGesture?: (grantId: string, gesture: { source: "card" | "checkbox"; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => void;
 }
 
-export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOverride, accentColor, onClick, onManageBudget, selected = false, selectionMode = false, onSelectGesture }: BudgetCardProps) {
+export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOverride, accentColor, forceSplit = false, onClick, onManageBudget, selected = false, selectionMode = false, onSelectGesture }: BudgetCardProps) {
   const { data: gm } = useGrantMetrics(grant.id);
   const { data: pinnedIds = [] } = usePinnedGrantIds();
   const togglePin = useTogglePinnedGrant();
@@ -465,6 +534,8 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
 
   const liData = lineItemId ? getLineItemBudget(grant, lineItemId) : null;
   const budget = liData ?? getBudget(grant);
+  const showCurrentCycle = !!lineItemId && (forceSplit || liData?.cycleDisplayMode === "split");
+  const currentCycleGoal = showCurrentCycle ? findCurrentSplitGoal(liData?.splitGoals ?? []) : null;
   const financialCapabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
   const drawsDownBudget = financialCapabilities.drawsDownBudget;
   const isBillingMode = !drawsDownBudget && (financialCapabilities.billingEnabled || financialCapabilities.usesBillingLedger);
@@ -625,7 +696,8 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
               valueClass={availClass}
             />
           </div>
-          {!lineItemId && <CompactBudgetChildRows grant={grant} drawsDownBudget={drawsDownBudget} />}
+          {currentCycleGoal && <CurrentCycleRows goal={currentCycleGoal} drawsDownBudget={drawsDownBudget} />}
+          {!lineItemId && <CompactBudgetChildRows grant={grant} drawsDownBudget={drawsDownBudget} forceSplit={forceSplit} />}
         </>
       )}
 

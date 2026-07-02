@@ -682,6 +682,7 @@ export async function buildCustomerFolder(args: {
   subfolders: string[];
   googleAccessToken?: string;
   userUid?: string;
+  existingFolderId?: string;
 }) {
   const drive = await getDriveClient({
     googleAccessToken: args.googleAccessToken,
@@ -690,16 +691,43 @@ export async function buildCustomerFolder(args: {
     requiredScopes: [DRIVE_SCOPE],
   });
 
-  // Create main folder
-  const folderResult = await drive.files.create({
-    requestBody: {
-      name: args.name,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: [args.parentId],
-    },
-    fields: "id,name,webViewLink",
-    supportsAllDrives: true,
-  });
+  // Builds are resumable. A cold-start timeout can happen after Drive accepts
+  // the create request but before the client receives our response.
+  let reused = false;
+  let folderResult: any;
+  const explicitFolderId = String(args.existingFolderId || "").trim();
+  if (explicitFolderId) {
+    folderResult = await drive.files.get({
+      fileId: explicitFolderId,
+      fields: "id,name,webViewLink",
+      supportsAllDrives: true,
+    });
+    reused = true;
+  } else {
+    const escapedName = args.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const existing = await drive.files.list({
+      q: `'${args.parentId}' in parents and name = '${escapedName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: "files(id,name,webViewLink)",
+      pageSize: 2,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    const match = existing.data.files?.[0];
+    if (match?.id) {
+      folderResult = { data: match };
+      reused = true;
+    } else {
+      folderResult = await drive.files.create({
+        requestBody: {
+          name: args.name,
+          mimeType: "application/vnd.google-apps.folder",
+          parents: [args.parentId],
+        },
+        fields: "id,name,webViewLink",
+        supportsAllDrives: true,
+      });
+    }
+  }
 
   const folderId = String(folderResult.data?.id || "").trim();
   if (!folderId) throw new Error("folder_create_no_id");
@@ -711,17 +739,29 @@ export async function buildCustomerFolder(args: {
     error: string;
   }> = [];
 
+  const existingChildren = reused
+    ? await drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: "files(id,name,mimeType,webViewLink)",
+        pageSize: 1000,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      }).then((result) => result.data.files || [])
+    : [];
+
   // Copy template files in parallel. A template failure should not hide the
   // successfully-created customer folder from the app.
   const templateResults = await Promise.allSettled(
-    args.templates.map((tmpl) =>
-      drive.files.copy({
+    args.templates.map((tmpl) => {
+      const alreadyCopied = existingChildren.find((file) => file.name === tmpl.name && file.mimeType !== "application/vnd.google-apps.folder");
+      if (alreadyCopied?.id) return Promise.resolve({ data: alreadyCopied });
+      return drive.files.copy({
         fileId: tmpl.fileId,
         requestBody: { name: tmpl.name, parents: [folderId] },
         fields: "id,name",
         supportsAllDrives: true,
-      }),
-    ),
+      });
+    }),
   );
   templateResults.forEach((result, index) => {
     if (result.status === "fulfilled") return;
@@ -761,6 +801,7 @@ export async function buildCustomerFolder(args: {
   // Create subfolders sequentially (cheap, low risk). Keep going so one bad
   // label does not turn a finished folder into a 500.
   for (const sub of args.subfolders) {
+    if (existingChildren.some((file) => file.name === sub && file.mimeType === "application/vnd.google-apps.folder")) continue;
     try {
       await drive.files.create({
         requestBody: {
@@ -793,6 +834,7 @@ export async function buildCustomerFolder(args: {
     id: folderId,
     name: String(folderResult.data?.name || args.name),
     url: `https://drive.google.com/drive/folders/${folderId}`,
+    reused,
     ...(workbook ? { workbook } : {}),
     ...(warnings.length ? { warnings } : {}),
   };

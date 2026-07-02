@@ -13,8 +13,7 @@ import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
 import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { computeRentCertDues, addMonthsISO, todayISO } from "@features/customers/components/paymentScheduleUtils";
 import { useEnrollmentsPatch } from "@hooks/useEnrollments";
-import { usePaymentsProjectionsAdjust } from "@hooks/usePayments";
-import { useTasksGenerateScheduleWrite } from "@hooks/useTasks";
+import { usePaymentRentCert, usePaymentsProjectionsAdjust } from "@hooks/usePayments";
 import { SortableHeader, sortRows, useTableSort } from "@hooks/useTableSort";
 import type { ReqOf } from "@types";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
@@ -39,6 +38,8 @@ type RentalAssistanceRow = {
   monthsOfAssistance: number | null;
   assistanceEndDate: string;
   nextRentCertDue: string;
+  nextRentCertTargetDate: string;
+  nextRentCertPaymentId: string;
   totalAssistance: number;
   maxAssistanceMonths: number | null;
   maxAssistanceCutoffDate: string;
@@ -56,6 +57,7 @@ type RentalPaymentRef = {
   note?: unknown;
   vendor?: unknown;
   comment?: unknown;
+  rentCert?: { dueDate?: string; targetPaymentDate?: string; source?: string } | null;
 };
 
 type CaseManagerOption = {
@@ -136,6 +138,7 @@ function toRentalPaymentRef(payment: Record<string, unknown>): RentalPaymentRef 
     note: payment.note,
     vendor: payment.vendor,
     comment: payment.comment,
+    rentCert: payment.rentCert && typeof payment.rentCert === "object" ? payment.rentCert as RentalPaymentRef["rentCert"] : null,
   };
 }
 
@@ -149,57 +152,6 @@ function lastUnpaidPayment(payments: RentalPaymentRef[]) {
 
 function unpaidAfter(payments: RentalPaymentRef[], cutoffDate: string) {
   return payments.filter((payment) => !payment.paid && payment.dueDate > cutoffDate);
-}
-
-function cleanTaskIdPart(value: unknown) {
-  return String(value || "rent")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "rent";
-}
-
-function formatRentCertMonth(value: string) {
-  if (!value) return "payment";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function buildRentCertTaskDefs(args: {
-  lineItemId: string;
-  dueDate: string;
-  targetPaymentDate: string;
-  bucket: "task" | "compliance";
-  title: string;
-}) {
-  const label = `${formatRentCertMonth(args.targetPaymentDate)} rent cert due ${formatRentCertMonth(args.dueDate)}`;
-  const idBase = `payment_rent_cert_${cleanTaskIdPart(args.lineItemId)}_${args.targetPaymentDate}`;
-  const description = args.title || "Rent Certification";
-  return [
-    {
-      id: `${idBase}_cm`,
-      name: label,
-      kind: "one-off",
-      dueDate: args.dueDate,
-      bucket: args.bucket,
-      notify: true,
-      assignedToGroup: "casemanager",
-      description,
-      notes: `Collect updated rent certification documents from the customer and landlord by ${formatRentCertMonth(args.dueDate)} for ${formatRentCertMonth(args.targetPaymentDate)} assistance.`,
-    },
-    {
-      id: `${idBase}_compliance`,
-      name: label,
-      kind: "one-off",
-      dueDate: args.dueDate,
-      bucket: args.bucket,
-      notify: true,
-      assignedToGroup: "compliance",
-      description,
-      notes: `Prepare and send the updated rent certification / notice by ${formatRentCertMonth(args.dueDate)} for ${formatRentCertMonth(args.targetPaymentDate)} assistance.`,
-    },
-  ];
 }
 
 function monthDiffInclusive(fromMonth: string, toMonth: string): number | null {
@@ -355,12 +307,14 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         String(enrollment.customerName || enrollment.clientName || customerId || "-");
       const grantName = grantNameById.get(grantId) || String(grant?.name || enrollment.grantName || grantId || "-");
       const totalAssistance = assistancePayments.reduce((sum, payment) => sum + payment.amount, 0);
-      const nextRentCertDue = computeRentCertDues(assistancePaymentRows, {
+      const nextRentCertEvent = computeRentCertDues(assistancePaymentRows, {
         enrollmentId: String(enrollment.id || ""),
         enrollmentLabel: grantName,
       })
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-        .find((due) => due.targetPaymentDate >= todayISO())?.dueDate || "";
+        .find((due) => due.targetPaymentDate >= todayISO()) || null;
+      const nextRentCertPayment = assistancePayments.find((payment) => payment.dueDate === nextRentCertEvent?.targetPaymentDate) || null;
+      const nextRentCertDue = String(nextRentCertPayment?.rentCert?.dueDate || nextRentCertEvent?.dueDate || "");
       const assistanceStartDate = paymentDates[0] || "";
       const maxAssistanceMonths = maxMonthsFrom(grant, enrollment);
       const monthsOfAssistance = assistanceStartDate ? monthsOfAssistanceToToday(assistanceStartDate) : null;
@@ -386,6 +340,8 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         monthsOfAssistance,
         assistanceEndDate: paymentDates[paymentDates.length - 1] || "",
         nextRentCertDue,
+        nextRentCertTargetDate: nextRentCertPayment?.dueDate || nextRentCertEvent?.targetPaymentDate || "",
+        nextRentCertPaymentId: nextRentCertPayment?.id || "",
         totalAssistance,
         maxAssistanceMonths,
         maxAssistanceCutoffDate,
@@ -708,9 +664,9 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
   const [rowAction, setRowAction] = React.useState<RowActionState>(null);
   const enrollmentPatch = useEnrollmentsPatch();
   const paymentAdjust = usePaymentsProjectionsAdjust();
-  const taskGenerate = useTasksGenerateScheduleWrite();
+  const rentCertMutation = usePaymentRentCert();
   const { sort, onSort } = useTableSort({ col: "customerName", dir: "asc" });
-  const anyActionBusy = enrollmentPatch.isPending || paymentAdjust.isPending || taskGenerate.isPending;
+  const anyActionBusy = enrollmentPatch.isPending || paymentAdjust.isPending || rentCertMutation.isPending;
   const sortedRows = React.useMemo(
     () =>
       sortRows(rows, sort, (row, col) => {
@@ -833,36 +789,16 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
         firstUnpaidPayment(row.assistancePayments) ||
         row.assistancePayments[0] ||
         null;
-      const lineItemId = targetPayment?.lineItemId || row.assistancePayments.find((payment) => payment.lineItemId)?.lineItemId || "rent";
-      const newDefs = buildRentCertTaskDefs({
-        lineItemId,
-        dueDate,
-        targetPaymentDate,
-        bucket: values.bucket,
-        title: values.title,
-      });
-
-      const prevMeta =
-        row.enrollment.taskScheduleMeta && typeof row.enrollment.taskScheduleMeta === "object"
-          ? (row.enrollment.taskScheduleMeta as Record<string, unknown>)
-          : null;
-      const prevDefs = Array.isArray(prevMeta?.defs) ? prevMeta!.defs : [];
-      const nextDefIds = new Set(newDefs.map((def) => def.id));
-      const mergedDefs = [
-        ...prevDefs.filter((def) => !nextDefIds.has(String((def as Record<string, unknown>)?.id || ""))),
-        ...newDefs,
-      ];
-
       try {
-        await taskGenerate.mutateAsync({
+        if (!targetPayment?.id) {
+          toast("No payment row matches the selected rent-cert target date.", { type: "error" });
+          return;
+        }
+        await rentCertMutation.mutateAsync({
           enrollmentId: row.id,
-          mode: "mergeManaged",
-          keepManual: true,
-          preserveCompletedManaged: true,
-          pinCompletedManaged: true,
-          replaceTaskDefPrefixes: [],
-          taskDefs: mergedDefs as ReqOf<"tasksGenerateScheduleWrite">["taskDefs"],
-        } as ReqOf<"tasksGenerateScheduleWrite">);
+          paymentId: targetPayment.id,
+          dueDate,
+        });
         toast("Rent cert reminders added.", { type: "success" });
         setRowAction(null);
       } catch (error) {
@@ -870,7 +806,7 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
         toast(message, { type: "error" });
       }
     },
-    [rowAction, taskGenerate],
+    [rentCertMutation, rowAction],
   );
 
   return (
@@ -939,7 +875,9 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
                 <td>{fmtDateOrDash(row.assistanceStartDate)}</td>
                 <td className="text-center tabular-nums">{row.monthsOfAssistance ?? "-"}</td>
                 <td>{fmtDateOrDash(row.assistanceEndDate)}</td>
-                <td>{fmtDateOrDash(row.nextRentCertDue)}</td>
+                <td title={`Rent cert for ${row.nextRentCertTargetDate || "next rental payment"}. Right-click the row to add or update it.`}>
+                  {fmtDateOrDash(row.nextRentCertDue)}
+                </td>
                 <td className="text-center tabular-nums">{fmtCurrencyUSD(row.totalAssistance)}</td>
                 <td>
                   {row.maxAssistanceMonthsRemaining == null

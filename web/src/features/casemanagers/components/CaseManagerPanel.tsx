@@ -93,18 +93,8 @@ export default function CaseManagerPanel({
   const legacyMetrics = (extras.metrics as Record<string, unknown> | undefined) || {};
 
   const activeCount = Number(extras.clientActive ?? legacyMetrics.clientActive);
-  const avgAcuity = Number(extras.acuityScoreAvg ?? legacyMetrics.acuityScoreAvg);
-  const acuitySum = Number(extras.acuityScoreSum ?? legacyMetrics.acuityScoreSum);
-  const acuityCount = Number(extras.acuityScoreCount ?? legacyMetrics.acuityScoreCount);
 
   const activeDisplay = Number.isFinite(activeCount) ? activeCount : computed.active;
-  const acuitySumDisplay = Number.isFinite(acuitySum) ? acuitySum : computed.acuitySum;
-  const acuityCountDisplay = Number.isFinite(acuityCount) ? acuityCount : computed.acuityCount;
-  const avgAcuityDisplay = Number.isFinite(avgAcuity)
-    ? avgAcuity
-    : acuityCountDisplay > 0
-      ? acuitySumDisplay / acuityCountDisplay
-      : NaN;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -139,10 +129,6 @@ export default function CaseManagerPanel({
             <span className={["rounded-full border px-2 py-0.5", populationChipClass("family")].join(" ")}>
               F {computed.family}
             </span>
-          </div>
-          <div className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-            Acuity: Sum <b>{acuitySumDisplay.toFixed(2)}</b> | Avg{" "}
-            <b>{Number.isFinite(avgAcuityDisplay) ? avgAcuityDisplay.toFixed(2) : "-"}</b>
           </div>
         </div>
 

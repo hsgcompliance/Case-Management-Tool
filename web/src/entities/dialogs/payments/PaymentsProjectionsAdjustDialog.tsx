@@ -5,6 +5,8 @@ import { Modal } from "@entities/ui/Modal";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { TPayment } from "@types";
 import type { PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
+import { calculateRentCertDueDate, usePaymentRentCert } from "@hooks/usePayments";
+import { RentCertToggle, rentCertToggleValue } from "./RentCertToggle";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10, todayISO } from "@lib/date";
 import { isISO } from "@features/customers/components/paymentScheduleUtils";
@@ -38,6 +40,7 @@ type Props = {
   enrollments: EnrollmentOption[];
   initialEnrollmentId?: string | null;
   paymentIssues?: Record<string, { label: string } | undefined>;
+  rentCertDueDates?: Record<string, string | undefined>;
   busy?: boolean;
   onCancel: () => void;
   onApply: (payload: PaymentsProjectionsAdjustInput) => void;
@@ -104,6 +107,7 @@ export default function PaymentsProjectionsAdjustDialog({
   const [futureMonthlyAmount, setFutureMonthlyAmount] = React.useState("");
   const [futureEffectiveFrom, setFutureEffectiveFrom] = React.useState("");
   const [futureLineItemId, setFutureLineItemId] = React.useState("");
+  const rentCertMutation = usePaymentRentCert();
 
   React.useEffect(() => {
     if (!open) return;
@@ -756,13 +760,14 @@ export default function PaymentsProjectionsAdjustDialog({
                   <th className="px-3 py-2 text-left">Vendor</th>
                   <th className="px-3 py-2 text-center">Paid</th>
                   <th className="px-3 py-2 text-left">Line Item</th>
+                  <th className="px-3 py-2 text-left">Rent Cert Due</th>
                   <th className="px-3 py-2 text-center">Delete</th>
                 </tr>
               </thead>
               <tbody>
                 {payments.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-slate-500" colSpan={8}>No payments in this enrollment.</td>
+                    <td className="px-3 py-3 text-slate-500" colSpan={9}>No payments in this enrollment.</td>
                   </tr>
                 ) : payments.map((p, idx) => {
                   const id = paymentId(p);
@@ -831,6 +836,19 @@ export default function PaymentsProjectionsAdjustDialog({
                           fallbackLineItemIds={lineItemOptions}
                           inputClassName="w-56 rounded border border-slate-300 px-2 py-1 text-xs"
                           disabled={editDisabled}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <RentCertToggle
+                          value={rentCertToggleValue((p as TPayment)?.rentCert)}
+                          disabled={deleted || rentCertMutation.isPending}
+                          title={`Due ${calculateRentCertDueDate(currentDueDate) || "n/a"} (month prior to ${currentDueDate || "payment date"})`}
+                          onChange={(next) => void rentCertMutation.mutateAsync({
+                            enrollmentId: selectedEnrollment?.id || "",
+                            paymentId: id,
+                            status: next,
+                            dueDate: calculateRentCertDueDate(currentDueDate),
+                          }).catch(() => setError("Failed to update rent cert."))}
                         />
                       </td>
                       <td className="px-3 py-2 text-center">

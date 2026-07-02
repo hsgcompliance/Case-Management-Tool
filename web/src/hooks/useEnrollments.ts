@@ -15,6 +15,7 @@ import type {
   EnrollmentsUndoMigrationReq,
   EnrollmentsAdminReverseLedgerEntryReq,
   EnrollmentActionsApplyReq,
+  ReqOf,
 } from "@types";
 import { qk } from "./queryKeys";
 import { RQ_DEFAULTS, RQ_DETAIL } from "./base";
@@ -703,5 +704,51 @@ export function useEnrollmentActionsApply() {
         enrollmentIds: [String(body.enrollmentId || "").trim()],
       });
     },
+  });
+}
+
+export function useEnrollmentContinuumSummary(enrollmentId?: string | null) {
+  const id = String(enrollmentId || "").trim();
+  return useQuery({
+    enabled: !!id,
+    queryKey: qk.enrollments.continuum(id),
+    queryFn: () => EnrollmentsAPI.continuumSummary(id),
+    staleTime: 60_000,
+  });
+}
+
+export function useEnrollmentAllocationSet() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root],
+    mutationFn: (body: ReqOf<"enrollmentsAllocationSet">) => EnrollmentsAPI.allocationSet(body),
+    onSuccess: async (_result, body) => {
+      await qc.invalidateQueries({ queryKey: qk.enrollments.continuum(String(body.enrollmentId)) });
+    },
+  });
+}
+
+export function useCycleRolloverPreview() {
+  return useMutation({
+    mutationFn: (body: ReqOf<"enrollmentsCycleRolloverPreview">) => EnrollmentsAPI.cycleRolloverPreview(body),
+  });
+}
+
+export function useCycleRolloverRun() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root, qk.grants.root, qk.inbox.root],
+    mutationFn: (body: ReqOf<"enrollmentsCycleRolloverRun">) => EnrollmentsAPI.cycleRolloverRun(body),
+  });
+}
+
+export function useLinkedProgramsReconcile() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root],
+    mutationFn: (body: ReqOf<"enrollmentsLinkedProgramsReconcile">) => EnrollmentsAPI.linkedProgramsReconcile(body),
   });
 }

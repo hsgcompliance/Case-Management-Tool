@@ -64,3 +64,32 @@ export function generateSplitGoals(mode: SplitMode, amount: number, startDate: s
     };
   });
 }
+
+export type RollForward = "none" | "rollToNext" | "rollToEnd" | "rebalanceFuture" | "manual";
+
+export function applyCompletedCycleRollover(goals: SplitGoal[], behavior: RollForward, asOf: string): SplitGoal[] {
+  const next = goals.map((goal) => ({ ...goal })) as Array<SplitGoal & { rolloverApplied?: boolean }>;
+  for (let index = 0; index < next.length; index += 1) {
+    const goal = next[index];
+    if (goal.rolloverApplied || !goal.endDate || goal.endDate >= asOf) continue;
+    const remainder = moneyCents(goal.amount) - moneyCents(goal.spent) - moneyCents(goal.projected);
+    if (remainder && behavior !== "none" && behavior !== "manual") {
+      const future = next.slice(index + 1);
+      if (future.length) {
+        if (behavior === "rollToNext") future[0].amount = moneyFromCents(moneyCents(future[0].amount) + remainder);
+        if (behavior === "rollToEnd") future[future.length - 1].amount = moneyFromCents(moneyCents(future[future.length - 1].amount) + remainder);
+        if (behavior === "rebalanceFuture") {
+          const base = Math.trunc(remainder / future.length);
+          let extra = remainder - base * future.length;
+          for (const target of future) {
+            const cent = extra > 0 ? 1 : extra < 0 ? -1 : 0;
+            extra -= cent;
+            target.amount = moneyFromCents(moneyCents(target.amount) + base + cent);
+          }
+        }
+      }
+    }
+    goal.rolloverApplied = true;
+  }
+  return next;
+}

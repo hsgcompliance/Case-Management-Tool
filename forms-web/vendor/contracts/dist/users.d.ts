@@ -172,6 +172,7 @@ export declare const UserSettings: z.ZodObject<{
     dashboardPrefs: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
     toolsPrefs: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
     spendingViews: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
+    allowAiAssistance: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
     googleIntegrationModes: z.ZodOptional<z.ZodOptional<z.ZodObject<{
         googleCalendar: z.ZodOptional<z.ZodEnum<{
             permanent: "permanent";
@@ -307,6 +308,7 @@ export declare const UserExtras: z.ZodObject<{
         dashboardPrefs: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
         toolsPrefs: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
         spendingViews: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
+        allowAiAssistance: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         googleIntegrationModes: z.ZodOptional<z.ZodOptional<z.ZodObject<{
             googleCalendar: z.ZodOptional<z.ZodEnum<{
                 permanent: "permanent";
@@ -462,6 +464,7 @@ export declare const UpdateMeBody: z.ZodObject<{
             dashboardPrefs: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
             toolsPrefs: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
             spendingViews: z.ZodOptional<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
+            allowAiAssistance: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
             googleIntegrationModes: z.ZodOptional<z.ZodOptional<z.ZodObject<{
                 googleCalendar: z.ZodOptional<z.ZodEnum<{
                     permanent: "permanent";

@@ -27,6 +27,11 @@
       "import": "./dist/creditCards.js",
       "require": "./dist/creditCards.cjs"
     },
+    "./households": {
+      "types": "./dist/households.d.ts",
+      "import": "./dist/households.js",
+      "require": "./dist/households.cjs"
+    },
     "./enrollments": {
       "types": "./dist/enrollments.d.ts",
       "import": "./dist/enrollments.js",

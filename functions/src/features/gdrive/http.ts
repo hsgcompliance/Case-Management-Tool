@@ -309,6 +309,13 @@ export const gdriveBuildCustomerFolder = secureHandler(
         ...body,
         googleAccessToken: readGoogleAccessToken(req),
         userUid: uid,
+        ...(body.customerId
+          ? {
+              existingFolderId: String(
+                (await db.collection("customers").doc(body.customerId).get()).data()?.customerDrive?.folderId || "",
+              ).trim() || undefined,
+            }
+          : {}),
       });
 
       // Atomically link to the customer (folder ref + auto-linked TSS workbook)
@@ -380,6 +387,9 @@ export const gdriveBuildCustomerFolder = secureHandler(
     // googleapis is imported lazily as a full barrel; under 256MiB the instance
     // OOMs (~268MiB observed) once it copies templates → 500. Match gdriveList.
     memory: "512MiB",
+    // This workflow is most failure-prone while googleapis initializes on a
+    // cold instance. Keep one ready and retain resumability for platform faults.
+    minInstances: 1,
   },
 );
 

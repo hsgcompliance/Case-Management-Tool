@@ -19,12 +19,10 @@ This folder is organized by feature surface:
     - `TasksTab.tsx` (legacy name; product direction is notes/reminders)
     - `PaymentsTab.tsx`
     - `CustomerFilesTab.tsx`
-    - `AcuityTab.tsx`
 
 - `components/`
   - Reusable customer-specific UI blocks used by tabs.
   - Current components:
-    - `CustomerAcuityPanel.tsx`
     - `CustomerCaseManagementPanel.tsx`
     - `CustomerFilesPanel.tsx`
     - `CustomerPaymentsTable.tsx`

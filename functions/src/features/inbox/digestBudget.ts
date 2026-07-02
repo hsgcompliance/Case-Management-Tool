@@ -106,15 +106,29 @@ function monthLabel(ym: string): string {
   } catch { return ym; }
 }
 
-function lineItemDisplayConfig(grant: Record<string, unknown>, lineItem: Record<string, unknown>) {
+export function lineItemDisplayConfig(grant: Record<string, unknown>, lineItem: Record<string, unknown>) {
   const grantDigest = ((grant.budget as any)?.digestDisplay ?? {}) as Record<string, unknown>;
   const itemDisplay = (lineItem.display && typeof lineItem.display === "object" ? lineItem.display : {}) as Record<string, unknown>;
   const mainLevel = String(itemDisplay.mainDisplayLevel || grantDigest.mainDisplayLevel || "grant");
   return {
-    appearInDigest: itemDisplay.appearInDigest !== false,
+    appearInDigest: itemDisplay.displayOnDigest === true || (itemDisplay.displayOnDigest === undefined && itemDisplay.appearInDigest === true),
     showLineItems: itemDisplay.showLineItemTotal !== false && (mainLevel === "lineItem" || mainLevel === "split" || itemDisplay.showLineItemTotal === true || itemDisplay.showSplitGoals === true),
     showSplitGoals: itemDisplay.showSplitGoals === true || mainLevel === "split",
+    digestDisplayMode: ["currentCycle", "total", "both"].includes(String(itemDisplay.digestDisplayMode)) ? String(itemDisplay.digestDisplayMode) : "total",
   };
+}
+
+export function splitGoalsForDigest(lineItem: Record<string, any>, month: string) {
+  const display = lineItemDisplayConfig({}, lineItem);
+  if (!display.appearInDigest || display.digestDisplayMode === "total") return [];
+  const monthStart = `${month}-01`;
+  const monthEnd = `${month}-31`;
+  const goals = Array.isArray(lineItem.splitGoals) ? lineItem.splitGoals : [];
+  return goals.filter((goal: Record<string, unknown>) => {
+    const start = String(goal.startDate || "");
+    const end = String(goal.endDate || "");
+    return (!start || start <= monthEnd) && (!end || end >= monthStart);
+  });
 }
 
 function periodText(startDate: string, endDate: string) {
@@ -181,8 +195,8 @@ export async function buildBudgetDigestData(opts: {
           balance: liTotal - liSpent,
           projectedBalance: liTotal - liProjectedSpend,
           pctAllocated: pct(liProjectedSpend, liTotal),
-          splitGoals: liDisplay.showSplitGoals
-            ? (Array.isArray(li.splitGoals) ? li.splitGoals : []).map((goal: Record<string, unknown>, index: number) => {
+          splitGoals: liDisplay.showSplitGoals && liDisplay.digestDisplayMode !== "total"
+            ? splitGoalsForDigest(li, month).map((goal: Record<string, unknown>, index: number) => {
                 const goalTotal = Number(goal.amount || 0);
                 const goalSpent = Number(goal.spent || 0);
                 const goalProjected = Number(goal.projected || 0);

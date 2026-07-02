@@ -219,6 +219,7 @@ export function BuildFolderDialog({
     parentId: string;
     templates: Array<{ fileId: string; name: string; role?: string }>;
     subfolders: string[];
+    variant: "payer" | "nonpayer";
   }) => void;
   onCancel: () => void;
   indexFolders: TCustomerFolder[];
@@ -296,6 +297,7 @@ export function BuildFolderDialog({
       parentId,
       templates: buildTemplatePayload(),
       subfolders: subfolderDrafts,
+      variant: medicaid === "yes" ? "payer" : "nonpayer",
     });
   };
 

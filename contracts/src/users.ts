@@ -195,6 +195,7 @@ export const UserSettings = z
     dashboardPrefs: UserUnknownRecord.optional(),
     toolsPrefs: UserUnknownRecord.optional(),
     spendingViews: UserUnknownRecord.optional(),
+    allowAiAssistance: z.boolean().optional(),
     googleIntegrationModes: z.object({
       googleCalendar: GoogleIntegrationMode.optional(),
       googleDrive: GoogleIntegrationMode.optional(),

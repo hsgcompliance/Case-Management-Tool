@@ -21,6 +21,15 @@ export type FlowInvoiceOption = {
   custom?: boolean;
 };
 
+export type FlowInvoicing = {
+  functionalGroup: string;
+  grantCode: string;
+  programCode: string;
+  hmisCode: string;
+  expenseCategories: FlowInvoiceOption[];
+  descriptionTemplates: FlowInvoiceOption[];
+};
+
 export type FlowLineItem = {
   id?: string;
   label: string;
@@ -28,6 +37,7 @@ export type FlowLineItem = {
   type?: { id: string; label: string } | null;
   perCustomerCap?: number | null;
   capEnabled?: boolean;
+  invoicing: FlowInvoicing;
 };
 
 export type GrantProgramFlowDraft = {
@@ -37,6 +47,10 @@ export type GrantProgramFlowDraft = {
   financialModel: GrantProgramFinancialModel;
   startDate: string;
   endDate: string;
+  previousGrantId: string;
+  nextGrantId: string;
+  linkedEnrollmentOperator: "all" | "any";
+  linkedEnrollmentGrantIds: string[];
   duration: string;
   lengthOfAssistance: string;
   maxAssistanceMonths: string;
@@ -45,19 +59,13 @@ export type GrantProgramFlowDraft = {
   allocationEnabled: boolean;
   perCustomerCap: string;
   description: string;
+  tags: string[];
   servicesOffered: string[];
   eligibility: Record<string, string>;
   levelOfAssistance: Record<string, string>;
   lineItems: FlowLineItem[];
   budgetTotal: string;
-  invoicing: {
-    functionalGroup: string;
-    grantCode: string;
-    programCode: string;
-    hmisCode: string;
-    expenseCategories: FlowInvoiceOption[];
-    descriptionTemplates: FlowInvoiceOption[];
-  };
+  invoicing: FlowInvoicing;
   tasks: Array<Record<string, unknown>>;
   conditionalTaskRules: Array<Record<string, unknown>>;
   pins: {
@@ -100,76 +108,10 @@ export const FINANCIAL_CONFIG_PRESETS: Record<GrantProgramFinancialModel, TGrant
   },
 };
 
-export const TSS_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
-  preset: "custom",
-  active: [
-    {
-      key: "caseworthyEntryComplete",
-      label: "CW Entry",
-      field: "compliance.caseworthyEntryComplete",
-      type: "boolean",
-    },
-    {
-      key: "hmisEntryComplete",
-      label: "HMIS Entry",
-      field: "compliance.hmisEntryComplete",
-      type: "boolean",
-    },
-    {
-      key: "serviceStatus",
-      label: "TSS Active",
-      field: "tss.active",
-      type: "boolean",
-    },
-    {
-      key: "medicaidStatus",
-      label: "Medicaid Active",
-      field: "medicaid.status",
-      type: "boolean",
-    },
-  ],
-  inactive: [
-    {
-      key: "caseworthyExitComplete",
-      label: "CW Exit",
-      field: "compliance.caseworthyExitComplete",
-      type: "boolean",
-    },
-    {
-      key: "hmisExitComplete",
-      label: "HMIS Exit",
-      field: "compliance.hmisExitComplete",
-      type: "boolean",
-    },
-  ],
-};
-
-export const DEFAULT_EXPENSE_CATEGORIES: FlowInvoiceOption[] = [
-  { id: "housing-non-hrdc", label: "Housing Assistance (non-HRDC Property)", code: "UNR-9520-300-00", enabled: false },
-  { id: "housing-hrdc", label: "Housing Assistance (HRDC Property)", code: "UNR-9960-300-00", enabled: false },
-  { id: "deposit", label: "Deposit Assistance", code: "UNR-9545-300-00", enabled: false },
-  { id: "preventative-arrears", label: "Preventative Arrears", code: "UNR-9548-300-00", enabled: false },
-  { id: "personal-needs", label: "Personal Needs", code: "UNR-5607-300-00", enabled: false },
-  { id: "utility", label: "Utility Assistance", code: "UNR-8510-300-00", enabled: false },
-];
-
-export const DEFAULT_DESCRIPTION_TEMPLATES: FlowInvoiceOption[] = [
-  { id: "rental-assistance", label: "Rental Assistance", template: "J. Doe: March RA", enabled: false },
-  { id: "prorated-rental-assistance", label: "Prorated Rental Assistance", template: "J. Doe: Feb Prorated Rent", enabled: false },
-  { id: "deposit-assistance", label: "Deposit Assistance", template: "J. Doe: DA", enabled: false },
-  { id: "utility-assistance", label: "Utility Assistance", template: "J. Doe: March Util Assistance", enabled: false },
-];
-
-export const DEFAULT_ELIGIBILITY: Record<string, string> = {
-  "Housing Status": "Experiencing Category 1 Homelessness",
-  "Sustainability Requirement": "Must demonstrate sustainability",
-  "Unit Rent Limit": "Lesser of FMR and rent reasonable",
-};
-
-export const DEFAULT_LEVEL_OF_ASSISTANCE: Record<string, string> = {
-  "Deposit Only": "MAP 0-3",
-  "Short-Term": "MAP 4-7",
-  "Medium-Term": "MAP 8+",
+const NO_COMPLIANCE_CONFIG: TGrantComplianceConfig = {
+  preset: "none",
+  active: [],
+  inactive: [],
 };
 
 const SERVER_MANAGED_KEYS = new Set([
@@ -215,7 +157,7 @@ function keyValueRecord(value: unknown): Record<string, string> {
   return out;
 }
 
-function invoiceOptions(value: unknown, defaults: FlowInvoiceOption[]): FlowInvoiceOption[] {
+function invoiceOptions(value: unknown): FlowInvoiceOption[] {
   const rows = Array.isArray(value)
     ? value.filter(isRecord).map((row, index) => ({
         id: text(row.id || row.label || `custom_${index}`),
@@ -226,13 +168,26 @@ function invoiceOptions(value: unknown, defaults: FlowInvoiceOption[]): FlowInvo
         custom: row.custom === true,
       })).filter((row) => row.id && row.label)
     : [];
-  const savedById = new Map(rows.map((row) => [row.id, row]));
-  const merged = defaults.map((row) => ({ ...row, ...(savedById.get(row.id) || {}) }));
-  const custom = rows.filter((row) => row.custom && !defaults.some((def) => def.id === row.id));
-  return [...merged, ...custom];
+  return rows;
 }
 
-function lineItemsFromBudget(value: unknown): FlowLineItem[] {
+function invoicingDraft(value: unknown) {
+  const invoicing = isRecord(value) ? value : {};
+  return {
+    functionalGroup: text(invoicing.functionalGroup),
+    grantCode: text(invoicing.grantCode),
+    programCode: text(invoicing.programCode),
+    hmisCode: text(invoicing.hmisCode || (isRecord(invoicing.meta) ? invoicing.meta.hmisCode : "")),
+    expenseCategories: invoiceOptions(invoicing.expenseCategories),
+    descriptionTemplates: invoiceOptions(invoicing.descriptionTemplates),
+  };
+}
+
+export function copyLineItemInvoicing(source: FlowLineItem): FlowInvoicing {
+  return structuredClone(source.invoicing);
+}
+
+function lineItemsFromBudget(value: unknown, legacyInvoicing?: unknown): FlowLineItem[] {
   const budget = isRecord(value) ? value : {};
   const lineItems = Array.isArray(budget.lineItems) ? budget.lineItems : [];
   return lineItems.filter(isRecord).map((row, index) => ({
@@ -244,16 +199,17 @@ function lineItemsFromBudget(value: unknown): FlowLineItem[] {
       : null,
     perCustomerCap: row.perCustomerCap == null ? null : asNumber(row.perCustomerCap, 0),
     capEnabled: row.capEnabled === true,
+    invoicing: invoicingDraft(isRecord(row.invoicing) ? row.invoicing : legacyInvoicing),
   }));
 }
 
-function cleanForCopy(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(cleanForCopy);
+function cleanForCopy(value: unknown, depth = 0): unknown {
+  if (Array.isArray(value)) return value.map((item) => cleanForCopy(item, depth + 1));
   if (!isRecord(value)) return value;
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value)) {
-    if (SERVER_MANAGED_KEYS.has(key)) continue;
-    out[key] = cleanForCopy(raw);
+    if (depth === 0 && SERVER_MANAGED_KEYS.has(key)) continue;
+    out[key] = cleanForCopy(raw, depth + 1);
   }
   return out;
 }
@@ -274,34 +230,53 @@ export function createInitialGrantProgramDraft(
   const pins = isRecord(source.pins) ? source.pins : {};
   const important = isRecord(pins.important) ? pins.important : {};
   const invoicePin = isRecord(pins.invoice) ? pins.invoice : {};
+  const linking = isRecord(source.linking) ? source.linking : {};
+  const cycle = isRecord(linking.cycle) ? linking.cycle : {};
+  const enrollmentRules = Array.isArray(linking.enrollmentRules) ? linking.enrollmentRules.filter(isRecord) : [];
+  const enrollmentRequirement = isRecord(linking.enrollmentRequirement) ? linking.enrollmentRequirement : {};
 
   return {
     name: text(source.name),
-    status: text(source.status) === "active" ? "active" : "draft",
+    status: text(source.status) === "closed"
+      ? "closed"
+      : text(source.status) === "draft"
+        ? "draft"
+        : "active",
     kind,
     financialModel,
     startDate: text(source.startDate).slice(0, 10),
     endDate: text(source.endDate).slice(0, 10),
-    duration: text(source.duration) || (kind === "grant" ? "1 Year" : ""),
+    previousGrantId: text(cycle.previousGrantId),
+    nextGrantId: text(cycle.nextGrantId),
+    linkedEnrollmentOperator: enrollmentRequirement.operator === "any" ? "any" : "all",
+    linkedEnrollmentGrantIds: Array.isArray(enrollmentRequirement.targetGrantIds)
+      ? textArray(enrollmentRequirement.targetGrantIds)
+      : enrollmentRules.map((rule) => text(rule.targetGrantId)).filter(Boolean),
+    duration: text(source.duration),
     lengthOfAssistance: text(source.lengthOfAssistance || source.maxLengthOfAssistance),
     maxAssistanceMonths: text(source.maxAssistanceMonths || parseGrantMaxAssistanceMonths(source.lengthOfAssistance || source.maxLengthOfAssistance) || ""),
     authorizationMonths: text(enrollmentDefaults.authorizationMonths),
-    complianceConfig: isRecord(source.complianceConfig) ? normalizeGrantComplianceConfig(source) : null,
+    complianceConfig: isRecord(source.complianceConfig)
+      ? normalizeGrantComplianceConfig(source)
+      : text(source.name)
+        ? normalizeGrantComplianceConfig(source)
+        : NO_COMPLIANCE_CONFIG,
     allocationEnabled: normalizeGrantFinancialConfig(source).allocationEnabled,
     perCustomerCap: budget.perCustomerCap == null ? "" : text(budget.perCustomerCap),
     description: text(source.description),
+    tags: textArray(source.tags),
     servicesOffered: textArray(source.servicesOffered),
     eligibility: keyValueRecord(source.eligibility),
     levelOfAssistance: keyValueRecord(source.levelOfAssistance),
-    lineItems: lineItemsFromBudget(source.budget),
+    lineItems: lineItemsFromBudget(source.budget, source.invoicing),
     budgetTotal: text(budget.total || budget.startAmount),
     invoicing: {
       functionalGroup: text(invoicing.functionalGroup),
       grantCode: text(invoicing.grantCode),
       programCode: text(invoicing.programCode),
       hmisCode: text(isRecord(invoicing.meta) ? invoicing.meta.hmisCode : ""),
-      expenseCategories: invoiceOptions(invoicing.expenseCategories, DEFAULT_EXPENSE_CATEGORIES),
-      descriptionTemplates: invoiceOptions(invoicing.descriptionTemplates, DEFAULT_DESCRIPTION_TEMPLATES),
+      expenseCategories: invoiceOptions(invoicing.expenseCategories),
+      descriptionTemplates: invoiceOptions(invoicing.descriptionTemplates),
     },
     tasks: Array.isArray(source.tasks) ? (source.tasks as Array<Record<string, unknown>>) : [],
     conditionalTaskRules: Array.isArray(source.conditionalTaskRules)
@@ -334,6 +309,10 @@ export function copyGrantProgramToDraft(
     name: draft.name ? `${draft.name} Copy` : "",
     startDate: base?.startDate || "",
     endDate: "",
+    previousGrantId: "",
+    nextGrantId: "",
+    linkedEnrollmentOperator: "all",
+    linkedEnrollmentGrantIds: [],
     lineItems: draft.lineItems.map((item) => ({
       ...item,
       id: item.id ? `${item.id}_copy` : undefined,
@@ -359,6 +338,14 @@ export function buildGrantProgramPayload(draft: GrantProgramFlowDraft): Record<s
       type: item.type || null,
       perCustomerCap: item.perCustomerCap == null ? null : asNumber(item.perCustomerCap, 0),
       capEnabled: item.capEnabled === true,
+      invoicing: {
+        functionalGroup: item.invoicing.functionalGroup.trim() || null,
+        grantCode: item.invoicing.grantCode.trim() || null,
+        programCode: item.invoicing.programCode.trim() || null,
+        hmisCode: item.invoicing.hmisCode.trim() || null,
+        expenseCategories: item.invoicing.expenseCategories.filter((row) => row.enabled || row.custom),
+        descriptionTemplates: item.invoicing.descriptionTemplates.filter((row) => row.enabled || row.custom),
+      },
     }))
     .filter((item) => item.label);
   const budgetTotal = capabilities.drawsDownBudget
@@ -376,8 +363,18 @@ export function buildGrantProgramPayload(draft: GrantProgramFlowDraft): Record<s
     status: draft.status,
     kind: draft.kind,
     financialConfig,
-    startDate: draft.startDate || "",
-    endDate: draft.endDate || "",
+    startDate: draft.startDate || null,
+    endDate: draft.endDate || null,
+    linking: {
+      cycle: {
+        previousGrantId: draft.previousGrantId || null,
+        nextGrantId: draft.nextGrantId || null,
+      },
+      enrollmentRequirement: draft.linkedEnrollmentGrantIds.length
+        ? { operator: draft.linkedEnrollmentOperator, targetGrantIds: draft.linkedEnrollmentGrantIds, behavior: "warnOnly" }
+        : null,
+      enrollmentRules: [],
+    },
     duration: draft.duration.trim() || null,
     lengthOfAssistance: draft.maxAssistanceMonths.trim()
       ? `${Math.max(1, Math.min(240, Math.floor(asNumber(draft.maxAssistanceMonths, 1))))} months`
@@ -386,9 +383,12 @@ export function buildGrantProgramPayload(draft: GrantProgramFlowDraft): Record<s
       ? Math.max(1, Math.min(240, Math.floor(asNumber(draft.maxAssistanceMonths, 1))))
       : null,
     description: draft.description.trim() || null,
-    servicesOffered: draft.servicesOffered.map(text).filter(Boolean),
-    eligibility: draft.eligibility,
-    levelOfAssistance: draft.levelOfAssistance,
+    tags: draft.tags.map(text).filter(Boolean).length ? draft.tags.map(text).filter(Boolean) : undefined,
+    servicesOffered: draft.servicesOffered.map(text).filter(Boolean).length
+      ? draft.servicesOffered.map(text).filter(Boolean)
+      : undefined,
+    eligibility: Object.keys(keyValueRecord(draft.eligibility)).length ? keyValueRecord(draft.eligibility) : undefined,
+    levelOfAssistance: Object.keys(keyValueRecord(draft.levelOfAssistance)).length ? keyValueRecord(draft.levelOfAssistance) : undefined,
     enrollmentDefaults: {
       authorizationMonths: draft.authorizationMonths
         ? Math.max(1, Math.min(120, Math.floor(asNumber(draft.authorizationMonths, 12))))
@@ -443,7 +443,7 @@ function stripEmpty(value: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value)) {
     if (raw === undefined) continue;
-    if (raw === null && key !== "endDate" && key !== "perCustomerCap" && key !== "authorizationMonths") continue;
+    if (raw === null && !["startDate", "endDate", "previousGrantId", "nextGrantId", "perCustomerCap", "authorizationMonths"].includes(key)) continue;
     out[key] = stripEmpty(raw);
   }
   return out;

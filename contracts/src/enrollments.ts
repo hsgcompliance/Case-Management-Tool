@@ -193,6 +193,48 @@ export const TaskScheduleMeta = z.object({
   savedAt: TsLike.nullish().optional(),
 }).passthrough();
 
+export const EnrollmentContinuity = z
+  .object({
+    continuumId: Id,
+    kind: z.literal("grantCycle").default("grantCycle"),
+    previousEnrollmentId: Id.nullable().optional(),
+    nextEnrollmentId: Id.nullable().optional(),
+    rolloverSource: z.enum(["admin", "migration", "backfill"]).nullish(),
+    cutoffDate: ISO10.nullish(),
+  })
+  .passthrough();
+export type TEnrollmentContinuity = z.infer<typeof EnrollmentContinuity>;
+
+export const EnrollmentClientAllocation = z
+  .object({
+    amount: z.number().min(0).nullable().optional(),
+    note: z.string().trim().max(1000).nullable().optional(),
+    updatedAt: TsLike.nullish().optional(),
+    updatedBy: z.string().trim().nullable().optional(),
+  })
+  .passthrough();
+export type TEnrollmentClientAllocation = z.infer<typeof EnrollmentClientAllocation>;
+
+export const EnrollmentProgramAutomation = z
+  .object({
+    targetGrantId: Id.nullish(),
+    sourceEnrollmentIds: z.array(Id).default([]),
+    createdByRule: z.boolean().default(false),
+  })
+  .passthrough();
+export type TEnrollmentProgramAutomation = z.infer<typeof EnrollmentProgramAutomation>;
+
+export const EnrollmentUnenrollmentReview = z
+  .object({
+    required: z.boolean().default(false),
+    reason: z.string().trim().nullable().optional(),
+    sourceEnrollmentIds: z.array(Id).default([]),
+    flaggedAt: TsLike.nullish().optional(),
+    clearedAt: TsLike.nullish().optional(),
+  })
+  .passthrough();
+export type TEnrollmentUnenrollmentReview = z.infer<typeof EnrollmentUnenrollmentReview>;
+
 // ---- Core model -------------------------------------------------------------
 
 /** Primary enrollment record. */
@@ -216,6 +258,11 @@ export const Enrollment = z.object({
     .object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() })
     .nullable()
     .optional(),
+
+  continuity: EnrollmentContinuity.nullish(),
+  clientAllocation: EnrollmentClientAllocation.nullish(),
+  programAutomation: EnrollmentProgramAutomation.nullish(),
+  unenrollmentReview: EnrollmentUnenrollmentReview.nullish(),
 
   active: z.boolean().nullable().optional(),
   status: z.enum(["active", "deleted", "closed"]).nullable().optional(),
@@ -596,6 +643,90 @@ export type TEnrollmentsMigrateResp = Ok<{
   toId: string;
   fromGrantId: string;
   toGrantId: string;
+}>;
+
+export const EnrollmentsContinuumSummaryQuery = z.object({ enrollmentId: Id }).passthrough();
+export type TEnrollmentsContinuumSummaryQuery = z.infer<typeof EnrollmentsContinuumSummaryQuery>;
+export type TEnrollmentsContinuumSummaryResp = Ok<{
+  continuumId: string;
+  currentEnrollmentId: string | null;
+  assistanceMonthsReceived: number;
+  assistanceMonthKeys: string[];
+  allocation: { editable: number; calculated: number; effective: number };
+  enrollments: Array<{
+    id: string;
+    grantId: string;
+    grantName: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    editableAllocation: number | null;
+    calculatedAllocation: number;
+    effectiveAllocation: number;
+  }>;
+  rentCertEvents: Array<{ targetDate: string; dueDate: string; enrollmentId: string; paymentId: string; source: "calculated" | "manual" }>;
+}>;
+
+export const EnrollmentsAllocationSetBody = z.object({
+  enrollmentId: Id,
+  amount: z.number().min(0).nullable(),
+  note: z.string().trim().max(1000).nullable().optional(),
+}).passthrough();
+export type TEnrollmentsAllocationSetBody = z.infer<typeof EnrollmentsAllocationSetBody>;
+export type TEnrollmentsAllocationSetResp = Ok<{ enrollmentId: string }>;
+
+export const EnrollmentsCycleRolloverPreviewBody = z.object({
+  grantId: Id,
+  cutoverDate: ISO10.optional(),
+}).passthrough();
+export type TEnrollmentsCycleRolloverPreviewBody = z.infer<typeof EnrollmentsCycleRolloverPreviewBody>;
+
+export const EnrollmentCycleRolloverPreviewItem = z.object({
+  enrollmentId: Id,
+  customerId: Id,
+  customerName: z.string().nullable(),
+  eligible: z.boolean(),
+  blockers: z.array(z.string()),
+  warnings: z.array(z.string()),
+  futureUnpaidPayments: z.number().int().nonnegative(),
+  futureOpenReminders: z.number().int().nonnegative(),
+  calculatedAllocation: z.number().nonnegative(),
+});
+export type TEnrollmentCycleRolloverPreviewItem = z.infer<typeof EnrollmentCycleRolloverPreviewItem>;
+
+export type TEnrollmentsCycleRolloverPreviewResp = Ok<{
+  fromGrantId: string;
+  toGrantId: string;
+  cutoverDate: string;
+  sourceCloseDate: string;
+  blockers: string[];
+  warnings: string[];
+  items: TEnrollmentCycleRolloverPreviewItem[];
+}>;
+
+export const EnrollmentsCycleRolloverRunBody = EnrollmentsCycleRolloverPreviewBody.extend({
+  enrollmentIds: z.array(Id).min(1).max(500).optional(),
+  confirm: z.literal("ROLLOVER"),
+});
+export type TEnrollmentsCycleRolloverRunBody = z.infer<typeof EnrollmentsCycleRolloverRunBody>;
+export type TEnrollmentsCycleRolloverRunResp = Ok<{
+  fromGrantId: string;
+  toGrantId: string;
+  cutoverDate: string;
+  results: Array<{ enrollmentId: string; ok: boolean; destinationEnrollmentId?: string; skipped?: string; error?: string }>;
+}>;
+
+export const EnrollmentsLinkedProgramsReconcileBody = z.object({
+  grantIds: z.array(Id).max(50).optional(),
+  dryRun: z.boolean().default(true),
+}).passthrough();
+export type TEnrollmentsLinkedProgramsReconcileBody = z.infer<typeof EnrollmentsLinkedProgramsReconcileBody>;
+export type TEnrollmentsLinkedProgramsReconcileResp = Ok<{
+  dryRun: boolean;
+  sourceEnrollments: number;
+  missingTargets: number;
+  duplicateTargets: number;
+  reconciled: number;
+  issues: Array<{ customerId: string; targetGrantId: string; issue: string }>;
 }>;
 
 // ---- Undo migration ---------------------------------------------------------

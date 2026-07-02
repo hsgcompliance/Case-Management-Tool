@@ -9,6 +9,14 @@ const unauthenticated = () => {
   return e;
 };
 
+const REVOCATION_ERROR_CODES = new Set([
+  "auth/id-token-revoked",
+  "auth/id-token-expired",
+  "auth/argument-error",
+  "auth/user-disabled",
+  "auth/user-not-found",
+]);
+
 /**
  * Canonical user verification from an Express Request:
  * - Reads Bearer token
@@ -24,25 +32,39 @@ export async function verifyUserFromRequest(req: Request): Promise<Claims> {
     throw unauthenticated();
   }
 
+  let dec: Claims;
   try {
-    const dec = await authAdmin.verifyIdToken(token, true);
-    const uid = dec.uid;
-    if (!uid) return dec as Claims;
-
-    try {
-      const rec = await authAdmin.getUser(uid);
-      const cc = (rec.customClaims || {}) as Partial<Claims>;
-      return {
-        ...dec,
-        ...cc,
-        uid,
-      } as Claims;
-    } catch {
-      // If Admin read fails, fall back to decoded token
-      return dec as Claims;
+    dec = (await authAdmin.verifyIdToken(token, true)) as Claims;
+  } catch (err: any) {
+    // checkRevoked makes an extra Admin API call to look up tokensValidAfterTime.
+    // A genuinely revoked/expired/invalid token should still 401, but a transient
+    // failure in that extra lookup (network blip, etc.) shouldn't be conflated
+    // with an actually-invalid token. Fall back to a plain signature/expiry-only
+    // verify (no extra network call) before giving up.
+    if (REVOCATION_ERROR_CODES.has(String(err?.code || ""))) {
+      throw unauthenticated();
     }
+    try {
+      dec = (await authAdmin.verifyIdToken(token)) as Claims;
+    } catch {
+      throw unauthenticated();
+    }
+  }
+
+  const uid = dec.uid;
+  if (!uid) return dec;
+
+  try {
+    const rec = await authAdmin.getUser(uid);
+    const cc = (rec.customClaims || {}) as Partial<Claims>;
+    return {
+      ...dec,
+      ...cc,
+      uid,
+    } as Claims;
   } catch {
-    throw unauthenticated();
+    // If Admin read fails, fall back to decoded token
+    return dec;
   }
 }
 

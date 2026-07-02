@@ -203,7 +203,7 @@ export default function SettingsPage() {
   const driveDisconnect = useGoogleIntegrationDisconnect("googleDrive");
   const profileSettings =
     profile && typeof profile.settings === "object" && profile.settings
-      ? (profile.settings as { textScale?: string; themeMode?: string; googleIntegrationModes?: Record<string, unknown>; calendarPushDefault?: boolean })
+      ? (profile.settings as { textScale?: string; themeMode?: string; googleIntegrationModes?: Record<string, unknown>; calendarPushDefault?: boolean; allowAiAssistance?: boolean })
       : undefined;
 
   const profileTaskMode: TTaskMode | null =
@@ -217,6 +217,7 @@ export default function SettingsPage() {
   );
   const [taskMode, setTaskMode] = React.useState<TTaskMode | null>(() => profileTaskMode);
   const [calendarPushDefault, setCalendarPushDefault] = React.useState<boolean>(() => Boolean(profileSettings?.calendarPushDefault));
+  const [allowAiAssistance, setAllowAiAssistance] = React.useState<boolean>(() => profileSettings?.allowAiAssistance === true);
   const [calendarMode, setCalendarMode] = React.useState<GoogleIntegrationMode>(() =>
     integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar")
   );
@@ -232,7 +233,8 @@ export default function SettingsPage() {
     setCalendarMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar"));
     setDriveMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleDrive"));
     setCalendarPushDefault(Boolean(profileSettings?.calendarPushDefault));
-  }, [profileSettings?.textScale, profileSettings?.themeMode, profileSettings?.googleIntegrationModes, profileSettings?.calendarPushDefault]);
+    setAllowAiAssistance(profileSettings?.allowAiAssistance === true);
+  }, [profileSettings?.textScale, profileSettings?.themeMode, profileSettings?.googleIntegrationModes, profileSettings?.calendarPushDefault, profileSettings?.allowAiAssistance]);
 
   React.useEffect(() => {
     setTaskMode(profileTaskMode);
@@ -291,6 +293,7 @@ export default function SettingsPage() {
           themeMode,
           googleIntegrationModes: modes,
           calendarPushDefault,
+          allowAiAssistance,
         },
         ...(taskMode != null
           ? { taskMode, taskModeSetAt: new Date().toISOString(), taskModeSetBy: "self" }
@@ -436,6 +439,21 @@ export default function SettingsPage() {
             inactiveOptionClassName="text-slate-700 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700"
             className="block"
           />
+
+          <label className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-indigo-600"
+              checked={allowAiAssistance}
+              onChange={(event) => setAllowAiAssistance(event.target.checked)}
+            />
+            <span className="text-slate-700 dark:text-slate-300">
+              Allow AI assistance
+              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                Enables the optional case-note drafting assistant for eligible payer-linked customers. Suggestions remain unsaved until you accept and save the session.
+              </span>
+            </span>
+          </label>
 
           <div className="space-y-3" data-tour="settings-google-integrations">
             <div>

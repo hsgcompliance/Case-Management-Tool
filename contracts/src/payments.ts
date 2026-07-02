@@ -54,6 +54,23 @@ export const PaymentCompliance = z.object({
 });
 
 /**
+ * Rent cert lifecycle status on a payment. The due date is always the month
+ * prior to the effective (payment) date, so it is derived, never entered.
+ * "not due" is represented by the absence of a rentCert object (null).
+ */
+export const RentCertStatus = z.enum(["due", "completed", "effective"]);
+export type TRentCertStatus = z.infer<typeof RentCertStatus>;
+
+export const PaymentRentCert = z.object({
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  targetPaymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: z.enum(["calculated", "manual"]).default("calculated"),
+  taskIds: z.array(z.string()).default([]),
+  status: RentCertStatus.default("due"),
+}).passthrough();
+export type TPaymentRentCert = z.infer<typeof PaymentRentCert>;
+
+/**
  * Scheduled/actual payment row stored on an enrollment.
  * NOTE: id is optional because some inbound operations accept "schedule rows" without ids.
  */
@@ -80,6 +97,7 @@ export const Payment = z.object({
 
   // compliance
   compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish(),
 });
 
 export type TPaymentCompliance = z.infer<typeof PaymentCompliance>;
@@ -286,6 +304,7 @@ export const PaymentProjectionInput = z
     comment: z.string().nullish(),
 
     compliance: PaymentCompliance.nullish(),
+    rentCert: PaymentRentCert.nullish(),
   })
   .superRefine((v, ctx) => {
     const hasDue = !!v.dueDate;
@@ -363,6 +382,22 @@ export const PaymentsUpdateComplianceBody = z.object({
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch,
 });
+/**
+ * Toggle the rent cert state on a payment. "notDue" clears it; the other
+ * states set it with a server-derived due date (month prior to the payment
+ * date). `dueDate` is retained for backward compatibility: when `status` is
+ * omitted, a present dueDate sets "due" and a null dueDate clears.
+ */
+export const RentCertToggle = z.enum(["notDue", "due", "completed", "effective"]);
+export type TRentCertToggle = z.infer<typeof RentCertToggle>;
+
+export const PaymentsRentCertSetBody = z.object({
+  enrollmentId: z.string().min(1),
+  paymentId: z.string().min(1),
+  status: RentCertToggle.optional(),
+  dueDate: ISO10ish.nullish(),
+});
+export type TPaymentsRentCertSetBody = z.infer<typeof PaymentsRentCertSetBody>;
 export type TPaymentsUpdateComplianceBody = z.infer<
   typeof PaymentsUpdateComplianceBody
 >;

@@ -30,6 +30,11 @@ import type { WorkbookLinkIssue } from "./WorkbookLinkControls";
 import { WorkbookStructuredView } from "./WorkbookStructuredView";
 import { DriveAuthBanner } from "@entities/gdrive/DriveAuthBanner";
 import { isScopeError, type ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
+import {
+  WorkbookVariantDialog,
+  type WorkbookTemplateVariant,
+} from "./WorkbookVariantDialog";
+import { WorkbookVariantToggle } from "./WorkbookVariantToggle";
 
 type WorkbookView = "sheet" | "structured";
 
@@ -42,6 +47,7 @@ type TssWorkbook = {
   status?: string | null;
   defaultSheetGid?: string | number | null;
   progressNotesGid?: string | number | null;
+  variant?: string | null;
 };
 
 type CustomerDrive = {
@@ -187,7 +193,8 @@ function WorkbookTemplateCreate({
   onLinked: () => void;
   onAuthIssue?: (issue: WorkbookLinkIssue) => void;
 }) {
-  const [variant, setVariant] = React.useState<"payer" | "nonpayer">("nonpayer");
+  const [variant, setVariant] = React.useState<WorkbookTemplateVariant>("nonpayer");
+  const [dialogOpen, setDialogOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -210,6 +217,7 @@ function WorkbookTemplateCreate({
       )) as Record<string, unknown>;
       if (resp?.ok) {
         toast("TSS workbook created from template.", { type: "success" });
+        setDialogOpen(false);
         onLinked();
       } else {
         const issue = apiIssueOf(resp, "Failed to create workbook from template");
@@ -225,32 +233,37 @@ function WorkbookTemplateCreate({
 
   return (
     <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-      <div className="text-xs font-semibold text-slate-600">Create from TSS template</div>
-      <div className="flex flex-wrap items-center gap-2">
-        {hasVariants ? (
-          <select
-            className="input min-w-0 flex-1 text-sm"
-            value={variant}
-            onChange={(e) => setVariant(e.currentTarget.value as "payer" | "nonpayer")}
-            disabled={busy}
-          >
-            <option value="nonpayer">Non-payer (not Medicaid / not sure)</option>
-            <option value="payer">Payer (Medicaid enrolled)</option>
-          </select>
-        ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold text-slate-600">Create from TSS template</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
+            Copies the template into this customer&apos;s Drive folder and links it as their workbook.
+          </div>
+        </div>
         <button
           type="button"
           className="btn btn-sm btn-primary shrink-0"
           disabled={busy}
-          onClick={() => void run()}
+          onClick={() => {
+            if (hasVariants) setDialogOpen(true);
+            else void run();
+          }}
         >
-          {busy ? "Creating…" : "Copy template"}
+          {busy ? "Creating..." : "Create workbook"}
         </button>
       </div>
       {error ? <div className="text-xs text-red-600">{error}</div> : null}
       <div className="text-[11px] text-slate-400">
-        Copies the template into this customer&apos;s Drive folder and links it as their workbook.
+        Future App Script library work should add convert-to-payer and convert-to-non-payer actions for existing workbooks.
       </div>
+      <WorkbookVariantDialog
+        open={dialogOpen}
+        variant={variant}
+        busy={busy}
+        onVariantChange={setVariant}
+        onConfirm={() => void run()}
+        onClose={() => setDialogOpen(false)}
+      />
     </div>
   );
 }
@@ -347,7 +360,15 @@ export function WorkbookPanel({
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h4 className="text-sm font-semibold text-slate-900">Customer Workbook</h4>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-semibold text-slate-900">Customer Workbook</h4>
+              <WorkbookVariantToggle
+                customerId={customerId}
+                variant={tssWorkbook?.variant}
+                isViewer={isViewer}
+                onChanged={invalidateCustomer}
+              />
+            </div>
             {tssWorkbook!.spreadsheetName ? (
               <div className="mt-0.5 truncate text-xs text-slate-500">{tssWorkbook!.spreadsheetName}</div>
             ) : null}

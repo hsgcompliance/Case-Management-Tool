@@ -16,7 +16,7 @@ import {
 } from "./paymentQueueOptimistic";
 import { RQ_DEFAULTS } from "./base";
 import { useInvalidateMutation } from "./optimistic";
-import { toISODate } from "@lib/date";
+import { addMonthsISO, isISODate10, toISODate } from "@lib/date";
 
 import type {
   PaymentsUpsertProjectionsReq,
@@ -465,6 +465,16 @@ function patchEnrollmentLikePayments(
   paymentId: string,
   patch: PaymentPatch,
 ): unknown {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const patched = patchEnrollmentLikePayments(item, enrollmentId, paymentId, patch);
+      if (patched !== item) changed = true;
+      return patched;
+    });
+    return changed ? next : value;
+  }
+
   if (!value || typeof value !== "object") return value;
 
   const obj = value as Record<string, unknown>;
@@ -515,6 +525,80 @@ function patchCustomerPaymentRows(
   return changed ? next : rows;
 }
 
+function findPaymentInEnrollmentLike(value: unknown, enrollmentId: string, paymentId: string): TPayment | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const payment = findPaymentInEnrollmentLike(item, enrollmentId, paymentId);
+      if (payment) return payment;
+    }
+    return null;
+  }
+
+  if (!value || typeof value !== "object") return null;
+
+  const obj = value as Record<string, unknown>;
+  const objId = String(obj.id || "").trim();
+  if (objId === enrollmentId && Array.isArray(obj.payments)) {
+    const payment = obj.payments.find((p) => String((p as { id?: unknown } | null | undefined)?.id || "").trim() === paymentId);
+    return payment ? payment as TPayment : null;
+  }
+
+  if (Array.isArray(obj.items)) {
+    for (const item of obj.items) {
+      const payment = findPaymentInEnrollmentLike(item, enrollmentId, paymentId);
+      if (payment) return payment;
+    }
+  }
+
+  return null;
+}
+
+function findCachedPayment(
+  qc: ReturnType<typeof useQueryClient>,
+  enrollmentId: string,
+  paymentId: string,
+): TPayment | null {
+  const byEnrollment = qc.getQueryData<unknown>(qk.payments.byEnrollment(enrollmentId));
+  if (Array.isArray(byEnrollment)) {
+    const payment = byEnrollment.find((p) => String((p as { id?: unknown } | null | undefined)?.id || "").trim() === paymentId);
+    if (payment) return payment as TPayment;
+  }
+
+  const detailPayment = findPaymentInEnrollmentLike(qc.getQueryData(qk.enrollments.detail(enrollmentId)), enrollmentId, paymentId);
+  if (detailPayment) return detailPayment;
+
+  for (const [, data] of qc.getQueriesData({ queryKey: qk.enrollments.root })) {
+    const payment = findPaymentInEnrollmentLike(data, enrollmentId, paymentId);
+    if (payment) return payment;
+  }
+
+  return null;
+}
+
+function dueDateFromPaymentId(paymentId: string): string {
+  const match = String(paymentId || "").match(/(?:^|_)(\d{4}-\d{2}-\d{2})(?:_|$)/);
+  return match?.[1] || "";
+}
+
+function normalizeRentCertBodyForRequest(
+  body: ReqOf<"paymentsRentCertSet">,
+  qc: ReturnType<typeof useQueryClient>,
+): ReqOf<"paymentsRentCertSet"> {
+  const status = (body as { status?: "notDue" | "due" | "completed" | "effective" }).status;
+  if (!status || body.dueDate) return body;
+
+  const enrollmentId = String(body.enrollmentId || "").trim();
+  const paymentId = String(body.paymentId || "").trim();
+  const payment = enrollmentId && paymentId ? findCachedPayment(qc, enrollmentId, paymentId) : null;
+  const targetPaymentDate = toISO10(
+    payment?.dueDate ||
+      (payment as Record<string, unknown> | null)?.date ||
+      dueDateFromPaymentId(paymentId),
+  );
+  const dueDate = calculateRentCertDueDate(targetPaymentDate);
+  return dueDate ? { ...body, dueDate } : body;
+}
+
 function paymentMutationPatches(
   qc: ReturnType<typeof useQueryClient>,
   args: {
@@ -542,6 +626,16 @@ function paymentMutationPatches(
   ];
 
   const enrollment = qc.getQueryData<Enrollment | null>(qk.enrollments.detail(enrollmentId));
+  const enrollmentListKeys = qc
+    .getQueriesData({ queryKey: qk.enrollments.root })
+    .map(([key]) => key as unknown[])
+    .filter((key) => Array.isArray(key) && key[0] === "enrollments" && key[1] !== "detail" && key[1] !== "continuum");
+  if (enrollmentListKeys.length) {
+    patches.push({
+      key: enrollmentListKeys,
+      update: (prev: unknown) => patchEnrollmentLikePayments(prev, enrollmentId, paymentId, args.patch),
+    });
+  }
   const customerId = String(enrollment?.customerId || "").trim();
   if (customerId) {
     const customerPaymentKeys = qc
@@ -783,6 +877,48 @@ export function usePaymentsUpdateCompliance() {
       // Rollback already restored snapshots; fetch authoritative state only on failure.
       void invalidateFromEnrollment(qc, enrollmentIdOf(body));
     },
+  });
+}
+
+export function calculateRentCertDueDate(targetPaymentDate: string): string {
+  return isISODate10(targetPaymentDate) ? addMonthsISO(targetPaymentDate, -1) : "";
+}
+
+export function usePaymentRentCert() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [],
+    optimisticPatches: (body, queryClient) => {
+      const enrollmentId = String(body?.enrollmentId || "").trim();
+      const paymentId = String(body?.paymentId || "").trim();
+      if (!enrollmentId || !paymentId) return [];
+      return paymentMutationPatches(queryClient, {
+        enrollmentId,
+        paymentId,
+        patch: (payment) => {
+          const targetPaymentDate = String((payment as any)?.dueDate || (payment as any)?.date || "").slice(0, 10);
+          const toggle = (body as { status?: "notDue" | "due" | "completed" | "effective" }).status;
+          let rentCert: TPayment["rentCert"] = null;
+          if (toggle && toggle !== "notDue") {
+            // Due date is derived as the month prior to the payment (effective) date.
+            rentCert = { dueDate: body.dueDate || calculateRentCertDueDate(targetPaymentDate), targetPaymentDate, source: "manual", taskIds: [], status: toggle };
+          } else if (!toggle && body.dueDate) {
+            rentCert = { dueDate: body.dueDate, targetPaymentDate, source: "manual", taskIds: [], status: "due" };
+          }
+          return { ...payment, rentCert } as TPayment;
+        },
+      });
+    },
+    mutationFn: (body: ReqOf<"paymentsRentCertSet">) => Payments.setRentCert(normalizeRentCertBodyForRequest(body, qc)),
+    onSuccess: async (_result, body) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.tasks.root }),
+        qc.invalidateQueries({ queryKey: qk.inbox.root }),
+        qc.invalidateQueries({ queryKey: qk.enrollments.continuum(String(body.enrollmentId)) }),
+      ]);
+    },
+    onError: (_error, body) => void invalidateFromEnrollment(qc, body.enrollmentId),
   });
 }
 

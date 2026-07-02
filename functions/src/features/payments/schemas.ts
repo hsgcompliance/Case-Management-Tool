@@ -4,6 +4,7 @@ export { z } from "@hdb/contracts";
 export {
   PaymentCompliance,
   PaymentsUpdateComplianceBody,
+  PaymentsRentCertSetBody,
   PaymentsDeleteRowsBody,
   Payment,
   SpendSource,
@@ -25,6 +26,7 @@ export {
 export type {
   TPaymentCompliance,
   TPaymentsUpdateComplianceBody,
+  TPaymentsRentCertSetBody,
   TPaymentsDeleteRowsBody,
   TPayment,
   TSpend,

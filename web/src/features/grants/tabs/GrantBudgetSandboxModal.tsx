@@ -6,13 +6,14 @@ import { toApiError } from "@client/api";
 import { fmtMDY, safeISODate10, toISODate } from "@lib/date";
 import { toast } from "@lib/toast";
 import { useGrantBudgetManagerLoad, useSaveGrantBudgetManager } from "@hooks/useGrantBudgetManager";
+import { calculateRentCertDueDate, usePaymentRentCert } from "@hooks/usePayments";
 import type { TGrantBudgetManagerRow } from "@types";
 
 type SortDirection = "asc" | "desc";
 type SandboxScale = "tight" | "compact" | "regular" | "large";
 type SandboxSortKey = "grant" | "date" | "amount" | "customer" | "caseManager" | "lineItem" | "sourceType" | "type" | "note" | "sourceStatus" | "sandboxChange";
 type SandboxRowState = "clean" | "changed" | "new" | "deleted";
-type EditableField = "date" | "amountCents" | "customerLabel" | "caseManagerLabel" | "lineItemId" | "budgetTypeLabel" | "noteText" | "statusLabel";
+type EditableField = "date" | "amountCents" | "customerLabel" | "caseManagerLabel" | "lineItemId" | "budgetTypeLabel" | "noteText" | "statusLabel" | "rentCertDueOn";
 
 export type GrantBudgetSandboxSeedRow = {
   sourceId: string;
@@ -20,6 +21,8 @@ export type GrantBudgetSandboxSeedRow = {
   sourceType?: "ledger" | "paymentQueue" | "newProjection";
   ledgerItemId?: string | null;
   paymentQueueItemId?: string | null;
+  enrollmentId?: string | null;
+  paymentId?: string | null;
   grantId: string;
   grantName?: string;
   lineItemId: string;
@@ -213,6 +216,12 @@ function isChanged(row: SandboxRow) {
   );
 }
 
+function isIncompleteProjectionDraft(row: SandboxRow) {
+  return row.rowState === "new"
+    && row.sourceType === "newProjection"
+    && (!row.customerLabel.trim() || row.amountCents <= 0);
+}
+
 function rowStateLabel(state: SandboxRowState) {
   return state === "clean" ? "Clean" : state === "changed" ? "Edited" : state === "new" ? "Added" : "Removed";
 }
@@ -283,6 +292,8 @@ function seedFromManagerRows(rows: TGrantBudgetManagerRow[]): GrantBudgetSandbox
     sourceType: row.sourceType,
     ledgerItemId: row.ledgerItemId || null,
     paymentQueueItemId: row.paymentQueueItemId || null,
+    enrollmentId: row.enrollmentId || null,
+    paymentId: row.paymentId || null,
     grantId: row.grantId,
     grantName: String((row as Record<string, unknown>).grantName || row.grantId),
     lineItemId: String(row.lineItemId || ""),
@@ -301,6 +312,7 @@ function seedFromManagerRows(rows: TGrantBudgetManagerRow[]): GrantBudgetSandbox
     isWritable: row.isWritable !== false,
     lockedReason: row.lockedReason || null,
     original: row.original,
+    rentCertDueOn: row.rentCertDueOn || "",
     statusLabel: String(row.status || row.sourceType),
   }));
 }
@@ -357,13 +369,16 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
   }, []);
 
   const addRowBelow = useCallback((sandboxId: string) => {
+    const incompleteDraft = rows.find(isIncompleteProjectionDraft);
+    if (incompleteDraft) return incompleteDraft.sandboxId;
+    const newSandboxId = `new:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`;
     setRows((current) => {
       const sourceIndex = current.findIndex((row) => row.sandboxId === sandboxId);
       const source = sourceIndex >= 0 ? current[sourceIndex] : null;
       const lineItem = source ? lineItemById.get(source.lineItemId) : null;
       const date = source?.date || toISODate(new Date());
       const row: SandboxRow = {
-        sandboxId: `new:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`,
+        sandboxId: newSandboxId,
         sourceId: "",
         sourceKind: "sandbox",
         sourceType: "newProjection",
@@ -402,7 +417,8 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
         ...current.slice(insertIndex),
       ];
     });
-  }, [lineItemById]);
+    return newSandboxId;
+  }, [lineItemById, rows]);
 
   const removeRow = useCallback((sandboxId: string) => {
     setRows((current) => current.flatMap((row) => {
@@ -466,6 +482,7 @@ export function GrantBudgetSandboxModal({
   const managerMode = managerGrantIds.length > 0;
   const managerQ = useGrantBudgetManagerLoad(managerGrantIds, { enabled: isOpen && managerMode });
   const saveManager = useSaveGrantBudgetManager();
+  const rentCertMutation = usePaymentRentCert();
   const loadedRows = managerQ.data?.ok ? managerQ.data.rows : [];
   const activeSeed = useMemo<GrantBudgetSandboxSeedRow[]>(() => {
     if (!managerMode) return seed;
@@ -552,6 +569,30 @@ export function GrantBudgetSandboxModal({
     ? `/budget/pipeline/${encodeURIComponent(budgetPipelineRefs[0]?.id || "")}`
     : "/budget/pipeline";
   const selectedRow = useMemo(() => rows.find((row) => row.sandboxId === selectedRowId) ?? null, [rows, selectedRowId]);
+  const updateRentCert = useCallback(async (row: SandboxRow) => {
+    const enrollmentId = String(row.enrollmentId || "").trim();
+    const paymentId = String(row.paymentId || "").trim();
+    if (!enrollmentId || !paymentId) {
+      toast("This budget row is not linked to an enrollment payment.", { type: "error" });
+      return;
+    }
+    const current = row.rentCertDueOn || calculateRentCertDueDate(row.date);
+    const raw = window.prompt("Rent cert due date (YYYY-MM-DD). Leave blank to clear.", current);
+    if (raw == null) return;
+    const dueDate = raw.trim() || null;
+    if (dueDate && !safeISODate10(dueDate)) {
+      toast("Enter a valid YYYY-MM-DD rent-cert date.", { type: "error" });
+      return;
+    }
+    try {
+      await rentCertMutation.mutateAsync({ enrollmentId, paymentId, dueDate });
+      updateRow(row.sandboxId, { rentCertDueOn: dueDate || "" });
+      await managerQ.refetch();
+      toast(dueDate ? "Rent cert updated." : "Rent cert cleared.", { type: "success" });
+    } catch (error) {
+      toast(toApiError(error).error || "Failed to update rent cert.", { type: "error" });
+    }
+  }, [managerQ, rentCertMutation, updateRow]);
 
   useEffect(() => {
     if (!selectedRowId) return;
@@ -569,6 +610,16 @@ export function GrantBudgetSandboxModal({
       document.removeEventListener("mousedown", onDocMouseDown);
       document.removeEventListener("keydown", onEsc);
     };
+  }, [selectedRowId]);
+
+  useEffect(() => {
+    if (!selectedRowId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const selectedElement = Array.from(document.querySelectorAll<HTMLElement>("[data-sandbox-row-id]"))
+        .find((element) => element.dataset.sandboxRowId === selectedRowId);
+      selectedElement?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [selectedRowId]);
 
   const visibleRows = useMemo(() => {
@@ -591,6 +642,7 @@ export function GrantBudgetSandboxModal({
     return rows
       .filter((row) => {
         if (!showDeleted && row.rowState === "deleted") return false;
+        if (row.sandboxId === selectedRowId && row.rowState === "new") return true;
         if (!showReversals && isReversalRelated(row)) return false;
         if (sourceFilter !== "all" && row.sourceType !== sourceFilter) return false;
         if (statusFilter !== "all" && statusBucket(row) !== statusFilter) return false;
@@ -607,7 +659,7 @@ export function GrantBudgetSandboxModal({
         }
         return 0;
       });
-  }, [deferredSearch, grantFilter, lineItemById, lineItemFilter, rows, showDeleted, showReversals, sortStack, sourceFilter, statusFilter]);
+  }, [deferredSearch, grantFilter, lineItemById, lineItemFilter, rows, selectedRowId, showDeleted, showReversals, sortStack, sourceFilter, statusFilter]);
 
   const grantSummaryRows = useMemo(() => {
     const ids = grantFilter === "all"
@@ -961,13 +1013,6 @@ export function GrantBudgetSandboxModal({
     );
   };
 
-  const togglePostedProjected = useCallback((row: SandboxRow) => {
-    if (readOnly || row.isWritable === false) return;
-    const current = statusBucket(row);
-    if (current !== "posted" && current !== "projected") return;
-    updateRow(row.sandboxId, { statusLabel: current === "posted" ? "Projected" : "Posted" });
-  }, [readOnly, updateRow]);
-
   const titleGrantChips = (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       {(managerMode ? grantsInSandbox : [{ id: grantId, label: grantName || grantId }]).slice(0, 4).map((grant) => (
@@ -1198,18 +1243,21 @@ export function GrantBudgetSandboxModal({
                     <td className={`w-40 border-b border-slate-100 ${scaleConfig.cell}`}>{renderCustomerCell(row)}</td>
                     <td className={`w-44 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "caseManagerLabel", row.caseManagerLabel || "-")}</td>
                     <td className={`w-44 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "lineItemId", lineItem?.label || "Unassigned")}</td>
-                    <td className={`w-28 border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>{row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "—"}</td>
+                    <td className={`w-28 border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>
+                      {row.enrollmentId && row.paymentId ? (
+                        <button type="button" className="rounded px-1 text-left hover:bg-sky-50 hover:text-sky-700" disabled={rentCertMutation.isPending} onClick={(event) => { event.stopPropagation(); void updateRentCert(row); }}>
+                          {row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "+ Add"}
+                        </button>
+                      ) : row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "—"}
+                    </td>
                     <td className={`w-36 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "budgetTypeLabel", row.budgetTypeLabel || row.category || "-")}</td>
                     <td className={`w-56 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "noteText", row.noteText || "-")}</td>
                     <td className={`w-28 border-b border-slate-100 ${scaleConfig.cell}`}>
                       <button
                         type="button"
-                        className={`rounded px-1.5 py-0.5 font-semibold uppercase ${scaleConfig.badge} ${sourceStatusClass(statusDisplayLabel(row))} ${!readOnly && row.isWritable !== false && ["posted", "projected"].includes(statusBucket(row)) ? "cursor-pointer hover:ring-2 hover:ring-sky-200" : "cursor-default"}`}
-                        title={!readOnly && row.isWritable !== false && ["posted", "projected"].includes(statusBucket(row)) ? "Toggle posted/projected" : undefined}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePostedProjected(row);
-                        }}
+                        className={`cursor-default rounded px-1.5 py-0.5 font-semibold uppercase ${scaleConfig.badge} ${sourceStatusClass(statusDisplayLabel(row))}`}
+                        title="Payment state is changed through the payment workflow."
+                        onClick={(e) => e.stopPropagation()}
                       >
                         {statusDisplayLabel(row)}
                       </button>
@@ -1253,7 +1301,13 @@ export function GrantBudgetSandboxModal({
             <div className="text-xs text-slate-400">{selectedRow.date ? fmtMDY(selectedRow.date) : "No date"}</div>
             {!readOnly ? (
               <>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => addRowBelow(selectedRow.sandboxId)}>Add Row Below</button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setSelectedRowId(addRowBelow(selectedRow.sandboxId))}
+                >
+                  Add Row Below
+                </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => duplicateRow(selectedRow.sandboxId)}>Duplicate</button>
                 {selectedRow.rowState === "deleted" ? (
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => restoreRow(selectedRow.sandboxId)}>Restore</button>
@@ -1264,6 +1318,11 @@ export function GrantBudgetSandboxModal({
             ) : null}
             {selectedRow.sourceId && onOpenPayment ? (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpenPayment(selectedRow.sourceId)}>Open Payment</button>
+            ) : null}
+            {selectedRow.enrollmentId && selectedRow.paymentId ? (
+              <button type="button" className="btn btn-secondary btn-sm" disabled={rentCertMutation.isPending} onClick={() => void updateRentCert(selectedRow)}>
+                {selectedRow.rentCertDueOn ? "Update Rent Cert" : "Add Rent Cert"}
+              </button>
             ) : null}
           </div>
         ) : null}

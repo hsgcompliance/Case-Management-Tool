@@ -325,6 +325,33 @@ export const Enrollments = {
       body,
       idemKey({ scope: "enrollments", op: "actionsApply", body })
     ),
+
+  continuumSummary: (enrollmentId: string): Promise<RespOf<"enrollmentsContinuumSummary">> =>
+    api.get("enrollmentsContinuumSummary", { enrollmentId }),
+
+  allocationSet: (body: ReqOf<"enrollmentsAllocationSet">): Promise<RespOf<"enrollmentsAllocationSet">> =>
+    api.callIdem(
+      "enrollmentsAllocationSet",
+      body,
+      idemKey({ scope: "enrollments", op: "allocationSet", body }),
+    ),
+
+  cycleRolloverPreview: (body: ReqOf<"enrollmentsCycleRolloverPreview">): Promise<RespOf<"enrollmentsCycleRolloverPreview">> =>
+    api.post("enrollmentsCycleRolloverPreview", body),
+
+  cycleRolloverRun: (body: ReqOf<"enrollmentsCycleRolloverRun">): Promise<RespOf<"enrollmentsCycleRolloverRun">> =>
+    api.callIdem(
+      "enrollmentsCycleRolloverRun",
+      body,
+      idemKey({ scope: "enrollments", op: "cycleRolloverRun", body }),
+    ),
+
+  linkedProgramsReconcile: (body: ReqOf<"enrollmentsLinkedProgramsReconcile">): Promise<RespOf<"enrollmentsLinkedProgramsReconcile">> =>
+    api.callIdem(
+      "enrollmentsLinkedProgramsReconcile",
+      body,
+      idemKey({ scope: "enrollments", op: "linkedProgramsReconcile", body }),
+    ),
 };
 
 export default Enrollments;

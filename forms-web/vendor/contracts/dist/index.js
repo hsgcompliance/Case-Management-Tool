@@ -1,4 +1,15 @@
 import {
+  TRANSACTION_WINDOW_FORM_IDS,
+  TransactionWindowSchemaError,
+  cleanVisibleLabel,
+  inferTransactionWindowModel,
+  transactionFieldKey,
+  transactionWindows_exports
+} from "./chunk-UU4CEQRZ.js";
+import {
+  tss_exports
+} from "./chunk-6BP5RFOU.js";
+import {
   CreateUserBody,
   InviteUserBody,
   ListUsersBody,
@@ -34,7 +45,11 @@ import {
   UserTaskMetrics,
   UserToursState,
   users_exports
-} from "./chunk-VQWEL4VR.js";
+} from "./chunk-5YUCCDMW.js";
+import {
+  InboxItemSchema,
+  inbox_exports
+} from "./chunk-PDFEQQPA.js";
 import {
   jotform_exports
 } from "./chunk-FX7IDERT.js";
@@ -60,16 +75,29 @@ import {
   tours_exports
 } from "./chunk-MRVKWMM6.js";
 import {
-  TRANSACTION_WINDOW_FORM_IDS,
-  TransactionWindowSchemaError,
-  cleanVisibleLabel,
-  inferTransactionWindowModel,
-  transactionFieldKey,
-  transactionWindows_exports
-} from "./chunk-UU4CEQRZ.js";
+  enrollments_exports
+} from "./chunk-MSDSNG6E.js";
 import {
-  tss_exports
-} from "./chunk-6BP5RFOU.js";
+  payments_exports
+} from "./chunk-KR3HYOES.js";
+import {
+  TasksAdminRegenerateForGrantBody,
+  TasksAssignBody,
+  TasksBulkStatusBody,
+  TasksDeleteBody,
+  TasksGenerateScheduleWriteBody,
+  TasksListQuery,
+  TasksOtherAssignBody,
+  TasksOtherCreateBody,
+  TasksOtherListMyQuery,
+  TasksOtherStatusBody,
+  TasksOtherUpdateBody,
+  TasksRescheduleBody,
+  TasksUpdateFieldsBody,
+  TasksUpdateStatusBody,
+  TasksUpsertManualBody,
+  tasks_exports
+} from "./chunk-4O3BPXUB.js";
 import {
   FORM_CONTEXT_KEYS,
   FormPrefillSnapshot,
@@ -111,7 +139,7 @@ import {
   GrantBudgetManagerSaveMode,
   GrantBudgetManagerSourceType,
   grantBudgetManager_exports
-} from "./chunk-TWRU6PSC.js";
+} from "./chunk-3FQYJFLR.js";
 import {
   GRANT_PIN_COLORS,
   GrantComplianceConfig,
@@ -132,12 +160,27 @@ import {
   normalizeGrantFinancialConfig,
   parseGrantMaxAssistanceMonths,
   shouldRetainGrantBudget
-} from "./chunk-CD4U5KDR.js";
-import "./chunk-6MMLCWVM.js";
+} from "./chunk-EEXJMPYI.js";
 import {
-  InboxItemSchema,
-  inbox_exports
-} from "./chunk-PDFEQQPA.js";
+  HouseholdEntity,
+  HouseholdInputSchema,
+  HouseholdMember,
+  HouseholdRelationship,
+  HouseholdStatus,
+  HouseholdsAddMemberBody,
+  HouseholdsDeleteBody,
+  HouseholdsGetQuery,
+  HouseholdsListQuery,
+  HouseholdsPatchBody,
+  HouseholdsPatchRow,
+  HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody,
+  HouseholdsUpsertBody,
+  deriveHeadCustomerId,
+  householdRelationshipLabel,
+  households_exports
+} from "./chunk-JWPMGPLN.js";
+import "./chunk-6MMLCWVM.js";
 import {
   assessments_exports
 } from "./chunk-BM7NCR2O.js";
@@ -156,6 +199,12 @@ import {
   budgetPipeline_exports
 } from "./chunk-DS5NSSHV.js";
 import {
+  GenerateCaseNoteSuggestionBodySchema,
+  GenerateCaseNoteSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema,
+  caseNoteAssistant_exports
+} from "./chunk-YJIMR7SQ.js";
+import {
   CmActivitiesListQuery,
   CmActivitiesListResp,
   CmActivity,
@@ -167,34 +216,9 @@ import {
 import {
   creditCards_exports
 } from "./chunk-WC56LPCP.js";
-import "./chunk-RSTNFQ4V.js";
-import {
-  enrollments_exports
-} from "./chunk-NY42WFZY.js";
-import {
-  payments_exports
-} from "./chunk-F2QBR4C7.js";
-import {
-  TasksAdminRegenerateForGrantBody,
-  TasksAssignBody,
-  TasksBulkStatusBody,
-  TasksDeleteBody,
-  TasksGenerateScheduleWriteBody,
-  TasksListQuery,
-  TasksOtherAssignBody,
-  TasksOtherCreateBody,
-  TasksOtherListMyQuery,
-  TasksOtherStatusBody,
-  TasksOtherUpdateBody,
-  TasksRescheduleBody,
-  TasksUpdateFieldsBody,
-  TasksUpdateStatusBody,
-  TasksUpsertManualBody,
-  tasks_exports
-} from "./chunk-4O3BPXUB.js";
 import {
   customers_exports
-} from "./chunk-QSS3BBDW.js";
+} from "./chunk-AGNAOSOI.js";
 import {
   BoolFromLike,
   BoolLike,
@@ -212,6 +236,7 @@ import {
   z
 } from "./chunk-AXFMCCQR.js";
 import "./chunk-MLKGABMK.js";
+import "./chunk-RSTNFQ4V.js";
 export {
   BoolFromLike,
   BoolLike,
@@ -242,6 +267,8 @@ export {
   FormWorkflowId,
   GDRIVE_TEMPLATE_TYPES,
   GRANT_PIN_COLORS,
+  GenerateCaseNoteSuggestionBodySchema,
+  GenerateCaseNoteSuggestionResponseSchema,
   GoogleAuthMode,
   GoogleConnectStartBody,
   GoogleIntegrationMode,
@@ -267,6 +294,20 @@ export {
   GrantFinancialModel,
   GrantIdsLike,
   GrantLedgerMode,
+  HouseholdEntity,
+  HouseholdInputSchema,
+  HouseholdMember,
+  HouseholdRelationship,
+  HouseholdStatus,
+  HouseholdsAddMemberBody,
+  HouseholdsDeleteBody,
+  HouseholdsGetQuery,
+  HouseholdsListQuery,
+  HouseholdsPatchBody,
+  HouseholdsPatchRow,
+  HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody,
+  HouseholdsUpsertBody,
   ISO10,
   Id,
   IdLike,
@@ -291,6 +332,7 @@ export {
   PipelineOperator,
   PipelineRuleNode,
   PipelineStatus,
+  RecordCaseNoteSuggestionDecisionBodySchema,
   ResendInviteBody,
   RevokeSessionsBody,
   RoleInput,
@@ -347,11 +389,13 @@ export {
   WORKFLOW_CONFIGS,
   assessments_exports as assessments,
   budgetPipeline_exports as budgetPipeline,
+  caseNoteAssistant_exports as caseNoteAssistant,
   cleanVisibleLabel,
   cmActivities_exports as cmActivities,
   computeGrantLineItemOverCap,
   creditCards_exports as creditCards,
   customers_exports as customers,
+  deriveHeadCustomerId,
   enrollments_exports as enrollments,
   formSessions_exports as formSessions,
   gdrive_exports as gdrive,
@@ -361,6 +405,8 @@ export {
   google_exports as google,
   grantBudgetManager_exports as grantBudgetManager,
   grants_exports as grants,
+  householdRelationshipLabel,
+  households_exports as households,
   inbox_exports as inbox,
   inferTransactionWindowModel,
   jotform_exports as jotform,

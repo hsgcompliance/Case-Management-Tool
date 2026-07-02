@@ -14,6 +14,7 @@ import { useAssessmentTemplate, useAssessmentTemplates } from "@hooks/useAssessm
 import { useCustomer, useUpsertCustomers, usePatchCustomers } from "@hooks/useCustomers";
 import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
 import {
+  prefetchGDriveCustomerFolderIndex,
   useGDriveBuildCustomerFolder,
   useGDriveCopyGrantTemplates,
   useGDriveCustomerFolderIndex,
@@ -499,6 +500,8 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
   const [folderUrl, setFolderUrl] = React.useState("");
   const [folderAlias, setFolderAlias] = React.useState("");
   const [workbookLinkedInFlow, setWorkbookLinkedInFlow] = React.useState(false);
+  const [wfWorkbookVariant, setWfWorkbookVariant] = React.useState<"payer" | "nonpayer">("nonpayer");
+  const [wfWorkbookBusy, setWfWorkbookBusy] = React.useState(false);
   // Folder builder state (step 8)
   const [folderMode, setFolderMode] = React.useState<"none" | "build" | "link">("none");
   const [buildFolderName, setBuildFolderName] = React.useState("");
@@ -539,7 +542,64 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     { activeParentId, exitedParentId },
     { enabled: folderMode !== "none" },
   );
+
+  // Warm the folder index in the background as soon as the flow opens (and once
+  // the Drive parents resolve) so the Files/Build step (8) doesn't stall on first
+  // load. No-op when the index is already cached and fresh.
+  React.useEffect(() => {
+    void prefetchGDriveCustomerFolderIndex(qc, { activeParentId, exitedParentId });
+  }, [qc, activeParentId, exitedParentId]);
+
   const buildFolder = useGDriveBuildCustomerFolder({ activeParentId, exitedParentId });
+
+  // Configured TSS workbook template — drives the "build from template" option in
+  // the Link-Existing path (so an existing folder without a workbook can still get
+  // one without leaving the flow).
+  const wfTssTemplate = React.useMemo(
+    () => flowTemplates.find((t) => t.role === "tssWorkbook"),
+    [flowTemplates],
+  );
+  const wfTssTemplateReady = !!(
+    wfTssTemplate &&
+    (wfTssTemplate.fileId || wfTssTemplate.variants?.payer || wfTssTemplate.variants?.nonpayer)
+  );
+  const wfTssTemplateHasVariants = !!(wfTssTemplate?.variants?.payer || wfTssTemplate?.variants?.nonpayer);
+
+  // Build a TSS workbook from the configured template into the chosen (link-mode)
+  // folder. copyCustomerWorkbookFromTemplate resolves the folder from the customer
+  // doc, so the chosen folder is persisted first; Finish re-writes it idempotently.
+  const buildWorkbookFromTemplateInFlow = React.useCallback(
+    async (linkFolderId: string) => {
+      if (!customerId || !linkFolderId) return;
+      setFlowError(null);
+      setWfWorkbookBusy(true);
+      try {
+        await patchCustomer.mutateAsync({
+          id: customerId,
+          patch: {
+            meta: {
+              ...((customerRecord as Record<string, unknown> | null)?.meta as Record<string, unknown> | undefined),
+              driveFolderId: linkFolderId,
+              driveFolders: [{ id: linkFolderId, alias: folderAlias.trim() || null, name: folderAlias.trim() || folderUrl.trim() }],
+            },
+          },
+        } as unknown as Parameters<typeof patchCustomer.mutateAsync>[0]);
+        const tok = getGoogleDriveAccessToken();
+        await api.postWith(
+          "copyCustomerWorkbookFromTemplate",
+          { customerId, variant: wfWorkbookVariant },
+          tok ? { "x-drive-access-token": tok } : undefined,
+        );
+        setWorkbookLinkedInFlow(true);
+        toast("TSS workbook created from template.", { type: "success" });
+      } catch (error: unknown) {
+        setFlowError(formatFlowError("Error creating TSS workbook", error));
+      } finally {
+        setWfWorkbookBusy(false);
+      }
+    },
+    [customerId, customerRecord, folderAlias, folderUrl, patchCustomer, wfWorkbookVariant],
+  );
 
   // Seed default templates/subfolders from resolved org config once it loads.
   const flowSeededRef = React.useRef(false);
@@ -1079,7 +1139,12 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             const tok = getGoogleDriveAccessToken();
             await api.postWith(
               "attachCustomerWorkbookCandidate",
-              { customerId: ensuredCustomerId, spreadsheetId: builtWorkbook.spreadsheetId, spreadsheetName: builtWorkbook.name },
+              {
+                customerId: ensuredCustomerId,
+                spreadsheetId: builtWorkbook.spreadsheetId,
+                spreadsheetName: builtWorkbook.name,
+                variant: buildMedicaid === "yes" ? "payer" : "nonpayer",
+              },
               tok ? { "x-drive-access-token": tok } : undefined,
             );
           } catch {
@@ -2003,11 +2068,42 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
                       <span>✓</span> TSS workbook linked to this customer.
                     </div>
                   ) : (
-                    <WorkbookLinkControls
-                      customerId={customerId}
-                      folderId={linkFolderId}
-                      onLinked={() => { setWorkbookLinkedInFlow(true); toast("TSS workbook linked.", { type: "success" }); }}
-                    />
+                    <div className="space-y-3">
+                      {wfTssTemplateReady ? (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-800">Build from configured template</div>
+                            <div className="text-[11px] text-slate-500">Creates a TSS workbook in this folder.</div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {wfTssTemplateHasVariants ? (
+                              <select
+                                className="input input-sm min-w-[160px] bg-white text-xs"
+                                value={wfWorkbookVariant}
+                                onChange={(e) => setWfWorkbookVariant(e.currentTarget.value as "payer" | "nonpayer")}
+                                disabled={wfWorkbookBusy}
+                              >
+                                <option value="nonpayer">Non-payer / not sure</option>
+                                <option value="payer">Payer</option>
+                              </select>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-primary"
+                              disabled={wfWorkbookBusy}
+                              onClick={() => void buildWorkbookFromTemplateInFlow(linkFolderId)}
+                            >
+                              {wfWorkbookBusy ? "Building..." : "Create from template"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      <WorkbookLinkControls
+                        customerId={customerId}
+                        folderId={linkFolderId}
+                        onLinked={() => { setWorkbookLinkedInFlow(true); toast("TSS workbook linked.", { type: "success" }); }}
+                      />
+                    </div>
                   )}
                 </div>
               );

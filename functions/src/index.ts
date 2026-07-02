@@ -40,3 +40,4 @@ export * from "./features/users";
 export * from "./features/tours";
 export * from "./features/orgs";
 export * from "./features/calendar";
+export * from "./features/caseNoteAssistant";

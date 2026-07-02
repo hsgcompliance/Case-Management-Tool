@@ -33,6 +33,7 @@ import {
   parseGrantMaxAssistanceMonths,
   toArray,
 } from "./schemas";
+import { copyCyclePipelineConfiguration } from "./cyclePipelineCopy";
 
 /* ---------------- Budget helpers (server-derived totals) ---------------- */
 
@@ -422,6 +423,7 @@ const KNOWN_GRANT_FIELDS = new Set<string>([
   "pins",
   "invoicing",
   "invoiceDocuments",
+  "linking",
   "levelOfAssistance",
   "programIds",
   "fundingGrantIds",
@@ -576,6 +578,92 @@ function sanitizeGrantPatch(patch: Partial<TGrant>): Partial<TGrant> {
   return out;
 }
 
+function assertNoSelfLinks(id: string, linking: unknown) {
+  if (!isPlainObject(linking)) return;
+  const cycle = isPlainObject(linking.cycle) ? linking.cycle : {};
+  const targets: unknown[] = [cycle.previousGrantId, cycle.nextGrantId];
+  const requirement = isPlainObject(linking.enrollmentRequirement) ? linking.enrollmentRequirement : {};
+  if (Array.isArray(requirement.targetGrantIds)) targets.push(...requirement.targetGrantIds);
+  for (const rule of Array.isArray(linking.enrollmentRules) ? linking.enrollmentRules : []) {
+    if (isPlainObject(rule)) targets.push(rule.targetGrantId);
+  }
+  if (targets.some((target) => normId(target) === id)) {
+    const error = new Error("grant_link_cannot_reference_self") as Error & { code: number };
+    error.code = 400;
+    throw error;
+  }
+}
+
+async function syncCycleReciprocal(ids: string[], targetOrg: string) {
+  for (const id of ids) {
+    const snap = await db.collection("grants").doc(id).get();
+    if (!snap.exists) continue;
+    const grant = snap.data() || {};
+    const cycle = isPlainObject(grant?.linking?.cycle) ? grant.linking.cycle : {};
+    const previousGrantId = normId(cycle.previousGrantId);
+    if (previousGrantId) await copyCyclePipelineConfiguration(previousGrantId, id, targetOrg);
+    for (const [rawTarget, reciprocalField] of [
+      [cycle.nextGrantId, "previousGrantId"],
+      [cycle.previousGrantId, "nextGrantId"],
+    ] as Array<[unknown, string]>) {
+      const targetId = normId(rawTarget);
+      if (!targetId) continue;
+      const direction = reciprocalField === "previousGrantId" ? "nextGrantId" : "previousGrantId";
+      const targetRef = db.collection("grants").doc(targetId);
+      const targetSnap = await targetRef.get();
+      if (!targetSnap.exists) {
+        await db.collection("grants").doc(id).update(`linking.cycle.${direction}`, null);
+        throw Object.assign(new Error("linked_grant_not_found"), { code: 400 });
+      }
+      const target = targetSnap.data() || {};
+      if (normId(target.orgId) && normId(target.orgId) !== normId(targetOrg)) {
+        await db.collection("grants").doc(id).update(`linking.cycle.${direction}`, null);
+        throw Object.assign(new Error("linked_grant_cross_org"), { code: 403 });
+      }
+      let cursor = targetId;
+      const visited = new Set<string>();
+      while (cursor && !visited.has(cursor)) {
+        if (cursor === id) {
+          await db.collection("grants").doc(id).update(`linking.cycle.${direction}`, null);
+          throw Object.assign(new Error("grant_cycle_loop_detected"), { code: 400 });
+        }
+        visited.add(cursor);
+        const cursorSnap = cursor === targetId ? targetSnap : await db.collection("grants").doc(cursor).get();
+        cursor = normId((cursorSnap.data() as any)?.linking?.cycle?.[direction]);
+      }
+      await targetRef.set({
+        linking: {
+          ...(isPlainObject(target.linking) ? target.linking : {}),
+          cycle: {
+            ...(isPlainObject(target?.linking?.cycle) ? target.linking.cycle : {}),
+            [reciprocalField]: id,
+          },
+        },
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+}
+
+async function clearRemovedCycleReciprocals(
+  changes: Array<{ id: string; before: Record<string, any>; after: Record<string, any> }>,
+) {
+  for (const { id, before, after } of changes) {
+    for (const [oldTargetRaw, newTargetRaw, reciprocalField] of [
+      [before?.linking?.cycle?.nextGrantId, after?.linking?.cycle?.nextGrantId, "previousGrantId"],
+      [before?.linking?.cycle?.previousGrantId, after?.linking?.cycle?.previousGrantId, "nextGrantId"],
+    ] as Array<[unknown, unknown, string]>) {
+      const oldTarget = normId(oldTargetRaw);
+      if (!oldTarget || oldTarget === normId(newTargetRaw)) continue;
+      const ref = db.collection("grants").doc(oldTarget);
+      const snap = await ref.get();
+      if (normId((snap.data() as any)?.linking?.cycle?.[reciprocalField]) === id) {
+        await ref.update(`linking.cycle.${reciprocalField}`, null, "updatedAt", FieldValue.serverTimestamp());
+      }
+    }
+  }
+}
+
 /* ---------------- Normalize single grant for storage ---------------- */
 
 export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
@@ -588,7 +676,8 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
   }
 
   const id = parsed.id || uuid();
-  const status = (parsed.status || "draft") as TGrant["status"];
+  assertNoSelfLinks(id, parsed.linking);
+  const status = (parsed.status || "active") as TGrant["status"];
 
   const active = status === "active";
   const deleted = status === "deleted";
@@ -636,6 +725,7 @@ export function normalizeOne(input: TGrant, caller: Claims, targetOrg: string) {
     pins: parsed.pins ?? null,
     invoicing: parsed.invoicing ?? null,
     invoiceDocuments: parsed.invoiceDocuments ?? null,
+    linking: parsed.linking ?? null,
     levelOfAssistance: parsed.levelOfAssistance ?? null,
     programIds: parsed.programIds ?? null,
     fundingGrantIds: parsed.fundingGrantIds ?? null,
@@ -675,6 +765,12 @@ export async function upsertGrants(
     writer.set(refs[i], items[i], { merge: true });
   }
   await writer.close();
+  await clearRemovedCycleReciprocals(items.map((item, index) => ({
+    id: item.id,
+    before: (snaps[index].data() || {}) as Record<string, any>,
+    after: item as Record<string, any>,
+  })));
+  await syncCycleReciprocal(items.map((item) => item.id), targetOrg);
 
   return { ids: items.map((i) => i.id) };
 }
@@ -712,12 +808,19 @@ export async function patchGrants(
   // Track grants whose terminal status should be reflected on enrollments after write.
   const cascadeNeeded: Array<{ id: string; targetStatus: "closed" | "deleted" }> = [];
   const maxAssistanceSyncIds = new Set<string>();
+  const cycleLinkChanges: Array<{ id: string; before: Record<string, any>; after: Record<string, any> }> = [];
 
   for (let i = 0; i < rows.length; i++) {
     const { id, patch, unset } = rows[i];
     const prev = (snaps[i].data() || {}) as Partial<TGrant>;
 
     const safePatch = sanitizeGrantPatch(patch as Partial<TGrant>);
+    assertNoSelfLinks(id, (safePatch as Record<string, unknown>).linking);
+    cycleLinkChanges.push({
+      id,
+      before: prev as Record<string, any>,
+      after: { ...(prev as Record<string, any>), ...(safePatch as Record<string, any>) },
+    });
 
     const touchesBudget = hasOwn(safePatch, "budget");
 
@@ -935,6 +1038,8 @@ export async function patchGrants(
     );
   }
 
+  await clearRemovedCycleReciprocals(cycleLinkChanges);
+  await syncCycleReciprocal(ids, targetOrg);
   return { ids };
 }
 

@@ -40,6 +40,11 @@ import { getToken as getAppCheckToken } from "firebase/app-check";
 import { toast } from "@lib/toast";
 import { BuildFolderDialog, LinkFolderDialog } from "./CustomerFilesPanel";
 import { FileTypeIcon, FOLDER_MIME, SHEETS_MIME } from "@entities/gdrive/FileTypeIcon";
+import {
+  WorkbookVariantDialog,
+  type WorkbookTemplateVariant,
+} from "@entities/workbook/WorkbookVariantDialog";
+import { WorkbookVariantToggle } from "@entities/workbook/WorkbookVariantToggle";
 import type { TCustomerFolder } from "@types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,7 +440,8 @@ function GDriveBlock({ customerId }: { customerId: string }) {
   const [uploadingFolderId, setUploadingFolderId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [buildingName, setBuildingName] = React.useState<string | null>(null);
-  const [workbookVariant, setWorkbookVariant] = React.useState<"payer" | "nonpayer">("nonpayer");
+  const [workbookVariant, setWorkbookVariant] = React.useState<WorkbookTemplateVariant>("nonpayer");
+  const [showWorkbookVariantDialog, setShowWorkbookVariantDialog] = React.useState(false);
   const [workbookBusy, setWorkbookBusy] = React.useState(false);
   const [workbookActionId, setWorkbookActionId] = React.useState<string | null>(null);
   const editFileRef = React.useRef<HTMLInputElement>(null);
@@ -512,7 +518,10 @@ function GDriveBlock({ customerId }: { customerId: string }) {
     () => indexData?.folders ?? [],
     [indexData?.folders],
   );
-  const linkedWorkbookId = String((customer as any)?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
+  const tssWorkbook = (customer as any)?.customerDrive?.linkedWorkbooks?.tss as
+    | { spreadsheetId?: string; spreadsheetUrl?: string; spreadsheetName?: string; variant?: string }
+    | undefined;
+  const linkedWorkbookId = String(tssWorkbook?.spreadsheetId || "").trim();
   const hasLinkedWorkbook = !!linkedWorkbookId;
   const indexFolder = React.useMemo(
     () => firstFolder ? indexFolders.find((folder) => folder.id === firstFolder.id) ?? null : null,
@@ -570,7 +579,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
       const tok = getGoogleDriveAccessToken();
       await (api as any).postWith(
         "attachCustomerWorkbookCandidate",
-        { customerId, spreadsheetId: args.spreadsheetId, spreadsheetName: args.spreadsheetName },
+        { customerId, spreadsheetId: args.spreadsheetId, spreadsheetName: args.spreadsheetName, variant: workbookVariant },
         tok ? { "x-drive-access-token": tok } : undefined,
       );
       invalidateCustomer();
@@ -592,6 +601,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
         { customerId, variant: workbookVariant },
         tok ? { "x-drive-access-token": tok } : undefined,
       );
+      setShowWorkbookVariantDialog(false);
       invalidateCustomer();
       void filesQ.refetch();
       toast("TSS workbook created from template.", { type: "success" });
@@ -602,10 +612,31 @@ function GDriveBlock({ customerId }: { customerId: string }) {
     }
   };
 
+  // Convert an .xlsx/.xls in the folder into a native Google Sheet and link it.
+  const convertWorkbookFile = async (args: { fileId: string; fileName?: string; actionId: string }) => {
+    setWorkbookActionId(args.actionId);
+    setError(null);
+    try {
+      const tok = getGoogleDriveAccessToken();
+      await (api as any).postWith(
+        "convertCustomerWorkbookXlsx",
+        { customerId, fileId: args.fileId, fileName: args.fileName, variant: workbookVariant },
+        tok ? { "x-drive-access-token": tok } : undefined,
+      );
+      invalidateCustomer();
+      void filesQ.refetch();
+      toast("Excel file converted to a Google Sheet and linked.", { type: "success" });
+    } catch (err) {
+      setError(toApiError(err).error || "Failed to convert file.");
+    } finally {
+      setWorkbookActionId(null);
+    }
+  };
+
   const buildFolder = useGDriveBuildCustomerFolder(
     { activeParentId, exitedParentId },
     {
-      onSuccess: async (folder) => {
+      onSuccess: async (folder, variables) => {
         const next = [...folders, { id: folder.id, name: folder.name, alias: null }];
         await saveLinkedFolders(next);
         setBuildingName(null);
@@ -613,12 +644,13 @@ function GDriveBlock({ customerId }: { customerId: string }) {
         // Auto-link the TSS workbook the build created (Medicaid/non-Medicaid
         // variant). The build returns the copied Sheet; link it as the workbook.
         const wb = (folder as { workbook?: { spreadsheetId?: string; name?: string } }).workbook;
+        const variant = (variables as { variant?: "payer" | "nonpayer" })?.variant;
         if (wb?.spreadsheetId) {
           try {
             const tok = getGoogleDriveAccessToken();
             await (api as any).postWith(
               "attachCustomerWorkbookCandidate",
-              { customerId, spreadsheetId: wb.spreadsheetId, spreadsheetName: wb.name },
+              { customerId, spreadsheetId: wb.spreadsheetId, spreadsheetName: wb.name, ...(variant ? { variant } : {}) },
               tok ? { "x-drive-access-token": tok } : undefined,
             );
             toast(`Folder "${folder.name}" is ready — workbook linked.`, { type: "success" });
@@ -637,6 +669,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
     parentId: string;
     templates: Array<{ fileId: string; name: string; role?: string }>;
     subfolders: string[];
+    variant: "payer" | "nonpayer";
   }) => {
     setShowBuildDialog(false);
     setBuildingName(args.name);
@@ -1206,27 +1239,46 @@ function GDriveBlock({ customerId }: { customerId: string }) {
                   </div>
                   {tssTemplateReady ? (
                     <div className="flex flex-wrap items-center gap-2">
-                      {tssTemplateHasVariants ? (
-                        <select
-                          className="input input-sm min-w-[190px] bg-white text-xs"
-                          value={workbookVariant}
-                          onChange={(e) => setWorkbookVariant(e.currentTarget.value as "payer" | "nonpayer")}
-                          disabled={workbookBusy}
-                        >
-                          <option value="nonpayer">Non-payer / not sure</option>
-                          <option value="payer">Payer</option>
-                        </select>
-                      ) : null}
                       <button
                         type="button"
                         className="btn btn-xs btn-primary"
                         disabled={workbookBusy}
-                        onClick={() => void buildWorkbookFromTemplate()}
+                        onClick={() => {
+                          if (tssTemplateHasVariants) setShowWorkbookVariantDialog(true);
+                          else void buildWorkbookFromTemplate();
+                        }}
                       >
-                        {workbookBusy ? "Building..." : "Build workbook"}
+                        {workbookBusy ? "Building..." : "Create workbook"}
                       </button>
                     </div>
                   ) : null}
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="font-medium text-amber-900">Workbook type</span>
+                  <div className="inline-flex items-center rounded-lg border border-amber-200 bg-white p-0.5">
+                    <button
+                      type="button"
+                      className={`rounded-md px-2 py-1 font-medium transition ${
+                        workbookVariant === "nonpayer" ? "bg-amber-100 text-slate-900" : "text-slate-500 hover:text-slate-700"
+                      }`}
+                      disabled={!!workbookActionId || workbookBusy}
+                      onClick={() => setWorkbookVariant("nonpayer")}
+                    >
+                      Non-payer
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-md px-2 py-1 font-medium transition ${
+                        workbookVariant === "payer" ? "bg-emerald-600 text-white" : "text-slate-500 hover:text-slate-700"
+                      }`}
+                      disabled={!!workbookActionId || workbookBusy}
+                      onClick={() => setWorkbookVariant("payer")}
+                    >
+                      Payer
+                    </button>
+                  </div>
+                  <span className="text-amber-700">Applies to whichever workbook you link or build below.</span>
                 </div>
 
                 {recommendedWorkbookId ? (
@@ -1261,36 +1313,86 @@ function GDriveBlock({ customerId }: { customerId: string }) {
                   <div className="overflow-hidden rounded-lg border border-amber-200 bg-white">
                     {tssFiles.map((file) => {
                       const fileId = String(file.id || "").trim();
+                      const isExcel = file.mimeType === XLSX_MIME || file.mimeType === XLS_MIME;
                       return (
                         <div key={fileId || file.name} className="flex items-center justify-between gap-2 border-b border-amber-100 px-3 py-2 last:border-b-0">
                           <div className="flex min-w-0 items-center gap-2">
                             <FileTypeIcon mime={file.mimeType} className="h-4 w-4 shrink-0" />
                             <div className="min-w-0">
                               <div className="truncate text-xs font-semibold text-slate-800">{file.name || "TSS workbook"}</div>
-                              {file.modifiedTime ? (
+                              {isExcel ? (
+                                <div className="text-[11px] text-amber-600">Excel file · converts to a Google Sheet</div>
+                              ) : file.modifiedTime ? (
                                 <div className="text-[11px] text-slate-400">Modified {fmtDateOrDash(file.modifiedTime)}</div>
                               ) : null}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            className="btn btn-xs btn-primary shrink-0"
-                            disabled={!fileId || !!workbookActionId}
-                            onClick={() => void linkWorkbookCandidate({
-                              spreadsheetId: fileId,
-                              spreadsheetName: String(file.name || "TSS workbook"),
-                              actionId: `file:${fileId}`,
-                            })}
-                          >
-                            {workbookActionId === `file:${fileId}` ? "Linking..." : "Link"}
-                          </button>
+                          {isExcel ? (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-primary shrink-0"
+                              disabled={!fileId || !!workbookActionId}
+                              onClick={() => void convertWorkbookFile({
+                                fileId,
+                                fileName: String(file.name || "TSS workbook"),
+                                actionId: `file:${fileId}`,
+                              })}
+                            >
+                              {workbookActionId === `file:${fileId}` ? "Converting..." : "Convert"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-primary shrink-0"
+                              disabled={!fileId || !!workbookActionId}
+                              onClick={() => void linkWorkbookCandidate({
+                                spreadsheetId: fileId,
+                                spreadsheetName: String(file.name || "TSS workbook"),
+                                actionId: `file:${fileId}`,
+                              })}
+                            >
+                              {workbookActionId === `file:${fileId}` ? "Linking..." : "Link"}
+                            </button>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                 ) : null}
               </div>
-            ) : null}
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-slate-800">
+                    {tssWorkbook?.spreadsheetName || "TSS workbook linked"}
+                  </div>
+                  {tssWorkbook?.spreadsheetUrl ? (
+                    <a
+                      href={tssWorkbook.spreadsheetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-sky-700 underline"
+                    >
+                      Open sheet ↗
+                    </a>
+                  ) : null}
+                </div>
+                <WorkbookVariantToggle
+                  customerId={customerId}
+                  variant={tssWorkbook?.variant}
+                  onChanged={invalidateCustomer}
+                />
+              </div>
+            )}
+
+            <WorkbookVariantDialog
+              open={showWorkbookVariantDialog}
+              variant={workbookVariant}
+              busy={workbookBusy}
+              onVariantChange={setWorkbookVariant}
+              onConfirm={() => void buildWorkbookFromTemplate()}
+              onClose={() => setShowWorkbookVariantDialog(false)}
+            />
 
             {/* File table (current folder) */}
             {filesQ.isLoading || filesQ.isFetching ? (

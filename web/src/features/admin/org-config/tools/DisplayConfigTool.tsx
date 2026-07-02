@@ -80,6 +80,7 @@ export const DisplayConfigMain: DashboardToolDefinition<DisplayConfigFilterState
   const saveOrgConfig = useSaveOrgConfig();
   const [savingId, setSavingId] = React.useState<string | null>(null);
   const [savingBudgetDigest, setSavingBudgetDigest] = React.useState(false);
+  const [savingAi, setSavingAi] = React.useState(false);
   const docs = docsByKind.display.filter((doc) => matchesSearch(doc, filterState.search));
   const selectedDoc = docs.find((doc) => doc.id === selection?.docId) ?? docs[0] ?? null;
 
@@ -93,6 +94,33 @@ export const DisplayConfigMain: DashboardToolDefinition<DisplayConfigFilterState
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
+      {orgConfig ? (
+        <section className="card">
+          <div className="card-section flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">AI Case Note Assistant Beta</h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Allows eligible payer-linked customers to use preview-only writing suggestions. Disabled by default.</p>
+            </div>
+            <button
+              type="button"
+              disabled={savingAi}
+              aria-pressed={orgConfig.aiFeatures?.caseNoteAssistantBeta?.enabled === true}
+              onClick={async () => {
+                setSavingAi(true);
+                const current = orgConfig.aiFeatures?.caseNoteAssistantBeta ?? { enabled: false, allowedWorkbookVariants: ["payer"], defaultClientLabel: "client", defaultStaffLabel: "case manager", monthlyTokenLimit: 25_000_000, monthlyRequestLimit: 10_000, dailyUserRequestLimit: 25, dailyUserTokenLimit: 100_000, userQuotaOverrides: {}, defaultModel: "gemini-2.5-flash-lite", fallbackModel: null, maxInputChars: 12_000, maxOutputTokens: 800, temperature: 0.2 };
+                try {
+                  await saveOrgConfig.mutateAsync({ ...orgConfig, aiFeatures: { ...orgConfig.aiFeatures, caseNoteAssistantBeta: { ...current, enabled: !current.enabled } } });
+                  toast(`AI Case Note Assistant ${current.enabled ? "disabled" : "enabled"}.`, { type: "success" });
+                } catch (e: unknown) { toast(e instanceof Error ? e.message : "Save failed.", { type: "error" }); }
+                finally { setSavingAi(false); }
+              }}
+              className={`btn btn-sm ${orgConfig.aiFeatures?.caseNoteAssistantBeta?.enabled ? "btn-primary" : ""}`}
+            >
+              {savingAi ? "Saving..." : orgConfig.aiFeatures?.caseNoteAssistantBeta?.enabled ? "Enabled" : "Disabled"}
+            </button>
+          </div>
+        </section>
+      ) : null}
       <BudgetDigestConfigEditor
         config={orgConfig}
         saving={savingBudgetDigest}

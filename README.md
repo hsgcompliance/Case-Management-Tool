@@ -42,6 +42,8 @@ npm -w web run dev
 
 The web dev server uses port `5173`. Local environment examples live in `web/.env.local.example`. Do not commit real `.env` files or service account credentials.
 
+> **Do not run the Firebase emulators or local auth on this workstation.** The dev machine `C:\Users\gseyfried\` (`AzureAD+GriffinSeyfried@HRDCL-Energy009`) cannot efficiently run the emulator suite + auth for a system this large (the full set of Cloud Functions). `npm run emulators` will be slow, unstable, or stall here. For this project on this machine, skip local emulation: verify with the build/test commands above (`npm run build:*`, `npm -w web run test:unit`) and exercise backend changes by deploying to a real Firebase environment via the safe deploy scripts.
+
 ## Deploy
 
 Deploy through the safe scripts in `package.json`, not raw ad hoc Firebase commands:

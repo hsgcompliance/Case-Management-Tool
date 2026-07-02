@@ -35,6 +35,32 @@ export declare const PaymentCompliance: z.ZodObject<{
     note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$strip>;
 /**
+ * Rent cert lifecycle status on a payment. The due date is always the month
+ * prior to the effective (payment) date, so it is derived, never entered.
+ * "not due" is represented by the absence of a rentCert object (null).
+ */
+export declare const RentCertStatus: z.ZodEnum<{
+    completed: "completed";
+    due: "due";
+    effective: "effective";
+}>;
+export type TRentCertStatus = z.infer<typeof RentCertStatus>;
+export declare const PaymentRentCert: z.ZodObject<{
+    dueDate: z.ZodString;
+    targetPaymentDate: z.ZodString;
+    source: z.ZodDefault<z.ZodEnum<{
+        manual: "manual";
+        calculated: "calculated";
+    }>>;
+    taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    status: z.ZodDefault<z.ZodEnum<{
+        completed: "completed";
+        due: "due";
+        effective: "effective";
+    }>>;
+}, z.core.$loose>;
+export type TPaymentRentCert = z.infer<typeof PaymentRentCert>;
+/**
  * Scheduled/actual payment row stored on an enrollment.
  * NOTE: id is optional because some inbound operations accept "schedule rows" without ids.
  */
@@ -71,6 +97,20 @@ export declare const Payment: z.ZodObject<{
         status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>>>;
+    rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        dueDate: z.ZodString;
+        targetPaymentDate: z.ZodString;
+        source: z.ZodDefault<z.ZodEnum<{
+            manual: "manual";
+            calculated: "calculated";
+        }>>;
+        taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        status: z.ZodDefault<z.ZodEnum<{
+            completed: "completed";
+            due: "due";
+            effective: "effective";
+        }>>;
+    }, z.core.$loose>>>;
 }, z.core.$strip>;
 export type TPaymentCompliance = z.infer<typeof PaymentCompliance>;
 export type TPayment = z.infer<typeof Payment>;
@@ -110,6 +150,20 @@ export declare const PaymentEntity: z.ZodObject<{
         status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>>>;
+    rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        dueDate: z.ZodString;
+        targetPaymentDate: z.ZodString;
+        source: z.ZodDefault<z.ZodEnum<{
+            manual: "manual";
+            calculated: "calculated";
+        }>>;
+        taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        status: z.ZodDefault<z.ZodEnum<{
+            completed: "completed";
+            due: "due";
+            effective: "effective";
+        }>>;
+    }, z.core.$loose>>>;
     id: z.ZodString;
 }, z.core.$strip>;
 export type TPaymentEntity = z.infer<typeof PaymentEntity>;
@@ -299,6 +353,20 @@ export declare const PaymentProjectionInput: z.ZodObject<{
         status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>>>;
+    rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        dueDate: z.ZodString;
+        targetPaymentDate: z.ZodString;
+        source: z.ZodDefault<z.ZodEnum<{
+            manual: "manual";
+            calculated: "calculated";
+        }>>;
+        taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        status: z.ZodDefault<z.ZodEnum<{
+            completed: "completed";
+            due: "due";
+            effective: "effective";
+        }>>;
+    }, z.core.$loose>>>;
 }, z.core.$strip>;
 export type TPaymentProjectionInput = z.infer<typeof PaymentProjectionInput>;
 export declare const PaymentsAdjustProjectionsBody: z.ZodObject<{
@@ -335,6 +403,20 @@ export declare const PaymentsAdjustProjectionsBody: z.ZodObject<{
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>;
     replaceUnpaid: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
 }, z.core.$strip>;
@@ -403,6 +485,31 @@ export declare const PaymentsUpdateComplianceBody: z.ZodObject<{
         note: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     }, z.core.$strip>;
 }, z.core.$strip>;
+/**
+ * Toggle the rent cert state on a payment. "notDue" clears it; the other
+ * states set it with a server-derived due date (month prior to the payment
+ * date). `dueDate` is retained for backward compatibility: when `status` is
+ * omitted, a present dueDate sets "due" and a null dueDate clears.
+ */
+export declare const RentCertToggle: z.ZodEnum<{
+    completed: "completed";
+    due: "due";
+    effective: "effective";
+    notDue: "notDue";
+}>;
+export type TRentCertToggle = z.infer<typeof RentCertToggle>;
+export declare const PaymentsRentCertSetBody: z.ZodObject<{
+    enrollmentId: z.ZodString;
+    paymentId: z.ZodString;
+    status: z.ZodOptional<z.ZodEnum<{
+        completed: "completed";
+        due: "due";
+        effective: "effective";
+        notDue: "notDue";
+    }>>;
+    dueDate: z.ZodOptional<z.ZodNullable<z.ZodPreprocess<z.ZodString>>>;
+}, z.core.$strip>;
+export type TPaymentsRentCertSetBody = z.infer<typeof PaymentsRentCertSetBody>;
 export type TPaymentsUpdateComplianceBody = z.infer<typeof PaymentsUpdateComplianceBody>;
 export declare const PaymentsDeleteRowsBody: z.ZodObject<{
     enrollmentId: z.ZodString;
@@ -464,6 +571,20 @@ export declare const PaymentsUpsertProjectionsBody: z.ZodObject<{
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type TPaymentsUpsertProjectionsBody = z.infer<typeof PaymentsUpsertProjectionsBody>;
@@ -505,6 +626,20 @@ export declare const PaymentsRecalculateFutureResp: z.ZodUnion<readonly [z.ZodOb
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>;
     deltaByLI: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     noChange: z.ZodOptional<z.ZodLiteral<true>>;
@@ -545,6 +680,20 @@ export declare const PaymentsRecalculateFutureResp: z.ZodUnion<readonly [z.ZodOb
             status: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>>;
+        rentCert: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            dueDate: z.ZodString;
+            targetPaymentDate: z.ZodString;
+            source: z.ZodDefault<z.ZodEnum<{
+                manual: "manual";
+                calculated: "calculated";
+            }>>;
+            taskIds: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            status: z.ZodDefault<z.ZodEnum<{
+                completed: "completed";
+                due: "due";
+                effective: "effective";
+            }>>;
+        }, z.core.$loose>>>;
     }, z.core.$strip>>>;
 }, z.core.$strip>, z.ZodObject<{
     mode: z.ZodLiteral<"grant">;

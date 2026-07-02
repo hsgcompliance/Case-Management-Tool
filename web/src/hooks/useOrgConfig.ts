@@ -20,6 +20,8 @@ export type BudgetGroupItem = {
   appearInDigest?: boolean;
   groupUnderParentGrant?: boolean;
   nested?: boolean;
+  /** Force this card to show split-cycle breakdowns regardless of the line item's own display.cycleDisplayMode setting. */
+  showSplitCycles?: boolean;
 };
 
 export type BudgetGroupCfg = {
@@ -29,6 +31,8 @@ export type BudgetGroupCfg = {
   color?: string;
   /** Grid columns for cards in this group on the Budget page. Default 3. */
   cols?: number;
+  /** Standard grid, or a narrow card spanning the entire group width. */
+  layout?: "grid" | "fullWidthNarrow";
   /** Ordered list of items (grants or line items) in this group. */
   items: BudgetGroupItem[];
   hidden?: boolean;
@@ -92,6 +96,24 @@ export type OrgDisplayConfig = {
   spendingPresets?: SpendingPreset[];
   /** Secret-games admin configuration. */
   secretGames?: unknown;
+  aiFeatures?: {
+    caseNoteAssistantBeta?: {
+      enabled: boolean;
+      allowedWorkbookVariants: string[];
+      defaultClientLabel: string;
+      defaultStaffLabel: string;
+      monthlyTokenLimit: number;
+      monthlyRequestLimit: number;
+      dailyUserRequestLimit: number;
+      dailyUserTokenLimit: number;
+      userQuotaOverrides: Record<string, { dailyRequestLimit?: number; dailyTokenLimit?: number }>;
+      defaultModel: string;
+      fallbackModel: string | null;
+      maxInputChars: number;
+      maxOutputTokens: number;
+      temperature: number;
+    };
+  };
   /** Per-page rich-text help content (HTML strings), editable by admins. */
   helpContent?: {
     customers?: string;
@@ -128,6 +150,7 @@ const DEFAULT_CONFIG: OrgDisplayConfig = {
     items: {},
   },
   secretGames: undefined,
+  aiFeatures: { caseNoteAssistantBeta: { enabled: false, allowedWorkbookVariants: ["payer"], defaultClientLabel: "client", defaultStaffLabel: "case manager", monthlyTokenLimit: 25_000_000, monthlyRequestLimit: 10_000, dailyUserRequestLimit: 25, dailyUserTokenLimit: 100_000, userQuotaOverrides: {}, defaultModel: "gemini-2.5-flash-lite", fallbackModel: null, maxInputChars: 12_000, maxOutputTokens: 800, temperature: 0.2 } },
 };
 
 // ─── Backward-compat hydration ────────────────────────────────────────────────
@@ -139,10 +162,11 @@ function hydrateBudgetGroup(raw: Record<string, unknown>): BudgetGroupCfg {
   const color = raw.color != null ? String(raw.color) : undefined;
   const cols = raw.cols != null ? Number(raw.cols) : undefined;
   const hidden = !!raw.hidden;
+  const layout = raw.layout === "fullWidthNarrow" ? "fullWidthNarrow" : "grid";
 
   // New format
   if (Array.isArray(raw.items)) {
-    return { key, label, color, cols, hidden, items: raw.items as BudgetGroupItem[] };
+    return { key, label, color, cols, layout, hidden, items: raw.items as BudgetGroupItem[] };
   }
 
   // Old format: grantIds[]
@@ -151,10 +175,10 @@ function hydrateBudgetGroup(raw: Record<string, unknown>): BudgetGroupCfg {
       id: `${grantId}::grant::legacy`,
       grantId,
     }));
-    return { key, label, color, cols, hidden, items };
+    return { key, label, color, cols, layout, hidden, items };
   }
 
-  return { key, label, color, cols, hidden, items: [] };
+  return { key, label, color, cols, layout, hidden, items: [] };
 }
 
 // ─── Internal query result type ───────────────────────────────────────────────
@@ -208,6 +232,7 @@ async function fetchOrgConfig(): Promise<OrgConfigQueryResult> {
       ? (value.spendingPresets as SpendingPreset[])
       : undefined,
     secretGames: value?.secretGames,
+    aiFeatures: value?.aiFeatures ?? DEFAULT_CONFIG.aiFeatures,
     helpContent: (value?.helpContent as OrgDisplayConfig["helpContent"] | undefined) ?? undefined,
   };
 

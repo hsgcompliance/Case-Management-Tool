@@ -371,6 +371,16 @@ function BucketItemChip({
               ))}
             </div>
           </div>
+          {displayType === "budget" && (
+            <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={!!item.showSplitCycles}
+                onChange={(e) => onUpdate({ showSplitCycles: e.currentTarget.checked })}
+              />
+              Show this month's split cycle on card
+            </label>
+          )}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onEdit(); }} // toggle off
@@ -502,6 +512,10 @@ function GroupBucket({
                 Done
               </button>
             </div>
+            <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <input type="checkbox" checked={group.layout === "fullWidthNarrow"} onChange={(e) => onChange({ layout: e.currentTarget.checked ? "fullWidthNarrow" : "grid" })} />
+              Full-width narrow cards
+            </label>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2">

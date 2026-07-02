@@ -7,7 +7,7 @@ runConfig:
   # maxInstances: 100
   # concurrency: 80
   # cpu: 1
-  # memoryMiB: 512
+  memoryMiB: 512
 
 source:
   dir: web

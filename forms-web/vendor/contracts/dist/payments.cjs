@@ -26,6 +26,7 @@ __export(payments_exports, {
   PaymentCompliancePatch: () => PaymentCompliancePatch,
   PaymentEntity: () => PaymentEntity,
   PaymentProjectionInput: () => PaymentProjectionInput,
+  PaymentRentCert: () => PaymentRentCert,
   PaymentsAdjustProjectionsBody: () => PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody: () => PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody: () => PaymentsBulkCopyScheduleBody,
@@ -38,10 +39,13 @@ __export(payments_exports, {
   PaymentsRecalculateFutureReq: () => PaymentsRecalculateFutureReq,
   PaymentsRecalculateFutureResp: () => PaymentsRecalculateFutureResp,
   PaymentsRecalculateFutureSingleReq: () => PaymentsRecalculateFutureSingleReq,
+  PaymentsRentCertSetBody: () => PaymentsRentCertSetBody,
   PaymentsSpendBody: () => PaymentsSpendBody,
   PaymentsUpdateComplianceBody: () => PaymentsUpdateComplianceBody,
   PaymentsUpdateGrantBudgetBody: () => PaymentsUpdateGrantBudgetBody,
   PaymentsUpsertProjectionsBody: () => PaymentsUpsertProjectionsBody,
+  RentCertStatus: () => RentCertStatus,
+  RentCertToggle: () => RentCertToggle,
   Spend: () => Spend,
   SpendSource: () => SpendSource
 });
@@ -133,6 +137,14 @@ var PaymentCompliance = import_zod2.z.object({
   status: import_zod2.z.string().nullish(),
   note: import_zod2.z.string().nullish()
 });
+var RentCertStatus = import_zod2.z.enum(["due", "completed", "effective"]);
+var PaymentRentCert = import_zod2.z.object({
+  dueDate: import_zod2.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  targetPaymentDate: import_zod2.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: import_zod2.z.enum(["calculated", "manual"]).default("calculated"),
+  taskIds: import_zod2.z.array(import_zod2.z.string()).default([]),
+  status: RentCertStatus.default("due")
+}).passthrough();
 var Payment = import_zod2.z.object({
   id: import_zod2.z.string().optional(),
   // core
@@ -154,7 +166,8 @@ var Payment = import_zod2.z.object({
   notifyCM: import_zod2.z.boolean().nullish(),
   // used by inbox trigger logic
   // compliance
-  compliance: PaymentCompliance.nullish()
+  compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish()
 });
 var PaymentEntity = Payment.extend({
   id: import_zod2.z.string().min(1)
@@ -289,7 +302,8 @@ var PaymentProjectionInput = import_zod2.z.object({
   note: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.array(import_zod2.z.string())]).nullish(),
   vendor: import_zod2.z.string().nullish(),
   comment: import_zod2.z.string().nullish(),
-  compliance: PaymentCompliance.nullish()
+  compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish()
 }).superRefine((v, ctx) => {
   const hasDue = !!v.dueDate;
   const hasDate = !!v.date;
@@ -335,6 +349,13 @@ var PaymentsUpdateComplianceBody = import_zod2.z.object({
   paymentId: import_zod2.z.string().min(1),
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch
+});
+var RentCertToggle = import_zod2.z.enum(["notDue", "due", "completed", "effective"]);
+var PaymentsRentCertSetBody = import_zod2.z.object({
+  enrollmentId: import_zod2.z.string().min(1),
+  paymentId: import_zod2.z.string().min(1),
+  status: RentCertToggle.optional(),
+  dueDate: ISO10ish.nullish()
 });
 var PaymentsDeleteRowsBody = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
@@ -411,6 +432,7 @@ var PaymentsDeleteRowsResp = import_zod2.z.object({
   PaymentCompliancePatch,
   PaymentEntity,
   PaymentProjectionInput,
+  PaymentRentCert,
   PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody,
@@ -423,10 +445,13 @@ var PaymentsDeleteRowsResp = import_zod2.z.object({
   PaymentsRecalculateFutureReq,
   PaymentsRecalculateFutureResp,
   PaymentsRecalculateFutureSingleReq,
+  PaymentsRentCertSetBody,
   PaymentsSpendBody,
   PaymentsUpdateComplianceBody,
   PaymentsUpdateGrantBudgetBody,
   PaymentsUpsertProjectionsBody,
+  RentCertStatus,
+  RentCertToggle,
   Spend,
   SpendSource
 });

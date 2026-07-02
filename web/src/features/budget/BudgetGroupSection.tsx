@@ -22,6 +22,9 @@ interface BudgetGroupSectionProps {
   label: string;
   color?: string;
   cols?: number;
+  layout?: "grid" | "fullWidthNarrow";
+  pinned?: boolean;
+  onTogglePin?: () => void;
   items: BudgetGroupItem[];
   /** All active grants keyed by ID — used to look up grants for each item. */
   grantsById: Map<string, Grant>;
@@ -36,6 +39,9 @@ export function BudgetGroupSection({
   label,
   color,
   cols = 3,
+  layout = "grid",
+  pinned = false,
+  onTogglePin,
   items,
   grantsById,
   onOpen,
@@ -73,6 +79,7 @@ export function BudgetGroupSection({
       <div className="flex items-center gap-3 border-b border-slate-200 dark:border-slate-700 pb-2">
         <span className={`inline-block h-3 w-3 rounded-full ${accentClass} flex-shrink-0`} />
         <h2 className="text-base font-semibold text-slate-700 dark:text-slate-300 flex-1">{label}</h2>
+        {onTogglePin ? <button type="button" className="btn btn-ghost btn-xs" onClick={onTogglePin} title={pinned ? "Unpin budget group" : "Pin budget group"}>{pinned ? "★ Pinned" : "☆ Pin"}</button> : null}
         <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
           <span>{resolved.length} {resolved.length === 1 ? "item" : "items"}</span>
           {groupTotal > 0 && (
@@ -87,7 +94,7 @@ export function BudgetGroupSection({
       </div>
 
       {/* Card grid */}
-      <div className={`grid gap-4 ${colClass}`}>
+      <div className={`grid gap-4 ${layout === "fullWidthNarrow" ? "grid-cols-1" : colClass}`}>
         {resolved.map(({ item, grant }) => (
           <BudgetCard
             key={item.id}
@@ -96,6 +103,7 @@ export function BudgetGroupSection({
             cardType={item.cardType ?? "standard"}
             labelOverride={item.labelOverride}
             accentColor={item.color}
+            forceSplit={item.showSplitCycles}
             onClick={() => onOpen(item.grantId)}
             onManageBudget={onManageBudget}
             selected={selectedIds?.has(String(item.grantId)) ?? false}

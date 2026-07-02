@@ -35,6 +35,7 @@ import {
   SystemConfigTopbar,
   type SystemConfigFilterState,
 } from "./tools/SystemConfigTool";
+import { AiControlMain, AiControlTopbar } from "./tools/AiControlTool";
 
 export const ORG_CONFIG_OVERVIEW_TOOL_ID = "overview";
 
@@ -99,6 +100,13 @@ export const ORG_CONFIG_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
     defaultPinned: false,
     ToolTopbar: DevOrgControlsTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Main: DevOrgControlsMain as AnyDashboardToolDefinition["Main"],
+  },
+  {
+    id: "ai-control",
+    title: "AI Control",
+    defaultPinned: false,
+    ToolTopbar: AiControlTopbar as AnyDashboardToolDefinition["ToolTopbar"],
+    Main: AiControlMain as AnyDashboardToolDefinition["Main"],
   },
 ];
 

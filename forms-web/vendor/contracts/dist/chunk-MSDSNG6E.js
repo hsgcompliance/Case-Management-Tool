@@ -1,14 +1,14 @@
 import {
   Payment,
   Spend
-} from "./chunk-F2QBR4C7.js";
+} from "./chunk-KR3HYOES.js";
 import {
   TaskScheduleItem,
   TaskStats
 } from "./chunk-4O3BPXUB.js";
 import {
   Population
-} from "./chunk-QSS3BBDW.js";
+} from "./chunk-AGNAOSOI.js";
 import {
   BoolFromLike,
   BoolLike,
@@ -33,23 +33,33 @@ __export(enrollments_exports, {
   EnrollmentActionHistoryRecord: () => EnrollmentActionHistoryRecord,
   EnrollmentActions: () => EnrollmentActions,
   EnrollmentActionsApplyBody: () => EnrollmentActionsApplyBody,
+  EnrollmentClientAllocation: () => EnrollmentClientAllocation,
   EnrollmentCompliance: () => EnrollmentCompliance,
+  EnrollmentContinuity: () => EnrollmentContinuity,
+  EnrollmentCycleRolloverPreviewItem: () => EnrollmentCycleRolloverPreviewItem,
   EnrollmentGetByIdQuery: () => EnrollmentGetByIdQuery,
   EnrollmentMedicaid: () => EnrollmentMedicaid,
   EnrollmentMedicaidStatus: () => EnrollmentMedicaidStatus,
+  EnrollmentProgramAutomation: () => EnrollmentProgramAutomation,
   EnrollmentServiceStatus: () => EnrollmentServiceStatus,
+  EnrollmentUnenrollmentReview: () => EnrollmentUnenrollmentReview,
   EnrollmentsAdminDeleteBody: () => EnrollmentsAdminDeleteBody,
   EnrollmentsAdminDeleteResp: () => EnrollmentsAdminDeleteResp,
   EnrollmentsAdminReverseLedgerEntryBody: () => EnrollmentsAdminReverseLedgerEntryBody,
+  EnrollmentsAllocationSetBody: () => EnrollmentsAllocationSetBody,
   EnrollmentsBackfillNamesBody: () => EnrollmentsBackfillNamesBody,
   EnrollmentsBulkEnrollBody: () => EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery: () => EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery: () => EnrollmentsCheckOverlapsQuery,
+  EnrollmentsContinuumSummaryQuery: () => EnrollmentsContinuumSummaryQuery,
+  EnrollmentsCycleRolloverPreviewBody: () => EnrollmentsCycleRolloverPreviewBody,
+  EnrollmentsCycleRolloverRunBody: () => EnrollmentsCycleRolloverRunBody,
   EnrollmentsDeleteBody: () => EnrollmentsDeleteBody,
   EnrollmentsDeleteCoreOutput: () => EnrollmentsDeleteCoreOutput,
   EnrollmentsDeleteResp: () => EnrollmentsDeleteResp,
   EnrollmentsDeleteResultItem: () => EnrollmentsDeleteResultItem,
   EnrollmentsEnrollCustomerBody: () => EnrollmentsEnrollCustomerBody,
+  EnrollmentsLinkedProgramsReconcileBody: () => EnrollmentsLinkedProgramsReconcileBody,
   EnrollmentsListQuery: () => EnrollmentsListQuery,
   EnrollmentsMigrateBody: () => EnrollmentsMigrateBody,
   EnrollmentsPatchBody: () => EnrollmentsPatchBody,
@@ -182,6 +192,32 @@ var TaskScheduleMeta = z.object({
   defs: z.array(z.unknown()).default([]),
   savedAt: TsLike.nullish().optional()
 }).passthrough();
+var EnrollmentContinuity = z.object({
+  continuumId: Id,
+  kind: z.literal("grantCycle").default("grantCycle"),
+  previousEnrollmentId: Id.nullable().optional(),
+  nextEnrollmentId: Id.nullable().optional(),
+  rolloverSource: z.enum(["admin", "migration", "backfill"]).nullish(),
+  cutoffDate: ISO10.nullish()
+}).passthrough();
+var EnrollmentClientAllocation = z.object({
+  amount: z.number().min(0).nullable().optional(),
+  note: z.string().trim().max(1e3).nullable().optional(),
+  updatedAt: TsLike.nullish().optional(),
+  updatedBy: z.string().trim().nullable().optional()
+}).passthrough();
+var EnrollmentProgramAutomation = z.object({
+  targetGrantId: Id.nullish(),
+  sourceEnrollmentIds: z.array(Id).default([]),
+  createdByRule: z.boolean().default(false)
+}).passthrough();
+var EnrollmentUnenrollmentReview = z.object({
+  required: z.boolean().default(false),
+  reason: z.string().trim().nullable().optional(),
+  sourceEnrollmentIds: z.array(Id).default([]),
+  flaggedAt: TsLike.nullish().optional(),
+  clearedAt: TsLike.nullish().optional()
+}).passthrough();
 var Enrollment = z.object({
   id: Id,
   grantId: z.string(),
@@ -194,6 +230,10 @@ var Enrollment = z.object({
   endDate: z.string().nullable().optional(),
   migratedFrom: z.object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() }).nullable().optional(),
   migratedTo: z.object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() }).nullable().optional(),
+  continuity: EnrollmentContinuity.nullish(),
+  clientAllocation: EnrollmentClientAllocation.nullish(),
+  programAutomation: EnrollmentProgramAutomation.nullish(),
+  unenrollmentReview: EnrollmentUnenrollmentReview.nullish(),
   active: z.boolean().nullable().optional(),
   status: z.enum(["active", "deleted", "closed"]).nullable().optional(),
   deleted: z.boolean().nullable().optional(),
@@ -405,6 +445,35 @@ var EnrollmentsMigrateBody = z.object({
   closeSourceTaskMode: z.enum(["complete", "delete"]).optional(),
   closeSourcePaymentMode: z.enum(["spendUnpaid", "deleteUnpaid", "keep"]).optional()
 }).passthrough();
+var EnrollmentsContinuumSummaryQuery = z.object({ enrollmentId: Id }).passthrough();
+var EnrollmentsAllocationSetBody = z.object({
+  enrollmentId: Id,
+  amount: z.number().min(0).nullable(),
+  note: z.string().trim().max(1e3).nullable().optional()
+}).passthrough();
+var EnrollmentsCycleRolloverPreviewBody = z.object({
+  grantId: Id,
+  cutoverDate: ISO10.optional()
+}).passthrough();
+var EnrollmentCycleRolloverPreviewItem = z.object({
+  enrollmentId: Id,
+  customerId: Id,
+  customerName: z.string().nullable(),
+  eligible: z.boolean(),
+  blockers: z.array(z.string()),
+  warnings: z.array(z.string()),
+  futureUnpaidPayments: z.number().int().nonnegative(),
+  futureOpenReminders: z.number().int().nonnegative(),
+  calculatedAllocation: z.number().nonnegative()
+});
+var EnrollmentsCycleRolloverRunBody = EnrollmentsCycleRolloverPreviewBody.extend({
+  enrollmentIds: z.array(Id).min(1).max(500).optional(),
+  confirm: z.literal("ROLLOVER")
+});
+var EnrollmentsLinkedProgramsReconcileBody = z.object({
+  grantIds: z.array(Id).max(50).optional(),
+  dryRun: z.boolean().default(true)
+}).passthrough();
 var EnrollmentsUndoMigrationBody = z.object({
   migrationId: Id
 }).passthrough();
@@ -427,6 +496,10 @@ export {
   ScheduleMetaMigrated,
   ScheduleMeta,
   TaskScheduleMeta,
+  EnrollmentContinuity,
+  EnrollmentClientAllocation,
+  EnrollmentProgramAutomation,
+  EnrollmentUnenrollmentReview,
   Enrollment,
   EnrollmentGetByIdQuery,
   EnrollmentsListQuery,
@@ -445,6 +518,12 @@ export {
   EnrollmentsCheckOverlapsQuery,
   EnrollmentsCheckDualQuery,
   EnrollmentsMigrateBody,
+  EnrollmentsContinuumSummaryQuery,
+  EnrollmentsAllocationSetBody,
+  EnrollmentsCycleRolloverPreviewBody,
+  EnrollmentCycleRolloverPreviewItem,
+  EnrollmentsCycleRolloverRunBody,
+  EnrollmentsLinkedProgramsReconcileBody,
   EnrollmentsUndoMigrationBody,
   EnrollmentsAdminReverseLedgerEntryBody,
   enrollments_exports

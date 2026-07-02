@@ -20,7 +20,7 @@ export default function SignInPage() {
   const [showEmail, setShowEmail] = useState(false);
 
   const showSignedOutBanner =
-    params.get("inactivity") === "1" || params.get("reason") === "signedout";
+    params.get("inactivity") === "1" || !!params.get("reason");
 
   const onGoogle = async () => {
     setErr(null); setBusyGoogle(true);

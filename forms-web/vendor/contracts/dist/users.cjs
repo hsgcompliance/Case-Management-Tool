@@ -301,6 +301,7 @@ var UserSettings = import_zod2.z.object({
   dashboardPrefs: UserUnknownRecord.optional(),
   toolsPrefs: UserUnknownRecord.optional(),
   spendingViews: UserUnknownRecord.optional(),
+  allowAiAssistance: import_zod2.z.boolean().optional(),
   googleIntegrationModes: import_zod2.z.object({
     googleCalendar: GoogleIntegrationMode.optional(),
     googleDrive: GoogleIntegrationMode.optional()

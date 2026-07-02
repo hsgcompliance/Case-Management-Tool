@@ -49,6 +49,8 @@ __export(index_exports, {
   FormWorkflowId: () => FormWorkflowId,
   GDRIVE_TEMPLATE_TYPES: () => GDRIVE_TEMPLATE_TYPES,
   GRANT_PIN_COLORS: () => GRANT_PIN_COLORS,
+  GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
+  GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
   GoogleAuthMode: () => GoogleAuthMode,
   GoogleConnectStartBody: () => GoogleConnectStartBody,
   GoogleIntegrationMode: () => GoogleIntegrationMode,
@@ -74,6 +76,20 @@ __export(index_exports, {
   GrantFinancialModel: () => GrantFinancialModel,
   GrantIdsLike: () => GrantIdsLike,
   GrantLedgerMode: () => GrantLedgerMode,
+  HouseholdEntity: () => HouseholdEntity,
+  HouseholdInputSchema: () => HouseholdInputSchema,
+  HouseholdMember: () => HouseholdMember,
+  HouseholdRelationship: () => HouseholdRelationship,
+  HouseholdStatus: () => HouseholdStatus,
+  HouseholdsAddMemberBody: () => HouseholdsAddMemberBody,
+  HouseholdsDeleteBody: () => HouseholdsDeleteBody,
+  HouseholdsGetQuery: () => HouseholdsGetQuery,
+  HouseholdsListQuery: () => HouseholdsListQuery,
+  HouseholdsPatchBody: () => HouseholdsPatchBody,
+  HouseholdsPatchRow: () => HouseholdsPatchRow,
+  HouseholdsRemoveMemberBody: () => HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody: () => HouseholdsSetHeadBody,
+  HouseholdsUpsertBody: () => HouseholdsUpsertBody,
   ISO10: () => ISO10,
   Id: () => Id,
   IdLike: () => IdLike,
@@ -98,6 +114,7 @@ __export(index_exports, {
   PipelineOperator: () => PipelineOperator,
   PipelineRuleNode: () => PipelineRuleNode,
   PipelineStatus: () => PipelineStatus,
+  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema,
   ResendInviteBody: () => ResendInviteBody,
   RevokeSessionsBody: () => RevokeSessionsBody,
   RoleInput: () => RoleInput,
@@ -154,11 +171,13 @@ __export(index_exports, {
   WORKFLOW_CONFIGS: () => WORKFLOW_CONFIGS,
   assessments: () => assessments_exports,
   budgetPipeline: () => budgetPipeline_exports,
+  caseNoteAssistant: () => caseNoteAssistant_exports,
   cleanVisibleLabel: () => cleanVisibleLabel,
   cmActivities: () => cmActivities_exports,
   computeGrantLineItemOverCap: () => computeGrantLineItemOverCap,
   creditCards: () => creditCards_exports,
   customers: () => customers_exports,
+  deriveHeadCustomerId: () => deriveHeadCustomerId,
   enrollments: () => enrollments_exports,
   formSessions: () => formSessions_exports,
   gdrive: () => gdrive_exports,
@@ -168,6 +187,8 @@ __export(index_exports, {
   google: () => google_exports,
   grantBudgetManager: () => grantBudgetManager_exports,
   grants: () => grants_exports,
+  householdRelationshipLabel: () => householdRelationshipLabel,
+  households: () => households_exports,
   inbox: () => inbox_exports,
   inferTransactionWindowModel: () => inferTransactionWindowModel,
   jotform: () => jotform_exports,
@@ -718,7 +739,13 @@ var CustomerMeta = import_zod2.z.object({
   // Legacy primary folder pointer kept for backward compatibility. Prefer
   // customerDrive.folderId for new resolvers and mirror writes during migration.
   driveFolderId: import_zod2.z.string().nullish(),
-  notes: import_zod2.z.string().nullish()
+  notes: import_zod2.z.string().nullish(),
+  // Household / family linking (Customer-Collection-Update). Denormalized
+  // pointer to the canonical households/{id} doc this customer belongs to; the
+  // member list itself lives on the household doc. Scalar = one primary
+  // household per customer. See contracts/src/households.ts.
+  householdId: import_zod2.z.string().trim().nullish(),
+  householdRelationship: import_zod2.z.string().trim().nullish()
 }).passthrough().nullish();
 var AssistanceLength = import_zod2.z.object({
   firstDateOfAssistance: ISO10.nullish(),
@@ -783,6 +810,7 @@ var CustomerInputSchema = import_zod2.z.object({
         defaultEmbedSheetName: import_zod2.z.string().nullish(),
         defaultSheetGid: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.number()]).nullish(),
         progressNotesGid: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.number()]).nullish(),
+        variant: import_zod2.z.enum(["payer", "nonpayer"]).nullish(),
         lastValidatedAt: import_zod2.z.string().nullish()
       }).passthrough().nullish()
     }).passthrough().nullish()
@@ -897,6 +925,142 @@ var CustomersBackfillAssistanceLengthBody = import_zod2.z.object({
   allOrgs: import_zod2.z.boolean().optional(),
   dryRun: import_zod2.z.boolean().optional()
 }).passthrough();
+
+// src/households.ts
+var households_exports = {};
+__export(households_exports, {
+  HouseholdEntity: () => HouseholdEntity,
+  HouseholdInputSchema: () => HouseholdInputSchema,
+  HouseholdMember: () => HouseholdMember,
+  HouseholdRelationship: () => HouseholdRelationship,
+  HouseholdStatus: () => HouseholdStatus,
+  HouseholdsAddMemberBody: () => HouseholdsAddMemberBody,
+  HouseholdsDeleteBody: () => HouseholdsDeleteBody,
+  HouseholdsGetQuery: () => HouseholdsGetQuery,
+  HouseholdsListQuery: () => HouseholdsListQuery,
+  HouseholdsPatchBody: () => HouseholdsPatchBody,
+  HouseholdsPatchRow: () => HouseholdsPatchRow,
+  HouseholdsRemoveMemberBody: () => HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody: () => HouseholdsSetHeadBody,
+  HouseholdsUpsertBody: () => HouseholdsUpsertBody,
+  deriveHeadCustomerId: () => deriveHeadCustomerId,
+  householdRelationshipLabel: () => householdRelationshipLabel
+});
+var HouseholdRelationship = import_zod2.z.enum([
+  "head",
+  "spouse",
+  // spouse / partner
+  "child",
+  "dependent",
+  "other"
+]);
+var HouseholdStatus = import_zod2.z.enum(["active", "archived"]);
+var HouseholdMember = import_zod2.z.object({
+  customerId: Id,
+  // Denormalized display name; cascade-maintained, may be stale until reconciled.
+  name: import_zod2.z.string().trim().nullish(),
+  relationship: HouseholdRelationship.default("other"),
+  // Free-text override for anything outside the enum (e.g. "grandparent").
+  relationshipLabel: import_zod2.z.string().trim().nullish(),
+  // Exactly one member should be the head; server normalizes/derives headCustomerId.
+  isHead: import_zod2.z.boolean().optional()
+}).passthrough();
+var HouseholdInputSchema = import_zod2.z.object({
+  id: Id.optional(),
+  // org (server authoritative — reject cross-org writes)
+  orgId: Id.nullish(),
+  // Household label, e.g. "Smith Household". Server may derive from head name.
+  name: import_zod2.z.string().trim().nullish(),
+  // Convenience pointer; if omitted, server derives from members[].isHead.
+  headCustomerId: Id.nullish(),
+  members: import_zod2.z.array(HouseholdMember).max(40).optional(),
+  status: HouseholdStatus.optional(),
+  notes: import_zod2.z.string().nullish(),
+  // server-managed (accepted but ignored on write)
+  createdAt: TsLike.nullish().optional(),
+  updatedAt: TsLike.nullish().optional()
+}).passthrough();
+var HouseholdEntity = HouseholdInputSchema.extend({
+  id: Id,
+  orgId: Id,
+  memberIds: import_zod2.z.array(Id).default([]),
+  members: import_zod2.z.array(HouseholdMember).default([])
+}).passthrough();
+var HouseholdsUpsertBody = HouseholdInputSchema;
+var HouseholdsPatchRow = import_zod2.z.object({
+  id: Id,
+  patch: HouseholdInputSchema.partial().passthrough().optional(),
+  unset: import_zod2.z.array(import_zod2.z.string().min(1)).optional()
+}).passthrough().refine(
+  (v) => Object.keys(v.patch || {}).length > 0 || (v.unset?.length || 0) > 0,
+  { message: "empty_patch" }
+);
+var HouseholdsPatchBody = import_zod2.z.union([
+  HouseholdsPatchRow,
+  import_zod2.z.array(HouseholdsPatchRow).min(1)
+]);
+var HouseholdsAddMemberBody = import_zod2.z.object({
+  householdId: Id.optional(),
+  member: HouseholdMember,
+  // When creating a new household inline, optional label.
+  name: import_zod2.z.string().trim().nullish()
+}).passthrough();
+var HouseholdsRemoveMemberBody = import_zod2.z.object({
+  householdId: Id,
+  customerId: Id
+}).passthrough();
+var HouseholdsSetHeadBody = import_zod2.z.object({
+  householdId: Id,
+  customerId: Id
+}).passthrough();
+var HouseholdsDeleteBody = import_zod2.z.object({
+  id: IdLike.optional(),
+  ids: import_zod2.z.preprocess((v) => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string")
+      return v.split(",").map((s) => s.trim()).filter(Boolean);
+    return v;
+  }, import_zod2.z.array(IdLike).min(1).optional())
+}).passthrough().refine(
+  (v) => typeof v.id === "string" || Array.isArray(v.ids) && v.ids.length > 0,
+  { message: "missing_id_or_ids" }
+);
+var HouseholdsGetQuery = import_zod2.z.object({
+  id: IdLike.optional(),
+  customerId: IdLike.optional()
+}).passthrough().refine((v) => !!v.id || !!v.customerId, { message: "missing_id_or_customerId" });
+var HouseholdsListQuery = import_zod2.z.object({
+  limit: import_zod2.z.coerce.number().int().min(1).max(500).optional(),
+  cursorUpdatedAt: TsLike.optional(),
+  cursorId: IdLike.optional(),
+  // Filter to households containing this member (array-contains memberIds).
+  memberCustomerId: IdLike.optional(),
+  status: HouseholdStatus.optional()
+}).passthrough();
+function householdRelationshipLabel(member) {
+  const free = String(member.relationshipLabel || "").trim();
+  if (free) return free;
+  const rel = String(member.relationship || "other").trim();
+  switch (rel) {
+    case "head":
+      return "Head of Household";
+    case "spouse":
+      return "Spouse / Partner";
+    case "child":
+      return "Child";
+    case "dependent":
+      return "Dependent";
+    default:
+      return "Other";
+  }
+}
+function deriveHeadCustomerId(members) {
+  const flagged = members.find((m) => m.isHead === true);
+  if (flagged) return flagged.customerId;
+  const byRole = members.find((m) => String(m.relationship || "") === "head");
+  if (byRole) return byRole.customerId;
+  return members[0]?.customerId ?? null;
+}
 
 // src/creditCards.ts
 var creditCards_exports = {};
@@ -1037,23 +1201,33 @@ __export(enrollments_exports, {
   EnrollmentActionHistoryRecord: () => EnrollmentActionHistoryRecord,
   EnrollmentActions: () => EnrollmentActions,
   EnrollmentActionsApplyBody: () => EnrollmentActionsApplyBody,
+  EnrollmentClientAllocation: () => EnrollmentClientAllocation,
   EnrollmentCompliance: () => EnrollmentCompliance,
+  EnrollmentContinuity: () => EnrollmentContinuity,
+  EnrollmentCycleRolloverPreviewItem: () => EnrollmentCycleRolloverPreviewItem,
   EnrollmentGetByIdQuery: () => EnrollmentGetByIdQuery,
   EnrollmentMedicaid: () => EnrollmentMedicaid,
   EnrollmentMedicaidStatus: () => EnrollmentMedicaidStatus,
+  EnrollmentProgramAutomation: () => EnrollmentProgramAutomation,
   EnrollmentServiceStatus: () => EnrollmentServiceStatus,
+  EnrollmentUnenrollmentReview: () => EnrollmentUnenrollmentReview,
   EnrollmentsAdminDeleteBody: () => EnrollmentsAdminDeleteBody,
   EnrollmentsAdminDeleteResp: () => EnrollmentsAdminDeleteResp,
   EnrollmentsAdminReverseLedgerEntryBody: () => EnrollmentsAdminReverseLedgerEntryBody,
+  EnrollmentsAllocationSetBody: () => EnrollmentsAllocationSetBody,
   EnrollmentsBackfillNamesBody: () => EnrollmentsBackfillNamesBody,
   EnrollmentsBulkEnrollBody: () => EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery: () => EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery: () => EnrollmentsCheckOverlapsQuery,
+  EnrollmentsContinuumSummaryQuery: () => EnrollmentsContinuumSummaryQuery,
+  EnrollmentsCycleRolloverPreviewBody: () => EnrollmentsCycleRolloverPreviewBody,
+  EnrollmentsCycleRolloverRunBody: () => EnrollmentsCycleRolloverRunBody,
   EnrollmentsDeleteBody: () => EnrollmentsDeleteBody,
   EnrollmentsDeleteCoreOutput: () => EnrollmentsDeleteCoreOutput,
   EnrollmentsDeleteResp: () => EnrollmentsDeleteResp,
   EnrollmentsDeleteResultItem: () => EnrollmentsDeleteResultItem,
   EnrollmentsEnrollCustomerBody: () => EnrollmentsEnrollCustomerBody,
+  EnrollmentsLinkedProgramsReconcileBody: () => EnrollmentsLinkedProgramsReconcileBody,
   EnrollmentsListQuery: () => EnrollmentsListQuery,
   EnrollmentsMigrateBody: () => EnrollmentsMigrateBody,
   EnrollmentsPatchBody: () => EnrollmentsPatchBody,
@@ -1075,6 +1249,7 @@ __export(payments_exports, {
   PaymentCompliancePatch: () => PaymentCompliancePatch,
   PaymentEntity: () => PaymentEntity,
   PaymentProjectionInput: () => PaymentProjectionInput,
+  PaymentRentCert: () => PaymentRentCert,
   PaymentsAdjustProjectionsBody: () => PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody: () => PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody: () => PaymentsBulkCopyScheduleBody,
@@ -1087,10 +1262,13 @@ __export(payments_exports, {
   PaymentsRecalculateFutureReq: () => PaymentsRecalculateFutureReq,
   PaymentsRecalculateFutureResp: () => PaymentsRecalculateFutureResp,
   PaymentsRecalculateFutureSingleReq: () => PaymentsRecalculateFutureSingleReq,
+  PaymentsRentCertSetBody: () => PaymentsRentCertSetBody,
   PaymentsSpendBody: () => PaymentsSpendBody,
   PaymentsUpdateComplianceBody: () => PaymentsUpdateComplianceBody,
   PaymentsUpdateGrantBudgetBody: () => PaymentsUpdateGrantBudgetBody,
   PaymentsUpsertProjectionsBody: () => PaymentsUpsertProjectionsBody,
+  RentCertStatus: () => RentCertStatus,
+  RentCertToggle: () => RentCertToggle,
   Spend: () => Spend,
   SpendSource: () => SpendSource
 });
@@ -1117,6 +1295,14 @@ var PaymentCompliance = import_zod2.z.object({
   status: import_zod2.z.string().nullish(),
   note: import_zod2.z.string().nullish()
 });
+var RentCertStatus = import_zod2.z.enum(["due", "completed", "effective"]);
+var PaymentRentCert = import_zod2.z.object({
+  dueDate: import_zod2.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  targetPaymentDate: import_zod2.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: import_zod2.z.enum(["calculated", "manual"]).default("calculated"),
+  taskIds: import_zod2.z.array(import_zod2.z.string()).default([]),
+  status: RentCertStatus.default("due")
+}).passthrough();
 var Payment = import_zod2.z.object({
   id: import_zod2.z.string().optional(),
   // core
@@ -1138,7 +1324,8 @@ var Payment = import_zod2.z.object({
   notifyCM: import_zod2.z.boolean().nullish(),
   // used by inbox trigger logic
   // compliance
-  compliance: PaymentCompliance.nullish()
+  compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish()
 });
 var PaymentEntity = Payment.extend({
   id: import_zod2.z.string().min(1)
@@ -1273,7 +1460,8 @@ var PaymentProjectionInput = import_zod2.z.object({
   note: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.array(import_zod2.z.string())]).nullish(),
   vendor: import_zod2.z.string().nullish(),
   comment: import_zod2.z.string().nullish(),
-  compliance: PaymentCompliance.nullish()
+  compliance: PaymentCompliance.nullish(),
+  rentCert: PaymentRentCert.nullish()
 }).superRefine((v, ctx) => {
   const hasDue = !!v.dueDate;
   const hasDate = !!v.date;
@@ -1319,6 +1507,13 @@ var PaymentsUpdateComplianceBody = import_zod2.z.object({
   paymentId: import_zod2.z.string().min(1),
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch
+});
+var RentCertToggle = import_zod2.z.enum(["notDue", "due", "completed", "effective"]);
+var PaymentsRentCertSetBody = import_zod2.z.object({
+  enrollmentId: import_zod2.z.string().min(1),
+  paymentId: import_zod2.z.string().min(1),
+  status: RentCertToggle.optional(),
+  dueDate: ISO10ish.nullish()
 });
 var PaymentsDeleteRowsBody = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
@@ -1772,6 +1967,32 @@ var TaskScheduleMeta = import_zod2.z.object({
   defs: import_zod2.z.array(import_zod2.z.unknown()).default([]),
   savedAt: TsLike.nullish().optional()
 }).passthrough();
+var EnrollmentContinuity = import_zod2.z.object({
+  continuumId: Id,
+  kind: import_zod2.z.literal("grantCycle").default("grantCycle"),
+  previousEnrollmentId: Id.nullable().optional(),
+  nextEnrollmentId: Id.nullable().optional(),
+  rolloverSource: import_zod2.z.enum(["admin", "migration", "backfill"]).nullish(),
+  cutoffDate: ISO10.nullish()
+}).passthrough();
+var EnrollmentClientAllocation = import_zod2.z.object({
+  amount: import_zod2.z.number().min(0).nullable().optional(),
+  note: import_zod2.z.string().trim().max(1e3).nullable().optional(),
+  updatedAt: TsLike.nullish().optional(),
+  updatedBy: import_zod2.z.string().trim().nullable().optional()
+}).passthrough();
+var EnrollmentProgramAutomation = import_zod2.z.object({
+  targetGrantId: Id.nullish(),
+  sourceEnrollmentIds: import_zod2.z.array(Id).default([]),
+  createdByRule: import_zod2.z.boolean().default(false)
+}).passthrough();
+var EnrollmentUnenrollmentReview = import_zod2.z.object({
+  required: import_zod2.z.boolean().default(false),
+  reason: import_zod2.z.string().trim().nullable().optional(),
+  sourceEnrollmentIds: import_zod2.z.array(Id).default([]),
+  flaggedAt: TsLike.nullish().optional(),
+  clearedAt: TsLike.nullish().optional()
+}).passthrough();
 var Enrollment = import_zod2.z.object({
   id: Id,
   grantId: import_zod2.z.string(),
@@ -1784,6 +2005,10 @@ var Enrollment = import_zod2.z.object({
   endDate: import_zod2.z.string().nullable().optional(),
   migratedFrom: import_zod2.z.object({ enrollmentId: import_zod2.z.string(), grantId: import_zod2.z.string(), cutover: import_zod2.z.string() }).nullable().optional(),
   migratedTo: import_zod2.z.object({ enrollmentId: import_zod2.z.string(), grantId: import_zod2.z.string(), cutover: import_zod2.z.string() }).nullable().optional(),
+  continuity: EnrollmentContinuity.nullish(),
+  clientAllocation: EnrollmentClientAllocation.nullish(),
+  programAutomation: EnrollmentProgramAutomation.nullish(),
+  unenrollmentReview: EnrollmentUnenrollmentReview.nullish(),
   active: import_zod2.z.boolean().nullable().optional(),
   status: import_zod2.z.enum(["active", "deleted", "closed"]).nullable().optional(),
   deleted: import_zod2.z.boolean().nullable().optional(),
@@ -1994,6 +2219,35 @@ var EnrollmentsMigrateBody = import_zod2.z.object({
   rebuildScheduleMeta: import_zod2.z.boolean().optional(),
   closeSourceTaskMode: import_zod2.z.enum(["complete", "delete"]).optional(),
   closeSourcePaymentMode: import_zod2.z.enum(["spendUnpaid", "deleteUnpaid", "keep"]).optional()
+}).passthrough();
+var EnrollmentsContinuumSummaryQuery = import_zod2.z.object({ enrollmentId: Id }).passthrough();
+var EnrollmentsAllocationSetBody = import_zod2.z.object({
+  enrollmentId: Id,
+  amount: import_zod2.z.number().min(0).nullable(),
+  note: import_zod2.z.string().trim().max(1e3).nullable().optional()
+}).passthrough();
+var EnrollmentsCycleRolloverPreviewBody = import_zod2.z.object({
+  grantId: Id,
+  cutoverDate: ISO10.optional()
+}).passthrough();
+var EnrollmentCycleRolloverPreviewItem = import_zod2.z.object({
+  enrollmentId: Id,
+  customerId: Id,
+  customerName: import_zod2.z.string().nullable(),
+  eligible: import_zod2.z.boolean(),
+  blockers: import_zod2.z.array(import_zod2.z.string()),
+  warnings: import_zod2.z.array(import_zod2.z.string()),
+  futureUnpaidPayments: import_zod2.z.number().int().nonnegative(),
+  futureOpenReminders: import_zod2.z.number().int().nonnegative(),
+  calculatedAllocation: import_zod2.z.number().nonnegative()
+});
+var EnrollmentsCycleRolloverRunBody = EnrollmentsCycleRolloverPreviewBody.extend({
+  enrollmentIds: import_zod2.z.array(Id).min(1).max(500).optional(),
+  confirm: import_zod2.z.literal("ROLLOVER")
+});
+var EnrollmentsLinkedProgramsReconcileBody = import_zod2.z.object({
+  grantIds: import_zod2.z.array(Id).max(50).optional(),
+  dryRun: import_zod2.z.boolean().default(true)
 }).passthrough();
 var EnrollmentsUndoMigrationBody = import_zod2.z.object({
   migrationId: Id
@@ -2396,9 +2650,12 @@ __export(grants_exports, {
   GrantComplianceConfig: () => GrantComplianceConfig,
   GrantComplianceControl: () => GrantComplianceControl,
   GrantCompliancePreset: () => GrantCompliancePreset,
+  GrantCycleLink: () => GrantCycleLink,
   GrantDriveTemplate: () => GrantDriveTemplate,
   GrantDriveTemplateType: () => GrantDriveTemplateType,
   GrantEnrollmentDefaults: () => GrantEnrollmentDefaults,
+  GrantEnrollmentLinkRule: () => GrantEnrollmentLinkRule,
+  GrantEnrollmentRequirement: () => GrantEnrollmentRequirement,
   GrantEntity: () => GrantEntity,
   GrantFinancialConfig: () => GrantFinancialConfig,
   GrantFinancialConfigPatch: () => GrantFinancialConfigPatch,
@@ -2410,7 +2667,9 @@ __export(grants_exports, {
   GrantKind: () => GrantKind,
   GrantLedgerMode: () => GrantLedgerMode,
   GrantLineItemCap: () => GrantLineItemCap,
+  GrantLineItemInvoicing: () => GrantLineItemInvoicing,
   GrantLineItemType: () => GrantLineItemType,
+  GrantLinking: () => GrantLinking,
   GrantPatchBody: () => GrantPatchBody,
   GrantPinDigest: () => GrantPinDigest,
   GrantPinImportant: () => GrantPinImportant,
@@ -2771,6 +3030,11 @@ var GrantBudgetSplitGoal = import_zod2.z.object({
   notes: import_zod2.z.string().trim().nullish()
 }).passthrough();
 var GrantBudgetItemDisplayConfig = import_zod2.z.object({
+  /** Budget card cycle presentation. Missing values preserve the legacy total view. */
+  cycleDisplayMode: import_zod2.z.enum(["split", "total"]).optional(),
+  /** Explicit digest participation. `appearInDigest` remains a legacy read alias. */
+  displayOnDigest: import_zod2.z.boolean().optional(),
+  digestDisplayMode: import_zod2.z.enum(["currentCycle", "total", "both"]).optional(),
   showGrantTotal: import_zod2.z.boolean().optional(),
   showLineItemTotal: import_zod2.z.boolean().optional(),
   showSplitGoals: import_zod2.z.boolean().optional(),
@@ -2785,6 +3049,22 @@ var GrantBudgetBreakdownValidation = import_zod2.z.object({
   message: import_zod2.z.string().trim().optional(),
   splitTotal: Num2.optional(),
   variance: Num2.optional()
+}).passthrough();
+var GrantInvoiceOption = import_zod2.z.object({
+  id: import_zod2.z.string().trim().min(1),
+  label: import_zod2.z.string().trim().min(1),
+  code: import_zod2.z.string().trim().nullish(),
+  template: import_zod2.z.string().trim().nullish(),
+  enabled: import_zod2.z.boolean().optional(),
+  custom: import_zod2.z.boolean().optional()
+}).passthrough();
+var GrantLineItemInvoicing = import_zod2.z.object({
+  functionalGroup: import_zod2.z.string().trim().nullish(),
+  grantCode: import_zod2.z.string().trim().nullish(),
+  programCode: import_zod2.z.string().trim().nullish(),
+  hmisCode: import_zod2.z.string().trim().nullish(),
+  expenseCategories: import_zod2.z.array(GrantInvoiceOption).nullish(),
+  descriptionTemplates: import_zod2.z.array(GrantInvoiceOption).nullish()
 }).passthrough();
 var GrantBudgetLineItem = import_zod2.z.object({
   id: Id.optional(),
@@ -2817,7 +3097,9 @@ var GrantBudgetLineItem = import_zod2.z.object({
   splitEndDate: import_zod2.z.string().trim().nullish(),
   splitGoals: import_zod2.z.array(GrantBudgetSplitGoal).optional().default([]),
   display: GrantBudgetItemDisplayConfig.nullish(),
-  breakdownValidation: GrantBudgetBreakdownValidation.nullish()
+  breakdownValidation: GrantBudgetBreakdownValidation.nullish(),
+  /** Invoice metadata for this line item. Grant-level invoicing remains legacy read compatibility. */
+  invoicing: GrantLineItemInvoicing.nullish()
 }).passthrough();
 var GrantBudgetTotals = import_zod2.z.object({
   total: Num2,
@@ -2935,14 +3217,6 @@ var GrantPins = import_zod2.z.object({
   important: GrantPinImportant.nullish()
 }).passthrough();
 var GrantInvoicingFrequency = import_zod2.z.enum(["monthly", "quarterly", "annually", "on-demand"]);
-var GrantInvoiceOption = import_zod2.z.object({
-  id: import_zod2.z.string().trim().min(1),
-  label: import_zod2.z.string().trim().min(1),
-  code: import_zod2.z.string().trim().nullish(),
-  template: import_zod2.z.string().trim().nullish(),
-  enabled: import_zod2.z.boolean().optional(),
-  custom: import_zod2.z.boolean().optional()
-}).passthrough();
 var GrantInvoicing = import_zod2.z.object({
   /** Grant identifier used on invoices / reimbursement requests */
   grantCode: import_zod2.z.string().trim().nullish(),
@@ -2988,6 +3262,27 @@ var GrantEnrollmentDefaults = import_zod2.z.object({
   serviceStatus: import_zod2.z.enum(["active", "paused"]).nullable().optional(),
   medicaidStatus: import_zod2.z.enum(["active", "closed"]).nullable().optional()
 }).passthrough();
+var GrantCycleLink = import_zod2.z.object({
+  previousGrantId: Id.nullable().optional(),
+  nextGrantId: Id.nullable().optional()
+}).passthrough();
+var GrantEnrollmentLinkRule = import_zod2.z.object({
+  targetGrantId: Id,
+  onEnroll: import_zod2.z.literal("ensureActive").default("ensureActive"),
+  onAllSourcesClosed: import_zod2.z.literal("flagShouldUnenroll").default("flagShouldUnenroll")
+}).passthrough();
+var GrantEnrollmentRequirement = import_zod2.z.object({
+  operator: import_zod2.z.enum(["all", "any"]).default("all"),
+  targetGrantIds: import_zod2.z.array(Id).min(1).max(20),
+  behavior: import_zod2.z.literal("warnOnly").default("warnOnly")
+}).passthrough();
+var GrantLinking = import_zod2.z.object({
+  cycle: GrantCycleLink.nullish(),
+  /** Enrollment eligibility requirement. Consumers surface warnings only. */
+  enrollmentRequirement: GrantEnrollmentRequirement.nullish(),
+  /** Legacy enrollment automation rules retained for read compatibility. */
+  enrollmentRules: import_zod2.z.array(GrantEnrollmentLinkRule).max(20).default([])
+}).passthrough();
 var GrantInputSchema = import_zod2.z.object({
   id: Id.optional(),
   name: import_zod2.z.string().trim().min(1),
@@ -3023,6 +3318,8 @@ var GrantInputSchema = import_zod2.z.object({
   invoicing: GrantInvoicing.nullish(),
   /** Optional enrollment defaults such as TSS authorization windows. */
   enrollmentDefaults: GrantEnrollmentDefaults.nullish(),
+  /** Explicit lifecycle links. Navigation-only related* fields below do not drive automation. */
+  linking: GrantLinking.nullish(),
   /** Optional documents expected for payment/invoice processing. */
   invoiceDocuments: import_zod2.z.array(import_zod2.z.string().trim()).nullish(),
   /** Optional internal guidance mapping assistance levels to eligibility criteria. */
@@ -3200,6 +3497,9 @@ var GrantBudgetManagerRow = import_zod2.z.object({
   sourceId: import_zod2.z.string().optional().default(""),
   ledgerItemId: import_zod2.z.string().nullable().optional(),
   paymentQueueItemId: import_zod2.z.string().nullable().optional(),
+  enrollmentId: import_zod2.z.string().nullable().optional(),
+  paymentId: import_zod2.z.string().nullable().optional(),
+  rentCertDueOn: import_zod2.z.string().nullable().optional(),
   grantId: import_zod2.z.string().min(1),
   lineItemId: import_zod2.z.string().nullable().optional(),
   customerId: import_zod2.z.string().nullable().optional(),
@@ -4280,6 +4580,7 @@ var UserSettings = import_zod2.z.object({
   dashboardPrefs: UserUnknownRecord.optional(),
   toolsPrefs: UserUnknownRecord.optional(),
   spendingViews: UserUnknownRecord.optional(),
+  allowAiAssistance: import_zod2.z.boolean().optional(),
   googleIntegrationModes: import_zod2.z.object({
     googleCalendar: GoogleIntegrationMode.optional(),
     googleDrive: GoogleIntegrationMode.optional()
@@ -5767,6 +6068,66 @@ var CmActivitiesListQuery = import_zod2.z.object({
 var CmActivitiesListResp = import_zod2.z.object({
   items: import_zod2.z.array(CmActivity)
 });
+
+// src/caseNoteAssistant.ts
+var caseNoteAssistant_exports = {};
+__export(caseNoteAssistant_exports, {
+  CaseNoteActionSchema: () => CaseNoteActionSchema,
+  CaseNoteInterviewFieldsSchema: () => CaseNoteInterviewFieldsSchema,
+  CaseNoteModeSchema: () => CaseNoteModeSchema,
+  GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
+  GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema
+});
+var import_zod5 = require("zod");
+var CaseNoteActionSchema = import_zod5.z.enum([
+  "improve",
+  "grammar_only",
+  "shorten",
+  "add_detail",
+  "professional_tone",
+  "compliance_review",
+  "neutral_language",
+  "missing_questions",
+  "interview_draft"
+]);
+var CaseNoteModeSchema = import_zod5.z.enum(["freeform", "interview"]);
+var CaseNoteInterviewFieldsSchema = import_zod5.z.object({
+  clientResponse: import_zod5.z.string().max(4e3).nullish(),
+  caseManagerAction: import_zod5.z.string().max(4e3).nullish(),
+  barrier: import_zod5.z.string().max(4e3).nullish(),
+  progress: import_zod5.z.string().max(4e3).nullish(),
+  nextStep: import_zod5.z.string().max(4e3).nullish()
+});
+var GenerateCaseNoteSuggestionBodySchema = import_zod5.z.object({
+  customerId: import_zod5.z.string().min(1).max(128),
+  sessionId: import_zod5.z.string().max(128).nullish(),
+  mode: CaseNoteModeSchema,
+  action: CaseNoteActionSchema,
+  program: import_zod5.z.string().max(120).nullish(),
+  serviceType: import_zod5.z.string().max(120).nullish(),
+  visitLengthMinutes: import_zod5.z.number().int().min(0).max(1440).nullish(),
+  draft: import_zod5.z.string().max(12e3).nullish(),
+  clientLabel: import_zod5.z.string().min(1).max(40).default("client"),
+  staffLabel: import_zod5.z.string().min(1).max(40).default("case manager"),
+  interviewFields: CaseNoteInterviewFieldsSchema.nullish()
+}).superRefine((value, ctx) => {
+  const hasInterviewText = value.interviewFields && Object.values(value.interviewFields).some((v) => String(v ?? "").trim());
+  if (value.mode === "freeform" && !String(value.draft ?? "").trim()) ctx.addIssue({ code: "custom", message: "Draft is required.", path: ["draft"] });
+  if (value.mode === "interview" && !hasInterviewText) ctx.addIssue({ code: "custom", message: "At least one interview field is required.", path: ["interviewFields"] });
+});
+var GenerateCaseNoteSuggestionResponseSchema = import_zod5.z.object({
+  ok: import_zod5.z.literal(true),
+  suggestion: import_zod5.z.string(),
+  requestId: import_zod5.z.string(),
+  action: CaseNoteActionSchema,
+  model: import_zod5.z.string(),
+  usage: import_zod5.z.object({ inputTokens: import_zod5.z.number().int().nonnegative(), outputTokens: import_zod5.z.number().int().nonnegative() })
+});
+var RecordCaseNoteSuggestionDecisionBodySchema = import_zod5.z.object({
+  requestId: import_zod5.z.string().uuid(),
+  accepted: import_zod5.z.boolean()
+});
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   BoolFromLike,
@@ -5798,6 +6159,8 @@ var CmActivitiesListResp = import_zod2.z.object({
   FormWorkflowId,
   GDRIVE_TEMPLATE_TYPES,
   GRANT_PIN_COLORS,
+  GenerateCaseNoteSuggestionBodySchema,
+  GenerateCaseNoteSuggestionResponseSchema,
   GoogleAuthMode,
   GoogleConnectStartBody,
   GoogleIntegrationMode,
@@ -5823,6 +6186,20 @@ var CmActivitiesListResp = import_zod2.z.object({
   GrantFinancialModel,
   GrantIdsLike,
   GrantLedgerMode,
+  HouseholdEntity,
+  HouseholdInputSchema,
+  HouseholdMember,
+  HouseholdRelationship,
+  HouseholdStatus,
+  HouseholdsAddMemberBody,
+  HouseholdsDeleteBody,
+  HouseholdsGetQuery,
+  HouseholdsListQuery,
+  HouseholdsPatchBody,
+  HouseholdsPatchRow,
+  HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody,
+  HouseholdsUpsertBody,
   ISO10,
   Id,
   IdLike,
@@ -5847,6 +6224,7 @@ var CmActivitiesListResp = import_zod2.z.object({
   PipelineOperator,
   PipelineRuleNode,
   PipelineStatus,
+  RecordCaseNoteSuggestionDecisionBodySchema,
   ResendInviteBody,
   RevokeSessionsBody,
   RoleInput,
@@ -5903,11 +6281,13 @@ var CmActivitiesListResp = import_zod2.z.object({
   WORKFLOW_CONFIGS,
   assessments,
   budgetPipeline,
+  caseNoteAssistant,
   cleanVisibleLabel,
   cmActivities,
   computeGrantLineItemOverCap,
   creditCards,
   customers,
+  deriveHeadCustomerId,
   enrollments,
   formSessions,
   gdrive,
@@ -5917,6 +6297,8 @@ var CmActivitiesListResp = import_zod2.z.object({
   google,
   grantBudgetManager,
   grants,
+  householdRelationshipLabel,
+  households,
   inbox,
   inferTransactionWindowModel,
   jotform,
