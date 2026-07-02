@@ -233,9 +233,12 @@ function buildFlowTemplatePayload(args: {
     if (!args.selectedTemplates.has(tmpl.key)) return [];
     const fileId = resolveFlowTemplateFileId(tmpl, args.medicaid);
     if (fileId.length < 3) return [];
+    // Variant-based templates carry the variant in the copied doc name so the
+    // payer status is visible in Drive (payer is the default, unsuffixed).
+    const variantSuffix = tmpl.variants && args.medicaid !== "yes" ? " (non-Payer)" : "";
     // `role` ("tssWorkbook") flags the template whose copied Sheet the backend
     // returns as `folder.workbook` for auto-linking as the customer's workbook.
-    return [{ fileId, name: renderFlowDocName(tmpl.docNameTpl, first, last), ...(tmpl.role ? { role: tmpl.role } : {}) }];
+    return [{ fileId, name: `${renderFlowDocName(tmpl.docNameTpl, first, last)}${variantSuffix}`, ...(tmpl.role ? { role: tmpl.role } : {}) }];
   });
 }
 

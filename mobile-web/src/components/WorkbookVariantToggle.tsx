@@ -18,10 +18,14 @@ export function WorkbookVariantToggle({
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Legacy links may have no persisted variant — the backend denies AI for
+  // those, so clicking "Non-payer" on an unset workbook must persist it
+  // rather than no-oping.
+  const hasExplicitVariant = variant === "payer" || variant === "nonpayer";
   const current: "payer" | "nonpayer" = variant === "payer" ? "payer" : "nonpayer";
 
   async function setVariant(next: "payer" | "nonpayer") {
-    if (next === current || busy) return;
+    if (busy || (hasExplicitVariant && next === current)) return;
     setBusy(true);
     setError(null);
     try {

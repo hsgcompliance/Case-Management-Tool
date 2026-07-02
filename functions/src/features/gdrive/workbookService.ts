@@ -6,7 +6,7 @@
 
 import * as logger from "firebase-functions/logger";
 import admin from "../../core/admin";
-import { isoNow } from "../../core";
+import { canAccessDoc, isoNow } from "../../core";
 import { getDriveClient } from "./service";
 import { getOrgGDriveConfig } from "./orgConfig";
 import { markTokenRevoked } from "../google/oauthClient";
@@ -44,6 +44,23 @@ async function getCustomerDoc(customerId: string): Promise<Record<string, unknow
   return snap.data() as Record<string, unknown>;
 }
 
+/**
+ * Loads the customer and enforces the caller's org/team access before any
+ * workbook link metadata is read or written. All workbook endpoints target a
+ * caller-supplied customerId, so this is the cross-org guard.
+ */
+async function getCustomerDocChecked(
+  customerId: string,
+  caller: Record<string, unknown> | undefined,
+): Promise<Record<string, unknown>> {
+  const doc = await getCustomerDoc(customerId);
+  if (!doc) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+  if (caller && !canAccessDoc(caller as any, doc)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
+  return doc;
+}
+
 /** Resolve the customer's primary Drive folder id (customerDrive → legacy meta). */
 function resolveCustomerFolderId(doc: Record<string, unknown>): string {
   const cDrive = doc.customerDrive as Record<string, unknown> | null | undefined;
@@ -58,14 +75,19 @@ function resolveCustomerFolderId(doc: Record<string, unknown>): string {
   );
 }
 
-/** "{last}, {first} TSS Workbook" — mirrors the build-folder doc-name convention. */
-function buildWorkbookCopyName(doc: Record<string, unknown>): string {
+/**
+ * "{last}, {first} TSS Workbook" — mirrors the build-folder doc-name convention.
+ * Non-payer copies are suffixed "(non-Payer)" so the variant is visible in Drive
+ * (the payer variant is the default and stays unsuffixed).
+ */
+function buildWorkbookCopyName(doc: Record<string, unknown>, variant?: "payer" | "nonpayer"): string {
   const first = String(doc.firstName || "").trim();
   const last = String(doc.lastName || "").trim();
   const base = last && first
     ? `${last}, ${first}`
     : String(doc.name || "").trim() || "Customer";
-  return `${base} TSS Workbook`.replace(/\s{2,}/g, " ").trim().slice(0, 255);
+  const suffix = variant === "nonpayer" ? " (non-Payer)" : "";
+  return `${base} TSS Workbook${suffix}`.replace(/\s{2,}/g, " ").trim().slice(0, 255);
 }
 
 export type WorkbookMeta = {
@@ -147,8 +169,13 @@ export async function attachWorkbookByUrl(args: {
   enrollmentId?: string;
   variant?: "payer" | "nonpayer";
   googleAccessToken?: string;
+  caller?: Record<string, unknown>;
 }): Promise<{ workbook: WorkbookMeta }> {
   const { customerId, uid, workbookUrl, enrollmentId, variant, googleAccessToken } = args;
+
+  // Verifies the customer exists and the caller may touch it (also prevents
+  // attach-by-URL from creating a stub customer doc for a bogus id).
+  await getCustomerDocChecked(customerId, args.caller);
 
   const spreadsheetId = extractSpreadsheetId(workbookUrl);
   if (!spreadsheetId) {
@@ -191,11 +218,11 @@ export async function listFolderCandidates(args: {
   customerId: string;
   uid: string;
   googleAccessToken?: string;
+  caller?: Record<string, unknown>;
 }): Promise<CandidateListResult> {
   const { customerId, uid, googleAccessToken } = args;
 
-  const customerDoc = await getCustomerDoc(customerId);
-  if (!customerDoc) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+  const customerDoc = await getCustomerDocChecked(customerId, args.caller);
 
   // Resolve folderId from customerDrive first, then legacy meta fields
   const cDrive = customerDoc.customerDrive as Record<string, unknown> | null | undefined;
@@ -261,8 +288,11 @@ export async function attachWorkbookCandidate(args: {
   enrollmentId?: string;
   variant?: "payer" | "nonpayer";
   googleAccessToken?: string;
+  caller?: Record<string, unknown>;
 }): Promise<{ workbook: WorkbookMeta }> {
   const { customerId, uid, spreadsheetId, spreadsheetName: nameHint, enrollmentId, variant, googleAccessToken } = args;
+
+  await getCustomerDocChecked(customerId, args.caller);
 
   // The candidate came from a mime-filtered folder listing, so its name and type
   // are already known client-side — linking needs NO Drive call. Only when the
@@ -320,8 +350,11 @@ export async function convertXlsxAndAttach(args: {
   enrollmentId?: string;
   variant?: "payer" | "nonpayer";
   googleAccessToken?: string;
+  caller?: Record<string, unknown>;
 }): Promise<{ workbook: WorkbookMeta; converted: true }> {
   const { customerId, uid, fileId, fileName, enrollmentId, variant, googleAccessToken } = args;
+
+  await getCustomerDocChecked(customerId, args.caller);
 
   // Writable Drive client (folder surface — fallback chain, user OAuth preferred).
   const drive = await getDriveClient({
@@ -435,11 +468,11 @@ export async function copyWorkbookFromTemplate(args: {
   variant: "payer" | "nonpayer";
   enrollmentId?: string;
   googleAccessToken?: string;
+  caller?: Record<string, unknown>;
 }): Promise<{ workbook: WorkbookMeta; copiedFromTemplateId: string }> {
   const { customerId, uid, orgId, variant, enrollmentId, googleAccessToken } = args;
 
-  const customerDoc = await getCustomerDoc(customerId);
-  if (!customerDoc) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+  const customerDoc = await getCustomerDocChecked(customerId, args.caller);
 
   const folderId = resolveCustomerFolderId(customerDoc);
   if (!folderId) throw Object.assign(new Error("customer_folder_missing"), { code: 400 });
@@ -463,7 +496,7 @@ export async function copyWorkbookFromTemplate(args: {
     requiredScopes: [DRIVE_SCOPE],
   });
 
-  const name = buildWorkbookCopyName(customerDoc);
+  const name = buildWorkbookCopyName(customerDoc, variant);
 
   let copied;
   try {
@@ -526,11 +559,11 @@ export async function setWorkbookVariant(args: {
   customerId: string;
   uid: string;
   variant: "payer" | "nonpayer";
+  caller?: Record<string, unknown>;
 }): Promise<{ workbook: WorkbookMeta }> {
   const { customerId, uid, variant } = args;
 
-  const customerDoc = await getCustomerDoc(customerId);
-  if (!customerDoc) throw Object.assign(new Error("customer_not_found"), { code: 404 });
+  const customerDoc = await getCustomerDocChecked(customerId, args.caller);
 
   const cDrive = customerDoc.customerDrive as Record<string, unknown> | null | undefined;
   const linkedWorkbooks = cDrive?.linkedWorkbooks as Record<string, unknown> | null | undefined;

@@ -9,9 +9,15 @@ import { estimateAiCostUsd } from "./pricing";
 import { buildAiUsageAudit } from "./privacy";
 
 export class CaseNoteAssistantError extends Error { constructor(public status: number, public safeMessage: string) { super(safeMessage); } }
+// Canonical variant token: lowercase, no spaces/dashes ("nonpayer", "payer").
+// Applied to BOTH the stored workbook variant and the org-config allowlist so
+// admin-entered spellings ("non-payer", "Non Payer") can't silently mismatch.
+function normVariant(value: unknown): string {
+  return String(value ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+}
 function variantOf(customer: Record<string, any>): string {
   const wb = customer.customerDrive?.linkedWorkbooks?.tss;
-  return String(wb?.variant ?? wb?.workbookVariant ?? wb?.detectedVariant ?? "").toLowerCase().replace("nonpayer", "non-payer");
+  return normVariant(wb?.variant ?? wb?.workbookVariant ?? wb?.detectedVariant ?? "");
 }
 function monthKey(now = new Date()) { return now.toISOString().slice(0, 7); }
 function dayKey(now = new Date()) { return now.toISOString().slice(0, 10); }
@@ -32,7 +38,8 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
   const profile = userSnap.data() || {};
   if (profile.settings?.allowAiAssistance !== true) throw new CaseNoteAssistantError(403, "Enable AI assistance in your personal settings before using this feature.");
   const wb = customer.customerDrive?.linkedWorkbooks?.tss;
-  if (!String(wb?.spreadsheetId ?? "").trim() || !config.allowedWorkbookVariants.map((v) => v.toLowerCase()).includes(variantOf(customer))) throw new CaseNoteAssistantError(403, "AI assistant is only available for payer-linked customers.");
+  const customerVariant = variantOf(customer);
+  if (!String(wb?.spreadsheetId ?? "").trim() || !customerVariant || !config.allowedWorkbookVariants.map(normVariant).includes(customerVariant)) throw new CaseNoteAssistantError(403, "AI assistant is only available for payer-linked customers.");
 
   const quotaRef = db.collection("aiCaseNoteUsage").doc(`${orgId}_${monthKey()}`);
   const dailyRef = quotaRef.collection("users").doc(`${uid}_${dayKey()}`);

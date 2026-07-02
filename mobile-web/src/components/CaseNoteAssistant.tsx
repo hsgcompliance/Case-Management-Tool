@@ -19,11 +19,18 @@ export function CaseNoteAssistant({ customerId, draft, visitLengthMinutes, clien
   useEffect(() => { setSuggestion(""); setEditable(false); }, [draft, customerId]);
   const interview = action === "interview_draft";
   async function generate() {
-    const result = await mutation.mutateAsync({ customerId, sessionId: null, mode: interview ? "interview" : "freeform", action, program: null, serviceType: null, visitLengthMinutes, draft: interview ? null : draft, clientLabel, staffLabel, interviewFields: interview ? fields : null });
-    if (requestId) void recordCaseNoteSuggestionDecision(requestId, false);
-    setSuggestion(result.suggestion); setRequestId(result.requestId); setEditable(false);
+    try {
+      const result = await mutation.mutateAsync({ customerId, sessionId: null, mode: interview ? "interview" : "freeform", action, program: null, serviceType: null, visitLengthMinutes, draft: interview ? null : draft, clientLabel, staffLabel, interviewFields: interview ? fields : null });
+      if (requestId) void recordCaseNoteSuggestionDecision(requestId, false);
+      setSuggestion(result.suggestion); setRequestId(result.requestId); setEditable(false);
+    } catch {
+      // mutation.error renders the safe backend message below; swallowing here
+      // just prevents an unhandled promise rejection.
+    }
   }
-  if (!open) return <button type="button" onClick={() => setOpen(true)} disabled={!draft.trim()} className="w-full rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">AI Case Note Assistant <span className="font-normal">Beta</span></button>;
+  // Open without a draft is allowed: Interview Mode builds a note from
+  // structured answers when nothing has been typed yet.
+  if (!open) return <button type="button" onClick={() => { setOpen(true); if (!draft.trim()) setAction("interview_draft"); }} className="w-full rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">AI Case Note Assistant <span className="font-normal">Beta</span></button>;
   return (
     <section className="rounded-2xl border border-indigo-200 bg-white p-4 space-y-4">
       <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-bold text-slate-900">AI Case Note Assistant <span className="text-xs font-medium text-indigo-600">Beta</span></h2><p className="text-xs text-slate-500 mt-1">Suggestions may be inaccurate. Review before accepting.</p></div><button type="button" onClick={() => { if (requestId) void recordCaseNoteSuggestionDecision(requestId, false); setOpen(false); }} className="text-sm text-slate-500">Dismiss</button></div>

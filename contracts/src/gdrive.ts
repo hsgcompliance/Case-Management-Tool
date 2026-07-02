@@ -159,6 +159,9 @@ export const GDriveBuildCustomerFolderBody = z.object({
     .default([]),
   subfolders: z.array(z.string().min(1).max(255)).optional().default([]),
   customerId: z.string().trim().min(1).optional(),
+  // Payer/non-payer variant of the TSS workbook template being copied. Written
+  // onto the auto-linked workbook metadata (AI case-note eligibility gate).
+  workbookVariant: z.enum(["payer", "nonpayer"]).optional(),
 });
 export type TGDriveBuildCustomerFolderBody = z.infer<typeof GDriveBuildCustomerFolderBody>;
 

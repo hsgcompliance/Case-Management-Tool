@@ -99,7 +99,10 @@ export function BuildFolderSheet({
       .map((t) => {
         const role = roleOf(t);
         const fileId = t.variants ? (variant === "payer" ? t.variants.payer : t.variants.nonpayer) : t.fileId;
-        return { fileId, name: buildTemplateDocName(customerForNaming, t.alias), ...(role ? { role } : {}) };
+        // Variant templates carry the variant in the copied doc name so payer
+        // status is visible in Drive (payer is the default, unsuffixed).
+        const variantSuffix = t.variants && variant === "nonpayer" ? " (non-Payer)" : "";
+        return { fileId, name: `${buildTemplateDocName(customerForNaming, t.alias)}${variantSuffix}`, ...(role ? { role } : {}) };
       })
       .filter((t) => t.fileId);
 
@@ -116,6 +119,9 @@ export function BuildFolderSheet({
         templates: payload,
         subfolders: cfg.data?.buildSettings?.defaultSubfolders ?? [],
         customerId,
+        // Written onto the atomic server-side auto-link so the Medicaid toggle
+        // sticks even if the follow-up re-link below fails.
+        ...(hasVariantTemplate ? { workbookVariant: variant } : {}),
       });
       if (!resp.ok || !resp.folder) { setError(resp.error || "Could not build folder."); return; }
       if (resp.linked === false) { setError(resp.linkError || "Folder built but linking failed."); return; }

@@ -71,6 +71,7 @@ export const attachCustomerWorkbookByUrl = secureHandler(
         enrollmentId: body.enrollmentId,
         variant: body.variant,
         googleAccessToken: readGoogleAccessToken(req),
+        caller,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
@@ -115,7 +116,7 @@ export const listCustomerFolderWorkbookCandidates = secureHandler(
     }
 
     try {
-      const result = await listFolderCandidates({ customerId, uid, googleAccessToken: readGoogleAccessToken(req) });
+      const result = await listFolderCandidates({ customerId, uid, googleAccessToken: readGoogleAccessToken(req), caller });
       res.json({ ok: true, ...result });
     } catch (err: any) {
       const msg = String(err?.message || "list_candidates_failed");
@@ -165,6 +166,7 @@ export const attachCustomerWorkbookCandidate = secureHandler(
         enrollmentId: body.enrollmentId,
         variant: body.variant,
         googleAccessToken: readGoogleAccessToken(req),
+        caller,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
@@ -219,6 +221,7 @@ export const convertCustomerWorkbookXlsx = secureHandler(
         enrollmentId: body.enrollmentId,
         variant: body.variant,
         googleAccessToken: readGoogleAccessToken(req),
+        caller,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
@@ -270,6 +273,7 @@ export const copyCustomerWorkbookFromTemplate = secureHandler(
         variant: body.variant,
         enrollmentId: body.enrollmentId,
         googleAccessToken: readGoogleAccessToken(req),
+        caller,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
@@ -329,6 +333,7 @@ export const appendCustomerWorkbookRow = secureHandler(
         values: body.values,
         mode: body.mode,
         rowKey: body.rowKey,
+        caller,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {
@@ -379,7 +384,7 @@ export const getWorkbookData = secureHandler(
     }
 
     try {
-      const extract = await extractWorkbook({ customerId, uid, orgId });
+      const extract = await extractWorkbook({ customerId, uid, orgId, caller });
       res.json({ ok: true, extract });
     } catch (err: any) {
       // Scope missing → named-permission re-authorize banner.
@@ -437,6 +442,7 @@ export const setCustomerWorkbookVariant = secureHandler(
         customerId: body.customerId,
         uid,
         variant: body.variant,
+        caller,
       });
       res.json({ ok: true, ...result });
     } catch (err: any) {

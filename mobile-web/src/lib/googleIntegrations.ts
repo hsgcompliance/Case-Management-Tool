@@ -89,6 +89,7 @@ export const GoogleIntegrations = {
     templates: Array<{ fileId: string; name: string; role?: string }>;
     subfolders: string[];
     customerId: string;
+    workbookVariant?: "payer" | "nonpayer";
   }) =>
     callFunction<{
       ok: boolean;
