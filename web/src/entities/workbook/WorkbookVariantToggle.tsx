@@ -21,10 +21,14 @@ export function WorkbookVariantToggle({
   onChanged?: () => void;
 }) {
   const [busy, setBusy] = React.useState(false);
+  // Legacy links may have no persisted variant — the backend denies AI for
+  // those, so an explicit save must be possible for BOTH buttons (clicking
+  // "Non-payer" on an unset workbook persists it rather than no-oping).
+  const hasExplicitVariant = variant === "payer" || variant === "nonpayer";
   const current: WorkbookTemplateVariant = variant === "payer" ? "payer" : "nonpayer";
 
   const setVariant = async (next: WorkbookTemplateVariant) => {
-    if (next === current || busy) return;
+    if (busy || (hasExplicitVariant && next === current)) return;
     setBusy(true);
     try {
       const resp = (await (api as any).postWith("setCustomerWorkbookVariant", {

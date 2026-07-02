@@ -33,4 +33,8 @@ export const GDriveBuildCustomerFolderBody = z.object({
   // When present, the built folder is linked to this customer (folder ref +
   // auto-linked TSS workbook) and upserted into the cached index, atomically.
   customerId: z.string().min(1).optional(),
+  // Payer/non-payer variant of the TSS workbook template being copied. Written
+  // onto the auto-linked workbook metadata so AI case-note eligibility is
+  // correct without a follow-up client call.
+  workbookVariant: z.enum(["payer", "nonpayer"]).optional(),
 });

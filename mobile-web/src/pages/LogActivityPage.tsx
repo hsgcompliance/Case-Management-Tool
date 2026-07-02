@@ -208,8 +208,13 @@ export function LogActivityPage() {
   const [endTime, setEndTime] = useState("");
   const [note, setNote] = useState("");
   const aiConfig = useCaseNoteAssistantConfig();
-  const workbookVariant = String(customerDetail?.customerDrive?.linkedWorkbooks?.tss?.variant ?? customerDetail?.customerDrive?.linkedWorkbooks?.tss?.workbookVariant ?? customerDetail?.customerDrive?.linkedWorkbooks?.tss?.detectedVariant ?? "").toLowerCase();
-  const showCaseNoteAssistant = aiConfig.data?.enabled === true && prefs.allowAiAssistance && !!workbookLink && workbookVariant === "payer";
+  // Mirror the backend eligibility check (caseNoteAssistant/service.ts): the
+  // stored workbook variant must be in the org's allowlist, both normalized to
+  // a canonical token so spelling variants ("non-payer") can't mismatch.
+  const normVariant = (v: unknown) => String(v ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  const workbookVariant = normVariant(customerDetail?.customerDrive?.linkedWorkbooks?.tss?.variant ?? customerDetail?.customerDrive?.linkedWorkbooks?.tss?.workbookVariant ?? customerDetail?.customerDrive?.linkedWorkbooks?.tss?.detectedVariant ?? "");
+  const allowedVariants = (aiConfig.data?.allowedWorkbookVariants ?? ["payer"]).map(normVariant);
+  const showCaseNoteAssistant = aiConfig.data?.enabled === true && prefs.allowAiAssistance && !!workbookLink && !!workbookVariant && allowedVariants.includes(workbookVariant);
   const visitLengthMinutes = useMemo(() => {
     return sessionDurationMinutes(startTime, endTime);
   }, [startTime, endTime]);

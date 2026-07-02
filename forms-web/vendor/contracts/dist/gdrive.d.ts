@@ -114,6 +114,10 @@ export declare const GDriveBuildCustomerFolderBody: z.ZodObject<{
     }, z.core.$strip>>>>;
     subfolders: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodString>>>;
     customerId: z.ZodOptional<z.ZodString>;
+    workbookVariant: z.ZodOptional<z.ZodEnum<{
+        payer: "payer";
+        nonpayer: "nonpayer";
+    }>>;
 }, z.core.$strip>;
 export type TGDriveBuildCustomerFolderBody = z.infer<typeof GDriveBuildCustomerFolderBody>;
 export declare const GDriveCopyGrantTemplatesBody: z.ZodObject<{

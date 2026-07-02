@@ -14,7 +14,7 @@
 
 import * as logger from "firebase-functions/logger";
 import admin from "../../core/admin";
-import { isoNow } from "../../core";
+import { canAccessDoc, isoNow } from "../../core";
 import { tss } from "@hdb/contracts";
 import type { tss as TssNS } from "@hdb/contracts";
 import { getWorkbookSheetsClient, ScopeMissingError } from "./service";
@@ -625,12 +625,16 @@ export async function extractWorkbook(args: {
   customerId: string;
   uid: string;
   orgId: string;
+  caller?: Record<string, unknown>;
 }): Promise<TssNS.TssWorkbookExtract> {
   const { customerId, uid, orgId } = args;
 
   // 1. Resolve the linked workbook from the customer record ONLY.
   const snap = await admin.firestore().collection("customers").doc(customerId).get();
   const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  if (customer && args.caller && !canAccessDoc(args.caller as any, customer)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
   const tssMeta = customer?.customerDrive?.linkedWorkbooks?.tss as
     | { spreadsheetId?: string; spreadsheetName?: string }
     | undefined;
@@ -779,6 +783,7 @@ export async function appendWorkbookRow(args: {
   mode?: "append" | "insert" | "update";
   /** Required for mode "update": the "row-N" key from extraction. */
   rowKey?: string;
+  caller?: Record<string, unknown>;
 }): Promise<{ rowKey: string; spreadsheetId: string }> {
   const { customerId, uid, orgId, entityId, values } = args;
   const mode = args.mode ?? "append";
@@ -786,6 +791,9 @@ export async function appendWorkbookRow(args: {
   // 1. Resolve workbook + config (same path as extraction).
   const snap = await admin.firestore().collection("customers").doc(customerId).get();
   const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  if (customer && args.caller && !canAccessDoc(args.caller as any, customer)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
   const spreadsheetId = String(customer?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
   if (!spreadsheetId) throw new WorkbookNotLinkedError();
 

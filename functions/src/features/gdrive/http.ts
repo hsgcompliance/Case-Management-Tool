@@ -345,6 +345,7 @@ export const gdriveBuildCustomerFolder = secureHandler(
                       linkedAt: isoNow(),
                       updatedAt: isoNow(),
                       linkedBy: uid,
+                      ...(body.workbookVariant ? { variant: body.workbookVariant } : {}),
                     },
                   },
                 },
