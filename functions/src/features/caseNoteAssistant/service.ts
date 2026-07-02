@@ -19,6 +19,20 @@ function variantOf(customer: Record<string, any>): string {
   const wb = customer.customerDrive?.linkedWorkbooks?.tss;
   return normVariant(wb?.variant ?? wb?.workbookVariant ?? wb?.detectedVariant ?? "");
 }
+// The prompt asks for {"draftNote", "missingOrUnclear", "complianceSuggestions"}.
+// Falls back to treating the whole text as the note so a model that ignores
+// JSON mode degrades to the old single-suggestion behavior instead of failing.
+function parseStructuredSuggestion(text: string): { draftNote: string; missingOrUnclear: string[]; complianceSuggestions: string[] } {
+  const stripped = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  try {
+    const obj = JSON.parse(stripped) as Record<string, unknown>;
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      const list = (value: unknown) => (Array.isArray(value) ? value.map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, 5) : []);
+      return { draftNote: String(obj.draftNote ?? "").trim(), missingOrUnclear: list(obj.missingOrUnclear), complianceSuggestions: list(obj.complianceSuggestions).slice(0, 3) };
+    }
+  } catch { /* not JSON — fall through to raw text */ }
+  return { draftNote: text, missingOrUnclear: [], complianceSuggestions: [] };
+}
 function monthKey(now = new Date()) { return now.toISOString().slice(0, 7); }
 function dayKey(now = new Date()) { return now.toISOString().slice(0, 10); }
 
@@ -66,12 +80,14 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
   const started = Date.now();
   const response = await fetch(`https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`, {
     method: "POST", headers: { Authorization: `Bearer ${token?.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature, maxOutputTokens: Math.min(config.maxOutputTokens, input.action === "grammar_only" || input.action === "shorten" ? 400 : input.action === "missing_questions" ? 500 : input.action === "interview_draft" ? 800 : 700) } }),
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature, responseMimeType: "application/json", maxOutputTokens: Math.min(config.maxOutputTokens, ["grammar_only", "shorten", "missing_questions", "compliance_review"].includes(input.action) ? 500 : 900) } }),
   });
   if (!response.ok) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
   const data: any = await response.json();
-  const suggestion = String(data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "").trim();
-  if (!suggestion) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
+  const rawText = String(data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "").trim();
+  if (!rawText) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
+  const parsed = parseStructuredSuggestion(rawText);
+  if (!parsed.draftNote && !parsed.missingOrUnclear.length && !parsed.complianceSuggestions.length) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
   const inputTokens = Number(data.usageMetadata?.promptTokenCount) || 0; const outputTokens = Number(data.usageMetadata?.candidatesTokenCount) || 0; const tokens = inputTokens + outputTokens;
   const estimatedCostUsd = estimateAiCostUsd(model, inputTokens, outputTokens);
   await Promise.all([
@@ -79,5 +95,5 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
     dailyRef.set({ uid, day: dayKey(), requests: FieldValue.increment(1), tokens: FieldValue.increment(tokens), updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
     db.collection("aiCaseNoteAudit").doc(requestId).set(buildAiUsageAudit({ requestId, uid, orgId, action: input.action, promptTemplateIds: promptTemplateIds(input.action), model, inputTokens, outputTokens, estimatedCostUsd, latencyMs: Date.now() - started })),
   ]);
-  return { suggestion, requestId, action: input.action, model, usage: { inputTokens, outputTokens } };
+  return { suggestion: parsed.draftNote, missingOrUnclear: parsed.missingOrUnclear, complianceSuggestions: parsed.complianceSuggestions, requestId, action: input.action, model, usage: { inputTokens, outputTokens } };
 }

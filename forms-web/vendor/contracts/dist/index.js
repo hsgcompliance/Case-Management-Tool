@@ -203,7 +203,7 @@ import {
   GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema,
   caseNoteAssistant_exports
-} from "./chunk-YJIMR7SQ.js";
+} from "./chunk-QYYQSCVK.js";
 import {
   CmActivitiesListQuery,
   CmActivitiesListResp,
