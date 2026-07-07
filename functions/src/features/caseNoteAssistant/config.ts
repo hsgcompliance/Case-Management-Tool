@@ -1,4 +1,4 @@
-export type UserQuotaOverride = { dailyRequestLimit?: number; dailyTokenLimit?: number };
+export type UserQuotaOverride = { enabled?: boolean; dailyRequestLimit?: number; dailyTokenLimit?: number };
 export type CaseNoteBetaConfig = {
   enabled: boolean; allowedWorkbookVariants: string[]; defaultClientLabel: string; defaultStaffLabel: string;
   monthlyTokenLimit: number; monthlyRequestLimit: number; dailyUserRequestLimit: number; dailyUserTokenLimit: number;

@@ -13,7 +13,7 @@ import {
 } from "@entities/ui/DynamicFormFields";
 import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
-import { GRANT_ACCENT_COLORS, type GrantAccentColor, grantAccentChip, grantAccentSolid } from "@lib/colorRegistry";
+import { grantAccentChip } from "@lib/colorRegistry";
 import { parseGrantMaxAssistanceMonths } from "@hdb/contracts";
 import { grantDriveTemplates, inferDriveTemplateType, parseDriveFileId } from "../driveTemplates";
 import {
@@ -118,16 +118,10 @@ function financialModelOf(model: Record<string, any>, grant: Grant | null): Fina
 }
 
 // ── Pin system ────────────────────────────────────────────────────────────────
-
-const PIN_COLORS = GRANT_ACCENT_COLORS;
-type PinColor = GrantAccentColor;
+// Pin editing lives on the Config tab; this tab only renders the badges.
 
 function pinColorChipCls(color: string | null | undefined): string {
   return grantAccentChip(color);
-}
-
-function pinColorDotCls(color: string | null | undefined): string {
-  return grantAccentSolid(color);
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -529,7 +523,7 @@ const toISOOrEmpty = (x: any): string => {
 
 const iso10 = (s: string) => safeISODate10(s) || "";
 
-function useBufferedField(ext: string, label: string) {
+function useBufferedField(ext: string) {
   const [buf, setBuf] = useState<string>(ext ?? "");
   const focused = useRef(false);
 
@@ -537,7 +531,6 @@ function useBufferedField(ext: string, label: string) {
   useEffect(() => {
     if (!focused.current) {
       if ((ext ?? "") !== buf) {
-        console.debug(`[DetailsTab] resync ${label}`, { from: buf, to: ext ?? "" });
         setBuf(ext ?? "");
       }
     }
@@ -840,7 +833,10 @@ function RecommendedGrantInfoEditor({
             className="input w-full"
             value={duration}
             placeholder={isGrant ? "1 Year" : ""}
-            onChange={(e) => setModel((m) => ({ ...m, duration: e.currentTarget.value }))}
+            onChange={(e) => {
+              const value = e.currentTarget.value;
+              setModel((m) => ({ ...m, duration: value }));
+            }}
           />
         </label>
         <label className="space-y-1">
@@ -906,11 +902,15 @@ function RecommendedGrantInfoEditor({
 function GrantInfoPanel({
   model,
   grant,
+  hideDates = false,
 }: {
   model: Record<string, any>;
   grant: Record<string, any> | null;
+  /** Hide the start/end row when the surrounding page header already shows the dates. */
+  hideDates?: boolean;
 }) {
   const g = (grant ?? model) as Record<string, any>;
+  const isProgram = String(g.kind || "") === "program";
 
   const startDate     = String(g.startDate   || "").slice(0, 10);
   const endDate       = String(g.endDate     || "").slice(0, 10);
@@ -927,26 +927,29 @@ function GrantInfoPanel({
 
   const hasServices   = Array.isArray(services) ? services.length > 0 : !!services;
   const hasEligibility = Object.keys(normalizeEligibility(eligibility)).length > 0;
+  const hasLevel = levelRows.length > 0;
 
   return (
+    <>
     <div className="rounded-[22px] border border-slate-200 bg-white p-5 space-y-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Grant Info</div>
+      <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">{isProgram ? "Program Info" : "Grant Info"}</div>
 
-      {/* Dates row — always shown */}
-      <div className="flex flex-wrap gap-4">
-        <div>
-          <div className="text-xs text-slate-400 mb-0.5">Start Date</div>
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {startDate ? fmtMDY(startDate) : "—"}
+      {!hideDates && (
+        <div className="flex flex-wrap gap-4">
+          <div>
+            <div className="text-xs text-slate-400 mb-0.5">Start Date</div>
+            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {startDate ? fmtMDY(startDate) : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-400 mb-0.5">End Date</div>
+            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {endDate ? fmtMDY(endDate) : "—"}
+            </div>
           </div>
         </div>
-        <div>
-          <div className="text-xs text-slate-400 mb-0.5">End Date</div>
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            {endDate ? fmtMDY(endDate) : "—"}
-          </div>
-        </div>
-      </div>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[1fr_1.35fr]">
         <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
@@ -980,48 +983,61 @@ function GrantInfoPanel({
         {description && <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{description}</p>}
       </FieldBlock>
 
-      <div className="grid gap-3 lg:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <FieldBlock label="Duration" empty={!duration}>
-            {duration && <span className="text-sm font-semibold text-slate-900">{duration}</span>}
-          </FieldBlock>
+      {(duration || maxLen || hasServices) ? (
+        <div className="grid gap-3 lg:grid-cols-3">
+          {duration ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <FieldBlock label="Duration" empty={false}>
+                <span className="text-sm font-semibold text-slate-900">{duration}</span>
+              </FieldBlock>
+            </div>
+          ) : null}
+          {maxLen ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <FieldBlock label="Max Length" empty={false}>
+                <span className="text-sm font-semibold text-slate-900">{maxLen}</span>
+              </FieldBlock>
+            </div>
+          ) : null}
+          {hasServices ? (
+            <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
+              <FieldBlock label="Services Offered" empty={false}>
+                <ServicesOfferedDisplay value={services} />
+              </FieldBlock>
+            </div>
+          ) : null}
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <FieldBlock label="Max Length" empty={!maxLen}>
-            {maxLen && <span className="text-sm font-semibold text-slate-900">{maxLen}</span>}
-          </FieldBlock>
-        </div>
-        <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
-          <FieldBlock label="Services Offered" empty={!hasServices}>
-            <ServicesOfferedDisplay value={services} />
-          </FieldBlock>
-        </div>
-      </div>
+      ) : null}
 
-      <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr]">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-          <FieldBlock label="Eligibility" empty={!hasEligibility}>
-            <EligibilityDisplay value={eligibility} />
-          </FieldBlock>
+      {(hasEligibility || hasLevel) ? (
+        <div className={["grid gap-3", hasEligibility && hasLevel ? "lg:grid-cols-[1.35fr_1fr]" : ""].join(" ")}>
+          {hasEligibility ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+              <FieldBlock label="Eligibility" empty={false}>
+                <EligibilityDisplay value={eligibility} />
+              </FieldBlock>
+            </div>
+          ) : null}
+          {hasLevel ? (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+              <FieldBlock label="Level of Assistance" empty={false}>
+                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                  {levelRows.map(([key, value]) => (
+                    <React.Fragment key={key}>
+                      <span className="font-medium text-slate-600">{key}</span>
+                      <span className="text-slate-800">{String(value)}</span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </FieldBlock>
+            </div>
+          ) : null}
         </div>
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
-          <FieldBlock label="Level of Assistance" empty={!levelRows.length}>
-            {levelRows.length ? (
-              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-                {levelRows.map(([key, value]) => (
-                  <React.Fragment key={key}>
-                    <span className="font-medium text-slate-600">{key}</span>
-                    <span className="text-slate-800">{String(value)}</span>
-                  </React.Fragment>
-                ))}
-              </div>
-            ) : null}
-          </FieldBlock>
-        </div>
-      </div>
-
-      <InvoiceInfoPanel value={g.invoicing} invoiceDocuments={invoiceDocs} />
+      ) : null}
     </div>
+
+    <InvoiceInfoPanel value={g.invoicing} invoiceDocuments={invoiceDocs} />
+    </>
   );
 }
 
@@ -1036,6 +1052,7 @@ export function DetailsTab({
   canEditKind,
   onRequestKindChange,
   STATUS_OPTS,
+  pageMode = false,
 }: {
   editing: boolean;
   model: Record<string, any>;
@@ -1050,6 +1067,8 @@ export function DetailsTab({
   derived?: { total: number; spent: number; projected: number; balance: number; projectedBalance: number } | null;
   showBudgetStrip?: boolean;
   currency?: (n: number) => string;
+  /** True when rendered inside the workspace page header that already shows kind/status/dates. */
+  pageMode?: boolean;
 }) {
   // external canonical values (used for initial buffer + read mode)
   const extName = String(model.name ?? "");
@@ -1057,35 +1076,31 @@ export function DetailsTab({
   const extEnd = String(model.endDate ?? "");
 
   // buffers
-  const nameB = useBufferedField(extName, "name");
-  const startB = useBufferedField(extStart, "startDate");
-  const endB = useBufferedField(extEnd, "endDate");
+  const nameB = useBufferedField(extName);
+  const startB = useBufferedField(extStart);
+  const endB = useBufferedField(extEnd);
 
   // commits (normalize on commit)
   const commitName = useCallback(() => {
     const next = nameB.buf;
-    console.debug("[DetailsTab] commit name ->", next);
     setModel((m) => (m?.name === next ? m : { ...m, name: next }));
   }, [nameB.buf, setModel]);
 
   const commitStart = useCallback(() => {
     const raw = iso10(startB.buf);
     const iso = toISOOrEmpty(raw);
-    console.debug("[DetailsTab] commit startDate ->", { raw, iso });
     setModel((m) => ({ ...m, startDate: iso || null }));
   }, [startB.buf, setModel]);
 
   const commitEnd = useCallback(() => {
     const raw = iso10(endB.buf);
     const iso = toISOOrEmpty(raw);
-    console.debug("[DetailsTab] commit endDate ->", { raw, iso });
     setModel((m) => ({ ...m, endDate: iso || null }));
   }, [endB.buf, setModel]);
 
   const onStatus = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const v = readSelect(e);
-      console.debug("[DetailsTab] status ->", v);
       setModel((m) => ({ ...m, status: v, active: v === "active" }));
     },
     [readSelect, setModel]
@@ -1150,14 +1165,18 @@ export function DetailsTab({
       {/* ── View mode: metrics + grant info ──────────────────────────── */}
       {!editing && (
         <div className="mt-4 space-y-4">
-          {/* Kind + Status chips */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md bg-sky-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-sky-600 dark:bg-sky-900/40 dark:text-sky-400">
-              {kindVal === "program" ? "Program" : "Grant"}
-            </span>
-            <span className={`rounded-md border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${STATUS_CHIP[statusVal] ?? STATUS_CHIP.draft}`}>
-              {statusVal}
-            </span>
+          {/* Kind + Status chips (skipped in pageMode — the workspace header already shows them) */}
+          <div className="flex flex-wrap items-center gap-2 empty:hidden">
+            {!pageMode && (
+              <>
+                <span className="rounded-md bg-sky-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-sky-600 dark:bg-sky-900/40 dark:text-sky-400">
+                  {kindVal === "program" ? "Program" : "Grant"}
+                </span>
+                <span className={`rounded-md border px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${STATUS_CHIP[statusVal] ?? STATUS_CHIP.draft}`}>
+                  {statusVal}
+                </span>
+              </>
+            )}
             {isGrantKind && rentalAssistanceTagged ? (
               <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
                 Rental Assistance
@@ -1196,6 +1215,7 @@ export function DetailsTab({
           <GrantInfoPanel
             model={model}
             grant={grant as any}
+            hideDates={pageMode}
           />
         </div>
       )}
@@ -1271,7 +1291,10 @@ export function DetailsTab({
                 className="input pointer-events-auto mt-1"
                 value={String(model.duration ?? grant?.duration ?? "")}
                 placeholder={isGrantKind ? "1 Year" : ""}
-                onChange={(e) => setModel((m) => ({ ...m, duration: e.currentTarget.value }))}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setModel((m) => ({ ...m, duration: value }));
+                }}
               />
             </label>
             <label>
@@ -1515,137 +1538,7 @@ export function DetailsTab({
             </div>
           </div>
 
-          {/* ── Pins ──────────────────────────────────────────────────────── */}
-          {isGrantKind && (
-            <div className="md:col-span-2 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Grant Pins</div>
-
-              {/* Important Pin */}
-              <div className="rounded-md border border-slate-200 bg-slate-50/70 px-2.5 py-2 space-y-2">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 rounded border-slate-300 accent-violet-600"
-                    checked={!!model?.pins?.important?.enabled}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      setModel((m) => ({
-                        ...m,
-                        pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), enabled: checked } },
-                      }));
-                    }}
-                  />
-                  <span className="text-xs font-semibold text-slate-800">Important Pin</span>
-                  <span className="text-xs text-slate-500">
-                    Floats grant to top of lists
-                  </span>
-                </label>
-
-                {model?.pins?.important?.enabled && (
-                  <div className="grid gap-2 pl-5 md:grid-cols-[minmax(160px,240px)_auto_minmax(180px,1fr)]">
-                    {/* Label */}
-                    <div>
-                      <div className="text-xs text-slate-500 mb-0.5">Label</div>
-                      <input
-                        className="input input-sm h-8 w-full text-xs"
-                        type="text"
-                        placeholder="Important (default)"
-                        value={String(model?.pins?.important?.label ?? "")}
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          setModel((m) => ({
-                            ...m,
-                            pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), label: v } },
-                          }));
-                        }}
-                      />
-                    </div>
-                    {/* Color */}
-                    <div>
-                      <div className="text-xs text-slate-500 mb-1">Color</div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {(["", ...PIN_COLORS] as const).map((c) => (
-                          <button
-                            key={c || "none"}
-                            type="button"
-                            onClick={() => setModel((m) => ({
-                              ...m,
-                              pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), color: c || null } },
-                            }))}
-                            className={[
-                              "h-4 w-4 rounded-full border-2 transition",
-                              (model?.pins?.important?.color ?? "") === c
-                                ? "border-slate-600 scale-110"
-                                : "border-transparent hover:border-slate-400",
-                              c ? pinColorDotCls(c as PinColor) : "bg-white border border-slate-300",
-                            ].join(" ")}
-                            title={c || "No color"}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                    {/* Note */}
-                    <div>
-                      <div className="text-xs text-slate-500 mb-0.5">Note (optional)</div>
-                      <input
-                        className="input h-8 w-full text-xs"
-                        type="text"
-                        placeholder="Internal note about this pin..."
-                        value={String(model?.pins?.important?.note ?? "")}
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          setModel((m) => ({
-                            ...m,
-                            pins: { ...(m?.pins ?? {}), important: { ...(m?.pins?.important ?? {}), note: v } },
-                          }));
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Digest Pin */}
-              <div className="grid gap-2 md:grid-cols-2">
-                <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50/70 px-2.5 py-2">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 rounded border-slate-300 accent-sky-600"
-                    checked={!!model?.pins?.digest?.enabled}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      setModel((m) => ({
-                        ...m,
-                        pins: { ...(m?.pins ?? {}), digest: { ...(m?.pins?.digest ?? {}), enabled: checked } },
-                      }));
-                    }}
-                  />
-                  <span className="text-xs font-semibold text-slate-800">Digest Pin</span>
-                  <span className="text-xs text-slate-500">
-                    Include in org digests
-                  </span>
-                </label>
-                <label className="flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50/70 px-2.5 py-2">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 rounded border-slate-300 accent-indigo-600"
-                    checked={!!model?.pins?.invoice?.enabled}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      setModel((m) => ({
-                        ...m,
-                        pins: { ...(m?.pins ?? {}), invoice: { ...(m?.pins?.invoice ?? {}), enabled: checked, label: m?.pins?.invoice?.label || "Invoice" } },
-                      }));
-                    }}
-                  />
-                  <span className="text-xs font-semibold text-indigo-900">Invoice Pin</span>
-                  <span className="text-xs text-indigo-700/80">
-                    Surface in invoice/payment workflows
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
+          {/* Pins are managed on the Config tab (Display and digest pins). */}
 
           {/* Promoted fields in edit mode */}
           <div className="md:col-span-2">
@@ -1821,17 +1714,14 @@ function ReadOnlyDetails({ obj }: { obj: Record<string, any> }) {
         (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)
     );
 
-  if (fields.length === 0) {
-    return (
-      <p className="text-sm text-slate-600 dark:text-slate-400">No additional details.</p>
-    );
-  }
+  if (fields.length === 0) return null;
 
   const important = fields.filter((f) => f.priority === "important");
   const rest = fields.filter((f) => f.priority !== "important");
 
   return (
     <div className="space-y-3">
+      <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">Additional Fields</div>
       {/* Important fields — full-width, amber accent */}
       {important.map(({ key, rawValue }) => (
         <div

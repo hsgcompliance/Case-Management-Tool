@@ -1591,7 +1591,10 @@ function FloatingPaymentAdjustSheet({
                       type="date"
                       className="w-36 rounded border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
                       value={editedDates[row.id] ?? isoInputValue(row.date)}
-                      onChange={(event) => setEditedDates((current) => ({ ...current, [row.id]: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setEditedDates((current) => ({ ...current, [row.id]: value }));
+                      }}
                       disabled={deleted}
                     />
                   </td>
@@ -1607,7 +1610,10 @@ function FloatingPaymentAdjustSheet({
                       className="w-28 rounded border border-slate-300 px-2 py-1 text-right dark:border-slate-700 dark:bg-slate-950"
                       value={editedAmounts[row.id] ?? ""}
                       placeholder={row.amount == null ? "" : row.amount.toFixed(2)}
-                      onChange={(event) => setEditedAmounts((current) => ({ ...current, [row.id]: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setEditedAmounts((current) => ({ ...current, [row.id]: value }));
+                      }}
                       disabled={deleted}
                     />
                   </td>
@@ -1615,7 +1621,10 @@ function FloatingPaymentAdjustSheet({
                     <input
                       className="w-40 rounded border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
                       value={editedVendors[row.id] ?? row.fields.vendor ?? ""}
-                      onChange={(event) => setEditedVendors((current) => ({ ...current, [row.id]: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setEditedVendors((current) => ({ ...current, [row.id]: value }));
+                      }}
                       disabled={deleted || paid}
                       placeholder={paid ? "-" : "Vendor"}
                     />
@@ -1627,7 +1636,10 @@ function FloatingPaymentAdjustSheet({
                     <input
                       className="w-56 rounded border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
                       value={editedLineItems[row.id] ?? row.fields.grant ?? row.fields.enrollmentName ?? ""}
-                      onChange={(event) => setEditedLineItems((current) => ({ ...current, [row.id]: event.currentTarget.value }))}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setEditedLineItems((current) => ({ ...current, [row.id]: value }));
+                      }}
                       disabled={deleted}
                       placeholder="Line item / grant"
                     />
@@ -1636,7 +1648,10 @@ function FloatingPaymentAdjustSheet({
                     <input
                       type="checkbox"
                       checked={deleted}
-                      onChange={(event) => setDeletedRows((current) => ({ ...current, [row.id]: event.currentTarget.checked }))}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setDeletedRows((current) => ({ ...current, [row.id]: checked }));
+                      }}
                       aria-label="Delete row"
                     />
                   </td>

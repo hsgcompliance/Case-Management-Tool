@@ -6,7 +6,14 @@ import { useAuth } from "@app/auth/AuthProvider";
 import { isAdminLike } from "@lib/roles";
 import { useOrgConfig, useSaveOrgConfig } from "@hooks/useOrgConfig";
 import { toast } from "@lib/toast";
-import { RichTextEditor } from "./RichTextEditor";
+import dynamic from "next/dynamic";
+
+// TipTap is heavy and only needed when an admin opens the help editor —
+// keep it out of the shared bundle.
+const RichTextEditor = dynamic(
+  () => import("./RichTextEditor").then((m) => m.RichTextEditor),
+  { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading editor…</div> }
+);
 
 export type HelpPageKey = "customers" | "customersModal" | "budget" | "programs" | "budgetPipeline" | "invoiceTool";
 

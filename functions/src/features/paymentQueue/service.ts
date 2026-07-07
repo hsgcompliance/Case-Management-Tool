@@ -547,6 +547,31 @@ export async function voidPaymentQueueItems(
   return snap.docs.length;
 }
 
+/**
+ * Soft-void one queue item addressed by its document id.
+ * Unlike voidPaymentQueueItems, this does not fan out over baseId — jotform
+ * items share a submission baseId, so doc-level removal must target the doc.
+ */
+export async function voidPaymentQueueItemById(
+    id: string,
+    actorUid?: string,
+): Promise<number> {
+  const ref = db.collection(COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return 0;
+  if (String((snap.data() || {}).queueStatus || '') === 'void') return 0;
+  const now = isoNow();
+  await ref.update({
+    'queueStatus': 'void',
+    'voidedAt': now,
+    'voidedBy': actorUid ?? null,
+    'updatedAtISO': now,
+    'system.lastWriter': FN,
+    'system.lastWriteAt': now,
+  });
+  return 1;
+}
+
 export async function syncEnrollmentProjectionQueueItems(args: {
   orgId: string | null;
   enrollmentId: string;

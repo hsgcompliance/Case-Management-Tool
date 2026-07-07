@@ -106,7 +106,7 @@ export type OrgDisplayConfig = {
       monthlyRequestLimit: number;
       dailyUserRequestLimit: number;
       dailyUserTokenLimit: number;
-      userQuotaOverrides: Record<string, { dailyRequestLimit?: number; dailyTokenLimit?: number }>;
+      userQuotaOverrides: Record<string, { enabled?: boolean; dailyRequestLimit?: number; dailyTokenLimit?: number }>;
       defaultModel: string;
       fallbackModel: string | null;
       maxInputChars: number;

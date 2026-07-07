@@ -1566,7 +1566,10 @@ export default function PaymentScheduleBuilderDialog({
                     id="certTask-enabled"
                     type="checkbox"
                     checked={certTask.enabled}
-                    onChange={(e) => setCertTask((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      setCertTask((prev) => ({ ...prev, enabled: checked }));
+                    }}
                     className="rounded"
                   />
                   <label htmlFor="certTask-enabled" className="flex-1 cursor-pointer select-none text-xs text-slate-600 dark:text-slate-300">
@@ -1599,7 +1602,10 @@ export default function PaymentScheduleBuilderDialog({
                       <select
                         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={certTask.cadenceMonths}
-                        onChange={(e) => setCertTask((prev) => ({ ...prev, cadenceMonths: e.currentTarget.value as CertTaskPlan["cadenceMonths"] }))}
+                        onChange={(e) => {
+                          const value = e.currentTarget.value as CertTaskPlan["cadenceMonths"];
+                          setCertTask((prev) => ({ ...prev, cadenceMonths: value }));
+                        }}
                       >
                         <option value="3">Every 3 months</option>
                         <option value="4">Every 4 months</option>
@@ -1607,12 +1613,14 @@ export default function PaymentScheduleBuilderDialog({
                         <option value="12">Annually</option>
                       </select>
                     </label>
-                    <label className="text-sm">
+                    <div className="text-sm">
                       <div className="mb-1 text-xs text-slate-500">End Date (optional)</div>
                       <DateInput
                         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={certTask.endDate}
-                        onChange={(value) => setCertTask((prev) => ({ ...prev, endDate: value }))}
+                        onChange={(value) => {
+                          setCertTask((prev) => ({ ...prev, endDate: value }));
+                        }}
                       />
                     </div>
                     <label className="text-sm">
@@ -1620,7 +1628,10 @@ export default function PaymentScheduleBuilderDialog({
                       <select
                         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={certTask.bucket}
-                        onChange={(e) => setCertTask((prev) => ({ ...prev, bucket: e.currentTarget.value as CertTaskPlan["bucket"] }))}
+                        onChange={(e) => {
+                          const value = e.currentTarget.value as CertTaskPlan["bucket"];
+                          setCertTask((prev) => ({ ...prev, bucket: value }));
+                        }}
                       >
                         <option value="compliance">Compliance</option>
                         <option value="task">Task</option>
@@ -1632,7 +1643,10 @@ export default function PaymentScheduleBuilderDialog({
                         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={certTask.title}
                         placeholder="Rent Certification"
-                        onChange={(e) => setCertTask((prev) => ({ ...prev, title: e.currentTarget.value }))}
+                        onChange={(e) => {
+                          const value = e.currentTarget.value;
+                          setCertTask((prev) => ({ ...prev, title: value }));
+                        }}
                       />
                     </label>
                   </div>

@@ -406,7 +406,10 @@ function SettingsDrawer({
               <input
                 type="checkbox"
                 checked={!!draft.locked}
-                onChange={(e) => setDraft((prev) => ({ ...prev, locked: e.currentTarget.checked }))}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  setDraft((prev) => ({ ...prev, locked: checked }));
+                }}
                 className="h-4 w-4 rounded border-slate-300 accent-indigo-600"
               />
               <div>

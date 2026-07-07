@@ -92,7 +92,12 @@ var Payment = z.object({
   // used by inbox trigger logic
   // compliance
   compliance: PaymentCompliance.nullish(),
-  rentCert: PaymentRentCert.nullish()
+  rentCert: PaymentRentCert.nullish(),
+  /**
+   * Sticky "not due": set when an operator clears a rent cert so the
+   * calculated continuum sync does not regenerate one for this payment.
+   */
+  rentCertOptOut: z.boolean().nullish()
 });
 var PaymentEntity = Payment.extend({
   id: z.string().min(1)
@@ -228,7 +233,8 @@ var PaymentProjectionInput = z.object({
   vendor: z.string().nullish(),
   comment: z.string().nullish(),
   compliance: PaymentCompliance.nullish(),
-  rentCert: PaymentRentCert.nullish()
+  rentCert: PaymentRentCert.nullish(),
+  rentCertOptOut: z.boolean().nullish()
 }).superRefine((v, ctx) => {
   const hasDue = !!v.dueDate;
   const hasDate = !!v.date;
