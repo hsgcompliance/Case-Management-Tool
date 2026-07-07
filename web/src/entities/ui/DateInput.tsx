@@ -104,8 +104,6 @@ export function DateInput({
         min={min}
         max={max}
         disabled={disabled}
-        min={min}
-        max={max}
         readOnly={readOnly}
         aria-invalid={invalid || undefined}
         onChange={(event) => {

@@ -1612,7 +1612,7 @@ export default function PaymentScheduleBuilderDialog({
                         <option value="6">Every 6 months</option>
                         <option value="12">Annually</option>
                       </select>
-                    </label>
+                    </div>
                     <div className="text-sm">
                       <div className="mb-1 text-xs text-slate-500">End Date (optional)</div>
                       <DateInput
