@@ -47,6 +47,7 @@ import {
   isInGrantWindow,
   ensureMonthlySubtypeTag,
   ensurePaymentIds,
+  carryRentCertState,
 } from "./utils";
 
 import {
@@ -657,7 +658,7 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
       }
 
       const normalized = targetList.map(ensureMonthlySubtypeTag);
-      const withIds = ensurePaymentIds(normalized, oldPayments);
+      const withIds = carryRentCertState(ensurePaymentIds(normalized, oldPayments), oldPayments);
 
       const sumUnpaidByLI = (arr: any[]) =>
         arr.reduce((m, p) => {

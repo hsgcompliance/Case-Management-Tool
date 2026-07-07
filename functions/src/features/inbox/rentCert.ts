@@ -46,6 +46,14 @@ function fmtShortMonth(iso: string): string {
   return `${names[Math.max(0, Math.min(11, Number(month) - 1))]} ${Number(day)}`;
 }
 
+/**
+ * Next rent cert due across the given enrollments.
+ *
+ * Persisted `payment.rentCert` (maintained by the continuum sync and manual
+ * toggles) is the source of truth. The every-3-months heuristic only runs for
+ * legacy enrollments that carry no persisted rent-cert state at all, and only
+ * certs due now or in the future are returned — never a past cert.
+ */
 export function computeNextRentCertDue(
   enrollments: Array<Record<string, unknown>>,
   opts?: { today?: string }
@@ -54,10 +62,33 @@ export function computeNextRentCertDue(
   const dues: DigestRentCertDue[] = [];
 
   for (const enrollment of enrollments) {
-    const payments = Array.isArray(enrollment.payments) ? enrollment.payments : [];
-    const rentPayments = payments
+    const payments = (Array.isArray(enrollment.payments) ? enrollment.payments : [])
       .filter((raw): raw is Record<string, unknown> => !!raw && typeof raw === "object")
-      .filter((p) => p.void !== true && isRentPayment(p))
+      .filter((p) => p.void !== true);
+
+    let hasPersistedState = false;
+    for (const p of payments) {
+      if (p.rentCertOptOut === true) hasPersistedState = true;
+      const rc = p.rentCert as Record<string, unknown> | null | undefined;
+      const rcDue = String(rc?.dueDate || "").slice(0, 10);
+      if (!rc || !isISO(rcDue)) continue;
+      hasPersistedState = true;
+      if (["completed", "effective"].includes(String(rc.status || "due"))) continue;
+      const paymentDate = String(p.dueDate || p.date || "").slice(0, 10);
+      const targetPaymentDate = isISO(String(rc.targetPaymentDate || "").slice(0, 10))
+        ? String(rc.targetPaymentDate).slice(0, 10)
+        : paymentDate;
+      dues.push({
+        dueDate: rcDue,
+        targetPaymentDate,
+        asap: rcDue <= today,
+        label: `${fmtShortMonth(targetPaymentDate)} rent cert due ${fmtShortMonth(rcDue)}`,
+      });
+    }
+    if (hasPersistedState) continue;
+
+    const rentPayments = payments
+      .filter((p) => isRentPayment(p))
       .map((p): Record<string, unknown> & { dueDate: string } => ({
         ...p,
         dueDate: String(p.dueDate || p.date || ""),
@@ -80,5 +111,21 @@ export function computeNextRentCertDue(
   }
 
   const sorted = dues.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  return sorted.find((due) => due.targetPaymentDate >= today) || sorted[sorted.length - 1] || null;
+  return sorted.find((due) => due.targetPaymentDate >= today) || null;
+}
+
+/** Last scheduled assistance (rent) payment date across the enrollments, or "". */
+export function computeLastAssistanceDate(enrollments: Array<Record<string, unknown>>): string {
+  let last = "";
+  for (const enrollment of enrollments) {
+    const payments = Array.isArray(enrollment.payments) ? enrollment.payments : [];
+    for (const raw of payments) {
+      if (!raw || typeof raw !== "object") continue;
+      const p = raw as Record<string, unknown>;
+      if (p.void === true || !isRentPayment(p) || Number(p.amount || 0) <= 0) continue;
+      const date = String(p.dueDate || p.date || "").slice(0, 10);
+      if (isISO(date) && date > last) last = date;
+    }
+  }
+  return last;
 }

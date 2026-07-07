@@ -1,7 +1,7 @@
 // functions/src/features/tasks/bulkStatus.ts
 import { db, FieldValue, secureHandler } from "../../core";
 import { tasks as C } from "@hdb/contracts";
-import { summarize, assertOrgAccess, requireUid } from "./utils";
+import { summarize, syncRentCertStatusFromTasks, assertOrgAccess, requireUid } from "./utils";
 
 
 
@@ -31,6 +31,7 @@ export const tasksBulkStatus = secureHandler(async (req, res) => {
       const sched: any[] = Array.isArray(e?.taskSchedule)
         ? [...e.taskSchedule]
         : [];
+      const rentCertPaymentIds = new Set<string>();
 
       for (const c of changes) {
         const idx = sched.findIndex(
@@ -99,11 +100,24 @@ export const tasksBulkStatus = secureHandler(async (req, res) => {
         }
 
         sched[idx] = t;
+        const rentCertPaymentId = String((t as any).rentCertPaymentId || "");
+        if (rentCertPaymentId) rentCertPaymentIds.add(rentCertPaymentId);
       }
+
+      // Rent-cert tasks project payment.rentCert — reflect completion back onto
+      // the linked payments so cert surfaces update without a continuum sync.
+      const payments = rentCertPaymentIds.size
+        ? syncRentCertStatusFromTasks(
+            Array.isArray(e.payments) ? e.payments : [],
+            sched,
+            rentCertPaymentIds,
+          )
+        : null;
 
       trx.update(ref, {
         taskSchedule: sched,
         taskStats: summarize(sched),
+        ...(payments ? { payments } : {}),
         updatedAt: FieldValue.serverTimestamp(),
       });
 

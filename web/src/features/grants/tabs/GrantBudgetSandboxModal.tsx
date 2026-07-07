@@ -321,8 +321,11 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
   const loadScenario = useCallback(() => seedRows(seed), [seed]);
   const [rows, setRows] = useState<SandboxRow[]>(() => loadScenario());
 
+  // Reseed when fresh data arrives, but never clobber in-progress edits —
+  // background refetches (query invalidation, window refocus) must not wipe
+  // pending rows. Explicit resetScenario/replaceScenario still replace.
   useEffect(() => {
-    setRows(loadScenario());
+    setRows((current) => (current.some((row) => row.rowState !== "clean") ? current : loadScenario()));
   }, [loadScenario]);
 
   const lineItemById = useMemo(() => new Map(lineItems.map((item) => [item.id, item])), [lineItems]);
@@ -342,11 +345,23 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
     setRows((current) => {
       const source = current.find((row) => row.sandboxId === sandboxId);
       if (!source) return current;
+      // A duplicate is a brand-new projection: it must not carry the source
+      // row's ledger/queue identity or payment linkage.
       const duplicate: SandboxRow = {
         ...source,
         sandboxId: `dup:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`,
-        sourceId: source.sourceId,
-        sourceKind: source.sourceKind,
+        sourceId: "",
+        sourceKind: "sandbox",
+        sourceType: "newProjection",
+        ledgerItemId: null,
+        paymentQueueItemId: null,
+        enrollmentId: null,
+        paymentId: null,
+        reversalOf: null,
+        reversedByLedgerItemIds: [],
+        isWritable: true,
+        lockedReason: null,
+        rentCertDueOn: "",
         rowState: "new",
         statusLabel: "New",
         original: {
@@ -357,6 +372,7 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
           date: source.date,
           caseManagerLabel: source.caseManagerLabel,
           statusLabel: "New",
+          original: undefined,
         },
       };
       const sourceIndex = current.findIndex((row) => row.sandboxId === sandboxId);
@@ -424,6 +440,12 @@ function useLocalSandboxScenario(seed: GrantBudgetSandboxSeedRow[], lineItems: G
     setRows((current) => current.flatMap((row) => {
       if (row.sandboxId !== sandboxId) return [row];
       if (row.rowState === "new") return [];
+      if (row.sourceType === "ledger") {
+        // The save endpoint always skips deleted ledger rows
+        // (unsupported_source_action) — surface that before save, not after.
+        toast("Ledger rows can't be removed here — reverse the payment from its payment workflow instead.", { type: "warn" });
+        return [row];
+      }
       return [{ ...row, rowState: "deleted" }];
     }));
   }, []);
@@ -508,7 +530,6 @@ export function GrantBudgetSandboxModal({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<(typeof SOURCE_FILTERS)[number]["value"]>("all");
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
-  const [sort, setSort] = useState<{ key: SandboxSortKey; direction: SortDirection }>({ key: "date", direction: "desc" });
   const [sortStack, setSortStack] = useState<Array<{ key: SandboxSortKey; direction: SortDirection }>>([{ key: "date", direction: "desc" }]);
   const [scale, setScale] = useState<SandboxScale>("compact");
   const [editingCell, setEditingCell] = useState<{ rowId: string; field: EditableField; value: string } | null>(null);
@@ -517,8 +538,14 @@ export function GrantBudgetSandboxModal({
   const [saveResult, setSaveResult] = useState<Awaited<ReturnType<typeof saveManager.mutateAsync>> | null>(null);
   const [refreshingAfterSave, setRefreshingAfterSave] = useState(false);
 
+  // Reset only on the closed -> open transition. resetScenario's identity
+  // changes whenever fresh data loads, and re-running this effect mid-session
+  // would wipe the user's filters, sort, and in-progress edits.
+  const wasOpenRef = React.useRef(false);
   useEffect(() => {
-    if (!isOpen) return;
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!isOpen || wasOpen) return;
     setLineItemFilter("all");
     setSearch("");
     setShowDeleted(false);
@@ -526,7 +553,6 @@ export function GrantBudgetSandboxModal({
     setShowAdvancedFilters(false);
     setSourceFilter("all");
     setStatusFilter("all");
-    setSort({ key: "date", direction: "desc" });
     setSortStack([{ key: "date", direction: "desc" }]);
     setGrantFilter("all");
     setScale("compact");
@@ -728,13 +754,9 @@ export function GrantBudgetSandboxModal({
   ), [budgetSummaryRows]);
 
   const toggleSort = useCallback((key: SandboxSortKey) => {
-    setSort((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
     setSortStack((current) => {
       const existing = current.find((entry) => entry.key === key);
-      const next = existing?.direction === "asc" ? "desc" : "asc";
+      const next: SortDirection = existing?.direction === "asc" ? "desc" : "asc";
       return [{ key, direction: next }, ...current.filter((entry) => entry.key !== key)].slice(0, 3);
     });
   }, []);
@@ -775,9 +797,13 @@ export function GrantBudgetSandboxModal({
     }
   };
 
+  const primarySort = sortStack[0];
   const headerButton = (key: SandboxSortKey, label: string, className = "") => (
     <button type="button" className={`w-full text-left ${className}`} onClick={() => toggleSort(key)}>
       {label}
+      {primarySort?.key === key ? (
+        <span className="ml-1 text-slate-400">{primarySort.direction === "asc" ? "▲" : "▼"}</span>
+      ) : null}
     </button>
   );
 
@@ -877,17 +903,21 @@ export function GrantBudgetSandboxModal({
       isWritable: row.isWritable !== false,
       lockedReason: row.lockedReason || null,
       rowState: row.rowState,
-      original: row.original || {
+      // Always send the manager-row original shape (dollars + updatedAt), not
+      // the sandbox seed shape — the server's stale-row check reads
+      // original.updatedAt to detect concurrent edits.
+      original: {
         grantId: row.original.grantId,
-        lineItemId: row.original.lineItemId,
+        lineItemId: row.original.lineItemId || null,
         customerId: row.original.customerId || null,
         caseManagerId: row.original.caseManagerId || null,
         amount: row.original.amountCents / 100,
-        date: row.original.date,
-        description: row.original.noteText,
-        category: row.original.budgetTypeLabel,
+        date: row.original.date || null,
+        description: row.original.noteText || null,
+        memo: row.original.noteText || null,
+        category: row.original.budgetTypeLabel || null,
         vendor: row.original.vendor || null,
-        status: row.original.statusLabel,
+        status: row.original.statusLabel || null,
         updatedAt: row.original.original?.updatedAt || null,
       },
     })), [grantId, rows]);
@@ -940,7 +970,16 @@ export function GrantBudgetSandboxModal({
 
   const renderEditableCell = (row: SandboxRow, field: EditableField, display: React.ReactNode, className = "") => {
     const active = editingCell?.rowId === row.sandboxId && editingCell.field === field;
-    const editable = !readOnly && row.isWritable !== false && (field === "date" || field === "amountCents" || field === "noteText" || row.rowState === "new");
+    // Line items stay editable on payment-queue rows: the save endpoint
+    // requires a grant/line-item pair, so unassigned queue rows must be
+    // classifiable here (ledger reclassification stays in the ledger tools).
+    const editable = !readOnly && row.isWritable !== false && (
+      field === "date" ||
+      field === "amountCents" ||
+      field === "noteText" ||
+      (field === "lineItemId" && row.sourceType === "paymentQueue") ||
+      row.rowState === "new"
+    );
     if (active) {
       if (field === "lineItemId") {
         return (

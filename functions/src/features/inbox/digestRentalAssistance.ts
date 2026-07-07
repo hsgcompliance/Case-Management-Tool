@@ -3,7 +3,7 @@
 import {db} from '../../core';
 import {sendHtmlEmail} from './emailer';
 import {loadDigestEnrollments} from './digestEnrollmentSource';
-import {computeNextRentCertDue} from './rentCert';
+import {computeLastAssistanceDate, computeNextRentCertDue} from './rentCert';
 import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 import {getGrantFinancialCapabilities} from '../grants/schemas';
 
@@ -248,6 +248,7 @@ export async function buildRentalAssistanceDigestData(opts: {
     if (active && !assistanceHasEnded) {
       activeAssistanceByCustomer.add(customerId);
       const due = computeNextRentCertDue([enrollment], {today});
+      const lastAssistance = computeLastAssistanceDate([enrollment]);
       const group = groups.get(grantId) || {
         grantId,
         grantName,
@@ -260,7 +261,9 @@ export async function buildRentalAssistanceDigestData(opts: {
         startDate: String(enrollment.startDate || ''),
         endDate,
         paymentAmount: fmtMoney(nextPayment.amount),
-        nextRentCertDate: due ? fmtDate(due.dueDate) : 'N/A',
+        nextRentCertDate: due
+          ? fmtDate(due.dueDate)
+          : lastAssistance ? `None (last assistance ${fmtDate(lastAssistance)})` : 'N/A',
       });
       groups.set(grantId, group);
     } else if (active) {

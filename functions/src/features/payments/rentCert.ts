@@ -103,7 +103,10 @@ export const paymentsRentCertSet = secureHandler(async (req: AuthedRequest, res:
         const derivedStatus = generated.every((task) => task.completed === true) ? "completed" : "due";
         rentCert = { dueDate, targetPaymentDate, source: "manual", taskIds: ids, status: forcedStatus || derivedStatus };
       }
-      payments[index] = { ...payment, rentCert };
+      // Clearing is sticky: rentCertOptOut prevents the continuum sync from
+      // regenerating a calculated cert for this payment. Setting any state
+      // removes the opt-out.
+      payments[index] = { ...payment, rentCert, rentCertOptOut: dueDate ? null : true };
       tx.set(ref, { payments, taskSchedule, taskStats: summarize(taskSchedule), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       return rentCert;
     });

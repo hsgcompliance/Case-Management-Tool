@@ -163,6 +163,9 @@ export function normalizePayments(
 export type RentCertDue = {
   enrollmentId?: string;
   enrollmentLabel?: string;
+  /** Payment the cert is persisted on (persisted certs only). */
+  paymentId?: string;
+  status?: "due" | "completed" | "effective";
   dueDate: string;
   targetPaymentDate: string;
   asap: boolean;
@@ -180,12 +183,50 @@ export function isRentPayment(p: Payment): boolean {
   return !notes || notes.includes("rent");
 }
 
+/**
+ * Upcoming (open) rent certs for a payment schedule.
+ *
+ * Persisted `payment.rentCert` state — written by the rent-cert toggle and the
+ * backend continuum sync — is the source of truth. The every-3-months
+ * heuristic only runs for legacy schedules with no persisted rent-cert state
+ * at all. Completed/effective certs are not returned; they are no longer due.
+ */
 export function computeRentCertDues(
   payments: unknown[],
   opts?: { enrollmentId?: string; enrollmentLabel?: string; today?: string }
 ): RentCertDue[] {
   const today = opts?.today && isISO(opts.today) ? opts.today : todayISO();
-  const rentPayments = normalizePayments(Array.isArray(payments) ? payments : [])
+  const list = Array.isArray(payments) ? payments : [];
+
+  const persisted: RentCertDue[] = [];
+  let hasPersistedState = false;
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const p = item as Record<string, any>;
+    if (p.void === true) continue;
+    if (p.rentCertOptOut === true) hasPersistedState = true;
+    const rc = p.rentCert as Record<string, any> | null | undefined;
+    const rcDue = safeISO(rc?.dueDate);
+    if (!rc || !rcDue) continue;
+    hasPersistedState = true;
+    const status = rc.status === "completed" ? "completed" : rc.status === "effective" ? "effective" : "due";
+    if (status !== "due") continue;
+    const targetPaymentDate = safeISO(rc.targetPaymentDate) || safeISO(p.dueDate) || safeISO(p.date);
+    if (!targetPaymentDate) continue;
+    persisted.push({
+      enrollmentId: opts?.enrollmentId,
+      enrollmentLabel: opts?.enrollmentLabel,
+      paymentId: p.id ? String(p.id) : undefined,
+      status,
+      dueDate: rcDue,
+      targetPaymentDate,
+      asap: rcDue <= addMonthsISO(today, 1),
+      label: `${fmtShortMonth(targetPaymentDate)} rent cert due ${fmtShortMonth(rcDue)}`,
+    });
+  }
+  if (hasPersistedState) return persisted.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+  const rentPayments = normalizePayments(list)
     .filter((p) => !p.void && isRentPayment(p))
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 

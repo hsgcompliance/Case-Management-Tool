@@ -2,7 +2,7 @@
 import { db, FieldValue } from "../../core";
 import { tasks as C } from "@hdb/contracts";
 import type { Request, Response } from "express";
-import { summarize, assertOrgAccess, requireUid } from "./utils";
+import { summarize, syncRentCertStatusFromTasks, assertOrgAccess, requireUid } from "./utils";
 
 function taskHttpErr(message: string, code: number, meta?: Record<string, unknown>): never {
   const e: any = new Error(message);
@@ -126,9 +126,21 @@ export async function updateTaskStatusHandler( req: Request, res: Response ): Pr
 
     sched[idx] = t;
 
+    // Rent-cert tasks project payment.rentCert — reflect completion back onto
+    // the linked payment so cert surfaces update without a continuum sync.
+    const rentCertPaymentId = String((t as any).rentCertPaymentId || "");
+    const payments = rentCertPaymentId
+      ? syncRentCertStatusFromTasks(
+          Array.isArray(e.payments) ? e.payments : [],
+          sched,
+          [rentCertPaymentId],
+        )
+      : null;
+
     trx.update(ref, {
       taskSchedule: sched,
       taskStats: summarize(sched),
+      ...(payments ? { payments } : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
 

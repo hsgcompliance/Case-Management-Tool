@@ -12,7 +12,7 @@ import { bulkAdjustLedgerEntries } from "../ledger/service";
 import {
   createManualProjectionQueueItem,
   patchPaymentQueueItem,
-  voidPaymentQueueItems,
+  voidPaymentQueueItemById,
 } from "../paymentQueue/service";
 
 type ClaimsLike = { uid?: string; email?: string; name?: string; displayName?: string };
@@ -341,6 +341,9 @@ export async function loadGrantBudgetManager(orgId: string, grantIds: string[]):
 function validateLineItem(grants: Map<string, Record<string, unknown>>, row: TGrantBudgetManagerRow): string | null {
   const grant = grants.get(row.grantId);
   if (!grant) return "invalid_grant";
+  // Removals void the source row as-is; they must not require classification
+  // (unassigned queue rows would otherwise be impossible to remove).
+  if (row.rowState === "deleted") return null;
   if (!row.lineItemId) return "grant_lineitem_pair_required";
   const li = lineItemsForGrant(row.grantId, grant).find((item) => item.id === row.lineItemId);
   if (!li) return "invalid_line_item";
@@ -415,8 +418,13 @@ export async function saveGrantBudgetManager(
       const id = row.paymentQueueItemId || row.sourceId;
       if (!id) { failed.push({ rowId: row.rowId, sourceId, error: "missing_source" }); continue; }
       if (row.rowState === "deleted") {
-        if (!dryRun) removed += await voidPaymentQueueItems(id, actor.uid || undefined);
-        else removed += 1;
+        if (!dryRun) {
+          const count = await voidPaymentQueueItemById(id, actor.uid || undefined);
+          if (!count) { skipped.push({ rowId: row.rowId, sourceId, reason: "already_void_or_missing" }); continue; }
+          removed += count;
+        } else {
+          removed += 1;
+        }
         affected.add(row.grantId);
         continue;
       }
@@ -456,7 +464,6 @@ export async function saveGrantBudgetManager(
         note: row.description || null,
       });
       affected.add(row.grantId);
-      updated += 1;
     }
   }
 
@@ -468,6 +475,9 @@ export async function saveGrantBudgetManager(
     for (const item of result.skipped) skipped.push({ rowId: item.entryId, sourceId: item.entryId, reason: item.reason });
     for (const item of result.failed) failed.push({ rowId: item.entryId, sourceId: item.entryId, error: item.error });
     for (const grantId of result.affectedGrantIds) affected.add(grantId);
+    updated += Math.max(0, ledgerItems.length - result.skipped.length - result.failed.length);
+  } else {
+    updated += ledgerItems.length;
   }
 
   const grantsRecomputed: string[] = [];

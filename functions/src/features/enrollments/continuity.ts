@@ -88,9 +88,11 @@ async function resolveContinuum(seed: Row): Promise<Row[]> {
   );
 }
 
+type RentCertEventStatus = "due" | "completed" | "effective";
+
 function continuumSummary(rows: Row[]) {
   const assistanceMonthKeys = new Set<string>();
-  const rentRows: Array<{ date: string; enrollmentId: string; paymentId: string; manualDueDate: string }> = [];
+  const rentRows: Array<{ date: string; enrollmentId: string; paymentId: string; manualDueDate: string; manualStatus: RentCertEventStatus | ""; optOut: boolean }> = [];
   let editable = 0;
   let calculated = 0;
   let effective = 0;
@@ -109,11 +111,16 @@ function continuumSummary(rows: Row[]) {
       if (!isRentPayment(payment)) continue;
       const date = paymentDate(payment);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const manualStatus = String(payment?.rentCert?.status || "");
       rentRows.push({
         date,
         enrollmentId: row.id,
         paymentId: String(payment?.id || ""),
         manualDueDate: payment?.rentCert?.source === "manual" ? iso10(payment.rentCert.dueDate) : "",
+        manualStatus: payment?.rentCert?.source === "manual" && ["due", "completed", "effective"].includes(manualStatus)
+          ? manualStatus as RentCertEventStatus
+          : "",
+        optOut: payment?.rentCertOptOut === true,
       });
       if (payment?.paid === true) assistanceMonthKeys.add(date.slice(0, 7));
     }
@@ -130,19 +137,37 @@ function continuumSummary(rows: Row[]) {
     };
   });
 
-  const uniqueRentRows = Array.from(
-    new Map(rentRows.sort((a, b) => a.date.localeCompare(b.date)).map((row) => [row.date, row])).values(),
-  );
-  const rentCertEvents: Array<{ targetDate: string; dueDate: string; enrollmentId: string; paymentId: string; source: "calculated" | "manual" }> = [];
+  // One representative payment per date drives the every-3-months cadence.
+  // Rows carrying a manual cert win date collisions so operator edits are
+  // never shadowed by a sibling enrollment's payment on the same date.
+  const byDate = new Map<string, (typeof rentRows)[number]>();
+  for (const row of rentRows.sort((a, b) => a.date.localeCompare(b.date))) {
+    const prior = byDate.get(row.date);
+    if (!prior || (row.manualDueDate && !prior.manualDueDate)) byDate.set(row.date, row);
+  }
+  const uniqueRentRows = Array.from(byDate.values());
+  const rentCertEvents: Array<{ targetDate: string; dueDate: string; enrollmentId: string; paymentId: string; source: "calculated" | "manual"; status: RentCertEventStatus }> = [];
   for (let index = 3; index < uniqueRentRows.length; index += 3) {
     const target = uniqueRentRows[index];
-    rentCertEvents.push({ targetDate: target.date, dueDate: target.manualDueDate || addMonths(target.date, -1), enrollmentId: target.enrollmentId, paymentId: target.paymentId, source: target.manualDueDate ? "manual" : "calculated" });
+    // Sticky clear: an opted-out payment consumes its cadence slot without a cert.
+    if (target.optOut) continue;
+    rentCertEvents.push({
+      targetDate: target.date,
+      dueDate: target.manualDueDate || addMonths(target.date, -1),
+      enrollmentId: target.enrollmentId,
+      paymentId: target.paymentId,
+      source: target.manualDueDate ? "manual" : "calculated",
+      status: target.manualStatus || "due",
+    });
   }
-  for (const target of uniqueRentRows.filter((row) => row.manualDueDate)) {
+  // Every manual cert emits an event, including rows that lost the per-date
+  // dedupe above — a manually added cert must never disappear from the schedule.
+  for (const target of rentRows.filter((row) => row.manualDueDate)) {
     if (rentCertEvents.some((event) => event.enrollmentId === target.enrollmentId && event.paymentId === target.paymentId)) continue;
-    rentCertEvents.push({ targetDate: target.date, dueDate: target.manualDueDate, enrollmentId: target.enrollmentId, paymentId: target.paymentId, source: "manual" });
+    rentCertEvents.push({ targetDate: target.date, dueDate: target.manualDueDate, enrollmentId: target.enrollmentId, paymentId: target.paymentId, source: "manual", status: target.manualStatus || "due" });
   }
   rentCertEvents.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const lastAssistanceDate = uniqueRentRows.length ? uniqueRentRows[uniqueRentRows.length - 1].date : null;
 
   const today = new Date().toISOString().slice(0, 10);
   const current = rows.find((row) => {
@@ -158,6 +183,7 @@ function continuumSummary(rows: Row[]) {
     allocation: { editable, calculated, effective },
     enrollments,
     rentCertEvents,
+    lastAssistanceDate,
   };
 }
 
@@ -193,9 +219,11 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
     });
     const generated: any[] = [];
     for (const event of eventsByEnrollment.get(row.id) || []) {
+      const forceComplete = event.status === "completed" || event.status === "effective";
       for (const role of ["casemanager", "compliance"] as const) {
         const id = `payment_rent_cert_${event.paymentId}_${event.targetDate}_${role}`;
         const prior: any = priorById.get(id) || legacyPrior(event.targetDate, role);
+        const completed = forceComplete ? true : prior?.completed === true;
         generated.push({
           id,
           type: `${event.targetDate.slice(0, 7)} rent cert due ${event.dueDate}`,
@@ -203,8 +231,8 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
           defId: id,
           dueDate: event.dueDate,
           dueMonth: event.dueDate.slice(0, 7),
-          completed: prior?.completed === true,
-          completedAt: prior?.completedAt || null,
+          completed,
+          completedAt: completed ? (prior?.completedAt || new Date().toISOString()) : null,
           status: prior?.status || undefined,
           verifiedAt: prior?.verifiedAt || null,
           verifiedBy: prior?.verifiedBy || null,
@@ -231,7 +259,10 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
       if (!event) return payment?.rentCert?.source === "calculated" ? { ...payment, rentCert: null } : payment;
       const ids = ["casemanager", "compliance"].map((role) => `payment_rent_cert_${event.paymentId}_${event.targetDate}_${role}`);
       const eventTasks = generated.filter((task) => ids.includes(String(task.id || "")));
-      return { ...payment, rentCert: { dueDate: event.dueDate, targetPaymentDate: event.targetDate, source: event.source, taskIds: ids, status: eventTasks.every((task) => task.completed === true) ? "completed" : "due" } };
+      const allDone = eventTasks.length > 0 && eventTasks.every((task) => task.completed === true);
+      // "effective" is an operator-declared terminal state — never downgrade it.
+      const status = event.status === "effective" ? "effective" : allDone ? "completed" : "due";
+      return { ...payment, rentCert: { dueDate: event.dueDate, targetPaymentDate: event.targetDate, source: event.source, taskIds: ids, status } };
     });
     await db.collection("customerEnrollments").doc(row.id).set({
       payments,
