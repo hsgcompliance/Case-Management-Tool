@@ -54,6 +54,9 @@ type CustomersNewStateViewProps = {
   onSearchEnter?: () => void;
   onCustomerOpen?: (customerId: string, options?: { tab?: "tasks" }) => void;
   featureFlags?: Partial<CustomerViewFeatureFlags>;
+  hiddenCustomerIds?: ReadonlySet<string>;
+  onHideCustomer?: (customerId: string) => void;
+  onShowAllCustomers?: () => void;
 };
 
 export function CustomersNewStateView({
@@ -88,6 +91,9 @@ export function CustomersNewStateView({
   onSearchEnter,
   onCustomerOpen,
   featureFlags,
+  hiddenCustomerIds,
+  onHideCustomer,
+  onShowAllCustomers,
 }: CustomersNewStateViewProps) {
   return (
     <>
@@ -123,6 +129,9 @@ export function CustomersNewStateView({
         onSearchEnter={onSearchEnter}
         onCustomerOpen={onCustomerOpen}
         featureFlags={featureFlags}
+        hiddenCustomerIds={hiddenCustomerIds}
+        onHideCustomer={onHideCustomer}
+        onShowAllCustomers={onShowAllCustomers}
       />
     </>
   );

@@ -7,6 +7,7 @@
  */
 
 export { BadgeChip, type BadgeChipProps, type BadgeVariant } from "./BadgeChip";
+export { DateInput, formatIsoDateForInput, parseDateInput, type DateInputProps } from "./DateInput";
 export {
   ComplexDateSelector,
   complexDateMatchesIsoDate,

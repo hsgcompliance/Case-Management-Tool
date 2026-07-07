@@ -36,6 +36,7 @@ const PAGE_SIZE = 50;
 // ─── Persisted filter state (survives in-session navigation) ──────────────────
 
 const FILTER_KEY = "customers_page_filters";
+const HIDDEN_CUSTOMERS_KEY = "customers_page_hidden_ids";
 
 type PersistedFilters = {
   activeMode: ActiveMode;
@@ -285,6 +286,27 @@ export function CustomersPage() {
   const meUser = (me || null) as CompositeUser | null;
   const updateMe = useUpdateMe();
   const myUid = String(meUser?.uid || "");
+  const [hiddenCustomerIds, setHiddenCustomerIds] = React.useState<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(HIDDEN_CUSTOMERS_KEY) || "[]") as unknown;
+      if (Array.isArray(parsed)) setHiddenCustomerIds(new Set(parsed.map(String).filter(Boolean)));
+    } catch {}
+  }, []);
+
+  const hideCustomer = React.useCallback((customerId: string) => {
+    setHiddenCustomerIds((current) => {
+      const next = new Set(current).add(customerId);
+      try { localStorage.setItem(HIDDEN_CUSTOMERS_KEY, JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  }, []);
+
+  const showAllCustomers = React.useCallback(() => {
+    setHiddenCustomerIds(new Set());
+    try { localStorage.removeItem(HIDDEN_CUSTOMERS_KEY); } catch {}
+  }, []);
   const meReady = me !== undefined;
   const isCM = isCaseManagerLike(meUser);
   const isDevUser = isDevLike(meUser);
@@ -554,6 +576,7 @@ export function CustomersPage() {
           : null;
 
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [rowContextMenu, setRowContextMenu] = React.useState<{ id: string; x: number; y: number; nonce: number } | null>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -799,6 +822,9 @@ export function CustomersPage() {
             onEnrollmentStatusesChange={setEnrollmentStatuses}
             onResetFilters={resetFilters}
             onSearchEnter={handleSearchEnter}
+            hiddenCustomerIds={hiddenCustomerIds}
+            onHideCustomer={hideCustomer}
+            onShowAllCustomers={showAllCustomers}
             featureFlags={isViewer ? { showEnrollmentRefreshAction: false, showBulkActions: false } : undefined}
           />
         ) : (
@@ -835,6 +861,13 @@ export function CustomersPage() {
             />
 
             <div className="table-wrap" data-tour="customers-list">
+              {hiddenCustomerIds.size > 0 ? (
+                <div className="flex justify-end border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={showAllCustomers}>
+                    Show All ({hiddenCustomerIds.size})
+                  </button>
+                </div>
+              ) : null}
               <table className="table">
                 <thead>
                   <tr>
@@ -876,7 +909,7 @@ export function CustomersPage() {
                     </tr>
                   ) : null}
 
-                  {newPageDisplayRows.map((c, idx) => {
+                  {newPageDisplayRows.filter((c) => !hiddenCustomerIds.has(String(c?.id || ""))).map((c, idx) => {
                     const id = String(c?.id || "");
                     const status = String(c?.status || "-");
                     const secondaryUid = String(
@@ -886,7 +919,15 @@ export function CustomersPage() {
                     const tier = (c as { tier?: number | null }).tier ?? null;
 
                     return (
-                      <tr key={id} onClick={() => openDetailModal(id)} title="Open customer">
+                      <tr
+                        key={id}
+                        onClick={() => openDetailModal(id)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setRowContextMenu({ id, x: event.clientX, y: event.clientY, nonce: Date.now() });
+                        }}
+                        title="Open customer"
+                      >
                         <td className="text-slate-400">{idx + 1}</td>
                         <td>
                           <div className="flex flex-wrap items-center gap-2">
@@ -933,6 +974,8 @@ export function CustomersPage() {
                             customer={c as TCustomerEntity & { id: string }}
                             canManage={!isViewer}
                             onOpen={() => openDetailModal(id)}
+                            onHide={() => hideCustomer(id)}
+                            openAt={rowContextMenu?.id === id ? rowContextMenu : null}
                           />
                         </td>
                       </tr>

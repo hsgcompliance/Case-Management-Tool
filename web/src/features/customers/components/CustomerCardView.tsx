@@ -69,12 +69,16 @@ type CustomerCardViewProps = {
   onSearchEnter?: () => void;
   onCustomerOpen?: (customerId: string, options?: { tab?: "tasks" }) => void;
   featureFlags?: Partial<CustomerViewFeatureFlags>;
+  hiddenCustomerIds?: ReadonlySet<string>;
+  onHideCustomer?: (customerId: string) => void;
+  onShowAllCustomers?: () => void;
 };
 
 const ENROLLMENT_PRELOAD_BATCH_SIZE = 8;
 const ENROLLMENT_DOC_ESTIMATE_PER_CUSTOMER = 4;
 const ENROLLMENT_ESTIMATED_COST_PER_DOC = 0.001;
 const ENROLLMENT_REFRESH_CONFIRM_THRESHOLD = 25;
+const EMPTY_HIDDEN_CUSTOMER_IDS: ReadonlySet<string> = new Set();
 
 export function CustomerCardView({
   myUid,
@@ -108,12 +112,18 @@ export function CustomerCardView({
   onSearchEnter,
   onCustomerOpen,
   featureFlags,
+  hiddenCustomerIds = EMPTY_HIDDEN_CUSTOMER_IDS,
+  onHideCustomer,
+  onShowAllCustomers,
 }: CustomerCardViewProps) {
   const viewFlags = React.useMemo(() => resolveCustomerViewFeatureFlags(featureFlags), [featureFlags]);
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const displayRows = rows as CustomerRow[];
+  const displayRows = React.useMemo(
+    () => (rows as CustomerRow[]).filter((customer) => !hiddenCustomerIds.has(String(customer.id || ""))),
+    [hiddenCustomerIds, rows],
+  );
   const orderedIds = React.useMemo(
     () => displayRows.map((customer) => String(customer.id || "")).filter(Boolean),
     [displayRows],
@@ -451,6 +461,15 @@ export function CustomerCardView({
 
       {viewFlags.showGridColumnToggle ? (
         <div className="flex items-center justify-end gap-1">
+          {hiddenCustomerIds.size > 0 && onShowAllCustomers ? (
+            <button
+              type="button"
+              className="mr-2 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              onClick={onShowAllCustomers}
+            >
+              Show All ({hiddenCustomerIds.size})
+            </button>
+          ) : null}
           {([1, 2, 3] as const).map((n) => (
             <button
               key={n}
@@ -493,6 +512,7 @@ export function CustomerCardView({
             selectionMode={selectedIds.size > 0}
             onSelectGesture={handleCardSelectGesture}
             onOpen={handleCardOpen}
+            onHide={onHideCustomer}
             loading={pendingCardId === String(customer.id || "")}
           />
         ))}

@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Modal } from "@entities/ui/Modal";
+import { DateInput } from "@entities/ui/DateInput";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { PaymentScheduleBuildInput } from "@hooks/usePayments";
 import type { TPayment } from "@types";
@@ -381,15 +382,14 @@ function RentRow({
         </button>
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <label className="text-sm" style={{ minWidth: 140 }}>
+        <div className="text-sm" style={{ minWidth: 140 }}>
           <div className="mb-1 text-xs text-slate-500">Start Date</div>
-          <input
-            type="date"
+          <DateInput
             className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             value={plan.firstDue}
-            onChange={(e) => onChange({ firstDue: e.currentTarget.value })}
+            onChange={(value) => onChange({ firstDue: value })}
           />
-        </label>
+        </div>
         <label className="text-sm" style={{ minWidth: 80 }}>
           <div className="mb-1 text-xs text-slate-500">Months</div>
           <input
@@ -510,15 +510,14 @@ function SinglePlanCard({
       </div>
       {!plan.collapsed && <div className="border-t border-slate-100 px-3 pb-3 pt-3 dark:border-slate-800">
           <div className="flex flex-wrap items-end gap-3">
-            <label className="text-sm" style={{ minWidth: 140 }}>
+            <div className="text-sm" style={{ minWidth: 140 }}>
               <div className="mb-1 text-xs text-slate-500">Date</div>
-              <input
-                type="date"
+              <DateInput
                 className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 value={plan.date}
-                onChange={(e) => onChange({ date: e.currentTarget.value })}
+                onChange={(value) => onChange({ date: value })}
               />
-            </label>
+            </div>
             <label className="text-sm" style={{ minWidth: 110 }}>
               <div className="mb-1 text-xs text-slate-500">Amount</div>
               <input
@@ -1595,7 +1594,7 @@ export default function PaymentScheduleBuilderDialog({
                 )}
                 {certTask.enabled && certTask.advancedOpen && (
                   <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 dark:border-slate-800 md:grid-cols-2 lg:grid-cols-4">
-                    <label className="text-sm">
+                    <div className="text-sm">
                       <div className="mb-1 text-xs text-slate-500">Cadence</div>
                       <select
                         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
@@ -1610,13 +1609,12 @@ export default function PaymentScheduleBuilderDialog({
                     </label>
                     <label className="text-sm">
                       <div className="mb-1 text-xs text-slate-500">End Date (optional)</div>
-                      <input
-                        type="date"
+                      <DateInput
                         className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         value={certTask.endDate}
-                        onChange={(e) => setCertTask((prev) => ({ ...prev, endDate: e.currentTarget.value }))}
+                        onChange={(value) => setCertTask((prev) => ({ ...prev, endDate: value }))}
                       />
-                    </label>
+                    </div>
                     <label className="text-sm">
                       <div className="mb-1 text-xs text-slate-500">Bucket</div>
                       <select
@@ -1744,15 +1742,14 @@ export default function PaymentScheduleBuilderDialog({
                               onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, amount: v } : s)); }}
                             />
                           </label>
-                          <label className="text-sm" style={{ minWidth: 130 }}>
+                          <div className="text-sm" style={{ minWidth: 130 }}>
                             <div className="mb-1 text-xs text-slate-500">Date</div>
-                            <input
-                              type="date"
+                            <DateInput
                               className="w-full rounded border border-slate-300 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                               value={svc.date}
-                              onChange={(e) => { const v = e.currentTarget.value; setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, date: v } : s)); }}
+                              onChange={(value) => { setServices((prev) => prev.map((s) => s.id === svc.id ? { ...s, date: value } : s)); }}
                             />
-                          </label>
+                          </div>
                           <div className="pb-0.5">
                             <button
                               type="button"
