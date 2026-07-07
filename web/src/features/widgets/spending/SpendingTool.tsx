@@ -2812,7 +2812,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                   type="checkbox"
                   className="toggle toggle-sm"
                   checked={bulkActions[key]}
-                  onChange={(e) => setBulkActions((prev) => ({ ...prev, [key]: e.currentTarget.checked }))}
+                  onChange={(e) => {
+                    const checked = e.currentTarget.checked;
+                    setBulkActions((prev) => ({ ...prev, [key]: checked }));
+                  }}
                 />
               </label>
             ))}

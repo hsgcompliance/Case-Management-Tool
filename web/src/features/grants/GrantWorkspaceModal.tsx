@@ -29,6 +29,12 @@ export default function GrantWorkspaceModal({
     { enabled: !!grantId && grantId !== "new", staleTime: 60_000 },
   );
 
+  const breadcrumbLabel = React.useMemo(() => {
+    if (!grantId || grantId === "new") return "New Grant";
+    const hit = (activeData as Grant[]).find((g) => String(g.id || "") === grantId);
+    return String(hit?.name || hit?.id || grantId);
+  }, [grantId, activeData]);
+
   if (!grantId || grantId === "new") {
     return (
       <NewGrantProgramWorkspaceModal
@@ -38,12 +44,6 @@ export default function GrantWorkspaceModal({
       />
     );
   }
-
-  const breadcrumbLabel = React.useMemo(() => {
-    if (!grantId || grantId === "new") return "New Grant";
-    const hit = (activeData as Grant[]).find((g) => String(g.id || "") === grantId);
-    return String(hit?.name || hit?.id || grantId);
-  }, [grantId, activeData]);
 
   return (
     <FullPageModal

@@ -38,8 +38,8 @@ describe("case-note assistant cost controls", () => {
     expect(config.monthlyTokenLimit).toBe(25_000_000);
   });
   it("preserves per-user quota overrides", () => {
-    const config = hydrateCaseNoteBetaConfig({ userQuotaOverrides: { user1: { dailyRequestLimit: 5, dailyTokenLimit: 10_000 } } });
-    expect(config.userQuotaOverrides.user1).toEqual({ dailyRequestLimit: 5, dailyTokenLimit: 10_000 });
+    const config = hydrateCaseNoteBetaConfig({ userQuotaOverrides: { user1: { enabled: true, dailyRequestLimit: 5, dailyTokenLimit: 10_000 } } });
+    expect(config.userQuotaOverrides.user1).toEqual({ enabled: true, dailyRequestLimit: 5, dailyTokenLimit: 10_000 });
   });
   it("estimates known model cost and declines unknown pricing", () => {
     expect(estimateAiCostUsd("gemini-2.5-flash-lite", 3_000, 250)).toBeCloseTo(0.0004);

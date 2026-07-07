@@ -50,6 +50,8 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
   const config = hydrateCaseNoteBetaConfig(raw);
   if (!config.enabled) throw new CaseNoteAssistantError(403, "AI assistant is not enabled for this organization.");
   const profile = userSnap.data() || {};
+  const userLimits = config.userQuotaOverrides[uid] ?? {};
+  if (userLimits.enabled !== true) throw new CaseNoteAssistantError(403, "AI assistant access has not been enabled for your account.");
   if (profile.settings?.allowAiAssistance !== true) throw new CaseNoteAssistantError(403, "Enable AI assistance in your personal settings before using this feature.");
   const wb = customer.customerDrive?.linkedWorkbooks?.tss;
   const customerVariant = variantOf(customer);
@@ -58,7 +60,6 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
   const quotaRef = db.collection("aiCaseNoteUsage").doc(`${orgId}_${monthKey()}`);
   const dailyRef = quotaRef.collection("users").doc(`${uid}_${dayKey()}`);
   const [orgUsage, dailyUsage] = await Promise.all([quotaRef.get(), dailyRef.get()]);
-  const userLimits = config.userQuotaOverrides[uid] ?? {};
   const dailyRequestLimit = userLimits.dailyRequestLimit ?? config.dailyUserRequestLimit;
   const dailyTokenLimit = userLimits.dailyTokenLimit ?? config.dailyUserTokenLimit;
   if ((Number(dailyUsage.data()?.requests) || 0) >= dailyRequestLimit || (Number(dailyUsage.data()?.tokens) || 0) >= dailyTokenLimit || (Number(orgUsage.data()?.requests) || 0) >= config.monthlyRequestLimit || (Number(orgUsage.data()?.tokens) || 0) >= config.monthlyTokenLimit) throw new CaseNoteAssistantError(429, "AI suggestions are temporarily unavailable because the usage limit has been reached.");

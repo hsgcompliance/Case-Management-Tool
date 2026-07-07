@@ -52,9 +52,12 @@ export function useSaveGrantBudgetManager() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
-    queryKeys: [qk.grantBudgetManager.root, qk.grants.root, qk.ledger.root, qk.paymentQueue.root],
+    // Invalidation lives in onSuccess so dry-run previews skip it entirely —
+    // the helper invalidates `queryKeys` on every success, and refetching the
+    // Budget Manager load query mid-edit would reseed the open modal.
     mutationFn: (body: GrantBudgetManagerSaveReq) => GrantBudgetManager.save(body),
     onSuccess: async (result, vars) => {
+      if ((result as { dryRun?: boolean } | null)?.dryRun) return;
       await invalidateBudgetManagerQueries(qc, affectedGrantIdsFromResult(result, vars.grantIds));
     },
   });

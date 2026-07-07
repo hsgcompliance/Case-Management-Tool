@@ -111,6 +111,7 @@ export declare const Payment: z.ZodObject<{
             effective: "effective";
         }>>;
     }, z.core.$loose>>>;
+    rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
 }, z.core.$strip>;
 export type TPaymentCompliance = z.infer<typeof PaymentCompliance>;
 export type TPayment = z.infer<typeof Payment>;
@@ -164,6 +165,7 @@ export declare const PaymentEntity: z.ZodObject<{
             effective: "effective";
         }>>;
     }, z.core.$loose>>>;
+    rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     id: z.ZodString;
 }, z.core.$strip>;
 export type TPaymentEntity = z.infer<typeof PaymentEntity>;
@@ -367,6 +369,7 @@ export declare const PaymentProjectionInput: z.ZodObject<{
             effective: "effective";
         }>>;
     }, z.core.$loose>>>;
+    rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
 }, z.core.$strip>;
 export type TPaymentProjectionInput = z.infer<typeof PaymentProjectionInput>;
 export declare const PaymentsAdjustProjectionsBody: z.ZodObject<{
@@ -417,6 +420,7 @@ export declare const PaymentsAdjustProjectionsBody: z.ZodObject<{
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>;
     replaceUnpaid: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
 }, z.core.$strip>;
@@ -585,6 +589,7 @@ export declare const PaymentsUpsertProjectionsBody: z.ZodObject<{
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type TPaymentsUpsertProjectionsBody = z.infer<typeof PaymentsUpsertProjectionsBody>;
@@ -640,6 +645,7 @@ export declare const PaymentsRecalculateFutureResp: z.ZodUnion<readonly [z.ZodOb
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>;
     deltaByLI: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     noChange: z.ZodOptional<z.ZodLiteral<true>>;
@@ -694,6 +700,7 @@ export declare const PaymentsRecalculateFutureResp: z.ZodUnion<readonly [z.ZodOb
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>;
 }, z.core.$strip>, z.ZodObject<{
     mode: z.ZodLiteral<"grant">;

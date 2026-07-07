@@ -716,7 +716,7 @@ export default function GrantDetailModal({
   const anyPinned = isPinned || isDashPinned;
 
   const title = isCreate
-    ? "New Grant"
+    ? currentKind === "program" ? "New Program" : "New Grant"
     : editing
       ? `Edit: ${String(model.name || grant?.name || "(Unnamed)")}`
       : String(grant?.name || grant?.id || "Grant");
@@ -733,7 +733,7 @@ export default function GrantDetailModal({
             <div>
               <div className="mb-1 flex items-center gap-2">
                 <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-500">
-                  {isCreate ? "New Grant" : currentKind === "program" ? "Program" : "Grant"}
+                  {isCreate ? (currentKind === "program" ? "New Program" : "New Grant") : currentKind === "program" ? "Program" : "Grant"}
                 </span>
                 <span className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300">
                   {statusText}
@@ -751,7 +751,9 @@ export default function GrantDetailModal({
                 </span>
               </div>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Use Edit to modify tabs, then save changes.
+                {editing
+                  ? "Editing — changes apply across all tabs when you save."
+                  : "Click Edit to make changes."}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -801,13 +803,15 @@ export default function GrantDetailModal({
                   {editing ? "Cancel" : "Edit"}
                 </button>
               )}
-              <button
-                className="btn btn-sm"
-                onClick={handleSave}
-                disabled={!canEditGrant || saveDisabled || saving || !editing}
-              >
-                {saving ? "Saving..." : isCreate ? "Create" : "Save Changes"}
-              </button>
+              {editing && canEditGrant && (
+                <button
+                  className="btn btn-sm"
+                  onClick={handleSave}
+                  disabled={saveDisabled || saving}
+                >
+                  {saving ? "Saving..." : isCreate ? "Create" : "Save Changes"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -893,11 +897,22 @@ export default function GrantDetailModal({
                 const stripped = stripIdsAndMeta(
                   source as Record<string, unknown>,
                 );
-                if (stripped.budget)
+                if (stripped.budget) {
+                  const b = stripped.budget as Record<string, unknown>;
+                  const lineItems = Array.isArray(b.lineItems) ? b.lineItems : [];
                   stripped.budget = {
-                    ...(stripped.budget as Record<string, unknown>),
+                    ...b,
                     total: 0,
+                    // Fresh line-item ids and zeroed activity: ledger rows
+                    // reference lineItemId, so the copy must not inherit them.
+                    lineItems: lineItems.map((li, index) => ({
+                      ...((li || {}) as Record<string, unknown>),
+                      id: `li_${Date.now().toString(36)}_${index + 1}`,
+                      spent: 0,
+                      projected: 0,
+                    })),
                   };
+                }
                 setModel((prev) => ({ ...prev, ...stripped }));
                 toast("Grant fields prefilled", { type: "success" });
               } catch (err) {
@@ -924,6 +939,7 @@ export default function GrantDetailModal({
           showBudgetTab={showBudgetTab}
           showAllocationTab={showAllocationTab}
           isAdmin={canUseAdminTools}
+          pageMode={pageMode}
           editing={editing}
           model={model}
           setModel={setModel}
@@ -1039,6 +1055,7 @@ function TabsRouter(props: {
   showBudgetTab: boolean;
   showAllocationTab: boolean;
   isAdmin?: boolean;
+  pageMode?: boolean;
   editing: boolean;
   grantId?: string;
   model: Record<string, unknown>;
@@ -1111,6 +1128,7 @@ function TabsRouter(props: {
           model={props.model}
           setModel={props.setModel}
           grant={props.grant}
+          pageMode={props.pageMode}
           dynamicValue={dynamicValue}
           readInput={props.readInput}
           readSelect={props.readSelect}

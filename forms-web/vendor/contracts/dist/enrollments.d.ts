@@ -445,6 +445,7 @@ export declare const Enrollment: z.ZodObject<{
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>>;
     spends: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -856,6 +857,7 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>>>;
     spends: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -1227,6 +1229,7 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
                 effective: "effective";
             }>>;
         }, z.core.$loose>>>;
+        rentCertOptOut: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     }, z.core.$strip>>>>>;
     spends: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -1653,7 +1656,10 @@ export type TEnrollmentsContinuumSummaryResp = Ok<{
         enrollmentId: string;
         paymentId: string;
         source: "calculated" | "manual";
+        status: "due" | "completed" | "effective";
     }>;
+    /** Last scheduled assistance (rent) payment date across the continuum, or null. */
+    lastAssistanceDate: string | null;
 }>;
 export declare const EnrollmentsAllocationSetBody: z.ZodObject<{
     enrollmentId: z.ZodString;

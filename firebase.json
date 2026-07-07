@@ -43,6 +43,9 @@
     {
       "target": "web",
       "source": "web",
+      "frameworksBackend": {
+        "memory": "512MiB"
+      },
       "predeploy": [
         "node scripts/pack-contracts.mjs"
       ],
@@ -66,12 +69,20 @@
       ],
       "headers": [
         {
-          "source": "/manifest.json",
+          "source": "**",
           "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
         },
         {
-          "source": "**/*.@(js|css)",
+          "source": "/assets/**",
           "headers": [{ "key": "Cache-Control", "value": "public,max-age=31536000,immutable" }]
+        },
+        {
+          "source": "/workbox-*.js",
+          "headers": [{ "key": "Cache-Control", "value": "public,max-age=31536000,immutable" }]
+        },
+        {
+          "source": "/icon-*.png",
+          "headers": [{ "key": "Cache-Control", "value": "public,max-age=86400" }]
         }
       ]
     },
@@ -88,7 +99,11 @@
       ],
       "headers": [
         {
-          "source": "**/*.@(js|css)",
+          "source": "**",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "/assets/**",
           "headers": [{ "key": "Cache-Control", "value": "public,max-age=31536000,immutable" }]
         }
       ]

@@ -2,7 +2,12 @@
 
 import React from "react";
 import type { OrgConfigDoc } from "@client/orgs";
-import { RichTextEditor } from "@entities/help/RichTextEditor";
+import dynamic from "next/dynamic";
+
+const RichTextEditor = dynamic(
+  () => import("@entities/help/RichTextEditor").then((m) => m.RichTextEditor),
+  { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading editor…</div> }
+);
 
 const KIND_LABELS: Record<string, string> = {
   display: "Display",
@@ -246,7 +251,10 @@ export function DigestScaffoldEditor({
           <input
             className="input"
             value={structure.digestType}
-            onChange={(event) => setStructure((current) => ({ ...current, digestType: event.currentTarget.value }))}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setStructure((current) => ({ ...current, digestType: value }));
+            }}
           />
         </label>
         <label className="block">
@@ -255,8 +263,9 @@ export function DigestScaffoldEditor({
             className="input"
             value={subject}
             onChange={(event) => {
-              setSubject(event.currentTarget.value);
-              setStructure((current) => ({ ...current, subject: { ...current.subject, template: event.currentTarget.value } }));
+              const value = event.currentTarget.value;
+              setSubject(value);
+              setStructure((current) => ({ ...current, subject: { ...current.subject, template: value } }));
             }}
             placeholder="Digest subject line..."
           />
@@ -281,7 +290,10 @@ export function DigestScaffoldEditor({
             <input
               type="checkbox"
               checked={structure.intro.enabled}
-              onChange={(event) => setStructure((current) => ({ ...current, intro: { ...current.intro, enabled: event.currentTarget.checked } }))}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                setStructure((current) => ({ ...current, intro: { ...current.intro, enabled: checked } }));
+              }}
             />
             Enabled
           </label>

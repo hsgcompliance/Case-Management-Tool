@@ -29,7 +29,11 @@ import { InboxCompletionBalloon } from "@entities/ui/dashboardStyle/InboxComplet
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
 import { useDashboardToolModal } from "@entities/Page/dashboardStyle/hooks/useDashboardToolModal";
 import { AnyDashboardToolDefinition, DashboardToolDefinition, DashboardToolId, NavCrumb } from "@entities/Page/dashboardStyle/types";
-import QuickBreakModal from "@features/games/QuickBreakModal";
+import dynamic from "next/dynamic";
+
+// Games code is a celebration-only path — load it on demand, not in the shared bundle.
+// (Rendered only after client-side state opens it, so it never renders during SSR.)
+const QuickBreakModal = dynamic(() => import("@features/games/QuickBreakModal"));
 import {
   CustomerFoldersFilterState,
   CustomerFoldersTool,
@@ -960,7 +964,9 @@ const InboxMain: DashboardToolDefinition<InboxFilterState, InboxSelection>["Main
           setQuickBreakOpen(true);
         }}
       />
-      <QuickBreakModal open={quickBreakOpen} onClose={() => setQuickBreakOpen(false)} />
+      {quickBreakOpen ? (
+        <QuickBreakModal open={quickBreakOpen} onClose={() => setQuickBreakOpen(false)} />
+      ) : null}
     </>
   );
 

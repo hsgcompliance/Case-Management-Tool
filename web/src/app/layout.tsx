@@ -8,6 +8,21 @@ import { Shell } from "./shell";
 
 export const metadata = { title: "Case Managment Dashboard" };
 
+// Origins the app talks to on every session — warming DNS+TLS here saves
+// serial round trips before the first Firestore/API byte on slow connections.
+const fnProject = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "housing-db-v2";
+const fnRegion =
+  process.env.NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION ||
+  process.env.NEXT_PUBLIC_FUNCTIONS_REGION ||
+  "us-central1";
+const functionsOrigin = `https://${fnRegion}-${fnProject}.cloudfunctions.net`;
+const preconnectOrigins = [
+  functionsOrigin,
+  "https://firestore.googleapis.com",
+  "https://identitytoolkit.googleapis.com",
+  "https://securetoken.googleapis.com",
+];
+
 
 const initThemeScript = `
     (function () {
@@ -67,6 +82,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {preconnectOrigins.map((origin) => (
+          <link key={origin} rel="preconnect" href={origin} crossOrigin="anonymous" />
+        ))}
+        <link rel="dns-prefetch" href="https://content-firebaseappcheck.googleapis.com" />
         <script dangerouslySetInnerHTML={{ __html: initThemeScript }} />
         <script dangerouslySetInnerHTML={{ __html: chunkRecoveryScript }} />
       </head>

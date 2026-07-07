@@ -189,6 +189,52 @@ describe("grant program flow payload", () => {
     });
   });
 
+  it("assigns fresh line-item ids on copy instead of source ids or _copy variants", () => {
+    const draft = copyGrantProgramToDraft({
+      name: "Source Grant",
+      kind: "grant",
+      budget: {
+        total: 5000,
+        lineItems: [
+          { id: "rent", label: "Rent", amount: 3000 },
+          { id: "deposit", label: "Deposit", amount: 2000 },
+        ],
+      },
+    });
+
+    const ids = draft.lineItems.map((item) => String(item.id));
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    for (const id of ids) {
+      expect(id).not.toContain("_copy");
+      expect(["rent", "deposit"]).not.toContain(id);
+      expect(id).toMatch(/^li_/);
+    }
+  });
+
+  it("reads legacy eligibility and assistance shapes into the draft", () => {
+    const draft = createInitialGrantProgramDraft({
+      name: "Legacy Shapes",
+      eligibility: "Must be experiencing homelessness",
+      "Level of Assistance": { _value: { ShortTerm: "3 months" } },
+      "Maximum Length of Assistance": { _value: "24 months" },
+    });
+
+    expect(draft.eligibility).toEqual({ Notes: "Must be experiencing homelessness" });
+    expect(draft.levelOfAssistance).toEqual({ ShortTerm: "3 months" });
+    expect(draft.maxAssistanceMonths).toBe("24");
+    expect(draft.lengthOfAssistance).toBe("24 months");
+  });
+
+  it("falls back to details.levelOfAssistanceEligibility when canonical fields are empty", () => {
+    const draft = createInitialGrantProgramDraft({
+      name: "Details Fallback",
+      details: { levelOfAssistanceEligibility: { Priority: "Chronically homeless" } },
+    });
+
+    expect(draft.levelOfAssistance).toEqual({ Priority: "Chronically homeless" });
+  });
+
   it("reads legacy grant invoicing into each line item and writes canonical line-item invoicing", () => {
     const draft = createInitialGrantProgramDraft({
       name: "Legacy",

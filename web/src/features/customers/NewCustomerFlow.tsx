@@ -547,12 +547,14 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     { enabled: folderMode !== "none" },
   );
 
-  // Warm the folder index in the background as soon as the flow opens (and once
-  // the Drive parents resolve) so the Files/Build step (8) doesn't stall on first
-  // load. No-op when the index is already cached and fresh.
+  // Warm the folder index once the Files step (8) is actually reached, rather than
+  // on every flow open — most flows never touch folder linking, and the index list
+  // is heavy enough that fetching it unconditionally on mount isn't worth the cost.
+  // No-op when the index is already cached and fresh.
   React.useEffect(() => {
+    if (step < 8) return;
     void prefetchGDriveCustomerFolderIndex(qc, { activeParentId, exitedParentId });
-  }, [qc, activeParentId, exitedParentId]);
+  }, [qc, activeParentId, exitedParentId, step]);
 
   const buildFolder = useGDriveBuildCustomerFolder({ activeParentId, exitedParentId });
 

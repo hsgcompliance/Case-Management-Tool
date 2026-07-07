@@ -3,9 +3,17 @@
 
 import React, { useState } from "react";
 import type { TGrant as Grant } from "@types";
+import { GRANT_ACCENT_COLORS, grantAccentSolid } from "@lib/colorRegistry";
 import { InvoiceInfoEditor } from "./DetailsTab";
 
 const RENTAL_ASSISTANCE_TAG = "rental-assistance";
+
+const PIN_DEFS = [
+  ["digest", "Budget Digest"],
+  ["rentalAssistance", "Rental Assistance Digest"],
+  ["invoice", "Invoice"],
+  ["important", "Important"],
+] as const;
 
 function normalizeTags(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -82,6 +90,12 @@ export function ConfigTab({
     setModel((current) => {
       const currentPins = (current.pins && typeof current.pins === "object") ? current.pins : pins;
       return { ...current, pins: { ...currentPins, [key]: { ...((currentPins[key] && typeof currentPins[key] === "object") ? currentPins[key] : {}), enabled } } };
+    });
+  const setPinField = (key: "invoice" | "important", field: "label" | "note" | "color", value: string | null) =>
+    setModel((current) => {
+      const currentPins = (current.pins && typeof current.pins === "object") ? current.pins : pins;
+      const currentPin = (currentPins[key] && typeof currentPins[key] === "object") ? currentPins[key] : {};
+      return { ...current, pins: { ...currentPins, [key]: { ...currentPin, [field]: value } } };
     });
 
   const safeAllGrants = Array.isArray(allGrants) ? allGrants : [];
@@ -161,7 +175,9 @@ export function ConfigTab({
           )}
         </SectionCard>
         <SectionCard title="Display and digest pins">
-          <div className="text-xs text-slate-500">{["digest", "rentalAssistance", "invoice", "important"].filter((key) => pins[key]?.enabled).join(", ") || "No pins enabled."}</div>
+          <div className="text-xs text-slate-500">
+            {PIN_DEFS.filter(([key]) => pins[key]?.enabled).map(([, label]) => label).join(", ") || "No pins enabled."}
+          </div>
         </SectionCard>
 
         <SectionCard title="Links">
@@ -267,18 +283,74 @@ export function ConfigTab({
 
       <SectionCard title="Display and digest pins" description="Explicit participation in digest, invoice, rental-assistance, and priority surfaces.">
         <div className="grid gap-2 sm:grid-cols-2">
-          {([
-            ["digest", "Budget Digest"],
-            ["rentalAssistance", "Rental Assistance Digest"],
-            ["invoice", "Invoice filter"],
-            ["important", "Important"],
-          ] as const).map(([key, label]) => (
+          {PIN_DEFS.map(([key, label]) => (
             <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
               <input type="checkbox" checked={pins[key]?.enabled === true} onChange={(event) => setPinEnabled(key, event.currentTarget.checked)} />
               <span>{label}</span>
             </label>
           ))}
         </div>
+        {pins.invoice?.enabled === true ? (
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-slate-500">Invoice pin label</span>
+              <input
+                className="input w-full"
+                placeholder="Invoice"
+                value={String(pins.invoice?.label ?? "")}
+                onChange={(e) => setPinField("invoice", "label", e.currentTarget.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-slate-500">Invoice pin note</span>
+              <input
+                className="input w-full"
+                value={String(pins.invoice?.note ?? "")}
+                onChange={(e) => setPinField("invoice", "note", e.currentTarget.value)}
+              />
+            </label>
+          </div>
+        ) : null}
+        {pins.important?.enabled === true ? (
+          <div className="mt-3 grid gap-3 md:grid-cols-[minmax(160px,240px)_auto_1fr]">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-slate-500">Important pin label</span>
+              <input
+                className="input w-full"
+                placeholder="Important"
+                value={String(pins.important?.label ?? "")}
+                onChange={(e) => setPinField("important", "label", e.currentTarget.value)}
+              />
+            </label>
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-slate-500">Color</div>
+              <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                {(["", ...GRANT_ACCENT_COLORS] as const).map((c) => (
+                  <button
+                    key={c || "none"}
+                    type="button"
+                    onClick={() => setPinField("important", "color", c || null)}
+                    className={[
+                      "h-4 w-4 rounded-full border-2 transition",
+                      String(pins.important?.color ?? "") === c ? "border-slate-600 scale-110" : "border-transparent hover:border-slate-400",
+                      c ? grantAccentSolid(c) : "bg-white border border-slate-300",
+                    ].join(" ")}
+                    title={c || "No color"}
+                  />
+                ))}
+              </div>
+            </div>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-slate-500">Note (optional)</span>
+              <input
+                className="input w-full"
+                placeholder="Internal note about this pin..."
+                value={String(pins.important?.note ?? "")}
+                onChange={(e) => setPinField("important", "note", e.currentTarget.value)}
+              />
+            </label>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard

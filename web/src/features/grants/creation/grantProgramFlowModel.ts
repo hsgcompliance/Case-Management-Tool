@@ -157,6 +157,30 @@ function keyValueRecord(value: unknown): Record<string, string> {
   return out;
 }
 
+/** Unwrap legacy dynamic-field envelopes ({ _value: ... }) written by DynamicFormFields. */
+function unwrapEnvelope(value: unknown): unknown {
+  if (isRecord(value) && "_value" in value) return (value as Record<string, unknown>)._value;
+  return value;
+}
+
+/** Read a key/value field for the draft, tolerating legacy string and envelope shapes. */
+function keyValueDraft(value: unknown): Record<string, string> {
+  const raw = unwrapEnvelope(value);
+  if (typeof raw === "string") {
+    const notes = raw.trim();
+    return notes ? { Notes: notes } : {};
+  }
+  return keyValueRecord(raw);
+}
+
+function firstKeyValueDraft(...candidates: unknown[]): Record<string, string> {
+  for (const candidate of candidates) {
+    const parsed = keyValueDraft(candidate);
+    if (Object.keys(parsed).length) return parsed;
+  }
+  return {};
+}
+
 function invoiceOptions(value: unknown): FlowInvoiceOption[] {
   const rows = Array.isArray(value)
     ? value.filter(isRecord).map((row, index) => ({
@@ -234,6 +258,8 @@ export function createInitialGrantProgramDraft(
   const cycle = isRecord(linking.cycle) ? linking.cycle : {};
   const enrollmentRules = Array.isArray(linking.enrollmentRules) ? linking.enrollmentRules.filter(isRecord) : [];
   const enrollmentRequirement = isRecord(linking.enrollmentRequirement) ? linking.enrollmentRequirement : {};
+  const details = isRecord(source.details) ? source.details : {};
+  const legacyMaxLength = text(unwrapEnvelope(source["Maximum Length of Assistance"]) ?? details.maximumLengthOfAssistance);
 
   return {
     name: text(source.name),
@@ -253,8 +279,8 @@ export function createInitialGrantProgramDraft(
       ? textArray(enrollmentRequirement.targetGrantIds)
       : enrollmentRules.map((rule) => text(rule.targetGrantId)).filter(Boolean),
     duration: text(source.duration),
-    lengthOfAssistance: text(source.lengthOfAssistance || source.maxLengthOfAssistance),
-    maxAssistanceMonths: text(source.maxAssistanceMonths || parseGrantMaxAssistanceMonths(source.lengthOfAssistance || source.maxLengthOfAssistance) || ""),
+    lengthOfAssistance: text(source.lengthOfAssistance || source.maxLengthOfAssistance || legacyMaxLength),
+    maxAssistanceMonths: text(source.maxAssistanceMonths || parseGrantMaxAssistanceMonths(source.lengthOfAssistance || source.maxLengthOfAssistance || legacyMaxLength) || ""),
     authorizationMonths: text(enrollmentDefaults.authorizationMonths),
     complianceConfig: isRecord(source.complianceConfig)
       ? normalizeGrantComplianceConfig(source)
@@ -265,9 +291,13 @@ export function createInitialGrantProgramDraft(
     perCustomerCap: budget.perCustomerCap == null ? "" : text(budget.perCustomerCap),
     description: text(source.description),
     tags: textArray(source.tags),
-    servicesOffered: textArray(source.servicesOffered),
-    eligibility: keyValueRecord(source.eligibility),
-    levelOfAssistance: keyValueRecord(source.levelOfAssistance),
+    servicesOffered: textArray(unwrapEnvelope(source.servicesOffered)),
+    eligibility: keyValueDraft(source.eligibility),
+    levelOfAssistance: firstKeyValueDraft(
+      source.levelOfAssistance,
+      source["Level of Assistance"],
+      details.levelOfAssistanceEligibility,
+    ),
     lineItems: lineItemsFromBudget(source.budget, source.invoicing),
     budgetTotal: text(budget.total || budget.startAmount),
     invoicing: {
@@ -313,9 +343,12 @@ export function copyGrantProgramToDraft(
     nextGrantId: "",
     linkedEnrollmentOperator: "all",
     linkedEnrollmentGrantIds: [],
-    lineItems: draft.lineItems.map((item) => ({
+    // Copied line items get fresh ids: ledger/paymentQueue rows reference
+    // lineItemId, so carrying the source ids (or a `_copy` variant) into a new
+    // grant creates misleading lineage.
+    lineItems: draft.lineItems.map((item, index) => ({
       ...item,
-      id: item.id ? `${item.id}_copy` : undefined,
+      id: `li_${Date.now().toString(36)}_${index + 1}`,
       spent: 0,
       projected: 0,
     } as FlowLineItem)),

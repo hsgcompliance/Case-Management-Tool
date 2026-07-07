@@ -795,7 +795,10 @@ function BulkMigrationDialog({
                   <div className="font-medium">{src.label || src.id}</div>
                   <div className="text-xs text-slate-400">{src.id}</div>
                 </div>
-                <select className="input w-full" value={lineItemMap[src.id] || ""} onChange={(e) => setLineItemMap((prev) => ({ ...prev, [src.id]: e.currentTarget.value }))} disabled={!toGrantId || running}>
+                <select className="input w-full" value={lineItemMap[src.id] || ""} onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setLineItemMap((prev) => ({ ...prev, [src.id]: value }));
+                }} disabled={!toGrantId || running}>
                   <option value="">Select destination line item...</option>
                   {destLineItems.map((li) => <option key={li.id} value={li.id}>{li.label || li.id}</option>)}
                 </select>

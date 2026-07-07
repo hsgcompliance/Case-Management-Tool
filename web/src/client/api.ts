@@ -129,7 +129,7 @@ export const endpointsStrict = {
   enrollmentsCheckOverlaps: { method: 'POST', path: 'enrollmentsCheckOverlaps' },
   enrollmentsCheckDual: { method: 'POST', path: 'enrollmentsCheckDual' },
   enrollmentsBackfillNames: { method: 'POST', path: 'enrollmentsBackfillNames' },
-  enrollmentsMigrate: { method: 'POST', path: 'enrollmentsMigrate' },
+  enrollmentsMigrate: { method: 'POST', path: 'migrateEnrollment' },
   enrollmentsUndoMigration: { method: 'POST', path: 'enrollmentsUndoMigration' },
   enrollmentsAdminReverseLedgerEntry: { method: 'POST', path: 'enrollmentsAdminReverseLedgerEntry' },
   enrollmentsContinuumSummary: { method: 'GET', path: 'enrollmentsContinuumSummary' },

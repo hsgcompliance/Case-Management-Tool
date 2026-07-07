@@ -232,7 +232,7 @@ export function usePatchCustomer(customerId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (patch: Partial<Pick<Customer, "caseManagerId" | "caseManagerName" | "secondaryCaseManagerId" | "secondaryCaseManagerName">>) => {
-      await callFunction("customersPatch", { id: customerId, patch });
+      await callFunction("customersPatch", { id: customerId, name: patch });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.customers.detail(customerId) });
