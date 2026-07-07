@@ -144,6 +144,7 @@ export type CustomerActionMenuBodyProps = {
   onOpen: () => void;
   onToggleActive: () => void;
   onEnroll: () => void;
+  onHide?: () => void;
   onSelectTier: (tier: number) => void;
 };
 
@@ -156,6 +157,7 @@ export function CustomerActionMenuBody({
   onOpen,
   onToggleActive,
   onEnroll,
+  onHide,
   onSelectTier,
 }: CustomerActionMenuBodyProps) {
   return (
@@ -175,6 +177,16 @@ export function CustomerActionMenuBody({
       >
         Open
       </button>
+      {onHide ? (
+        <button
+          type="button"
+          className="block w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+          onClick={onHide}
+          role="menuitem"
+        >
+          Hide
+        </button>
+      ) : null}
       {canManage ? (
         <button
           type="button"
@@ -236,11 +248,15 @@ export function CustomerRowActionMenu({
   canManage,
   onOpen,
   onChanged,
+  onHide,
+  openAt,
 }: {
   customer: TCustomerEntity & { id: string };
   canManage: boolean;
   onOpen: () => void;
   onChanged?: () => void;
+  onHide?: () => void;
+  openAt?: { x: number; y: number; nonce: number } | null;
 }) {
   const setActive = useSetCustomerActive();
   const setTier = useSetCustomerTier();
@@ -249,6 +265,7 @@ export function CustomerRowActionMenu({
   const [menuPos, setMenuPos] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const btnRef = React.useRef<HTMLButtonElement | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const openedFromContextMenu = React.useRef(false);
 
   const inactive = isInactiveCustomer(customer);
   const currentTier = (customer as { tier?: number | null }).tier ?? null;
@@ -280,8 +297,8 @@ export function CustomerRowActionMenu({
     const onEsc = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-    const onViewportChange = () => updateMenuPosition();
-    updateMenuPosition();
+    const onViewportChange = () => openedFromContextMenu.current ? setOpen(false) : updateMenuPosition();
+    if (!openedFromContextMenu.current) updateMenuPosition();
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onEsc);
     window.addEventListener("resize", onViewportChange);
@@ -293,6 +310,13 @@ export function CustomerRowActionMenu({
       window.removeEventListener("scroll", onViewportChange, true);
     };
   }, [open, updateMenuPosition]);
+
+  React.useEffect(() => {
+    if (!openAt) return;
+    openedFromContextMenu.current = true;
+    setMenuPos({ top: openAt.y, left: openAt.x });
+    setOpen(true);
+  }, [openAt]);
 
   const toggleActive = async () => {
     try {
@@ -340,6 +364,10 @@ export function CustomerRowActionMenu({
               setOpen(false);
               setEnrollOpen(true);
             }}
+            onHide={onHide ? () => {
+              setOpen(false);
+              onHide();
+            } : undefined}
             onSelectTier={(t) => {
               setOpen(false);
               void selectTier(t);
@@ -358,6 +386,7 @@ export function CustomerRowActionMenu({
         className="btn btn-ghost h-8 px-2"
         aria-label="Open actions"
         onClick={() => {
+          openedFromContextMenu.current = false;
           if (!open) {
             const rect = btnRef.current?.getBoundingClientRect();
             if (rect) setMenuPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 224) });

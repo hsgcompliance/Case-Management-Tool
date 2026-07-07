@@ -51,6 +51,7 @@ type CustomerCardProps = {
     },
   ) => void;
   onOpen: (customerId: string, options?: { tab?: "tasks" }) => void;
+  onHide?: (customerId: string) => void;
   loading?: boolean;
 };
 
@@ -912,6 +913,7 @@ function CustomerCardInner({
   onSelectGesture,
   onOpen,
   loading = false,
+  onHide,
 }: CustomerCardProps) {
   const { profile } = useAuth();
   const canManageEnrollments = !isViewerLike(profile as any);
@@ -1868,6 +1870,10 @@ function CustomerCardInner({
               setActionBar(null);
               setEnrollOpen(true);
             }}
+            onHide={onHide ? () => {
+              setActionBar(null);
+              onHide(customer.id);
+            } : undefined}
             onSelectTier={(t) => {
               setActionBar(null);
               void onSelectTier(t);

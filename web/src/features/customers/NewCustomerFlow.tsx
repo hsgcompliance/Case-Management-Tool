@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { DateInput } from "@entities/ui/DateInput";
 import { useRouter } from "next/navigation";
 import api, { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
@@ -1380,10 +1381,10 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
             <span className="label">Last name</span>
             <input className="input" value={lastName} onChange={(e) => setLastName(e.currentTarget.value)} />
           </label>
-          <label className="field">
-            <span className="label">DOB</span>
-            <input className="input" type="date" value={dob} onChange={(e) => setDob(e.currentTarget.value)} />
-          </label>
+          <div className="field">
+            <label className="label" htmlFor="new-customer-dob">DOB</label>
+            <DateInput id="new-customer-dob" value={dob} onChange={setDob} />
+          </div>
           <label className="field">
             <span className="label">Caseworthy ID</span>
             <input className="input" value={cwId} onChange={(e) => setCwId(e.currentTarget.value)} />

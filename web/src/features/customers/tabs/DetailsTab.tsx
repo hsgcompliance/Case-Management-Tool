@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import { DateInput } from "@entities/ui/DateInput";
 import { parseISO10Strict } from "@lib/date";
 import { fmtDateOrDash } from "@lib/formatters";
 import { CustomerWorkbookPanel } from "./CustomerWorkbookPanel";
@@ -147,15 +148,14 @@ export function DetailsTab({
           </select>
         </label>
 
-        <label className="field">
-          <span className="label">DOB</span>
-          <input
-            className="input"
-            type="date"
+        <div className="field">
+          <label className="label" htmlFor="customer-dob">DOB</label>
+          <DateInput
+            id="customer-dob"
             value={asStr(model?.dob) || ""}
-            onChange={(e) => setField("dob", e.currentTarget.value || null)}
+            onChange={(value) => setField("dob", value || null)}
           />
-        </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">

@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { DateInput } from "@entities/ui/DateInput";
 import ActionMenu from "@entities/ui/ActionMenu";
 import GrantSelect from "@entities/selectors/GrantSelect";
 import { Modal } from "@entities/ui/Modal";
@@ -609,30 +610,26 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
               filters={{ active: true, limit: 500 }}
             />
           </label>
-          <label className="field">
+          <div className="field">
             <span className="label">Start Date (optional)</span>
-            <input
-              className="input"
-              type="date"
+            <DateInput
               value={startDate}
-              onChange={(e) => setStartDate(e.currentTarget.value)}
+              onChange={setStartDate}
               disabled={busy}
             />
-          </label>
-          <label className="field">
+          </div>
+          <div className="field">
             <span className="label">End Date (optional)</span>
-            <input
-              className="input"
-              type="date"
+            <DateInput
               value={endDate}
               max={selectedGrantEndDate || undefined}
-              onChange={(e) => {
+              onChange={(value) => {
                 setEndDateTouched(true);
-                setEndDate(capEnrollmentEndDate(e.currentTarget.value, selectedGrantEndDate));
+                setEndDate(capEnrollmentEndDate(value, selectedGrantEndDate));
               }}
               disabled={busy}
             />
-          </label>
+          </div>
           <button className="btn btn-sm" onClick={() => void onCreate()} disabled={!grantId || busy}>
             {enroll.isPending ? "Creating..." : "Enroll"}
           </button>
@@ -729,10 +726,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         }
       >
         <div className="space-y-4">
-          <label className="field">
+          <div className="field">
             <span className="label">Close Date</span>
-            <input className="input" type="date" value={closeDate} onChange={(e) => setCloseDate(e.currentTarget.value)} />
-          </label>
+            <DateInput value={closeDate} onChange={setCloseDate} />
+          </div>
 
           <div className="rounded border border-slate-200 p-3">
             <div className="mb-2 text-sm font-medium">Future tasks (after today)</div>
@@ -798,25 +795,21 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         }
       >
         <div className="space-y-3">
-          <label className="field">
+          <div className="field">
             <span className="label">Start Date</span>
-            <input
-              className="input"
-              type="date"
+            <DateInput
               value={editStartDate}
-              onChange={(e) => setEditStartDate(e.currentTarget.value)}
+              onChange={setEditStartDate}
             />
-          </label>
-          <label className="field">
+          </div>
+          <div className="field">
             <span className="label">End Date</span>
-            <input
-              className="input"
-              type="date"
+            <DateInput
               value={editEndDate}
               max={editing ? grantEndDateById.get(String(editing.grantId || "")) || undefined : undefined}
-              onChange={(e) => setEditEndDate(capEnrollmentEndDate(e.currentTarget.value, editing ? grantEndDateById.get(String(editing.grantId || "")) || "" : ""))}
+              onChange={(value) => setEditEndDate(capEnrollmentEndDate(value, editing ? grantEndDateById.get(String(editing.grantId || "")) || "" : ""))}
             />
-          </label>
+          </div>
         </div>
       </Modal>
 
