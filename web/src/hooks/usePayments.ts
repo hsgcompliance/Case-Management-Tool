@@ -906,7 +906,9 @@ export function usePaymentRentCert() {
           } else if (!toggle && body.dueDate) {
             rentCert = { dueDate: body.dueDate, targetPaymentDate, source: "manual", taskIds: [], status: "due" };
           }
-          return { ...payment, rentCert } as TPayment;
+          // Mirror the server: clearing sets the sticky opt-out so calculated
+          // certs don't transiently reappear before the refetch lands.
+          return { ...payment, rentCert, rentCertOptOut: rentCert ? null : true } as TPayment;
         },
       });
     },

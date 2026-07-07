@@ -22,6 +22,7 @@ import {
   getGrantWindowISO,
   isInGrantWindow,
   ensureMonthlySubtypeTag,
+  carryRentCertState,
 } from './utils';
 import {
   PaymentsUpsertProjectionsBody,
@@ -65,7 +66,7 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
       const normalized = (payments || []).map(ensureMonthlySubtypeTag);
       const withIdsRaw = ensurePaymentIds(normalized, oldPayments);
 
-      const withIds = withIdsRaw.map((p: any) => {
+      const withIds = carryRentCertState(withIdsRaw, oldPayments).map((p: any) => {
         const dueDate = p?.dueDate || p?.date;
         return {
           ...p,

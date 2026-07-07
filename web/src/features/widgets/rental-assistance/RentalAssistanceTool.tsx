@@ -307,14 +307,20 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         String(enrollment.customerName || enrollment.clientName || customerId || "-");
       const grantName = grantNameById.get(grantId) || String(grant?.name || enrollment.grantName || grantId || "-");
       const totalAssistance = assistancePayments.reduce((sum, payment) => sum + payment.amount, 0);
+      // computeRentCertDues is persisted-first: any payment.rentCert (including
+      // an optimistic patch from the add/toggle mutations) wins over the
+      // legacy every-3-months heuristic, so a cert added here stays visible.
       const nextRentCertEvent = computeRentCertDues(assistancePaymentRows, {
         enrollmentId: String(enrollment.id || ""),
         enrollmentLabel: grantName,
       })
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
         .find((due) => due.targetPaymentDate >= todayISO()) || null;
-      const nextRentCertPayment = assistancePayments.find((payment) => payment.dueDate === nextRentCertEvent?.targetPaymentDate) || null;
-      const nextRentCertDue = String(nextRentCertPayment?.rentCert?.dueDate || nextRentCertEvent?.dueDate || "");
+      const nextRentCertPayment =
+        (nextRentCertEvent?.paymentId
+          ? assistancePayments.find((payment) => payment.id === nextRentCertEvent.paymentId)
+          : assistancePayments.find((payment) => payment.dueDate === nextRentCertEvent?.targetPaymentDate)) || null;
+      const nextRentCertDue = String(nextRentCertEvent?.dueDate || nextRentCertPayment?.rentCert?.dueDate || "");
       const assistanceStartDate = paymentDates[0] || "";
       const maxAssistanceMonths = maxMonthsFrom(grant, enrollment);
       const monthsOfAssistance = assistanceStartDate ? monthsOfAssistanceToToday(assistanceStartDate) : null;

@@ -222,6 +222,43 @@ export function carryStatus(prev: any, next: any) {
   };
 }
 
+/**
+ * Recompute payment.rentCert.status from its projected rent-cert tasks after
+ * a task status change, so surfaces reading payment.rentCert see completion
+ * without waiting for the next continuum sync (which only runs on payment
+ * signature changes). "effective" is operator-declared and never downgraded.
+ *
+ * Returns the updated payments array, or null when nothing changed.
+ */
+export function syncRentCertStatusFromTasks(
+  payments: any[],
+  taskSchedule: any[],
+  paymentIds: Iterable<string>,
+): any[] | null {
+  const ids = new Set(Array.from(paymentIds).map(String).filter(Boolean));
+  if (!ids.size || !Array.isArray(payments) || !payments.length) return null;
+  const isDone = (t: any) =>
+    t?.completed === true || ["done", "verified"].includes(String(t?.status || "").toLowerCase());
+  let changed = false;
+  const next = payments.map((payment: any) => {
+    const pid = String(payment?.id || "");
+    if (!ids.has(pid)) return payment;
+    const rentCert = payment?.rentCert;
+    if (!rentCert || typeof rentCert !== "object") return payment;
+    const current = String(rentCert.status || "due");
+    if (current === "effective") return payment;
+    const tasks = (Array.isArray(taskSchedule) ? taskSchedule : []).filter(
+      (t: any) => String(t?.rentCertPaymentId || "") === pid,
+    );
+    if (!tasks.length) return payment;
+    const status = tasks.every(isDone) ? "completed" : "due";
+    if (status === current) return payment;
+    changed = true;
+    return { ...payment, rentCert: { ...rentCert, status } };
+  });
+  return changed ? next : null;
+}
+
 export function summarize(schedule: any[]) {
   const today = new Date().toISOString().slice(0, 10);
   const total = schedule.length;

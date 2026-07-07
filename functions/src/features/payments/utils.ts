@@ -358,3 +358,21 @@ export function recalcFutureMonthly(existing: any[] = [], newMonthlyAmount = 0) 
     return { ...p, amount: Number(newMonthlyAmount) };
   });
 }
+
+/**
+ * Carry rent-cert state forward from prior payment rows (matched by id) when
+ * an incoming schedule write omits it. Rent-cert state is owned by
+ * paymentsRentCertSet and the continuum sync; schedule adjustments that don't
+ * explicitly send it must not strip it from surviving rows.
+ */
+export function carryRentCertState(next: any[], prev: any[]): any[] {
+  const prevById = new Map((prev || []).map((p: any) => [String(p?.id || ""), p]));
+  return (next || []).map((p: any) => {
+    const prior: any = prevById.get(String(p?.id || "")) || null;
+    if (!prior) return p;
+    const carry: Record<string, unknown> = {};
+    if (p?.rentCert === undefined && prior.rentCert !== undefined) carry.rentCert = prior.rentCert;
+    if (p?.rentCertOptOut === undefined && prior.rentCertOptOut !== undefined) carry.rentCertOptOut = prior.rentCertOptOut;
+    return Object.keys(carry).length ? { ...p, ...carry } : p;
+  });
+}

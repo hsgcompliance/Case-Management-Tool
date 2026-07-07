@@ -14,7 +14,7 @@ import {
   type DigestTaskRow,
 } from './digestTemplate';
 import {loadEnrollmentsForCustomers} from './digestEnrollmentSource';
-import {computeNextRentCertDue} from './rentCert';
+import {computeLastAssistanceDate, computeNextRentCertDue} from './rentCert';
 
 const DASHBOARD_LINK = 'https://households-db.web.app/dashboard';
 
@@ -196,16 +196,23 @@ export async function buildDigestData(opts: BuildOpts): Promise<DigestTemplateAr
           // Only include this enrollment in the Rental Assistance block if at least one paid payment exists
           if (!paidPayments.length) return null;
           const nextPayments = payments.filter((p) => !p.paid && p.dueDate >= today);
-          const nextRentCert = computeNextRentCertDue([e]);
-          const certInFuture = !!nextRentCert && nextRentCert.dueDate >= today;
+          // computeNextRentCertDue only returns certs whose target payment is
+          // today or later, so presence alone means the cert is actionable —
+          // an overdue dueDate is the ASAP case, not a stale cert.
+          const nextRentCert = computeNextRentCertDue([e], {today});
+          const lastAssistance = computeLastAssistanceDate([e]);
           return {
             enrollmentId: String(e.id || ''),
             grantName: grantName(e),
             assistanceEndDate: String(e.endDate || payments[payments.length - 1]?.dueDate || ''),
             lastPayment: formatPayment(paidPayments[0] || null),
             nextPayment: formatPayment(nextPayments[0] || null),
-            nextRentCertDue: certInFuture ? `${nextRentCert!.dueDate}${nextRentCert!.asap ? ' ASAP' : ''}` : 'No More Rent Certs Due',
-            rentCertAsap: certInFuture && nextRentCert!.asap === true,
+            nextRentCertDue: nextRentCert
+              ? `${nextRentCert.dueDate}${nextRentCert.asap ? ' ASAP' : ''}`
+              : lastAssistance
+                ? `No More Rent Certs Due (last assistance ${lastAssistance})`
+                : 'No More Rent Certs Due',
+            rentCertAsap: !!nextRentCert && nextRentCert.asap === true,
           };
         })
         .filter((row): row is DigestRentalAssistanceRow => !!row);

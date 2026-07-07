@@ -98,6 +98,11 @@ export const Payment = z.object({
   // compliance
   compliance: PaymentCompliance.nullish(),
   rentCert: PaymentRentCert.nullish(),
+  /**
+   * Sticky "not due": set when an operator clears a rent cert so the
+   * calculated continuum sync does not regenerate one for this payment.
+   */
+  rentCertOptOut: z.boolean().nullish(),
 });
 
 export type TPaymentCompliance = z.infer<typeof PaymentCompliance>;
@@ -305,6 +310,7 @@ export const PaymentProjectionInput = z
 
     compliance: PaymentCompliance.nullish(),
     rentCert: PaymentRentCert.nullish(),
+    rentCertOptOut: z.boolean().nullish(),
   })
   .superRefine((v, ctx) => {
     const hasDue = !!v.dueDate;

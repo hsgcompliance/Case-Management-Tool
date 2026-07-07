@@ -663,7 +663,9 @@ export type TEnrollmentsContinuumSummaryResp = Ok<{
     calculatedAllocation: number;
     effectiveAllocation: number;
   }>;
-  rentCertEvents: Array<{ targetDate: string; dueDate: string; enrollmentId: string; paymentId: string; source: "calculated" | "manual" }>;
+  rentCertEvents: Array<{ targetDate: string; dueDate: string; enrollmentId: string; paymentId: string; source: "calculated" | "manual"; status: "due" | "completed" | "effective" }>;
+  /** Last scheduled assistance (rent) payment date across the continuum, or null. */
+  lastAssistanceDate: string | null;
 }>;
 
 export const EnrollmentsAllocationSetBody = z.object({
