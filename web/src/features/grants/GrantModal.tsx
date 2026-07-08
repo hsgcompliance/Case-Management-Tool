@@ -592,6 +592,21 @@ export default function GrantDetailModal({
     }
   };
 
+  // Persist budget changes made from view mode (line item config, add/move
+  // funds, caps, locks). Edit mode keeps the explicit Save flow instead.
+  const persistBudget = async (budget: unknown) => {
+    if (!fetchId || !canEditGrant) return;
+    try {
+      const updates: Record<string, unknown> = {
+        budget: sanitizeBudgetForWrite(recomputeBudgetTotals(budget)),
+      };
+      await patch.mutateAsync({ id: fetchId, patch: noUndefined(updates) });
+      toast("Budget updated", { type: "success" });
+    } catch (e: unknown) {
+      toast(toApiError(e).error, { type: "error" });
+    }
+  };
+
   const handleDelete = async () => {
     if (!canEditGrant) return;
     const id = String(grantId || model?.id || "");
@@ -957,6 +972,8 @@ export default function GrantDetailModal({
           STATUS_OPTS={STATUS_OPTS}
           financialCapabilities={financialVisibility.capabilities}
           allGrants={allGrants}
+          canEditBudget={canEditGrant && !isCreate}
+          onPersistBudget={persistBudget}
         />
       )}
 
@@ -1077,6 +1094,8 @@ function TabsRouter(props: {
   STATUS_OPTS: readonly string[];
   financialCapabilities: ReturnType<typeof getGrantFinancialVisibility>["capabilities"];
   allGrants: Grant[];
+  canEditBudget: boolean;
+  onPersistBudget: (budget: unknown) => Promise<void> | void;
 }) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<GrantTab>(tabFromQuery(searchParams.get("tab")));
@@ -1163,6 +1182,8 @@ function TabsRouter(props: {
           grantId={props.grantId}
           drawsDownBudget={props.financialCapabilities.drawsDownBudget}
           canManageBudget={!!props.isAdmin}
+          canEditBudget={props.canEditBudget}
+          onPersistBudget={props.onPersistBudget}
         />
       )}
 

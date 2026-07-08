@@ -1,7 +1,7 @@
 import {
   Payment,
   Spend
-} from "./chunk-RPHPEADS.js";
+} from "./chunk-4ZUKQL35.js";
 import {
   TaskScheduleItem,
   TaskStats
@@ -228,8 +228,18 @@ var Enrollment = z.object({
   startDate: z.string().nullable().optional(),
   // YYYY-MM-DD
   endDate: z.string().nullable().optional(),
-  migratedFrom: z.object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() }).nullable().optional(),
-  migratedTo: z.object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() }).nullable().optional(),
+  migratedFrom: z.object({
+    enrollmentId: z.string(),
+    grantId: z.string(),
+    cutover: z.string(),
+    migrationId: z.string().optional()
+  }).nullable().optional(),
+  migratedTo: z.object({
+    enrollmentId: z.string(),
+    grantId: z.string(),
+    cutover: z.string(),
+    migrationId: z.string().optional()
+  }).nullable().optional(),
   continuity: EnrollmentContinuity.nullish(),
   clientAllocation: EnrollmentClientAllocation.nullish(),
   programAutomation: EnrollmentProgramAutomation.nullish(),

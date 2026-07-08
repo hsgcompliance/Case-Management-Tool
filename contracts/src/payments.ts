@@ -402,6 +402,12 @@ export const PaymentsRentCertSetBody = z.object({
   paymentId: z.string().min(1),
   status: RentCertToggle.optional(),
   dueDate: ISO10ish.nullish(),
+  /** Inbox bucket for the generated reminder tasks. Default: "compliance". */
+  bucket: z.enum(["task", "compliance"]).optional(),
+  /** Custom title for the generated reminder tasks. Default: derived "{month} rent cert due {date}". */
+  title: z.string().trim().max(200).optional(),
+  /** Mark older open ("due") certs on other payments of this enrollment completed. */
+  supersedeOlderOpenCerts: z.boolean().optional(),
 });
 export type TPaymentsRentCertSetBody = z.infer<typeof PaymentsRentCertSetBody>;
 export type TPaymentsUpdateComplianceBody = z.infer<

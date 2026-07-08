@@ -288,11 +288,13 @@ export declare const Enrollment: z.ZodObject<{
         enrollmentId: z.ZodString;
         grantId: z.ZodString;
         cutover: z.ZodString;
+        migrationId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>;
     migratedTo: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         enrollmentId: z.ZodString;
         grantId: z.ZodString;
         cutover: z.ZodString;
+        migrationId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>;
     continuity: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         continuumId: z.ZodString;
@@ -700,11 +702,13 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         enrollmentId: z.ZodString;
         grantId: z.ZodString;
         cutover: z.ZodString;
+        migrationId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     migratedTo: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
         enrollmentId: z.ZodString;
         grantId: z.ZodString;
         cutover: z.ZodString;
+        migrationId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     continuity: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
         continuumId: z.ZodString;
@@ -1072,11 +1076,13 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         enrollmentId: z.ZodString;
         grantId: z.ZodString;
         cutover: z.ZodString;
+        migrationId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     migratedTo: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
         enrollmentId: z.ZodString;
         grantId: z.ZodString;
         cutover: z.ZodString;
+        migrationId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     continuity: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
         continuumId: z.ZodString;

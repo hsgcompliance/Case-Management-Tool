@@ -512,6 +512,12 @@ export declare const PaymentsRentCertSetBody: z.ZodObject<{
         notDue: "notDue";
     }>>;
     dueDate: z.ZodOptional<z.ZodNullable<z.ZodPreprocess<z.ZodString>>>;
+    bucket: z.ZodOptional<z.ZodEnum<{
+        compliance: "compliance";
+        task: "task";
+    }>>;
+    title: z.ZodOptional<z.ZodString>;
+    supersedeOlderOpenCerts: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export type TPaymentsRentCertSetBody = z.infer<typeof PaymentsRentCertSetBody>;
 export type TPaymentsUpdateComplianceBody = z.infer<typeof PaymentsUpdateComplianceBody>;

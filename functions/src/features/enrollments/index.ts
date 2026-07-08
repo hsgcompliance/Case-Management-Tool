@@ -11,7 +11,7 @@ export {enrollmentsBackfillPopulation} from "./backfillPopulation";
 export {enrollmentsBulkEnroll} from "./bulkEnroll";
 export {enrollmentsCheckOverlaps} from "./checkOverlaps";
 export {enrollmentsCheckDual} from "./checkDual";
-export { migrateEnrollment } from "./migrate";
+export { migrateEnrollment, enrollmentsMigrate } from "./migrate";
 export { undoEnrollmentMigration } from "./migrate";
 export { adminReverseLedgerEntry } from "./adminReverseLedgerEntry";
 export { enrollmentsVoidProjections } from "./voidProjections";

@@ -986,6 +986,8 @@ export function BudgetActivityTab({
   grantId,
   drawsDownBudget = true,
   canManageBudget = false,
+  canEditBudget = false,
+  onPersistBudget,
 }: {
   editing: boolean;
   model: Record<string, any>;
@@ -997,6 +999,8 @@ export function BudgetActivityTab({
   grantId?: string;
   drawsDownBudget?: boolean;
   canManageBudget?: boolean;
+  canEditBudget?: boolean;
+  onPersistBudget?: (budget: unknown) => Promise<void> | void;
 }) {
   const activityQ = useGrantActivity(grantId ?? "", 2000);
   const allActivity: any[] = useMemo(() => (Array.isArray(activityQ.data) ? activityQ.data : []), [activityQ.data]);
@@ -1034,6 +1038,9 @@ export function BudgetActivityTab({
   const commit = (next: any) => {
     const recomputed = recomputeBudgetTotals(next);
     setModel((m) => ({ ...m, budget: recomputed }));
+    // View-mode actions (line item config, funds, caps, locks) have no Save
+    // button, so persist immediately; edit mode keeps the explicit Save flow.
+    if (!editing) void onPersistBudget?.(recomputed);
   };
 
   const setTotal = (val: number) => {
@@ -1631,7 +1638,7 @@ export function BudgetActivityTab({
                 const liActivity = grantId ? activityForLineItem(liId) : [];
 
                 const menuItems: ActionItem[] = [
-                  ...(drawsDownBudget
+                  ...(canEditBudget && drawsDownBudget
                     ? [
                         {
                           key: "add-funds",
@@ -1659,16 +1666,20 @@ export function BudgetActivityTab({
                     label: "Line Item Config",
                     onSelect: () => setSplitConfigIdx(i),
                   },
-                  {
-                    key: "edit-cap",
-                    label: "Edit Spend Cap",
-                    onSelect: () => setSpendCapIdx(i),
-                  },
-                  {
-                    key: "lock-line-item",
-                    label: li.locked ? "Unlock Line Item" : "Lock Line Item",
-                    onSelect: () => updateLineItem(i, { locked: !li.locked }),
-                  },
+                  ...(canEditBudget
+                    ? [
+                        {
+                          key: "edit-cap",
+                          label: "Edit Spend Cap",
+                          onSelect: () => setSpendCapIdx(i),
+                        },
+                        {
+                          key: "lock-line-item",
+                          label: li.locked ? "Unlock Line Item" : "Lock Line Item",
+                          onSelect: () => updateLineItem(i, { locked: !li.locked }),
+                        },
+                      ]
+                    : []),
                 ];
 
                 const row = (
@@ -1923,7 +1934,7 @@ export function BudgetActivityTab({
           grantEndDate={isoDate(model?.endDate)}
           num={num}
           currency={currency}
-          editing={editing}
+          editing={editing || canEditBudget}
           onClose={() => setSplitConfigIdx(null)}
           onCommit={(patch) => updateLineItemConfig(splitConfigIdx, patch)}
         />

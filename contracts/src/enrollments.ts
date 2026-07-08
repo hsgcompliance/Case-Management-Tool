@@ -251,11 +251,21 @@ export const Enrollment = z.object({
   endDate: z.string().nullable().optional(),
 
   migratedFrom: z
-    .object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() })
+    .object({
+      enrollmentId: z.string(),
+      grantId: z.string(),
+      cutover: z.string(),
+      migrationId: z.string().optional(),
+    })
     .nullable()
     .optional(),
   migratedTo: z
-    .object({ enrollmentId: z.string(), grantId: z.string(), cutover: z.string() })
+    .object({
+      enrollmentId: z.string(),
+      grantId: z.string(),
+      cutover: z.string(),
+      migrationId: z.string().optional(),
+    })
     .nullable()
     .optional(),
 

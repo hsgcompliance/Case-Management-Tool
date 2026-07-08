@@ -625,7 +625,6 @@ function paymentMutationPatches(
     },
   ];
 
-  const enrollment = qc.getQueryData<Enrollment | null>(qk.enrollments.detail(enrollmentId));
   const enrollmentListKeys = qc
     .getQueriesData({ queryKey: qk.enrollments.root })
     .map(([key]) => key as unknown[])
@@ -636,31 +635,21 @@ function paymentMutationPatches(
       update: (prev: unknown) => patchEnrollmentLikePayments(prev, enrollmentId, paymentId, args.patch),
     });
   }
-  const customerId = String(enrollment?.customerId || "").trim();
-  if (customerId) {
-    const customerPaymentKeys = qc
-      .getQueriesData({ queryKey: qk.payments.byCustomerPrefix(customerId) })
-      .map(([key]) => key as unknown[])
-      .filter((key) => Array.isArray(key) && key[0] === "payments" && key[1] === "byCustomer");
 
-    if (customerPaymentKeys.length) {
-      patches.push({
-        key: customerPaymentKeys,
-        update: (prev: unknown) => patchCustomerPaymentRows(prev, enrollmentId, paymentId, args.patch),
-      });
-    }
-
-    const enrollmentListKeys = qc
-      .getQueriesData({ queryKey: qk.enrollments.byCustomer(customerId) })
-      .map(([key]) => key as unknown[])
-      .filter((key) => Array.isArray(key) && key[0] === "enrollments" && key[1] === "byCustomer");
-
-    if (enrollmentListKeys.length) {
-      patches.push({
-        key: enrollmentListKeys,
-        update: (prev: unknown) => patchEnrollmentLikePayments(prev, enrollmentId, paymentId, args.patch),
-      });
-    }
+  // Patch every cached customer-payments projection unconditionally.
+  // patchCustomerPaymentRows scopes rows by enrollmentId+paymentId, so other
+  // customers' caches are untouched. Resolving the owning customer through
+  // qk.enrollments.detail misses surfaces that only load byCustomer lists
+  // (e.g. the customer workspace payments tab), which left these rows stale.
+  const customerPaymentKeys = qc
+    .getQueriesData({ queryKey: qk.payments.root })
+    .map(([key]) => key as unknown[])
+    .filter((key) => Array.isArray(key) && key[0] === "payments" && key[1] === "byCustomer");
+  if (customerPaymentKeys.length) {
+    patches.push({
+      key: customerPaymentKeys,
+      update: (prev: unknown) => patchCustomerPaymentRows(prev, enrollmentId, paymentId, args.patch),
+    });
   }
 
   return patches;
@@ -918,6 +907,12 @@ export function usePaymentRentCert() {
         qc.invalidateQueries({ queryKey: qk.tasks.root }),
         qc.invalidateQueries({ queryKey: qk.inbox.root }),
         qc.invalidateQueries({ queryKey: qk.enrollments.continuum(String(body.enrollmentId)) }),
+        // Converge the surfaces that render rentCert directly onto server
+        // truth (customer payments tab, admin enrollment lists like the
+        // rental assistance report) in case an optimistic patch missed.
+        qc.invalidateQueries({ queryKey: ["payments", "byCustomer"] }),
+        qc.invalidateQueries({ queryKey: ["enrollments", "byCustomer"] }),
+        qc.invalidateQueries({ queryKey: ["enrollments", "list"] }),
       ]);
     },
     onError: (_error, body) => void invalidateFromEnrollment(qc, body.enrollmentId),
