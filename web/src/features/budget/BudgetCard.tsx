@@ -10,6 +10,7 @@ import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItem
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import { todayISO, fmtMDY } from "@lib/date";
+import { resolveActiveCycleBudget, type BudgetCycle } from "./budgetCardModel";
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
@@ -218,8 +219,8 @@ type SplitGoalDisplay = {
 
 /** The split goal whose date range covers today, or null if the cycles don't cover the current date. */
 function findCurrentSplitGoal(goals: SplitGoalDisplay[]): SplitGoalDisplay | null {
-  const today = todayISO();
-  return goals.find((goal) => (!goal.startDate || goal.startDate <= today) && (!goal.endDate || goal.endDate >= today)) ?? null;
+  const active = resolveActiveCycleBudget(goals as BudgetCycle[], todayISO());
+  return active ? { id: "active", label: "Current cycle", ...active } : null;
 }
 
 function cyclePeriodLabel(goal: SplitGoalDisplay) {
@@ -533,9 +534,19 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
   const isDashPinned = dashPinnedItems.some((x) => x.type === "grant" && x.id === gid);
 
   const liData = lineItemId ? getLineItemBudget(grant, lineItemId) : null;
-  const budget = liData ?? getBudget(grant);
-  const showCurrentCycle = !!lineItemId && (forceSplit || liData?.cycleDisplayMode === "split");
-  const currentCycleGoal = showCurrentCycle ? findCurrentSplitGoal(liData?.splitGoals ?? []) : null;
+  const totalBudget = liData ?? getBudget(grant);
+  const showCurrentCycle = forceSplit || (!!lineItemId && liData?.cycleDisplayMode === "split");
+  const cycleGoals = liData?.splitGoals ?? getBudgetLineItems(grant).flatMap((item) => item.splitGoals);
+  const currentCycleGoal = showCurrentCycle ? findCurrentSplitGoal(cycleGoals) : null;
+  const budget = currentCycleGoal ? {
+    ...totalBudget,
+    total: currentCycleGoal.amount,
+    spent: currentCycleGoal.spent,
+    projected: currentCycleGoal.projected,
+    remaining: currentCycleGoal.amount - currentCycleGoal.spent,
+    projectedToSpend: currentCycleGoal.spent + currentCycleGoal.projected,
+    available: currentCycleGoal.amount - currentCycleGoal.spent - currentCycleGoal.projected,
+  } : totalBudget;
   const financialCapabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
   const drawsDownBudget = financialCapabilities.drawsDownBudget;
   const isBillingMode = !drawsDownBudget && (financialCapabilities.billingEnabled || financialCapabilities.usesBillingLedger);
@@ -665,15 +676,22 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
             {/* Total row */}
             <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {drawsDownBudget ? "Total" : "Reference"}
+                {currentCycleGoal ? "Cycle budget" : drawsDownBudget ? "Total" : "Reference"}
               </span>
               <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
                 {fmtUsd(budget.total)}
               </span>
             </div>
 
+            {currentCycleGoal && (
+              <>
+                <MetricRow label="Total grant budget" value={fmtUsd(totalBudget.total)} />
+                <MetricRow label="Current cycle" value={cyclePeriodLabel(currentCycleGoal)} />
+              </>
+            )}
+
             <MetricRow
-              label={isBillingMode ? "Recorded Spend" : "Spent"}
+              label={currentCycleGoal ? "Spent this cycle" : isBillingMode ? "Recorded Spend" : "Spent"}
               value={fmtUsd(budget.spent)}
               valueClass="text-amber-700 dark:text-amber-400"
             />
@@ -685,18 +703,22 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
               />
             ) : null}
             <MetricRow
-              label={isBillingMode ? "Projected Activity" : "Projected to Spend"}
-              value={fmtUsd(budget.projectedToSpend)}
+              label={currentCycleGoal ? "Projected this cycle" : isBillingMode ? "Projected Activity" : "Projected to Spend"}
+              value={fmtUsd(currentCycleGoal ? budget.projected : budget.projectedToSpend)}
               valueClass={drawsDownBudget && budget.projectedToSpend > budget.total ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}
-              dimmed={budget.projectedToSpend === 0}
+              dimmed={(currentCycleGoal ? budget.projected : budget.projectedToSpend) === 0}
             />
             <MetricRow
-              label={drawsDownBudget ? "Available" : "Activity Total"}
+              label={currentCycleGoal && drawsDownBudget ? "Available this cycle" : drawsDownBudget ? "Available" : "Activity Total"}
               value={fmtUsd(drawsDownBudget ? budget.available : budget.projectedToSpend)}
               valueClass={availClass}
             />
           </div>
-          {currentCycleGoal && <CurrentCycleRows goal={currentCycleGoal} drawsDownBudget={drawsDownBudget} />}
+          {showCurrentCycle && !currentCycleGoal && (
+            <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+              No split budget cycle includes today. Review the cycle dates in Budget Manager.
+            </div>
+          )}
           {!lineItemId && <CompactBudgetChildRows grant={grant} drawsDownBudget={drawsDownBudget} forceSplit={forceSplit} />}
         </>
       )}

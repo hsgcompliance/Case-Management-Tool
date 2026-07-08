@@ -43,7 +43,7 @@ export const paymentsRentCertSet = secureHandler(async (req: AuthedRequest, res:
   try { requireUid(user); } catch (error: any) {
     return void res.status(401).json({ ok: false, error: error?.message || "auth_required" });
   }
-  const { enrollmentId, paymentId, status: toggle, dueDate: bodyDueDate } = parsed.data;
+  const { enrollmentId, paymentId, status: toggle, dueDate: bodyDueDate, bucket: bodyBucket, title: bodyTitle, supersedeOlderOpenCerts } = parsed.data;
   const ref = db.collection("customerEnrollments").doc(enrollmentId);
   try {
     const result = await db.runTransaction(async (tx) => {
@@ -84,7 +84,7 @@ export const paymentsRentCertSet = secureHandler(async (req: AuthedRequest, res:
       if (dueDate) {
         const ids = taskIds(paymentId, targetPaymentDate);
         const priorById = new Map(existingTasks.map((task: any) => [String(task?.id || ""), task]));
-        const title = `${targetPaymentDate.slice(0, 7)} rent cert due ${dueDate}`;
+        const title = (bodyTitle || "").trim() || `${targetPaymentDate.slice(0, 7)} rent cert due ${dueDate}`;
         const nowISO = new Date().toISOString();
         const generated = ids.map((id, index) => {
           const role = index === 0 ? "casemanager" : "compliance";
@@ -93,7 +93,7 @@ export const paymentsRentCertSet = secureHandler(async (req: AuthedRequest, res:
           return {
             id, type: title, title, defId: id, dueDate, dueMonth: dueDate.slice(0, 7),
             completed, completedAt: completed ? (prior?.completedAt || nowISO) : null,
-            status: completed ? "done" : (prior?.status || "open"), notify: true, bucket: "compliance", managed: true,
+            status: completed ? "done" : (prior?.status || "open"), notify: true, bucket: bodyBucket || "compliance", managed: true,
             notes: role === "casemanager" ? "Collect updated customer and landlord documents for rent certification." : "Prepare and send the updated rent certification or notice.",
             assignedToGroup: role, assignedToUid: role === "casemanager" ? enrollment.caseManagerId || null : null,
             assignedBy: "system", rentCertPaymentId: paymentId, targetPaymentDate,
@@ -107,6 +107,36 @@ export const paymentsRentCertSet = secureHandler(async (req: AuthedRequest, res:
       // regenerating a calculated cert for this payment. Setting any state
       // removes the opt-out.
       payments[index] = { ...payment, rentCert, rentCertOptOut: dueDate ? null : true };
+
+      // A newer certification supersedes earlier open ("due") certs on this
+      // enrollment: mark them completed and close their reminder tasks.
+      // "completed"/"effective" certs are never touched.
+      if (dueDate && supersedeOlderOpenCerts) {
+        const supersededPaymentIds = new Set<string>();
+        const supersededTaskIds = new Set<string>();
+        for (let i = 0; i < payments.length; i += 1) {
+          if (i === index) continue;
+          const other = (payments[i] || {}) as Record<string, any>;
+          const rc = other.rentCert as Record<string, any> | null | undefined;
+          if (!rc?.dueDate) continue;
+          if (String(rc.status || "due") !== "due") continue;
+          const otherTarget = String(rc.targetPaymentDate || paymentDate(other) || "").slice(0, 10);
+          if (!otherTarget || otherTarget >= targetPaymentDate) continue;
+          supersededPaymentIds.add(String(other.id || ""));
+          for (const id of Array.isArray(rc.taskIds) ? rc.taskIds : []) supersededTaskIds.add(String(id));
+          payments[i] = { ...other, rentCert: { ...rc, status: "completed" } };
+        }
+        if (supersededPaymentIds.size || supersededTaskIds.size) {
+          const completedAtISO = new Date().toISOString();
+          taskSchedule = taskSchedule.map((task: any) => {
+            const linked =
+              supersededTaskIds.has(String(task?.id || "")) ||
+              supersededPaymentIds.has(String(task?.rentCertPaymentId || ""));
+            if (!linked || task?.completed === true) return task;
+            return { ...task, completed: true, completedAt: task?.completedAt || completedAtISO, status: "done" };
+          });
+        }
+      }
       tx.set(ref, { payments, taskSchedule, taskStats: summarize(taskSchedule), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       return rentCert;
     });

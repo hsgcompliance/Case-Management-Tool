@@ -12,6 +12,7 @@ import {
   computeBudgetTotals,
   Timestamp,
 } from "../../core";
+import { randomUUID as uuid } from "node:crypto";
 import { writeLedgerEntry } from "../ledger/service";
 import {
   computeGrantLineItemOverCap,
@@ -263,8 +264,8 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
             throw new Error(
               `Destination grant missing lineItemId "${mapped}"`
             );
-          const { id, paid, paidAt, ...rest } = p;
-          return { ...rest, lineItemId: mapped, paid: false, paidAt: null };
+          const { id: _sourcePaymentId, paid, paidAt, ...rest } = p;
+          return { ...rest, id: uuid(), lineItemId: mapped, paid: false, paidAt: null };
         });
 
         const fromItems = Array.isArray(fromGrant?.budget?.lineItems)
@@ -474,6 +475,7 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
             enrollmentId: src.id,
             grantId: src.grantId,
             cutover,
+            migrationId,
           },
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
@@ -644,6 +646,7 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
             enrollmentId: destRef.id,
             grantId: toGrantId,
             cutover,
+            migrationId,
           },
           scheduleMeta: {
             ...(src.scheduleMeta || {}),
@@ -768,6 +771,13 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
 }
 
 export const migrateEnrollment = secureHandler(
+  migrateEnrollmentHandler,
+  { auth: "user", requireOrg: true, methods: ["POST", "OPTIONS"] }
+);
+
+// Canonical contract/client endpoint. Keep the legacy export above until all
+// deployed web bundles have migrated to this name.
+export const enrollmentsMigrate = secureHandler(
   migrateEnrollmentHandler,
   { auth: "user", requireOrg: true, methods: ["POST", "OPTIONS"] }
 );

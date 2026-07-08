@@ -1,4 +1,4 @@
-//web/src/entities/dialogs/EnrollmentMigrateDialog.tsx
+//web/src/entities/dialogs/enrollment/EnrollmentMigrateDialog.tsx
 "use client";
 
 import React from "react";
@@ -546,6 +546,12 @@ function EnrollmentMigrateDialogUI({
 
 // ─── Connected component ──────────────────────────────────────────────────────
 
+export type EnrollmentMigrateResult = {
+  migrationId?: string;
+  fromId?: string;
+  toId?: string;
+};
+
 export function EnrollmentMigrateDialog({
   open,
   enrollment,
@@ -562,7 +568,7 @@ export function EnrollmentMigrateDialog({
     }
   >;
   onClose: () => void;
-  onDone: () => void;
+  onDone: (result?: EnrollmentMigrateResult) => void;
 }) {
   const migrateMutation = useMigrateEnrollment();
 
@@ -640,9 +646,14 @@ export function EnrollmentMigrateDialog({
         migrateMutation.mutate(
           { ...body, customerId: String(enrollment.customerId || "") } as EnrollmentsMigrateReq,
           {
-            onSuccess: () => {
+            onSuccess: (res) => {
               toast("Enrollment migrated.", { type: "success" });
-              onDone();
+              const result = res as Record<string, unknown> | undefined;
+              onDone({
+                migrationId: String(result?.migrationId || "") || undefined,
+                fromId: String(result?.fromId || "") || undefined,
+                toId: String(result?.toId || "") || undefined,
+              });
               onClose();
             },
             onError: (e: unknown) => {

@@ -17,6 +17,7 @@ import {
   useEnrollmentsAdminDelete,
   useEnrollmentsDelete,
   useEnrollmentsPatch,
+  useEnrollmentsUndoMigration,
   useEnrollmentsVoidProjections,
 } from "@hooks/useEnrollments";
 import { toast } from "@lib/toast";
@@ -81,6 +82,23 @@ function badgeClasses(done: boolean): string {
     : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
 }
 
+type MigrationLineage = {
+  migratedTo?: { enrollmentId?: string; grantId?: string; cutover?: string; migrationId?: string } | null;
+  migratedFrom?: { enrollmentId?: string; grantId?: string; cutover?: string; migrationId?: string } | null;
+};
+
+function rowMigrationLineage(row: Enrollment): MigrationLineage {
+  return row as unknown as MigrationLineage;
+}
+
+/** Migration id recorded on either side of a migration (source has migratedTo, destination has migratedFrom). */
+function rowMigrationId(row: Enrollment): string {
+  const lineage = rowMigrationLineage(row);
+  return String(lineage.migratedTo?.migrationId || lineage.migratedFrom?.migrationId || "").trim();
+}
+
+type UndoMigrationCandidate = { migrationId: string; label: string };
+
 export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const { data: enrollments = [], isLoading, refetch } = useCustomerEnrollments(customerId);
   const { data: grants = [] } = useGrants({ limit: 500 });
@@ -117,6 +135,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const applyAction = useEnrollmentActionsApply();
   const softDelete = useEnrollmentsDelete();
   const adminDelete = useEnrollmentsAdminDelete();
+  const undoMigration = useEnrollmentsUndoMigration();
   const voidProjections = useEnrollmentsVoidProjections();
   const copyGrantTemplates = useGDriveCopyGrantTemplates();
   const paymentsSpend = usePaymentsSpend();
@@ -137,6 +156,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const [editEndDate, setEditEndDate] = React.useState("");
 
   const [migrateTarget, setMigrateTarget] = React.useState<Enrollment | null>(null);
+  const [undoCandidate, setUndoCandidate] = React.useState<UndoMigrationCandidate | null>(null);
+  const [lastMigration, setLastMigration] = React.useState<UndoMigrationCandidate | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Enrollment | null>(null);
   const [isAdminDelete, setIsAdminDelete] = React.useState(false);
   const [closeTarget, setCloseTarget] = React.useState<Enrollment | null>(null);
@@ -151,6 +172,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     patch.isPending ||
     softDelete.isPending ||
     adminDelete.isPending ||
+    undoMigration.isPending ||
     voidProjections.isPending ||
     paymentsSpend.isPending ||
     paymentsDeleteRows.isPending ||
@@ -459,6 +481,31 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     }
   };
 
+  const confirmUndoMigration = async () => {
+    if (!undoCandidate) return;
+    setError(null);
+    try {
+      await undoMigration.mutateAsync({ migrationId: undoCandidate.migrationId });
+      toast("Migration undone.", { type: "success" });
+      setUndoCandidate(null);
+      setLastMigration(null);
+      void refetch();
+    } catch (e: unknown) {
+      const msg = toApiError(e).error || "Failed to undo migration.";
+      setError(msg);
+      toast(msg, { type: "error" });
+    }
+  };
+
+  const openUndoMigration = (row: Enrollment) => {
+    const migrationId = rowMigrationId(row);
+    if (!migrationId) return;
+    setUndoCandidate({
+      migrationId,
+      label: formatEnrollmentLabel(row as unknown as Record<string, unknown>),
+    });
+  };
+
   const reopenEnrollment = async (row: Enrollment) => {
     setError(null);
     try {
@@ -513,6 +560,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     const canEditDates = true;
     const canMigrate = (!grantClosed && rowOpen) || ALLOW_MIGRATION_FOR_CLOSED_ROWS;
 
+    const undoItems = rowMigrationId(row)
+      ? [{ key: "undo-migration", label: "Undo Migration", onSelect: () => openUndoMigration(row), danger: true }]
+      : [];
+
     if (rowOpen) {
       return (
         <ActionMenu
@@ -525,6 +576,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             ...(canMigrate
               ? [{ key: "migrate", label: "Migrate", onSelect: () => setMigrateTarget(row) }]
               : []),
+            ...undoItems,
           ]}
         />
       );
@@ -540,6 +592,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           ...(canMigrate
             ? [{ key: "migrate", label: "Migrate", onSelect: () => setMigrateTarget(row) }]
             : []),
+          ...undoItems,
           { key: "delete", label: "Archive", onSelect: () => onSoftDelete(row), danger: true },
           { key: "admin-delete", label: "⚠️ Admin Delete (Permanent)", onSelect: () => onAdminDelete(row), danger: true },
         ]}
@@ -572,10 +625,28 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
                 <tr key={row.id} className="border-t border-slate-100">
                   <td className="px-3 py-2">{formatEnrollmentLabel(row as unknown as Record<string, unknown>)}</td>
                   <td className="px-3 py-2">
-                    <RowStateBadge
-                      state={isInactiveEnrollment(row) ? "inactive" : "active"}
-                      label={toOpenClosed(row)}
-                    />
+                    <div className="flex flex-col items-start gap-1">
+                      <RowStateBadge
+                        state={isInactiveEnrollment(row) ? "inactive" : "active"}
+                        label={toOpenClosed(row)}
+                      />
+                      {rowMigrationLineage(row).migratedTo ? (
+                        <span
+                          className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700"
+                          title={`Migrated out on ${rowMigrationLineage(row).migratedTo?.cutover || "?"}`}
+                        >
+                          Migrated out
+                        </span>
+                      ) : null}
+                      {rowMigrationLineage(row).migratedFrom ? (
+                        <span
+                          className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700"
+                          title={`Migrated in on ${rowMigrationLineage(row).migratedFrom?.cutover || "?"}`}
+                        >
+                          Migrated in
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-3 py-2">{fmtDateOrDash(row.startDate)}</td>
                   <td className="px-3 py-2">{fmtDateOrDash(row.endDate)}</td>
@@ -692,6 +763,31 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         </div>
       )}
 
+      {lastMigration ? (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+          <span>
+            Migrated <span className="font-medium">{lastMigration.label}</span>. If something looks wrong you can undo it.
+          </span>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              className="btn btn-xs"
+              onClick={() => setUndoCandidate(lastMigration)}
+              disabled={busy}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost border border-violet-200"
+              onClick={() => setLastMigration(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {isLoading ? (
         <div className="text-sm text-slate-600">Loading enrollments...</div>
       ) : filtered.length === 0 && search ? (
@@ -700,8 +796,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         </div>
       ) : (
         <>
-          {renderTable(activeRows, "Active Enrollments")}
-          {renderTable(inactiveRows, "Inactive Enrollments")}
+          {renderTable(activeRows, `Active Enrollments (${activeRows.length})`)}
+          {inactiveRows.length > 0
+            ? renderTable(inactiveRows, `Inactive Enrollments (${inactiveRows.length})`)
+            : null}
         </>
       )}
 
@@ -732,7 +830,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           </div>
 
           <div className="rounded border border-slate-200 p-3">
-            <div className="mb-2 text-sm font-medium">Future tasks (after today)</div>
+            <div className="mb-2 text-sm font-medium">Future tasks (after close date)</div>
             <div className="mb-2 text-xs text-slate-600">Found: {closeFutureTasks.length}</div>
             <select
               className="input"
@@ -746,7 +844,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           </div>
 
           <div className="rounded border border-slate-200 p-3">
-            <div className="mb-2 text-sm font-medium">Future payments (after today)</div>
+            <div className="mb-2 text-sm font-medium">Future payments (after close date)</div>
             <div className="mb-2 text-xs text-slate-600">Future unpaid projections: {closeFutureUnpaidPayments.length}</div>
             <select
               className="input"
@@ -835,11 +933,53 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           },
         }))}
         onClose={() => setMigrateTarget(null)}
-        onDone={() => {
+        onDone={(result) => {
+          const migrationId = String(result?.migrationId || "").trim();
+          if (migrationId) {
+            setLastMigration({
+              migrationId,
+              label: migrateTarget
+                ? formatEnrollmentLabel(migrateTarget as unknown as Record<string, unknown>)
+                : "enrollment",
+            });
+          }
           // Hook invalidation already runs; refetch immediately for instant table update.
           void refetch();
         }}
       />
+
+      <Modal
+        isOpen={!!undoCandidate}
+        title={undoCandidate ? `Undo Migration — ${undoCandidate.label}` : "Undo Migration"}
+        onClose={() => setUndoCandidate(null)}
+        widthClass="max-w-lg"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button className="btn-secondary btn-sm" onClick={() => setUndoCandidate(null)} disabled={busy}>
+              Cancel
+            </button>
+            <button className="btn btn-sm" onClick={() => void confirmUndoMigration()} disabled={busy || !undoCandidate}>
+              {undoMigration.isPending ? "Undoing..." : "Undo Migration"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <div className="rounded border border-amber-200 bg-amber-50 p-3 text-amber-800">
+            This reverses the entire migration, not just this enrollment.
+          </div>
+          <div className="text-slate-700">Undoing the migration will:</div>
+          <ul className="list-disc space-y-1 pl-5 text-slate-700">
+            <li>Restore the source enrollment exactly as it was before the migration (payments, tasks, status).</li>
+            <li>Delete the destination enrollment created by the migration.</li>
+            <li>Restore both grant budgets to their pre-migration state.</li>
+            <li>Write compensating ledger entries so financial history nets to zero.</li>
+          </ul>
+          <div className="text-xs text-slate-500">
+            Changes made to either enrollment after the migration will be lost. This action is idempotent — running it twice has no additional effect.
+          </div>
+        </div>
+      </Modal>
 
       <EnrollmentCleanupDialog
         open={!!deleteTarget}

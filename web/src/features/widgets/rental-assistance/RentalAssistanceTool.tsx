@@ -534,13 +534,18 @@ function RentalRowActionDialog({
   onConfirmDate: (date: string) => void;
   onConfirmRentCert: (values: {
     dueDate: string;
-    targetPaymentDate: string;
+    paymentId: string;
     bucket: "task" | "compliance";
     title: string;
+    supersede: boolean;
   }) => void;
 }) {
   const row = state?.row || null;
   const kind = state?.kind || null;
+  const sortedPayments = React.useMemo(
+    () => (row ? row.assistancePayments.slice().sort((a, b) => a.dueDate.localeCompare(b.dueDate)) : []),
+    [row],
+  );
   const nextPayment = React.useMemo(() => {
     if (!row) return null;
     return firstUnpaidPayment(row.assistancePayments) || row.assistancePayments[0] || null;
@@ -551,22 +556,26 @@ function RentalRowActionDialog({
       ? row?.assistanceStartDate || nextPayment?.dueDate || todayISO()
       : kind === "end" || kind === "closeFuture"
       ? row?.assistanceEndDate || nextPayment?.dueDate || todayISO()
-      : row?.nextRentCertDue || (nextPayment?.dueDate ? addMonthsISO(nextPayment.dueDate, -1) : todayISO());
-  const defaultTarget = nextPayment?.dueDate || (defaultDate ? addMonthsISO(defaultDate, 1) : todayISO());
+      : nextPayment?.dueDate
+      ? addMonthsISO(nextPayment.dueDate, -1)
+      : todayISO();
+  const defaultTargetId = nextPayment?.id || "";
 
   const [date, setDate] = React.useState(defaultDate);
   const [dueDate, setDueDate] = React.useState(defaultDate);
-  const [targetPaymentDate, setTargetPaymentDate] = React.useState(defaultTarget);
+  const [targetPaymentId, setTargetPaymentId] = React.useState(defaultTargetId);
   const [bucket, setBucket] = React.useState<"task" | "compliance">("compliance");
-  const [title, setTitle] = React.useState("Rent Certification");
+  const [title, setTitle] = React.useState("");
+  const [supersede, setSupersede] = React.useState(false);
 
   React.useEffect(() => {
     setDate(defaultDate);
     setDueDate(defaultDate);
-    setTargetPaymentDate(defaultTarget);
+    setTargetPaymentId(defaultTargetId);
     setBucket("compliance");
-    setTitle("Rent Certification");
-  }, [defaultDate, defaultTarget, state]);
+    setTitle("");
+    setSupersede(false);
+  }, [defaultDate, defaultTargetId, state]);
 
   if (!state || !row || !kind) return null;
 
@@ -602,7 +611,7 @@ function RentalRowActionDialog({
             className={kind === "closeFuture" ? "btn btn-sm bg-red-600 text-white hover:bg-red-700" : "btn btn-sm"}
             disabled={busy}
             onClick={() => {
-              if (kind === "rentCert") onConfirmRentCert({ dueDate, targetPaymentDate, bucket, title });
+              if (kind === "rentCert") onConfirmRentCert({ dueDate, paymentId: targetPaymentId, bucket, title, supersede });
               else onConfirmDate(date);
             }}
           >
@@ -620,12 +629,28 @@ function RentalRowActionDialog({
         {kind === "rentCert" ? (
           <>
             <label className="field">
-              <span className="label">Rent cert due date</span>
-              <input className="input" type="date" value={dueDate} onChange={(event) => setDueDate(event.currentTarget.value)} />
+              <span className="label">Target payment</span>
+              <select
+                className="input"
+                value={targetPaymentId}
+                onChange={(event) => {
+                  const id = event.currentTarget.value;
+                  setTargetPaymentId(id);
+                  const payment = sortedPayments.find((p) => p.id === id);
+                  if (payment?.dueDate) setDueDate(addMonthsISO(payment.dueDate, -1));
+                }}
+              >
+                <option value="">-- Select payment --</option>
+                {sortedPayments.map((payment) => (
+                  <option key={payment.id} value={payment.id}>
+                    {payment.dueDate} · {fmtCurrencyUSD(payment.amount)}{payment.paid ? " (paid)" : ""}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="field">
-              <span className="label">Target payment date</span>
-              <input className="input" type="date" value={targetPaymentDate} onChange={(event) => setTargetPaymentDate(event.currentTarget.value)} />
+              <span className="label">Rent cert due date</span>
+              <input className="input" type="date" value={dueDate} onChange={(event) => setDueDate(event.currentTarget.value)} />
             </label>
             <label className="field">
               <span className="label">Bucket</span>
@@ -636,7 +661,24 @@ function RentalRowActionDialog({
             </label>
             <label className="field">
               <span className="label">Title</span>
-              <input className="input" value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
+              <input
+                className="input"
+                value={title}
+                onChange={(event) => setTitle(event.currentTarget.value)}
+                placeholder="Default: {month} rent cert due {date}"
+              />
+            </label>
+            <label className="flex items-start gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={supersede}
+                onChange={(event) => setSupersede(event.currentTarget.checked)}
+              />
+              <span>
+                Mark older open rent certs on this enrollment completed. Leave unchecked to keep them —
+                the report always shows the soonest due open cert.
+              </span>
             </label>
           </>
         ) : (
@@ -780,32 +822,34 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
   );
 
   const applyRentCertAction = React.useCallback(
-    async (values: { dueDate: string; targetPaymentDate: string; bucket: "task" | "compliance"; title: string }) => {
+    async (values: { dueDate: string; paymentId: string; bucket: "task" | "compliance"; title: string; supersede: boolean }) => {
       const action = rowAction;
       const dueDate = safeISODate10(values.dueDate);
-      const targetPaymentDate = safeISODate10(values.targetPaymentDate);
-      if (!action || action.kind !== "rentCert" || !dueDate || !targetPaymentDate) {
-        toast("Choose valid rent cert dates.", { type: "error" });
+      if (!action || action.kind !== "rentCert" || !dueDate) {
+        toast("Choose a valid rent cert due date.", { type: "error" });
         return;
       }
 
       const row = action.row;
-      const targetPayment =
-        row.assistancePayments.find((payment) => payment.dueDate === targetPaymentDate) ||
-        firstUnpaidPayment(row.assistancePayments) ||
-        row.assistancePayments[0] ||
-        null;
+      const targetPayment = row.assistancePayments.find((payment) => payment.id === values.paymentId) || null;
+      if (!targetPayment?.id) {
+        toast("Choose the payment this rent cert applies to.", { type: "error" });
+        return;
+      }
+      const customTitle = values.title.trim();
       try {
-        if (!targetPayment?.id) {
-          toast("No payment row matches the selected rent-cert target date.", { type: "error" });
-          return;
-        }
         await rentCertMutation.mutateAsync({
           enrollmentId: row.id,
           paymentId: targetPayment.id,
           dueDate,
+          bucket: values.bucket,
+          ...(customTitle ? { title: customTitle } : {}),
+          ...(values.supersede ? { supersedeOlderOpenCerts: true } : {}),
         });
-        toast("Rent cert reminders added.", { type: "success" });
+        toast(
+          values.supersede ? "Rent cert added. Older open certs were marked completed." : "Rent cert added.",
+          { type: "success" },
+        );
         setRowAction(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to add rent cert reminders.";

@@ -361,7 +361,13 @@ var PaymentsRentCertSetBody = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
   paymentId: import_zod2.z.string().min(1),
   status: RentCertToggle.optional(),
-  dueDate: ISO10ish.nullish()
+  dueDate: ISO10ish.nullish(),
+  /** Inbox bucket for the generated reminder tasks. Default: "compliance". */
+  bucket: import_zod2.z.enum(["task", "compliance"]).optional(),
+  /** Custom title for the generated reminder tasks. Default: derived "{month} rent cert due {date}". */
+  title: import_zod2.z.string().trim().max(200).optional(),
+  /** Mark older open ("due") certs on other payments of this enrollment completed. */
+  supersedeOlderOpenCerts: import_zod2.z.boolean().optional()
 });
 var PaymentsDeleteRowsBody = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
