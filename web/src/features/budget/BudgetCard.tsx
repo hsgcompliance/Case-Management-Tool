@@ -10,7 +10,13 @@ import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItem
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import { todayISO, fmtMDY } from "@lib/date";
-import { resolveActiveCycleBudget, type BudgetCycle } from "./budgetCardModel";
+import {
+  findNextBudgetCycleStart,
+  getBudgetAvailabilityState,
+  normalizeBudgetCycleDate,
+  resolveActiveCycleBudget,
+  type BudgetCycle,
+} from "./budgetCardModel";
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, v));
@@ -220,12 +226,13 @@ type SplitGoalDisplay = {
 /** The split goal whose date range covers today, or null if the cycles don't cover the current date. */
 function findCurrentSplitGoal(goals: SplitGoalDisplay[]): SplitGoalDisplay | null {
   const active = resolveActiveCycleBudget(goals as BudgetCycle[], todayISO());
-  return active ? { id: "active", label: "Current cycle", ...active } : null;
+  return active;
 }
 
 function cyclePeriodLabel(goal: SplitGoalDisplay) {
   if (!goal.startDate && !goal.endDate) return "Date range TBD";
-  return `${goal.startDate ? fmtMDY(goal.startDate) : "TBD"} – ${goal.endDate ? fmtMDY(goal.endDate) : "TBD"}`;
+  const format = (value: string) => fmtMDY(value).replaceAll("-", "/");
+  return `${goal.startDate ? format(goal.startDate) : "TBD"} – ${goal.endDate ? format(goal.endDate) : "TBD"}`;
 }
 
 /** Full metric-row block for the current cycle — mirrors the card's own Total/Spent/Available layout. */
@@ -547,10 +554,29 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
     projectedToSpend: currentCycleGoal.spent + currentCycleGoal.projected,
     available: currentCycleGoal.amount - currentCycleGoal.spent - currentCycleGoal.projected,
   } : totalBudget;
+  const availabilityState = getBudgetAvailabilityState(budget);
+  const nextCycleStart = currentCycleGoal
+    ? findNextBudgetCycleStart(cycleGoals, currentCycleGoal.endDate)
+    : null;
   const financialCapabilities = getGrantFinancialCapabilities(grant as Record<string, unknown>);
   const drawsDownBudget = financialCapabilities.drawsDownBudget;
   const isBillingMode = !drawsDownBudget && (financialCapabilities.billingEnabled || financialCapabilities.usesBillingLedger);
   const status = String(grant.status || "active");
+
+  useEffect(() => {
+    if (!showCurrentCycle) return;
+    console.debug("[BudgetCard] current split-cycle lookup", {
+      grantId: gid,
+      budgetLineCategory: liData?.label ?? labelOverride ?? "All budget lines",
+      currentDate: todayISO(),
+      splitCycles: cycleGoals.map((goal) => ({
+        ...goal,
+        parsedStartDate: normalizeBudgetCycleDate(goal.startDate) || null,
+        parsedEndDate: normalizeBudgetCycleDate(goal.endDate) || null,
+      })),
+      selectedActiveCycle: currentCycleGoal,
+    });
+  }, [currentCycleGoal, cycleGoals, gid, labelOverride, liData?.label, showCurrentCycle]);
 
   const displayType: BudgetCardDisplayType =
     cardType === "allocation" ? "client-allocation" : cardType === "budget" ? "standard" : cardType;
@@ -651,10 +677,15 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
         >
           {status}
         </span>
+        {!isClientAlloc && !isBillableFinancialModel && availabilityState.lowFunds && (
+          <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+            Low funds
+          </span>
+        )}
       </button>
 
       {/* Progress bar */}
-      {!isClientAlloc && !isBillableFinancialModel && (
+      {!isClientAlloc && !isBillableFinancialModel && !availabilityState.unavailable && (
         <div className="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
           <BudgetProgressBar
             spent={budget.spent}
@@ -670,9 +701,43 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
         <AllocationListCardBody grant={grant} lineItemId={lineItemId} />
       ) : isBillableFinancialModel ? (
         <BillableFinancialModelCardBody grant={grant} activeEnrollments={gm?.enrollments?.active} />
+      ) : availabilityState.unavailable ? (
+        <div className="relative flex min-h-56 flex-1 items-center justify-center overflow-hidden border-t border-slate-200 bg-slate-100/80 px-5 py-8 text-center dark:border-slate-700 dark:bg-slate-950/70">
+          <div className="absolute inset-0 bg-white/30 backdrop-blur-[1.5px] dark:bg-slate-950/30" aria-hidden="true" />
+          <div className="relative z-10 w-full max-w-xs rounded-xl border border-slate-200 bg-white/90 px-5 py-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              This grant budget has been spent.
+            </div>
+            {nextCycleStart && (
+              <div className="mt-1 text-xs font-medium text-sky-700 dark:text-sky-300">
+                Funds release {nextCycleStart}
+              </div>
+            )}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Spent</div>
+                <div className="mt-1 text-base font-bold tabular-nums text-amber-700 dark:text-amber-400">{fmtUsd(budget.spent)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Projected to Spend</div>
+                <div className="mt-1 text-base font-bold tabular-nums text-blue-600 dark:text-blue-400">{fmtUsd(budget.projectedToSpend)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           <div className="border-t border-slate-100 px-4 py-2 dark:border-slate-800">
+            {currentCycleGoal && (
+              <div className="pb-2 text-center">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  {currentCycleGoal.label}
+                </div>
+                <div className="mt-0.5 text-sm font-bold tabular-nums text-slate-800 dark:text-slate-100">
+                  {cyclePeriodLabel(currentCycleGoal)}
+                </div>
+              </div>
+            )}
             {/* Total row */}
             <div className="flex items-baseline justify-between gap-2 border-b border-slate-100 py-1 dark:border-slate-800">
               <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -686,7 +751,6 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
             {currentCycleGoal && (
               <>
                 <MetricRow label="Total grant budget" value={fmtUsd(totalBudget.total)} />
-                <MetricRow label="Current cycle" value={cyclePeriodLabel(currentCycleGoal)} />
               </>
             )}
 
