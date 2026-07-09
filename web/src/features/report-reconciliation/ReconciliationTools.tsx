@@ -20,13 +20,14 @@ import {
 import { qk } from "@hooks/queryKeys";
 import { toast } from "@lib/toast";
 import type { CustomersPatchReq, CustomersUpsertReq } from "@types";
-import { type ReconciliationPacket } from "./reportProfiles";
-import { ReportUploadPanel, type ReportUploadGrant } from "@entities/report-upload/ReportUploadPanel";
+import { defaultExcludeRulesForProfile, type ReconciliationPacket } from "./reportProfiles";
+import { ReportUploadPanel, type ReportUpload, type ReportUploadGrant } from "@entities/report-upload/ReportUploadPanel";
 import {
   buildReconciliationReview,
   type ReconciliationFinding,
   type ReconciliationFindingKind,
   type ReconciliationReviewResult,
+  type ReconciliationSourceSummary,
   type ReconciliationSourceSystem,
 } from "./reconciliationReview";
 import { useReconciliationWorkspace } from "./ReconciliationWorkspaceContext";
@@ -72,9 +73,9 @@ const TOOL_CONFIG: Record<ReconciliationToolKind, {
   enrollment: {
     title: "Coordinated Entry / Enrollment Reconciliation",
     uploadLabel: "Add CE/HMIS Report",
-    help: "Review HMIS Coordinated Entry by-name and enrollment evidence against dashboard customers, enrollments, entry/exit dates, and HMIS enrollment compliance.",
+    help: "Review HMIS Coordinated Entry by-name and enrollment evidence — or any custom CSV with name/ID/grant/date columns — against dashboard customers, enrollments, entry/exit dates, and HMIS enrollment compliance.",
     findingFocus: ["Missing dashboard enrollments", "Entry/exit date differences", "HMIS enrollment compliance flags", "Grant/provider mapping review"],
-    preferredProfiles: ["coordinated_entry_by_name_list", "hmis_service_payment_report"],
+    preferredProfiles: ["coordinated_entry_by_name_list", "hmis_service_payment_report", "other_csv"],
     findingKinds: ["enrollment_missing", "entry_date_mismatch", "exit_date_mismatch", "enrollment_compliance_missing", "grant_mapping_review", "report_row_diagnostic"],
   },
   payment: {
@@ -88,9 +89,9 @@ const TOOL_CONFIG: Record<ReconciliationToolKind, {
   identity: {
     title: "Customer Identity Review",
     uploadLabel: "Add Identity Source",
-    help: "Review customer existence and identity links across HMIS IDs, dashboard customer IDs, names, DOBs, and future Caseworthy IDs.",
+    help: "Review customer existence and identity links across CWIDs, HMIS IDs, dashboard customer IDs, names, and DOBs. Accepts HMIS/Caseworthy exports or any custom CSV with identity columns.",
     findingFocus: ["Names/IDs present in reports but missing from dashboard", "Low-confidence customer matches", "HMIS/Caseworthy ID patch candidates", "Duplicate/same-name identity review"],
-    preferredProfiles: ["coordinated_entry_by_name_list", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total"],
+    preferredProfiles: ["coordinated_entry_by_name_list", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total", "other_csv"],
     findingKinds: ["customer_missing", "customer_possible_match", "report_row_diagnostic"],
   },
 };
@@ -961,6 +962,147 @@ type QueueRow = {
   warning?: string;
 };
 
+const ENROLL_ACTION_KINDS: ReconciliationFindingKind[] = ["enrollment_missing", "entry_date_mismatch", "exit_date_mismatch"];
+
+function OverviewChip({ tone, children, title }: { tone: "neutral" | "good" | "warn" | "bad" | "info"; children: React.ReactNode; title?: string }) {
+  const toneClass = {
+    neutral: "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300",
+    good: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300",
+    warn: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+    bad: "border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300",
+    info: "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300",
+  }[tone];
+  return <span className={`rounded border px-2 py-0.5 text-[11px] ${toneClass}`} title={title}>{children}</span>;
+}
+
+/**
+ * Immediate per-uploaded-file results: match counts, issue counts, and quick
+ * actions — visible as soon as a report is uploaded, before the operator digs
+ * into individual findings. Also surfaces uploads this tool is ignoring.
+ */
+function UploadOverviewPanel({
+  uploads,
+  acceptedProfileIds,
+  review,
+  findings,
+  databaseLine,
+  loadingDatabase,
+  onUseAsCustomCsv,
+  onSelectFileFindings,
+  onCreateCustomersForFile,
+  onBulkEnrollForFile,
+  onOpenCompare,
+}: {
+  uploads: ReportUpload[];
+  acceptedProfileIds: string[];
+  review: ReconciliationReviewResult;
+  findings: ReconciliationFinding[];
+  databaseLine: string;
+  loadingDatabase: boolean;
+  onUseAsCustomCsv: (uploadId: string) => void;
+  onSelectFileFindings: (sourceFile: string) => void;
+  onCreateCustomersForFile: (sourceFile: string) => void;
+  onBulkEnrollForFile: (sourceFile: string) => void;
+  onOpenCompare: () => void;
+}) {
+  const summaryByFile = React.useMemo(
+    () => new Map<string, ReconciliationSourceSummary>(review.sourceSummaries.map((summary) => [summary.sourceFile, summary])),
+    [review.sourceSummaries],
+  );
+  const findingsByFile = React.useMemo(() => {
+    const map = new Map<string, ReconciliationFinding[]>();
+    for (const finding of findings) map.set(finding.sourceFile, [...(map.get(finding.sourceFile) ?? []), finding]);
+    return map;
+  }, [findings]);
+  const activeUploads = uploads.filter((upload) => upload.enabled !== false);
+  const skippedSheetCount = uploads.length - activeUploads.length;
+  const ignoredUploads = activeUploads.filter((upload) => !acceptedProfileIds.includes(upload.config.profileId));
+  const reviewedUploads = activeUploads.filter((upload) => acceptedProfileIds.includes(upload.config.profileId));
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Report overview</div>
+        <div className="text-xs text-slate-500">{loadingDatabase ? "Loading dashboard data for matching…" : databaseLine}</div>
+      </div>
+
+      {!activeUploads.length ? (
+        <div className="mt-3 rounded border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500 dark:border-slate-800">
+          Upload a report above — matched rows, issues, and bulk actions appear here immediately.
+        </div>
+      ) : null}
+
+      {ignoredUploads.map((upload) => {
+        const label = upload.sheetName ? `${upload.fileName} / ${upload.sheetName}` : upload.fileName;
+        return (
+          <div key={upload.id} className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="min-w-0">
+              <span className="font-semibold">{label}</span>
+              <span className="ml-2">is detected as “{upload.packet.profileLabel}”, which this tool does not review — its {upload.packet.summary.totalRows} rows are being ignored.</span>
+            </div>
+            <button type="button" className="btn btn-secondary btn-xs shrink-0" onClick={() => onUseAsCustomCsv(upload.id)}>
+              Treat as custom CSV
+            </button>
+          </div>
+        );
+      })}
+
+      {reviewedUploads.map((upload) => {
+        const summary = summaryByFile.get(upload.packet.sourceFile);
+        const label = upload.sheetName ? `${upload.fileName} / ${upload.sheetName}` : upload.fileName;
+        if (!summary) return null;
+        const fileFindings = findingsByFile.get(summary.sourceFile) ?? [];
+        const createCount = fileFindings.filter((finding) => finding.kind === "customer_missing").length;
+        const enrollCount = fileFindings.filter((finding) => ENROLL_ACTION_KINDS.includes(finding.kind)).length;
+        const clean = summary.rows > 0 && !fileFindings.length;
+        return (
+          <div key={upload.id} className="mt-3 rounded border border-slate-200 p-3 dark:border-slate-800">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100" title={label}>{label}</div>
+                <div className="text-[11px] text-slate-500">{summary.profileLabel}</div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <OverviewChip tone="neutral">{summary.rows} rows{summary.excludedRows ? ` (+${summary.excludedRows} excluded)` : ""}</OverviewChip>
+                {summary.matchedExact ? <OverviewChip tone="good" title="Matched a dashboard customer by ID or name + DOB">{summary.matchedExact} matched</OverviewChip> : null}
+                {summary.matchedReview ? <OverviewChip tone="info" title="Matched below 95% confidence — review identity">{summary.matchedReview} low-confidence</OverviewChip> : null}
+                {summary.missing ? <OverviewChip tone="bad" title="No dashboard customer found for these rows">{summary.missing} not in dashboard</OverviewChip> : null}
+                {summary.noIdentity ? <OverviewChip tone="warn" title="Rows without a usable name or ID">{summary.noIdentity} no identity</OverviewChip> : null}
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {clean ? (
+                <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">All rows reconciled — no issues for this tool.</span>
+              ) : fileFindings.length ? (
+                <button type="button" className="btn btn-secondary btn-xs" onClick={() => onSelectFileFindings(summary.sourceFile)}>
+                  Select {fileFindings.length} issue{fileFindings.length === 1 ? "" : "s"}
+                </button>
+              ) : (
+                <span className="text-xs text-slate-500">{loadingDatabase ? "Matching against dashboard data…" : "No reviewable rows for this tool."}</span>
+              )}
+              {createCount ? (
+                <button type="button" className="btn btn-secondary btn-xs" onClick={() => onCreateCustomersForFile(summary.sourceFile)}>
+                  Create {createCount} customer{createCount === 1 ? "" : "s"}
+                </button>
+              ) : null}
+              {enrollCount ? (
+                <button type="button" className="btn btn-secondary btn-xs" onClick={() => onBulkEnrollForFile(summary.sourceFile)}>
+                  Bulk enroll / fix dates ({enrollCount})
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-ghost btn-xs" onClick={onOpenCompare}>Compare rows</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {skippedSheetCount ? (
+        <div className="mt-2 text-[11px] text-slate-400">{skippedSheetCount} helper/skipped sheet{skippedSheetCount === 1 ? "" : "s"} excluded from review.</div>
+      ) : null}
+    </div>
+  );
+}
+
 function buildQueueRows(findings: ReconciliationFinding[]): QueueRow[] {
   return findings.flatMap((finding) => {
     const actions = buildActionPreviews(finding);
@@ -1204,6 +1346,7 @@ function findingSearchText(finding: ReconciliationFinding) {
     record?.customerIdentity.lastName,
     record?.customerIdentity.fullName,
     record?.customerIdentity.hmisId,
+    record?.customerIdentity.cwId,
     record?.customerIdentity.caseworthyId,
     record?.customerIdentity.dob,
     record?.raw?.cwId,
@@ -2456,6 +2599,27 @@ function ReconciliationToolMain({
     const visibleIds = new Set(visibleFindings.map((finding) => finding.id));
     setSelectedFindingIds((current) => new Set(Array.from(current).filter((id) => !visibleIds.has(id))));
   }, [visibleFindings]);
+  const findingsForFile = React.useCallback(
+    (sourceFile: string, kinds?: ReconciliationFindingKind[]) =>
+      filteredFindings.filter((finding) => finding.sourceFile === sourceFile && (!kinds || kinds.includes(finding.kind))),
+    [filteredFindings],
+  );
+  const selectFileFindings = React.useCallback((sourceFile: string) => {
+    setSelectedFindingIds(new Set(findingsForFile(sourceFile).map((finding) => finding.id)));
+  }, [findingsForFile]);
+  const createCustomersForFile = React.useCallback((sourceFile: string) => {
+    setSelectedFindingIds(new Set(findingsForFile(sourceFile, ["customer_missing"]).map((finding) => finding.id)));
+    setBulkCustomerImportOpen(true);
+  }, [findingsForFile]);
+  const bulkEnrollForFile = React.useCallback((sourceFile: string) => {
+    setSelectedFindingIds(new Set(findingsForFile(sourceFile, ENROLL_ACTION_KINDS).map((finding) => finding.id)));
+    setBulkEnrollmentOpen(true);
+  }, [findingsForFile]);
+  const useAsCustomCsv = React.useCallback((uploadId: string) => {
+    const generic = workspace.profiles.find((profile) => profile.id === "other_csv");
+    if (!generic) return;
+    workspace.updateUploadConfig(uploadId, { profileId: generic.id, excludeRules: defaultExcludeRulesForProfile(generic) });
+  }, [workspace]);
   const refreshCollection = React.useCallback(async (key: DatabaseCollectionKey) => {
     setRefreshingCollection(key);
     try {
@@ -2518,6 +2682,7 @@ function ReconciliationToolMain({
         onRemove={workspace.removeUpload}
         onClear={workspace.clearUploads}
         toolKind={kind}
+        acceptedProfileIds={config.preferredProfiles}
         databaseConfig={
           <DatabaseFilterPanel
             value={filterState.databaseFilters}
@@ -2525,35 +2690,32 @@ function ReconciliationToolMain({
             toolKind={kind}
             onRefreshCollection={(key) => void refreshCollection(key)}
             refreshingCollection={refreshingCollection}
+            counts={{
+              customers: database.customers.length,
+              enrollments: database.enrollments.length,
+              grants: database.grants.length,
+              paymentQueue: database.paymentQueueItems.length,
+              ledger: database.ledger.length,
+            }}
+            loading={dashboard.sharedDataLoading || paymentQueueLoading || ledgerLoading}
             embedded
           />
         }
       />
 
-      <div className="grid gap-3 md:grid-cols-5">
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Dashboard Data</div>
-          <div className="mt-2 text-sm text-slate-700 dark:text-slate-200">
-            {dashboard.sharedDataLoading || paymentQueueLoading || ledgerLoading ? "Loading filtered data..." : `${database.customers.length} customers - ${database.enrollments.length} enrollments - ${database.paymentQueueItems.length} queue - ${database.ledger.length} ledger`}
-          </div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Relevant Packets</div>
-          <div className="mt-2 text-2xl font-semibold">{relevantPackets.length}</div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Report Rows</div>
-          <div className="mt-2 text-2xl font-semibold">{review.summary.reportRows}</div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Findings</div>
-          <div className="mt-2 text-2xl font-semibold">{filteredFindings.length}</div>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Severity</div>
-          <div className="mt-2 text-sm">Errors {review.summary.bySeverity.error} - Warnings {review.summary.bySeverity.warning}</div>
-        </div>
-      </div>
+      <UploadOverviewPanel
+        uploads={workspace.uploads}
+        acceptedProfileIds={config.preferredProfiles}
+        review={review}
+        findings={filteredFindings}
+        databaseLine={`${database.customers.length} customers · ${database.enrollments.length} enrollments · ${database.paymentQueueItems.length} queue · ${database.ledger.length} ledger · ${filteredFindings.length} findings (${review.summary.bySeverity.error} errors, ${review.summary.bySeverity.warning} warnings)`}
+        loadingDatabase={dashboard.sharedDataLoading || paymentQueueLoading || ledgerLoading}
+        onUseAsCustomCsv={useAsCustomCsv}
+        onSelectFileFindings={selectFileFindings}
+        onCreateCustomersForFile={createCustomersForFile}
+        onBulkEnrollForFile={bulkEnrollForFile}
+        onOpenCompare={() => setCompareOpen(true)}
+      />
 
       <ReviewFilterPanel findings={toolFindings} value={filterState} onChange={onFilterChange} />
 

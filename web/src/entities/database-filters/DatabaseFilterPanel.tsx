@@ -16,6 +16,9 @@ type Props = {
   onRefreshCollection?: (key: DatabaseCollectionKey) => void;
   refreshingCollection?: DatabaseCollectionKey | null;
   embedded?: boolean;
+  /** Rows currently in scope per collection (after filters), shown next to each toggle. */
+  counts?: Partial<Record<DatabaseCollectionKey, number>>;
+  loading?: boolean;
 };
 
 const COLLECTION_LABELS: Record<DatabaseCollectionKey, string> = {
@@ -24,6 +27,14 @@ const COLLECTION_LABELS: Record<DatabaseCollectionKey, string> = {
   grants: "Grants",
   paymentQueue: "Payment queue",
   ledger: "Ledger",
+};
+
+const COLLECTION_HINTS: Record<DatabaseCollectionKey, string> = {
+  customers: "Dashboard customer docs matched against report identities.",
+  enrollments: "Grant enrollments compared for existence and entry/exit dates.",
+  grants: "Grant names/aliases used for provider → grant matching.",
+  paymentQueue: "Scheduled/queued payments, scoped to the report's months.",
+  ledger: "Posted/paid rows, scoped to the report's months.",
 };
 
 const TOOL_COLLECTIONS: Record<NonNullable<Props["toolKind"]>, DatabaseCollectionKey[]> = {
@@ -106,7 +117,7 @@ function NumberField({ label, value, onChange }: { label: string; value: number 
   );
 }
 
-export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollection, refreshingCollection, embedded = false }: Props) {
+export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollection, refreshingCollection, embedded = false, counts, loading = false }: Props) {
   const [open, setOpen] = React.useState(false);
   const keys = toolKind ? TOOL_COLLECTIONS[toolKind] : (Object.keys(COLLECTION_LABELS) as DatabaseCollectionKey[]);
   const activeCount = keys.reduce((sum, key) => sum + countActiveFilters(key, value), 0);
@@ -127,8 +138,8 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
     <div className={embedded ? "rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950" : "absolute right-0 z-30 mt-2 w-[min(92vw,760px)] rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-950"}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Database filters</div>
-          <div className="text-xs text-slate-500">Limit cached rows for this review. Eventual upgrade: move these inputs into backend report queries.</div>
+          <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Database collections for this review</div>
+          <div className="text-xs text-slate-500">Choose which dashboard collections are pulled and how they are narrowed. Filters apply to cached data before matching runs.</div>
         </div>
         <button type="button" className="btn btn-ghost btn-xs" onClick={reset}>Reset</button>
       </div>
@@ -136,16 +147,28 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
       <div className="space-y-3">
         {keys.map((key) => {
           const enabled = value[key].enabled;
+          const activeFilters = countActiveFilters(key, value);
+          const count = counts?.[key];
           return (
-            <section key={key} className="rounded border border-slate-200 p-3 dark:border-slate-800">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <label className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <section key={key} className={["rounded border p-3 transition", enabled ? "border-slate-200 dark:border-slate-800" : "border-dashed border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/30"].join(" ")}>
+              <div className={["flex items-center justify-between gap-2", enabled ? "mb-3" : ""].join(" ")}>
+                <label className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
                   <input type="checkbox" checked={enabled} onChange={(event) => patch(key, { enabled: event.currentTarget.checked } as never)} />
-                  {COLLECTION_LABELS[key]}
+                  <span className={enabled ? "" : "text-slate-400 dark:text-slate-500"}>{COLLECTION_LABELS[key]}</span>
+                  {enabled && count != null ? (
+                    <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-normal text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      {loading ? "loading…" : `${count.toLocaleString()} in scope`}
+                    </span>
+                  ) : null}
+                  {!enabled ? <span className="text-[11px] font-normal text-slate-400">not pulled for this review</span> : null}
                 </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">{countActiveFilters(key, value)} active</span>
-                  {onRefreshCollection ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  {enabled && activeFilters ? (
+                    <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[11px] text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300">
+                      {activeFilters} filter{activeFilters === 1 ? "" : "s"} on
+                    </span>
+                  ) : null}
+                  {enabled && onRefreshCollection ? (
                     <button
                       type="button"
                       className="btn btn-ghost btn-xs"
@@ -157,8 +180,9 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                   ) : null}
                 </div>
               </div>
+              {enabled ? <div className="mb-2 text-[11px] text-slate-400">{COLLECTION_HINTS[key]}</div> : null}
 
-              {key === "customers" ? (
+              {enabled && key === "customers" ? (
                 <div className="grid gap-2 sm:grid-cols-3">
                   <SearchField label="Customer search" value={value.customers.search} placeholder="Name, ID, HMIS, CW, CM" onChange={(search) => patch("customers", { search })} />
                   <label className="text-xs">
@@ -191,7 +215,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                 </div>
               ) : null}
 
-              {key === "enrollments" ? (
+              {enabled && key === "enrollments" ? (
                 <div className="grid gap-2 sm:grid-cols-3">
                   <SearchField label="Enrollment search" value={value.enrollments.search} placeholder="Customer, grant, program" onChange={(search) => patch("enrollments", { search })} />
                   <label className="text-xs">
@@ -214,7 +238,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                 </div>
               ) : null}
 
-              {key === "grants" ? (
+              {enabled && key === "grants" ? (
                 <div className="grid gap-2 sm:grid-cols-3">
                   <SearchField label="Grant search" value={value.grants.search} placeholder="Name, type, FY" onChange={(search) => patch("grants", { search })} />
                   <label className="text-xs">
@@ -232,7 +256,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                 </div>
               ) : null}
 
-              {key === "paymentQueue" ? (
+              {enabled && key === "paymentQueue" ? (
                 <div className="grid gap-2 sm:grid-cols-4">
                   <SearchField label="Queue search" value={value.paymentQueue.search} placeholder="Customer, vendor, grant" onChange={(search) => patch("paymentQueue", { search })} />
                   <label className="text-xs">
@@ -275,7 +299,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                 </div>
               ) : null}
 
-              {key === "ledger" ? (
+              {enabled && key === "ledger" ? (
                 <div className="grid gap-2 sm:grid-cols-4">
                   <SearchField label="Ledger search" value={value.ledger.search} placeholder="Customer, vendor, grant" onChange={(search) => patch("ledger", { search })} />
                   <label className="text-xs">

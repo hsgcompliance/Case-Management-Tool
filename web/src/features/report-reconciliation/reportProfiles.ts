@@ -70,6 +70,7 @@ export type NormalizedReportRecord = {
   recordKind: string;
   customerIdentity: {
     dashboardCustomerId: string;
+    cwId: string;
     hmisId: string;
     caseworthyId: string;
     firstName: string;
@@ -136,6 +137,28 @@ const MONEY_CLEANUP_RE = /[$,\s]/g;
 const WORD_RE = /[a-z0-9]+/g;
 
 export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
+  {
+    id: "other_csv",
+    label: "Other / Custom CSV",
+    recordKind: "customCustomerEnrollment",
+    active: true,
+    schemaVersion: 1,
+    notes: "Generic customer and enrollment import. Every field is optional; map any relevant columns before review.",
+    sourceAliases: ["other", "custom", "csv", "spreadsheet", "tracker"],
+    fields: {
+      customerId: { required: false, type: "identity", aliases: ["Customer ID", "Customer Id", "Dashboard Customer ID", "Dashboard ID"] },
+      cwId: { required: false, type: "identity", aliases: ["CWID", "CW ID", "CaseWorthy ID", "Caseworthy ID"] },
+      hmisId: { required: false, type: "identity", aliases: ["HMIS ID", "HMIS Client Identifier", "Client ID"] },
+      customerName: { required: false, type: "identity", aliases: ["Full Name", "Customer Name", "Client Name", "Name"] },
+      firstName: { required: false, type: "identity", aliases: ["First Name", "Given Name"] },
+      lastName: { required: false, type: "identity", aliases: ["Last Name", "Surname"] },
+      dob: { required: false, type: "date", aliases: ["DOB", "Date of Birth", "Birth Date"] },
+      grant: { required: false, type: "grant", aliases: ["Grant", "Program", "Project"] },
+      enrollment: { required: false, type: "grant", aliases: ["Enrollment", "Enrollment Name", "Project Enrollment"] },
+      entryDate: { required: false, type: "date", aliases: ["Enrollment Start", "Entry Date", "Start Date", "Begin Date", "TSS Begin Date"] },
+      exitDate: { required: false, type: "date", aliases: ["Enrollment End", "Exit Date", "End Date", "TSS End Date"] },
+    },
+  },
   {
     id: "rental_assistance_invoice_request",
     label: "Rental Assistance Invoice Request Workbook",
@@ -446,7 +469,11 @@ export function normalizeReportProfiles(raw: unknown): ReportSourceProfile[] {
       schemaVersion: Number(candidate.schemaVersion || 1),
     } satisfies ReportSourceProfile];
   });
-  return profiles.length ? profiles : DEFAULT_REPORT_SOURCE_PROFILES;
+  if (!profiles.length) return DEFAULT_REPORT_SOURCE_PROFILES;
+  const genericProfile = DEFAULT_REPORT_SOURCE_PROFILES.find((profile) => profile.id === "other_csv");
+  return genericProfile && !profiles.some((profile) => profile.id === genericProfile.id)
+    ? [genericProfile, ...profiles]
+    : profiles;
 }
 
 export function getActiveReportProfiles(profiles: ReportSourceProfile[]): ReportSourceProfile[] {
@@ -750,7 +777,7 @@ export function normalizeReportRow(
     : "";
   const reportNameValue = firstText(values.get("customerName"), parsedFeName);
   const sourceGrant = String(source.sourceGrant ?? "").trim();
-  const reportGrant = firstText(values.get("grant"), values.get("providerId"), values.get("serviceProvider"), sourceGrant, serviceName);
+  const reportGrant = firstText(values.get("grant"), values.get("enrollment"), values.get("providerId"), values.get("serviceProvider"), sourceGrant, serviceName);
   const reportNameParts = namePartsFromReportName(reportNameValue);
 
   return {
@@ -760,6 +787,7 @@ export function normalizeReportRow(
     recordKind: profile.recordKind,
     customerIdentity: {
       dashboardCustomerId: String(values.get("customerId") ?? "").trim(),
+      cwId: String(values.get("cwId") ?? "").trim(),
       hmisId: String(values.get("hmisId") ?? values.get("clientId") ?? "").trim(),
       caseworthyId: String(values.get("caseworthyId") ?? "").trim(),
       firstName: firstName || reportNameParts.firstName,
@@ -769,7 +797,7 @@ export function normalizeReportRow(
     },
     enrollmentEvidence: {
       programId: firstText(values.get("programId"), values.get("providerId"), values.get("serviceProvider"), values.get("program"), sourceGrant),
-      projectName: firstText(values.get("projectName"), values.get("providerId"), values.get("serviceProvider"), values.get("program"), reportGrant),
+      projectName: firstText(values.get("projectName"), values.get("enrollment"), values.get("providerId"), values.get("serviceProvider"), values.get("program"), reportGrant),
       entryDate: normalizeDate(values.get("entryDate") ?? values.get("projectEntryDate") ?? values.get("dateIdentified")),
       exitDate: normalizeDate(values.get("exitDate") ?? values.get("projectExitDate")),
       destination: String(values.get("destination") ?? "").trim(),

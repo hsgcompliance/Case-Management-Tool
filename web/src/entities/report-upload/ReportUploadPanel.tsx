@@ -76,6 +76,8 @@ export type ReportUploadPanelProps = {
   onClear: () => void;
   toolKind?: "enrollment" | "payment" | "identity";
   databaseConfig?: React.ReactNode;
+  /** Profile IDs the hosting tool reviews; uploads mapped to other profiles get an "ignored" warning. */
+  acceptedProfileIds?: string[];
 };
 
 const ACCEPT = ".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -206,12 +208,14 @@ function UploadsList({
   onConfigure,
   onRemove,
   onClear,
+  acceptedProfileIds,
 }: {
   uploads: ReportUpload[];
   selectedId: string;
   onConfigure: (id: string) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
+  acceptedProfileIds?: string[];
 }) {
   if (!uploads.length) {
     return <div className="mt-3 text-center text-xs text-slate-400">No reports uploaded yet.</div>;
@@ -242,6 +246,7 @@ function UploadsList({
         {uploads.map((upload) => {
           const profile = upload.profileCandidates[0]?.profile;
           const requiredMissing = upload.packet.summary.requiredMissingCount;
+          const ignoredByTool = upload.enabled !== false && acceptedProfileIds && !acceptedProfileIds.includes(upload.config.profileId);
           const label = upload.sheetName || upload.fileName;
           const active = upload.id === selectedId;
           return (
@@ -264,6 +269,7 @@ function UploadsList({
                 <span className="block truncate text-slate-500">
                   {upload.enabled === false ? "Skipped" : (upload.packet.profileLabel || profile?.label || "Unknown type")} - {upload.packet.summary.totalRows} rows
                   {requiredMissing ? <span className="ml-1 text-amber-600">- {requiredMissing} required unmapped</span> : null}
+                  {ignoredByTool ? <span className="ml-1 text-amber-600">- ignored by this tool</span> : null}
                 </span>
               </button>
               <button
@@ -522,7 +528,7 @@ function AdvancedConfigPreview({
                       <>
                         <td className="border border-slate-200 px-2 py-1 font-mono text-[11px] dark:border-slate-800">{filterRow.sourceRowNumber}</td>
                         <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.customerIdentity.fullName || `${normalized.customerIdentity.firstName} ${normalized.customerIdentity.lastName}`.trim()}</td>
-                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.customerIdentity.hmisId || normalized.customerIdentity.caseworthyId}</td>
+                        <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.customerIdentity.cwId || normalized.customerIdentity.hmisId || normalized.customerIdentity.caseworthyId}</td>
                         <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.transactionDate || normalized.enrollmentEvidence.entryDate}</td>
                         <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.amount ?? ""}</td>
                         <td className="border border-slate-200 px-2 py-1 dark:border-slate-800">{normalized.paymentEvidence.grant || normalized.enrollmentEvidence.projectName}</td>
@@ -635,6 +641,7 @@ function ConfigureTab({
   onSetUploadEnabled?: ReportUploadPanelProps["onSetUploadEnabled"];
   onSetWorkbookEnabled?: ReportUploadPanelProps["onSetWorkbookEnabled"];
   toolKind?: ReportUploadPanelProps["toolKind"];
+  acceptedProfileIds?: string[];
 }) {
   const [sheetPage, setSheetPage] = React.useState(0);
   const [configTool, setConfigTool] = React.useState<"header" | "fields" | "grants" | "excludes">("fields");
@@ -661,8 +668,18 @@ function ConfigureTab({
       fieldOverrides: selected.config.fieldOverrides,
       excludeRules,
     });
-    return { included: filtered.included.length, excluded: filtered.excluded.length };
+    return { included: filtered.included.length, excluded: filtered.excluded.length, previewRows: filtered.included.slice(0, 3) };
   }, [dataRows, excludeRules, headers, profile, selected.config.fieldOverrides, selected.config.headerRowIndex]);
+  const previewNormalized = React.useMemo(
+    () => filterCounts.previewRows.map((filterRow) => normalizeReportRow(profile, headers, filterRow.row, {
+      sourceFile: selected.fileName,
+      sourceRowNumber: filterRow.sourceRowNumber,
+      sourceType: profile.id,
+      sourceGrant: [...(selected.config.manualGrantSignals ?? []), selected.sheetName ? `${selected.fileName} / ${selected.sheetName}` : selected.fileName].filter(Boolean).join(" | "),
+    }, selected.config.fieldOverrides)),
+    [filterCounts.previewRows, headers, profile, selected.config.fieldOverrides, selected.config.manualGrantSignals, selected.fileName, selected.sheetName],
+  );
+  const ignoredByTool = acceptedProfileIds && !acceptedProfileIds.includes(selected.config.profileId);
   const visibleSheetTabs = React.useMemo(() => {
     const workbookSheets = selected.workbookKey ? uploads.filter((upload) => upload.workbookKey === selected.workbookKey) : uploads;
     const pageSize = 8;
@@ -805,6 +822,23 @@ function ConfigureTab({
                 Advanced config
               </button>
             </div>
+            {ignoredByTool ? (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                <span>This tool does not review “{profile.label}” reports — rows from this upload are ignored. Change the report type, or map it as a custom CSV.</span>
+                {profiles.some((item) => item.id === "other_csv") ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs shrink-0"
+                    onClick={() => {
+                      const generic = profiles.find((item) => item.id === "other_csv");
+                      if (generic) onUpdateConfig(selected.id, { profileId: generic.id, excludeRules: defaultExcludeRulesForProfile(generic) });
+                    }}
+                  >
+                    Use custom CSV mapping
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             {toolWarning ? (
               <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{toolWarning}</div>
             ) : null}
@@ -970,6 +1004,43 @@ function ConfigureTab({
           ) : null}
         </div>
       </div>
+      <div className="rounded border border-slate-200 bg-slate-50/60 p-2 dark:border-slate-800 dark:bg-slate-900/40">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Live mapping preview</div>
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => setAdvancedOpen(true)}>View all rows</button>
+        </div>
+        {previewNormalized.length ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead className="text-[11px] uppercase text-slate-500">
+                <tr>
+                  {["Row", "Name", "CWID/HMIS", "DOB", "Grant/Provider", "Entry", "Exit", "Date", "Amount"].map((header) => (
+                    <th key={header} className="px-2 py-1">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {previewNormalized.map((normalized, index) => (
+                  <tr key={index} className="border-t border-slate-200 dark:border-slate-800">
+                    <td className="px-2 py-1 font-mono text-[11px] text-slate-400">{filterCounts.previewRows[index]?.sourceRowNumber}</td>
+                    <td className="max-w-[180px] truncate px-2 py-1">{normalized.customerIdentity.fullName || `${normalized.customerIdentity.firstName} ${normalized.customerIdentity.lastName}`.trim() || "-"}</td>
+                    <td className="px-2 py-1">{normalized.customerIdentity.cwId || normalized.customerIdentity.hmisId || normalized.customerIdentity.caseworthyId || "-"}</td>
+                    <td className="px-2 py-1">{normalized.customerIdentity.dob || "-"}</td>
+                    <td className="max-w-[180px] truncate px-2 py-1">{normalized.paymentEvidence.grant || normalized.enrollmentEvidence.projectName || "-"}</td>
+                    <td className="px-2 py-1">{normalized.enrollmentEvidence.entryDate || "-"}</td>
+                    <td className="px-2 py-1">{normalized.enrollmentEvidence.exitDate || "-"}</td>
+                    <td className="px-2 py-1">{normalized.paymentEvidence.transactionDate || "-"}</td>
+                    <td className="px-2 py-1">{normalized.paymentEvidence.amount ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-2 text-center text-[11px] text-slate-400">No included rows to preview — check the header row and exclude filters.</div>
+        )}
+      </div>
+
       {advancedOpen ? (
         <AdvancedConfigPreview
           upload={selected}
@@ -999,6 +1070,7 @@ export function ReportUploadPanel({
   onClear,
   toolKind,
   databaseConfig,
+  acceptedProfileIds,
 }: ReportUploadPanelProps) {
   const [tab, setTab] = React.useState<"upload" | "configure" | "database">("upload");
   const [selectedId, setSelectedId] = React.useState("");
@@ -1044,7 +1116,7 @@ export function ReportUploadPanel({
         <div>
           <Dropzone reading={reading} onFiles={onFiles} />
           {error ? <div className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
-          <UploadsList uploads={uploads} selectedId={selectedId} onConfigure={configure} onRemove={onRemove} onClear={onClear} />
+          <UploadsList uploads={uploads} selectedId={selectedId} onConfigure={configure} onRemove={onRemove} onClear={onClear} acceptedProfileIds={acceptedProfileIds} />
         </div>
       ) : tab === "configure" ? (
         <ConfigureTab
@@ -1058,6 +1130,7 @@ export function ReportUploadPanel({
           onSetUploadEnabled={onSetUploadEnabled}
           onSetWorkbookEnabled={onSetWorkbookEnabled}
           toolKind={toolKind}
+          acceptedProfileIds={acceptedProfileIds}
         />
       ) : (
         <div>{databaseConfig}</div>

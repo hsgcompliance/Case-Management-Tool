@@ -65,7 +65,7 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
         patch: { hmisId },
       });
     }
-    const caseworthyId = text(record.customerIdentity.caseworthyId);
+    const caseworthyId = text(record.customerIdentity.cwId || record.customerIdentity.caseworthyId);
     if (canPreviewIdentityPatch && caseworthyId && caseworthyId !== currentCaseworthyId) {
       out.push({
         id: `${finding.id}:push-caseworthy-id`,
@@ -108,7 +108,7 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
     const lastName = text(identity.lastName) || parsed.lastName;
     if (firstName && lastName) {
       const hmisId = text(identity.hmisId);
-      const cwId = text(identity.caseworthyId);
+      const cwId = text(identity.cwId || identity.caseworthyId);
       const dob = text(identity.dob);
       const name = `${firstName} ${lastName}`.trim();
       out.push({
