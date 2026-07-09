@@ -8,6 +8,11 @@ import {
   type ReconciliationPacket,
   type ReportDiagnosticSeverity,
 } from "./reportProfiles";
+import {
+  billableCategoriesFromGrants,
+  classifyFinancialEdgeRow,
+  type FinancialEdgeRowClassification,
+} from "./reportParsingEngines";
 
 export type ReconciliationFindingKind =
   | "customer_missing"
@@ -77,6 +82,8 @@ export type ReconciliationSourceSummary = {
   profileLabel: string;
   rows: number;
   excludedRows: number;
+  /** FE rows classified as non-client spend (payroll/overhead/balance) and skipped from payment matching. */
+  scrapRows?: number;
   /** Rows matched to a dashboard customer at >=0.95 confidence (ID or name+DOB). */
   matchedExact: number;
   /** Rows matched below 0.95 — needs identity review. */
@@ -127,14 +134,17 @@ function sourceSystemLabel(system: ReconciliationSourceSystem) {
   return "Uploaded report";
 }
 
+// Matching cents are ABSOLUTE: FE report balances are negative/parenthesized
+// expenses while queue/ledger amounts are positive, so amount matching must
+// compare magnitudes or FE rows never match the dashboard.
 function cents(value: unknown) {
   const amount = normalizeAmount(value);
-  return amount == null ? null : Math.round(amount * 100);
+  return amount == null ? null : Math.abs(Math.round(amount * 100));
 }
 
 function rowCents(row: Record<string, unknown>) {
   const amountCents = Number(row.amountCents);
-  if (Number.isFinite(amountCents)) return Math.round(amountCents);
+  if (Number.isFinite(amountCents)) return Math.abs(Math.round(amountCents));
   return cents(row.amount ?? row.amountAbs);
 }
 
@@ -531,7 +541,63 @@ function findReportPaymentCandidates(source: NormalizedReportRecord, candidates:
     .sort((a, b) => b.score - a.score);
 }
 
-function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<string, unknown>, customerId?: string) {
+/**
+ * Recurring-amount month sets: report side keyed by name|amountCents, database
+ * side keyed by customerId-or-name|amountCents. When a report row's exact
+ * amount recurs in 2+ months on BOTH sides (an enrollment's payment schedule
+ * lining up with report actuals), that alignment is a first-class match signal.
+ */
+type PaymentScheduleContext = {
+  reportMonths: Map<string, Set<string>>;
+  dbMonths: Map<string, Set<string>>;
+};
+
+function addScheduleMonth(map: Map<string, Set<string>>, key: string, month: string) {
+  if (!key || !month) return;
+  const set = map.get(key) ?? new Set<string>();
+  set.add(month);
+  map.set(key, set);
+}
+
+function paymentRowWho(row: Record<string, unknown>) {
+  return text(row.customerId) || normalizeCustomerName(row.customerNameAtSpend ?? row.customerName ?? row.customer ?? "");
+}
+
+function buildPaymentScheduleContext(
+  paymentRecords: Array<{ record: NormalizedReportRecord }>,
+  dashboardPaymentRows: Array<Record<string, unknown>>,
+): PaymentScheduleContext {
+  const reportMonths = new Map<string, Set<string>>();
+  for (const { record } of paymentRecords) {
+    const name = recordNameKey(record);
+    const amount = cents(record.paymentEvidence.amount);
+    if (!name || amount == null) continue;
+    addScheduleMonth(reportMonths, `${name}|${amount}`, record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate));
+  }
+  const dbMonths = new Map<string, Set<string>>();
+  for (const row of dashboardPaymentRows) {
+    const amount = rowCents(row);
+    if (amount == null) continue;
+    const who = paymentRowWho(row);
+    if (!who) continue;
+    addScheduleMonth(dbMonths, `${who}|${amount}`, paymentRowMonth(row));
+  }
+  return { reportMonths, dbMonths };
+}
+
+function scheduleAlignmentMonths(record: NormalizedReportRecord, row: Record<string, unknown>, schedule: PaymentScheduleContext) {
+  const amount = cents(record.paymentEvidence.amount);
+  const itemAmount = rowCents(row);
+  if (amount == null || itemAmount == null || Math.abs(amount - itemAmount) > 1) return 0;
+  const reportSet = schedule.reportMonths.get(`${recordNameKey(record)}|${amount}`);
+  const dbSet = schedule.dbMonths.get(`${paymentRowWho(row)}|${itemAmount}`);
+  if (!reportSet || !dbSet) return 0;
+  let overlap = 0;
+  for (const month of reportSet) if (dbSet.has(month)) overlap += 1;
+  return overlap;
+}
+
+function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<string, unknown>, customerId?: string, schedule?: PaymentScheduleContext) {
   const amount = cents(record.paymentEvidence.amount);
   const serviceMonth = record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate);
   const itemAmount = rowCents(row);
@@ -587,6 +653,14 @@ function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<strin
     reasons.push("grant/project overlap");
   }
 
+  if (schedule) {
+    const alignedMonths = scheduleAlignmentMonths(record, row, schedule);
+    if (alignedMonths >= 2) {
+      score += 15;
+      reasons.push(`payment schedule alignment (${alignedMonths} months at this amount)`);
+    }
+  }
+
   if (lower(row.queueStatus) === "void") {
     score -= 20;
     warnings.push("queue item is void");
@@ -595,9 +669,9 @@ function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<strin
   return { row, score, reasons, warnings, amountDiffCents: amount != null && itemAmount != null ? amount - itemAmount : null };
 }
 
-function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Array<Record<string, unknown>>, customerId?: string) {
+function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Array<Record<string, unknown>>, customerId?: string, schedule?: PaymentScheduleContext) {
   return paymentRows
-    .map((row) => scorePaymentCandidate(record, row, customerId))
+    .map((row) => scorePaymentCandidate(record, row, customerId, schedule))
     .filter((candidate) => candidate.score >= 35)
     .sort((a, b) => b.score - a.score)
     .map((candidate) => ({
@@ -676,13 +750,34 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
   const customerIndexes = buildCustomerIndexes(dashboard.customers);
   const paymentRecords = packets.flatMap((packet) => packet.records.map((record) => ({ packet, record })))
     .filter(({ record }) => record.paymentEvidence.amount != null);
-  const fePaymentRecords = paymentRecords.filter(({ record }) => sourceSystemFor(record.sourceType, record.recordKind) === "financial_edge");
+
+  // Classify FE rows (keep/scrap + named/unposted) against billable categories
+  // sourced from grant budget line items; scrap rows (payroll/overhead/balance)
+  // are skipped from payment matching but stay counted for visibility.
+  const billableCategories = billableCategoriesFromGrants(dashboard.grants);
+  const feClassifications = new Map<NormalizedReportRecord, FinancialEdgeRowClassification>();
+  const classifyFe = (record: NormalizedReportRecord) => {
+    let classification = feClassifications.get(record);
+    if (!classification) {
+      classification = classifyFinancialEdgeRow(
+        { description: record.paymentEvidence.vendor, reference: record.paymentEvidence.reference },
+        { billableCategories },
+      );
+      feClassifications.set(record, classification);
+    }
+    return classification;
+  };
+
+  const fePaymentRecords = paymentRecords.filter(({ record }) =>
+    sourceSystemFor(record.sourceType, record.recordKind) === "financial_edge" && classifyFe(record).keep);
   const hmisPaymentRecords = paymentRecords.filter(({ record }) => {
     const system = sourceSystemFor(record.sourceType, record.recordKind);
     return system === "hmis" || system === "caseworthy";
   });
   const feKeys = new Set(fePaymentRecords.map(({ record }) => reportPaymentKey(record)));
   const matchedHmisKeys = new Set<string>();
+  const allDashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
+  const scheduleContext = buildPaymentScheduleContext(paymentRecords, allDashboardPaymentRows);
 
   const sourceSummaries: ReconciliationSourceSummary[] = [];
   for (const packet of packets) {
@@ -703,6 +798,11 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
     for (const record of packet.records) {
       const sourceSystem = sourceSystemFor(record.sourceType, record.recordKind);
       const sourceLabel = sourceSystemLabel(sourceSystem);
+      const feClassification = sourceSystem === "financial_edge" && record.paymentEvidence.amount != null ? classifyFe(record) : null;
+      if (feClassification && !feClassification.keep) {
+        sourceSummary.scrapRows = (sourceSummary.scrapRows ?? 0) + 1;
+        continue;
+      }
       const match = findCustomer(record, customerIndexes);
       const customer = match.customer;
       const customerId = customer ? text(customer.id) : "";
@@ -918,6 +1018,8 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         const isFinancialEdge = sourceSystem === "financial_edge";
         const isHmisLike = sourceSystem === "hmis" || sourceSystem === "caseworthy";
         if (!isFinancialEdge && !isHmisLike) continue;
+        const isUnposted = feClassification?.paymentKind === "unposted";
+        const unpostedCriteria = isUnposted && feClassification ? [`FE row classified as unposted/pending: ${feClassification.reason}.`] : [];
         let hmisBridgeMatch: ReturnType<typeof findCustomer> | null = null;
         let hmisBridgeRecord: NormalizedReportRecord | null = null;
 
@@ -930,8 +1032,8 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               kind: "payment_missing_hmis",
               sourceSystem,
               sourceSystemLabel: sourceLabel,
-              severity: "error",
-              confidence: 0.78,
+              severity: isUnposted ? "warning" : "error",
+              confidence: isUnposted ? 0.6 : 0.78,
               sourceFile: record.sourceFile,
               sourceProfileId: packet.profileId,
               sourceProfileLabel: packet.profileLabel,
@@ -940,12 +1042,22 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               customerId: customerId || undefined,
               customerLabel: customer ? customerLabel(customer) : undefined,
               reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
-              explanation: ["Financial Edge has this payment in the selected date frame, but no HMIS/Caseworthy service row matched by name/ID, amount, and month."],
-              proposedAction: "Enter or correct the HMIS/Caseworthy service/payment row, or document why FE should be corrected.",
+              explanation: isUnposted
+                ? ["Financial Edge shows an unposted/pending AP invoice (no client name) in the selected date frame, and no HMIS/Caseworthy service row matched by amount + month. It may simply not be entered yet."]
+                : ["Financial Edge has this payment in the selected date frame, but no HMIS/Caseworthy service row matched by name/ID, amount, and month."],
+              proposedAction: isUnposted
+                ? "Track the unposted invoice; once posted with a client reference, re-run reconciliation."
+                : "Enter or correct the HMIS/Caseworthy service/payment row, or document why FE should be corrected.",
               reportRecord: record,
               matchedCustomer: customer ?? undefined,
               match: {
-                criteria: ["FE is source of truth for payment reconciliation.", "No HMIS/Caseworthy row matched by name/ID + service month + amount."],
+                criteria: [
+                  "FE is source of truth for payment reconciliation.",
+                  ...unpostedCriteria,
+                  isUnposted
+                    ? "No HMIS/Caseworthy row matched by service month + amount (no name available)."
+                    : "No HMIS/Caseworthy row matched by name/ID + service month + amount.",
+                ],
                 customerMethod: match.method || undefined,
                 customerConfidence: match.confidence || undefined,
                 paymentCandidateCount: 0,
@@ -1032,8 +1144,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         const bridgeCriteria = hmisBridgeRecord && hmisBridgeMatch?.customer && !customer
           ? [`FE row matched HMIS/Caseworthy row by payment evidence, then dashboard customer resolved from HMIS row by ${hmisBridgeMatch.method}.`]
           : [];
-        const dashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
-        const candidates = findPaymentCandidates(record, dashboardPaymentRows, effectiveCustomerId || customerId || undefined);
+        const candidates = findPaymentCandidates(record, allDashboardPaymentRows, effectiveCustomerId || customerId || undefined, scheduleContext);
         if (!candidates.length) {
           findings.push({
             id: findingId("payment_missing_dashboard", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
@@ -1050,7 +1161,9 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             customerId: effectiveCustomerId || customerId || undefined,
             customerLabel: effectiveCustomer ? customerLabel(effectiveCustomer) : customer ? customerLabel(customer) : undefined,
             reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
-            explanation: [`${sourceLabel} payment/service row did not match cached dashboard payment queue or ledger rows by customer, amount, and month.`],
+            explanation: isUnposted
+              ? [`${sourceLabel} unposted/pending AP invoice (no client name) did not match cached dashboard payment queue or ledger rows by amount and month.`]
+              : [`${sourceLabel} payment/service row did not match cached dashboard payment queue or ledger rows by customer, amount, and month.`],
             proposedAction: "Review for missing payment schedule, unmatched FE transaction, or mapping issue.",
             reportRecord: record,
             matchedCustomer: effectiveCustomer ?? customer ?? undefined,
@@ -1058,6 +1171,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               criteria: [
                 effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "No dashboard customer match was available for payment matching.",
                 ...bridgeCriteria,
+                ...unpostedCriteria,
                 "No payment queue or ledger row matched amount and service month.",
               ],
               customerMethod: effectiveCustomerMethod || undefined,
@@ -1094,6 +1208,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
                 criteria: [
                   effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "Payment matched without a confirmed dashboard customer.",
                   ...bridgeCriteria,
+                  ...unpostedCriteria,
                   ...((best as Record<string, unknown>)._matchReasons as string[] ?? []),
                   ...((best as Record<string, unknown>)._matchWarnings as string[] ?? []),
                 ],
@@ -1126,6 +1241,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               criteria: [
                 effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "Payment matched without a confirmed dashboard customer.",
                 ...bridgeCriteria,
+                ...unpostedCriteria,
                 `Found ${candidates.length} scored queue/ledger candidates.`,
                 ...(((candidates[0] as Record<string, unknown>)._matchReasons as string[] | undefined) ?? []),
               ],
@@ -1137,6 +1253,28 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           }
         }
       }
+    }
+
+    if (sourceSummary.scrapRows) {
+      findings.push({
+        id: `fe_scrap::${packet.sourceFile}::${packet.profileId}`,
+        kind: "report_row_diagnostic",
+        sourceSystem: "financial_edge",
+        sourceSystemLabel: sourceSystemLabel("financial_edge"),
+        severity: "info",
+        confidence: 1,
+        sourceFile: packet.sourceFile,
+        sourceProfileId: packet.profileId,
+        sourceProfileLabel: packet.profileLabel,
+        sourceRowNumber: null,
+        recordKind: packet.summary.recordKind,
+        reportValue: `${sourceSummary.scrapRows} rows skipped`,
+        explanation: [
+          `${sourceSummary.scrapRows} Financial Edge row(s) were classified as non-client spend (payroll, overhead, balance/summary, or an unrecognized category with no client name) and were skipped from payment matching.`,
+          "Nothing was deleted — the rows remain in the uploaded report; they are just not treated as client payments.",
+        ],
+        proposedAction: "Spot-check the skipped categories in the uploaded report if a client payment appears to be missing.",
+      });
     }
   }
 

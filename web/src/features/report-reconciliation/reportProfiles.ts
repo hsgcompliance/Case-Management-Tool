@@ -262,11 +262,15 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
         enabled: true,
       },
       {
+        // Leading GL category stems only — scrap rows carry "-Direct Svcs" /
+        // "-Rental Assistance" suffixes, so never key on those. "Unposted" /
+        // "accounts payable" rows are intentionally NOT excluded: they are real
+        // pending client payments matched by amount + date.
         id: "fe_admin_payroll_allocation_description",
-        label: "Payroll or allocation description",
+        label: "Payroll/benefits/overhead description",
         fieldKey: "description",
         operator: "regex",
-        value: "\\b(payroll|allocation)\\b",
+        value: "\\b(payroll|salar|wage|fica|accrued|med(ical)?\\s+ins|work(ers)?\\s+comp|unemploy|401k|retire|pension|fringe|benefit|space\\s+cost|allocation|indirect|overhead|communicat|depreciat|occupancy)",
         flags: "i",
         enabled: true,
       },
@@ -280,11 +284,20 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
         enabled: true,
       },
       {
-        id: "fe_beginning_balance_reference",
-        label: "Beginning balance reference",
+        id: "fe_summary_balance_description",
+        label: "Balance/totals summary description",
+        fieldKey: "description",
+        operator: "regex",
+        value: "(beginning|ending)\\s+balance|adjustments?\\s+to\\s+balance|totals?\\s+for|subtotal|journal\\s+entr",
+        flags: "i",
+        enabled: true,
+      },
+      {
+        id: "fe_summary_balance_reference",
+        label: "Balance/totals summary reference",
         fieldKey: "reference",
-        operator: "contains",
-        value: "beginning balance",
+        operator: "regex",
+        value: "(beginning|ending)\\s+balance|adjustments?\\s+to\\s+balance|totals?\\s+for|subtotal|journal\\s+entr",
         flags: "i",
         enabled: true,
       },
