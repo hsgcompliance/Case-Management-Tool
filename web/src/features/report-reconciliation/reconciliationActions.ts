@@ -3,7 +3,17 @@
 import type { ReconciliationFinding } from "./reconciliationReview";
 
 export type ReconciliationActionTarget = "customers" | "customerEnrollments" | "paymentQueue" | "ledger" | "userTasks";
-export type ReconciliationActionKind = "push_hmis_id" | "push_cw_id" | "push_dob" | "create_customer" | "review_provider_mapping" | "create_payment_review_task";
+export type ReconciliationActionKind =
+  | "push_hmis_id"
+  | "push_cw_id"
+  | "push_dob"
+  | "create_customer"
+  | "review_provider_mapping"
+  | "create_payment_review_task"
+  | "post_queue_payment"
+  | "patch_queue_amount"
+  | "void_queue_payment"
+  | "patch_enrollment_dates";
 
 export type ReconciliationActionPreview = {
   id: string;
@@ -155,10 +165,91 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
       });
     }
   }
+  if ((finding.kind === "entry_date_mismatch" || finding.kind === "exit_date_mismatch") && finding.enrollmentId && finding.reportValue) {
+    const isEntry = finding.kind === "entry_date_mismatch";
+    // Patch the key the matched doc already uses; fall back to the canonical
+    // contract fields (startDate/endDate).
+    const dateKeys = isEntry ? ["entryDate", "startDate", "enrolledAt"] : ["exitDate", "endDate", "closedAt"];
+    const dateKey = dateKeys.find((key) => text(finding.matchedEnrollment?.[key])) ?? (isEntry ? "startDate" : "endDate");
+    out.push({
+      id: `${finding.id}:patch-enrollment-date`,
+      kind: "patch_enrollment_dates",
+      label: isEntry ? "Set enrollment entry date to report value" : "Set enrollment exit date to report value",
+      target: "customerEnrollments",
+      targetId: finding.enrollmentId,
+      sourceValue: finding.reportValue,
+      currentValue: finding.dashboardValue || "(blank)",
+      proposedValue: finding.reportValue,
+      confidence: finding.confidence,
+      warning: "Confirm the report date is authoritative before overwriting the dashboard enrollment date.",
+      executable: true,
+      patch: { [dateKey]: finding.reportValue },
+    });
+  }
+  if (finding.kind === "payment_unpaid_dashboard" && finding.paymentId) {
+    out.push({
+      id: `${finding.id}:post-queue-payment`,
+      kind: "post_queue_payment",
+      label: "Post queue item to ledger (mark paid)",
+      target: "paymentQueue",
+      targetId: finding.paymentId,
+      sourceValue: finding.reportValue || "",
+      currentValue: finding.dashboardValue || "pending",
+      proposedValue: "posted (ledger entry created)",
+      confidence: finding.confidence,
+      warning: "Creates a ledger entry and marks the queue item paid. Confirm the report evidence describes this exact payment.",
+      executable: true,
+    });
+  }
+  if (finding.kind === "payment_amount_mismatch" && record) {
+    const best = finding.matchedPaymentCandidates?.[0];
+    const bestId = text(best?.id);
+    const isQueueRow = text(best?._matchSource) === "payment queue";
+    const isPaid = text(best?.queueStatus).toLowerCase() === "posted" || best?.paid === true || text(best?.ledgerEntryId) !== "";
+    const reportAmount = Math.abs(Number(record.paymentEvidence.amount ?? NaN));
+    if (best && bestId && isQueueRow && !isPaid && Number.isFinite(reportAmount) && reportAmount > 0) {
+      out.push({
+        id: `${finding.id}:patch-queue-amount`,
+        kind: "patch_queue_amount",
+        label: "Set queue amount to report amount",
+        target: "paymentQueue",
+        targetId: bestId,
+        sourceValue: String(record.paymentEvidence.amount),
+        currentValue: finding.dashboardValue || String(best.amount ?? ""),
+        proposedValue: reportAmount.toFixed(2),
+        confidence: finding.confidence,
+        warning: "Confirm the report amount is correct before overwriting the queue item amount.",
+        executable: true,
+        patch: { amount: reportAmount, amountAbs: reportAmount, localModificationReason: "reconciliation: matched report amount" },
+      });
+    }
+  }
+  if (finding.kind === "payment_missing_report") {
+    const row = finding.matchedPaymentCandidates?.[0];
+    const rowId = text(row?.id);
+    const isPendingQueue = text(row?.queueStatus).toLowerCase() === "pending"
+      || (finding.recordKind === "payment queue" && !text(row?.ledgerEntryId) && text(row?.queueStatus).toLowerCase() !== "posted");
+    if (rowId && isPendingQueue) {
+      out.push({
+        id: `${finding.id}:void-queue-payment`,
+        kind: "void_queue_payment",
+        label: "Void scheduled payment (confirmed cancelled)",
+        target: "paymentQueue",
+        targetId: rowId,
+        sourceValue: "(no report row)",
+        currentValue: finding.dashboardValue || "scheduled",
+        proposedValue: "void",
+        confidence: finding.confidence,
+        warning: "Destructive: only void if this scheduled payment is confirmed cancelled — the uploaded report may simply not cover it.",
+        executable: true,
+      });
+    }
+  }
   if (
     finding.kind === "payment_missing_dashboard" ||
     finding.kind === "payment_missing_hmis" ||
     finding.kind === "payment_missing_financial_edge" ||
+    finding.kind === "payment_missing_report" ||
     finding.kind === "payment_possible_match"
   ) {
     out.push({

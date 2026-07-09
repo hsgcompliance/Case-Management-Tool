@@ -7,9 +7,11 @@ import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/type
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
 import FullPageModal from "@entities/ui/FullPageModal";
 import type { ExportColumn } from "@entities/ui/dashboardStyle/SmartExportButton";
-import { usePaymentQueueItemsForMonths } from "@hooks/usePaymentQueue";
+import { usePaymentQueueItemsForMonths, usePatchPaymentQueueItem, usePostPaymentQueueToLedger, useVoidPaymentQueueItem } from "@hooks/usePaymentQueue";
+import type { PaymentQueuePatchReq } from "@client/paymentQueue";
 import { useLedgerEntriesForMonths } from "@hooks/useLedger";
 import { usePatchCustomers, useUpsertCustomers } from "@hooks/useCustomers";
+import { useEnrollmentsPatch } from "@hooks/useEnrollments";
 import DatabaseFilterPanel from "@entities/database-filters/DatabaseFilterPanel";
 import {
   DEFAULT_DATABASE_FILTER_CONFIG,
@@ -84,7 +86,7 @@ const TOOL_CONFIG: Record<ReconciliationToolKind, {
     help: "Review Financial Project Activity and HMIS Service Provided reports against dashboard payment queue and schedule rows.",
     findingFocus: ["Missing dashboard payment/ledger rows", "Ambiguous payment candidates", "Amount/date/month differences", "Grant/provider/payment-source mapping review"],
     preferredProfiles: ["financial_edge_project_activity", "rental_assistance_invoice_request", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total"],
-    findingKinds: ["payment_missing_hmis", "payment_missing_dashboard", "payment_missing_financial_edge", "payment_missing_report", "payment_possible_match", "payment_amount_mismatch", "grant_mapping_review", "report_row_diagnostic"],
+    findingKinds: ["payment_missing_hmis", "payment_missing_dashboard", "payment_missing_financial_edge", "payment_missing_report", "payment_unpaid_dashboard", "payment_possible_match", "payment_amount_mismatch", "grant_mapping_review", "report_row_diagnostic"],
   },
   identity: {
     title: "Customer Identity Review",
@@ -229,6 +231,10 @@ function FindingList({
 function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActionPreview[]; onApplied?: () => void }) {
   const patchCustomers = usePatchCustomers();
   const upsertCustomers = useUpsertCustomers();
+  const patchQueueItem = usePatchPaymentQueueItem();
+  const postQueueItem = usePostPaymentQueueToLedger();
+  const voidQueueItem = useVoidPaymentQueueItem();
+  const enrollmentsPatch = useEnrollmentsPatch();
   const queryClient = useQueryClient();
   const [runningId, setRunningId] = React.useState("");
 
@@ -254,6 +260,28 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
         await upsertCustomers.mutateAsync([action.create] as CustomersUpsertReq);
         await refresh();
         toast("Customer created.", { type: "success" });
+      } else if (action.kind === "patch_enrollment_dates") {
+        if (!action.targetId || !action.patch) throw new Error("Enrollment date action is missing its target or patch.");
+        await enrollmentsPatch.mutateAsync([{ id: action.targetId, patch: action.patch }]);
+        await refresh();
+        toast(`${action.label} applied.`, { type: "success" });
+      } else if (action.kind === "post_queue_payment") {
+        if (!action.targetId) throw new Error("Queue post action is missing its target.");
+        if (!window.confirm(`Post this queue item to the ledger (mark paid)?\n\nCurrent: ${action.currentValue}\nProposed: ${action.proposedValue}`)) return;
+        await postQueueItem.mutateAsync({ id: action.targetId });
+        await refresh();
+        toast("Queue item posted to ledger.", { type: "success" });
+      } else if (action.kind === "patch_queue_amount") {
+        if (!action.targetId || !action.patch) throw new Error("Queue amount action is missing its target or patch.");
+        await patchQueueItem.mutateAsync({ id: action.targetId, body: action.patch as PaymentQueuePatchReq });
+        await refresh();
+        toast("Queue amount updated.", { type: "success" });
+      } else if (action.kind === "void_queue_payment") {
+        if (!action.targetId) throw new Error("Queue void action is missing its target.");
+        if (!window.confirm("Void this scheduled payment? Only proceed if it is confirmed cancelled — the uploaded report may simply not cover it.")) return;
+        await voidQueueItem.mutateAsync({ id: action.targetId, body: { reason: "reconciliation: no report evidence" } });
+        await refresh();
+        toast("Queue item voided.", { type: "success" });
       }
     } catch (error) {
       toast(error instanceof Error ? error.message : `Failed to apply ${action.label}.`, { type: "error" });
@@ -263,7 +291,7 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
   };
 
   if (!actions.length) return null;
-  const busy = patchCustomers.isPending || upsertCustomers.isPending || Boolean(runningId);
+  const busy = patchCustomers.isPending || upsertCustomers.isPending || patchQueueItem.isPending || postQueueItem.isPending || voidQueueItem.isPending || enrollmentsPatch.isPending || Boolean(runningId);
   return (
     <div className="mt-4 rounded border border-sky-200 bg-sky-50 p-3 dark:border-sky-900 dark:bg-sky-950/40">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Database actions</div>
@@ -314,6 +342,7 @@ function reviewStatusForFinding(finding: ReconciliationFinding) {
   if (finding.kind === "payment_missing_financial_edge") return "HMIS/CASEWORTHY ONLY";
   if (finding.kind === "payment_missing_dashboard") return finding.sourceSystem === "hmis" || finding.sourceSystem === "caseworthy" ? "HMIS/CASEWORTHY ONLY" : "FE ONLY";
   if (finding.kind === "payment_missing_report") return "DASHBOARD ONLY";
+  if (finding.kind === "payment_unpaid_dashboard") return "UNPAID IN DASHBOARD";
   if (finding.kind === "customer_missing" || finding.kind === "enrollment_missing") return "NO DATABASE MATCH";
   if (finding.kind === "customer_possible_match") return "PARTIAL MATCH";
   if (finding.kind === "entry_date_mismatch" || finding.kind === "exit_date_mismatch") return "REVIEW";
