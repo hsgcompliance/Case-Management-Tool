@@ -428,7 +428,7 @@ export const REPORT_NAME_ORDER_LABELS: Record<ReportNameOrder, string> = {
  * common tracker format); otherwise word order is read as First … Last.
  */
 export function parseReportPersonName(input: unknown, order: ReportNameOrder = "auto") {
-  const raw = String(input ?? "").replace(/[([{][^)\]}]*[)\]}]?/g, " ").replace(/\s+/g, " ").trim();
+  const raw = String(input ?? "").replace(/[([{][^)\]}]*[)\]}]?/g, " ").replace(/[:;]/g, " ").replace(/\s+/g, " ").trim();
   if (!raw) return { firstName: "", lastName: "", fullName: "" };
   const commaParts = raw.split(",").map((part) => part.trim()).filter(Boolean);
   let firstName = "";

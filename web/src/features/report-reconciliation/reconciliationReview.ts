@@ -247,9 +247,16 @@ function namePartsFromRecord(record: NormalizedReportRecord) {
   return { first: parts[0] ?? "", last: parts.length > 1 ? parts[parts.length - 1] : "" };
 }
 
+// FE references truncate multi-word last names ("C. Red Hat …" parses as last
+// name "Red"), so a truncated last name may be a word-boundary prefix of the
+// full one. Only used inside review-capped / amount+month-gated match paths.
+function lastNamesMatch(left: string, right: string) {
+  return left === right || left.startsWith(`${right} `) || right.startsWith(`${left} `);
+}
+
 function namesMatchByFirstInitialAndLast(left: { first: string; last: string }, right: { first: string; last: string }) {
   if (!left.first || !left.last || !right.first || !right.last) return false;
-  if (left.last !== right.last) return false;
+  if (!lastNamesMatch(left.last, right.last)) return false;
   if (left.first === right.first) return true;
   return left.first.length === 1 && right.first.startsWith(left.first)
     || right.first.length === 1 && left.first.startsWith(right.first);
