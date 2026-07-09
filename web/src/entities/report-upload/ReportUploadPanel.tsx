@@ -630,6 +630,7 @@ function ConfigureTab({
   onSetUploadEnabled,
   onSetWorkbookEnabled,
   toolKind,
+  acceptedProfileIds,
 }: {
   uploads: ReportUpload[];
   profiles: ReportSourceProfile[];

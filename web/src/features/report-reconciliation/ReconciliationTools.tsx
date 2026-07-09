@@ -84,7 +84,7 @@ const TOOL_CONFIG: Record<ReconciliationToolKind, {
     help: "Review Financial Project Activity and HMIS Service Provided reports against dashboard payment queue and schedule rows.",
     findingFocus: ["Missing dashboard payment/ledger rows", "Ambiguous payment candidates", "Amount/date/month differences", "Grant/provider/payment-source mapping review"],
     preferredProfiles: ["financial_edge_project_activity", "rental_assistance_invoice_request", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total"],
-    findingKinds: ["payment_missing_hmis", "payment_missing_dashboard", "payment_missing_financial_edge", "payment_possible_match", "payment_amount_mismatch", "grant_mapping_review", "report_row_diagnostic"],
+    findingKinds: ["payment_missing_hmis", "payment_missing_dashboard", "payment_missing_financial_edge", "payment_missing_report", "payment_possible_match", "payment_amount_mismatch", "grant_mapping_review", "report_row_diagnostic"],
   },
   identity: {
     title: "Customer Identity Review",
@@ -313,6 +313,7 @@ function reviewStatusForFinding(finding: ReconciliationFinding) {
   if (finding.kind === "payment_missing_hmis") return "HMIS MISSING";
   if (finding.kind === "payment_missing_financial_edge") return "HMIS/CASEWORTHY ONLY";
   if (finding.kind === "payment_missing_dashboard") return finding.sourceSystem === "hmis" || finding.sourceSystem === "caseworthy" ? "HMIS/CASEWORTHY ONLY" : "FE ONLY";
+  if (finding.kind === "payment_missing_report") return "DASHBOARD ONLY";
   if (finding.kind === "customer_missing" || finding.kind === "enrollment_missing") return "NO DATABASE MATCH";
   if (finding.kind === "customer_possible_match") return "PARTIAL MATCH";
   if (finding.kind === "entry_date_mismatch" || finding.kind === "exit_date_mismatch") return "REVIEW";
