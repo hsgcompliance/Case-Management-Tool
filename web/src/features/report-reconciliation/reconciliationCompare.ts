@@ -496,14 +496,27 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
     looseTotals.set(loosePaymentKey(unit), bySource);
   }
 
+  const reportMonths = new Set(
+    units
+      .filter((unit) => unit.sourceKind === "report")
+      .map((unit) => unit.month || monthOf(unit.date))
+      .filter(Boolean),
+  );
   const rows: CompareRow[] = [];
   for (const { key, group, method } of rowGroups) {
     const groupHasFe = hasFinancialEdge(group);
     const groupHasHmis = hasHmisLike(group);
     const groupHasDatabase = group.some((unit) => unit.sourceKind === "database");
-    if (!groupHasFe && !groupHasHmis) continue;
-    if (!groupHasFe && groupHasDatabase) continue;
+    const groupHasReport = group.some((unit) => unit.sourceKind === "report");
     const first = group[0];
+    // Database-only groups render only inside the uploaded reports' month
+    // window — "scheduled in dashboard, absent from the report" stays visible
+    // without dumping the whole queue/ledger. Budget rollups never render alone.
+    if (!groupHasReport) {
+      const groupMonth = first.month || monthOf(first.date);
+      if (!groupMonth || !reportMonths.has(groupMonth)) continue;
+      if (group.every((unit) => unit.sourceId === "budgetProjected" || unit.sourceId === "budgetSpent")) continue;
+    }
     const sourceIds = new Set(group.map((unit) => unit.sourceId));
     const hasReport = group.some((unit) => unit.sourceKind === "report");
     const hasDatabase = group.some((unit) => unit.sourceKind === "database");
@@ -520,7 +533,9 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
       ? (amountMismatch ? "mismatch" : method === "identity" && (!hasExternalPaidSignal || hasDashboardPaid) ? "matched" : "partial")
       : amountMismatch ? "mismatch"
       : partial ? "partial" : "unmatched";
-    const matchStatus = status === "matched"
+    const matchStatus = !groupHasReport
+      ? "Dashboard only — no matching report row"
+      : status === "matched"
       ? "Matched by CWID/HMIS/name + date/month + amount"
       : amountMismatch
         ? "Name/ID and month match, but amounts differ"
@@ -548,7 +563,9 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
           !groupHasDatabase ? "Dashboard queue/ledger missing for FE row" : "",
           amountMismatch ? "Amount mismatch against FE" : "",
         ].filter(Boolean).join("; ")
-      : groupHasHmis ? "HMIS/Caseworthy row has no matching FE row; verify cancelled/stale data entry." : "";
+      : groupHasHmis ? "HMIS/Caseworthy row has no matching FE row; verify cancelled/stale data entry."
+      : !groupHasReport ? "Dashboard queue/ledger row has no report evidence in the uploaded month range; verify unpaid or cancelled."
+      : "";
     rows.push({
       id: `payment:${key}`,
       mode: "payments",

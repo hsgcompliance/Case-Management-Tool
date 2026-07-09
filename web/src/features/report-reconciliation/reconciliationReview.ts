@@ -24,6 +24,7 @@ export type ReconciliationFindingKind =
   | "payment_missing_dashboard"
   | "payment_missing_hmis"
   | "payment_missing_financial_edge"
+  | "payment_missing_report"
   | "payment_possible_match"
   | "payment_amount_mismatch"
   | "grant_mapping_review"
@@ -344,6 +345,20 @@ function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof
   }
 
   const recordParts = namePartsFromRecord(record);
+  // FE references only yield "J. Doe" — match by first initial + exact last
+  // name when exactly ONE dashboard customer qualifies. Capped at 0.6 so it is
+  // always review-flagged and never powers identity writeback on its own.
+  if (recordParts.first.length === 1 && recordParts.last) {
+    const initialMatches = indexes.all.filter((customer) => namesMatchByFirstInitialAndLast(recordParts, namePartsFromCustomer(customer)));
+    if (initialMatches.length === 1) {
+      const dobMatch = dobAwareNameConfidence(dob, customerDob(initialMatches[0]));
+      return {
+        customer: initialMatches[0],
+        confidence: Math.min(0.6, dobMatch.confidence),
+        method: "first initial + last name; manual review required",
+      };
+    }
+  }
   let fuzzy: Record<string, unknown> | null = null;
   for (const customer of indexes.all) {
     const customerParts = namePartsFromCustomer(customer);
@@ -669,8 +684,9 @@ function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<strin
   return { row, score, reasons, warnings, amountDiffCents: amount != null && itemAmount != null ? amount - itemAmount : null };
 }
 
-function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Array<Record<string, unknown>>, customerId?: string, schedule?: PaymentScheduleContext) {
+function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Array<Record<string, unknown>>, customerId?: string, schedule?: PaymentScheduleContext, excludeIds?: Set<string>) {
   return paymentRows
+    .filter((row) => !excludeIds?.has(text(row.id)))
     .map((row) => scorePaymentCandidate(record, row, customerId, schedule))
     .filter((candidate) => candidate.score >= 35)
     .sort((a, b) => b.score - a.score)
@@ -732,6 +748,8 @@ function findingTitle(finding: ReconciliationFinding): string {
       return `FE payment row missing from HMIS: ${who}`;
     case "payment_missing_financial_edge":
       return `${source} payment row missing from FE: ${who}`;
+    case "payment_missing_report":
+      return `Dashboard payment with no report evidence: ${who}`;
     case "payment_possible_match":
       return `Multiple dashboard payment matches for ${source} row: ${who}`;
     case "payment_amount_mismatch":
@@ -778,6 +796,25 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
   const matchedHmisKeys = new Set<string>();
   const allDashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
   const scheduleContext = buildPaymentScheduleContext(paymentRecords, allDashboardPaymentRows);
+
+  // 1:1 assignment: once a report row claims a dashboard row, later report rows
+  // cannot silently reuse it — a second identical payment must find its own
+  // backing or flag as missing. Covered keys additionally absorb the queue/
+  // ledger sibling pair that describes the same paid payment.
+  const consumedDashboardIds = new Set<string>();
+  const coveredDashboardKeys = new Set<string>();
+  const dashboardRowKey = (row: Record<string, unknown>) => {
+    const amount = rowCents(row);
+    const month = paymentRowMonth(row);
+    const who = paymentRowWho(row);
+    return amount != null && month && who ? `${who}|${month}|${amount}` : "";
+  };
+  const consumeDashboardRow = (row: Record<string, unknown>) => {
+    const id = text(row.id);
+    if (id) consumedDashboardIds.add(id);
+    const key = dashboardRowKey(row);
+    if (key) coveredDashboardKeys.add(key);
+  };
 
   const sourceSummaries: ReconciliationSourceSummary[] = [];
   for (const packet of packets) {
@@ -1027,7 +1064,9 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           const hmisCandidates = findReportPaymentCandidates(record, hmisPaymentRecords.map((item) => item.record));
           const bestHmis = hmisCandidates[0];
           if (!bestHmis) {
-            findings.push({
+            // Only meaningful when an HMIS/Caseworthy report is uploaded —
+            // otherwise every FE row would false-flag as missing from HMIS.
+            if (hmisPaymentRecords.length) findings.push({
               id: findingId("payment_missing_hmis", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
               kind: "payment_missing_hmis",
               sourceSystem,
@@ -1107,7 +1146,9 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           }
         }
 
-        if (isHmisLike && !feKeys.has(reportPaymentKey(record)) && !matchedHmisKeys.has(reportPaymentKey(record))) {
+        // Gated on FE actually being uploaded (with kept rows) — otherwise
+        // every HMIS/Caseworthy row would false-flag as missing from FE.
+        if (isHmisLike && fePaymentRecords.length > 0 && !feKeys.has(reportPaymentKey(record)) && !matchedHmisKeys.has(reportPaymentKey(record))) {
           findings.push({
             id: findingId("payment_missing_financial_edge", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
             kind: "payment_missing_financial_edge",
@@ -1144,7 +1185,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         const bridgeCriteria = hmisBridgeRecord && hmisBridgeMatch?.customer && !customer
           ? [`FE row matched HMIS/Caseworthy row by payment evidence, then dashboard customer resolved from HMIS row by ${hmisBridgeMatch.method}.`]
           : [];
-        const candidates = findPaymentCandidates(record, allDashboardPaymentRows, effectiveCustomerId || customerId || undefined, scheduleContext);
+        const candidates = findPaymentCandidates(record, allDashboardPaymentRows, effectiveCustomerId || customerId || undefined, scheduleContext, consumedDashboardIds);
         if (!candidates.length) {
           findings.push({
             id: findingId("payment_missing_dashboard", record, `${record.paymentEvidence.amount}:${record.paymentEvidence.serviceMonth}`),
@@ -1181,6 +1222,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           });
         } else {
           const best = candidates[0];
+          consumeDashboardRow(best as Record<string, unknown>);
           const amountDiff = Number((best as Record<string, unknown>)._amountDiffCents);
           if (Number.isFinite(amountDiff) && Math.abs(amountDiff) > 1) {
             findings.push({
@@ -1274,6 +1316,64 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           "Nothing was deleted — the rows remain in the uploaded report; they are just not treated as client payments.",
         ],
         proposedAction: "Spot-check the skipped categories in the uploaded report if a client payment appears to be missing.",
+      });
+    }
+  }
+
+  // Reverse direction (FE is source of truth): dashboard queue/ledger rows in
+  // the FE report's month window that no report row claimed — a scheduled or
+  // recorded payment with no external payment evidence.
+  if (fePaymentRecords.length) {
+    const feMonths = new Set(
+      fePaymentRecords
+        .map(({ record }) => record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate))
+        .filter(Boolean),
+    );
+    const reportGrants = Array.from(new Set(
+      fePaymentRecords
+        .map(({ record }) => record.paymentEvidence.grant || record.enrollmentEvidence.projectName)
+        .filter(Boolean),
+    ));
+    for (const row of allDashboardPaymentRows) {
+      const id = text(row.id);
+      if (id && consumedDashboardIds.has(id)) continue;
+      const amount = rowCents(row);
+      const month = paymentRowMonth(row);
+      if (amount == null || !month || !feMonths.has(month)) continue;
+      const key = dashboardRowKey(row);
+      if (key && coveredDashboardKeys.has(key)) continue;
+      if (lower(row.queueStatus) === "void") continue;
+      const customer = customerIndexes.byId.get(text(row.customerId));
+      const rowGrant = paymentRowGrant(row);
+      // Rows whose grant never appears in the report are likely out of the
+      // report's scope (e.g. an ESG payment during a CoC reconciliation).
+      const grantInReportScope = !rowGrant || !reportGrants.length || reportGrants.some((grant) => hasTokenOverlap(grant, rowGrant));
+      findings.push({
+        id: `payment_missing_report::${paymentRowSource(row)}::${id || key || Math.random().toString(36).slice(2)}`,
+        kind: "payment_missing_report",
+        sourceSystem: "dashboard",
+        sourceSystemLabel: sourceSystemLabel("dashboard"),
+        severity: grantInReportScope ? "warning" : "info",
+        confidence: grantInReportScope ? 0.6 : 0.4,
+        sourceFile: "dashboard",
+        sourceRowNumber: null,
+        recordKind: paymentRowSource(row),
+        customerId: text(row.customerId) || undefined,
+        customerLabel: customer ? customerLabel(customer) : text(row.customerNameAtSpend ?? row.customerName) || undefined,
+        reportValue: "(no report row)",
+        dashboardValue: `${(amount / 100).toFixed(2)} ${month}`,
+        explanation: [
+          `Dashboard ${paymentRowSource(row)} row (${month}, $${(amount / 100).toFixed(2)}) was not claimed by any Financial Edge row in the uploaded report months. The payment may be unpaid, cancelled, or missing from FE.`,
+          ...(grantInReportScope ? [] : [`Row grant "${rowGrant}" does not appear in the uploaded report's grant signals — it may simply be outside this report's scope.`]),
+        ],
+        proposedAction: "Verify whether this scheduled/recorded payment actually went out; correct the queue/ledger row if it was cancelled or never paid.",
+        matchedPaymentCandidates: [row],
+        match: {
+          criteria: [
+            "FE is source of truth for payment reconciliation.",
+            "No kept FE row matched this dashboard payment by customer/amount/month (1:1 assignment).",
+          ],
+        },
       });
     }
   }
