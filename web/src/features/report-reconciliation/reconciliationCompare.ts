@@ -7,6 +7,7 @@ import {
   type NormalizedReportRecord,
   type ReconciliationPacket,
 } from "./reportProfiles";
+import { billableCategoriesFromGrants, classifyFinancialEdgeRow } from "./reportParsingEngines";
 
 export type CompareMode = "payments" | "enrollments" | "customer_exits";
 export type EnrollmentCompareGranularity = "enrollment" | "service";
@@ -72,6 +73,8 @@ type PaymentUnit = {
   vendor: string;
   status: string;
   paidSignal: boolean;
+  /** FE unposted/pending AP invoice — no client name; matched by amount + month. */
+  unposted?: boolean;
   row: Record<string, unknown>;
 };
 
@@ -79,9 +82,12 @@ const money = (value: unknown) => {
   const parsed = normalizeAmount(value);
   return parsed == null ? null : parsed;
 };
+// Matching cents are ABSOLUTE: FE report balances are negative/parenthesized
+// expenses while queue/ledger amounts are positive, so amount keys must compare
+// magnitudes or FE rows never group with dashboard rows.
 const cents = (value: unknown) => {
   const parsed = money(value);
-  return parsed == null ? null : Math.round(parsed * 100);
+  return parsed == null ? null : Math.abs(Math.round(parsed * 100));
 };
 const text = (value: unknown) => String(value ?? "").trim();
 const lower = (value: unknown) => text(value).toLowerCase();
@@ -245,7 +251,7 @@ function reportPaymentUnit(packet: ReconciliationPacket, source: { id: string; l
     date,
     month: record.paymentEvidence.serviceMonth || monthOf(date),
     amount,
-    amountCents: amount == null ? null : Math.round(amount * 100),
+    amountCents: amount == null ? null : Math.abs(Math.round(amount * 100)),
     vendor: record.paymentEvidence.vendor || record.paymentEvidence.reference,
     status: record.paymentEvidence.invoice || packet.profileLabel,
     paidSignal: ["financial_edge_project_activity", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total"].includes(packet.profileId),
@@ -272,7 +278,7 @@ function databasePaymentUnit(source: "paymentQueue" | "ledger", row: Record<stri
     date,
     month: text(row.month) || monthOf(row.dueDate ?? row.transactionDate ?? row.postedAt ?? row.date),
     amount: money(rawAmount),
-    amountCents: row.amountCents != null ? Math.round(Number(row.amountCents)) : cents(rawAmount),
+    amountCents: row.amountCents != null ? Math.abs(Math.round(Number(row.amountCents))) : cents(rawAmount),
     vendor: text(row.vendor ?? row.merchant ?? row.payee ?? row.landlord ?? row.description ?? row.note ?? row.notes),
     status: text(row.queueStatus ?? row.status ?? row.paid ?? row.source),
     paidSignal: source === "ledger" || lower(row.queueStatus) === "posted" || row.paid === true || text(row.ledgerEntryId) !== "",
@@ -321,7 +327,7 @@ function budgetLineItemUnits(grants: Array<Record<string, unknown>>): PaymentUni
           date: "",
           month: "",
           amount,
-          amountCents: Math.round(amount * 100),
+          amountCents: Math.abs(Math.round(amount * 100)),
           vendor: label,
           status: kind === "spent" ? "budget spent rollup" : "budget projected rollup",
           paidSignal: kind === "spent",
@@ -396,11 +402,27 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
   const maps = customerMaps(database.customers);
   const units: PaymentUnit[] = [];
   const packetSources = packetSourceMetas(packets);
+  const billableCategories = billableCategoriesFromGrants(database.grants);
   for (const [packetIndex, packet] of packets.entries()) {
     const source = packetSources[packetIndex];
     packet.records.forEach((record, index) => {
       const unit = reportPaymentUnit(packet, source, record, index);
-      if (unit) units.push(unit);
+      if (!unit) return;
+      if (packet.profileId === "financial_edge_project_activity") {
+        const classification = classifyFinancialEdgeRow(
+          { description: record.paymentEvidence.vendor, reference: record.paymentEvidence.reference },
+          { billableCategories },
+        );
+        // Payroll/overhead/balance rows are not client payments; the review
+        // surface reports the skipped count so nothing is silently lost.
+        if (!classification.keep) return;
+        if (classification.paymentKind === "unposted") {
+          unit.unposted = true;
+          unit.paidSignal = false;
+          unit.status = unit.status ? `${unit.status} (unposted)` : "unposted";
+        }
+      }
+      units.push(unit);
     });
   }
   for (const row of database.paymentQueueItems) units.push(databasePaymentUnit("paymentQueue", row, maps));
@@ -409,8 +431,8 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
 
   const sources = Array.from(new Map(units.map((unit) => [unit.sourceId, { id: unit.sourceId, label: unit.sourceLabel, kind: unit.sourceKind }])).values());
   const consumed = new Set<string>();
-  const rowGroups: Array<{ key: string; group: PaymentUnit[]; method: "identity" | "identity_month" | "amount_grant" | "unique_amount" | "budget_rollup" | "unmatched" }> = [];
-  const consumeGroup = (key: string, group: PaymentUnit[], method: "identity" | "identity_month" | "amount_grant" | "unique_amount" | "budget_rollup" | "unmatched") => {
+  const rowGroups: Array<{ key: string; group: PaymentUnit[]; method: "identity" | "identity_month" | "amount_grant" | "unique_amount" | "schedule" | "budget_rollup" | "unmatched" }> = [];
+  const consumeGroup = (key: string, group: PaymentUnit[], method: "identity" | "identity_month" | "amount_grant" | "unique_amount" | "schedule" | "budget_rollup" | "unmatched") => {
     const available = group.filter((unit) => !consumed.has(unit.id));
     if (!available.length) return;
     for (const unit of available) consumed.add(unit.id);
@@ -432,6 +454,30 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
     const reportCount = group.filter((unit) => unit.sourceKind === "report").length;
     const databaseCount = group.filter((unit) => unit.sourceKind === "database").length;
     if (reportCount === 1 && databaseCount === 1) consumeGroup(key, group, "unique_amount");
+  }
+  // Recurring-schedule pass: a report row (often FE unposted, no name) merges
+  // into the ONE customer whose queue/ledger schedule repeats this exact amount
+  // across 2+ months including the report's month.
+  {
+    const dbSchedules = new Map<string, PaymentUnit[]>();
+    for (const unit of units) {
+      if (unit.sourceKind !== "database" || consumed.has(unit.id) || unit.amountCents == null) continue;
+      const who = unit.identityKey || unit.nameKey;
+      if (!who) continue;
+      const key = `${who}|${unit.amountCents}`;
+      dbSchedules.set(key, [...(dbSchedules.get(key) ?? []), unit]);
+    }
+    const recurring = Array.from(dbSchedules.entries()).filter(([, group]) => new Set(group.map((unit) => unit.month || unit.date)).size >= 2);
+    for (const unit of units) {
+      if (unit.sourceKind !== "report" || consumed.has(unit.id) || unit.amountCents == null) continue;
+      const month = unit.month || monthOf(unit.date);
+      if (!month) continue;
+      const hits = recurring.filter(([key, group]) =>
+        key.endsWith(`|${unit.amountCents}`) && group.some((dbUnit) => !consumed.has(dbUnit.id) && (dbUnit.month || monthOf(dbUnit.date)) === month));
+      if (hits.length !== 1) continue;
+      const monthUnits = hits[0][1].filter((dbUnit) => !consumed.has(dbUnit.id) && (dbUnit.month || monthOf(dbUnit.date)) === month);
+      consumeGroup(`schedule:${unit.id}`, [unit, ...monthUnits], "schedule");
+    }
   }
   for (const [key, group] of groupByPaymentKey(units.filter((unit) => !consumed.has(unit.id) && unit.amountCents != null && unit.grantKey), amountGrantKey)) {
     const hasExternal = group.some((unit) => unit.sourceKind === "report" && unit.paidSignal);
@@ -482,6 +528,8 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
         ? "Likely payment match by amount + month + grant/category"
         : method === "unique_amount"
           ? "Possible payment match by unique amount + month"
+          : method === "schedule"
+            ? "Recurring schedule match by amount + month"
           : method === "budget_rollup"
             ? "External paid/service row lines up with a grant budget rollup amount"
           : status === "partial"
@@ -504,7 +552,7 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
     rows.push({
       id: `payment:${key}`,
       mode: "payments",
-      name: first.name || "-",
+      name: first.name || group.find((unit) => unit.name)?.name || "-",
       date: first.date || first.month || "-",
       amount: first.amount,
       status,
@@ -539,9 +587,11 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
         method === "identity_month" ? "Name/ID or first-initial + last name and service month matched across sources; amount is reviewed separately." : "",
         method === "amount_grant" ? "Customer identity was weak or absent; amount, service month/date, and grant/category lined up across report and database rows." : "",
         method === "unique_amount" ? "Customer identity and grant/category were weak; this amount/month had exactly one report row and one database row." : "",
+        method === "schedule" ? "Report amount + month landed inside a single customer's recurring payment schedule (same amount across multiple months in queue/ledger)." : "",
         method === "budget_rollup" ? "Grant budget projected/spent line-item rollup matched the external paid/service amount; confirm the exact payment event before writeback." : "",
         sourceOfTruthFlag,
         paidFlag,
+        group.some((unit) => unit.unposted) ? "Includes an FE unposted/pending AP invoice (no client name); matched by amount + month, not identity." : "",
         status === "partial" && method === "unmatched" ? "Same CWID/HMIS/name identity and month; per-source totals match, but line items differ." : "",
       ].filter(Boolean),
     });
