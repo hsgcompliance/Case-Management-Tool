@@ -1,11 +1,11 @@
 # Graph Report - .  (2026-07-09)
 
 ## Corpus Check
-- 915 files · ~1,219,758 words
+- 915 files · ~1,219,984 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5785 nodes · 8275 edges · 948 communities detected
+- 5783 nodes · 8273 edges · 948 communities detected
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
 - Token cost: 0 input · 0 output
 
@@ -1490,104 +1490,104 @@ Cohesion: 0.2
 Nodes (2): checkAutoClose(), handleToggle()
 
 ### Community 126 - "Community 126"
-Cohesion: 0.25
-Nodes (4): matchGrant(), norm(), reportGrantRows(), wordTokens()
-
-### Community 127 - "Community 127"
 Cohesion: 0.29
 Nodes (8): addOneOff(), addRecurring(), commit(), del(), patch(), setSelection(), toggleAll(), toggleOne()
 
-### Community 128 - "Community 128"
+### Community 127 - "Community 127"
 Cohesion: 0.45
 Nodes (9): buildLadders(), initGame(), levelParams(), padPlatforms(), platformAt(), rowExtent(), rowGroups(), rowSurface() (+1 more)
 
-### Community 129 - "Community 129"
+### Community 128 - "Community 128"
 Cohesion: 0.27
 Nodes (7): applyPersistentAttr(), clearBlockAttrs(), getBlockEl(), makePlot(), randomCrop(), setBlockAttr(), tendPlots()
 
-### Community 130 - "Community 130"
+### Community 129 - "Community 129"
 Cohesion: 0.44
 Nodes (10): baselineCount(), buildBossWave(), buildCrusherWedge(), buildEncirclement(), buildEnemyWave(), buildHunterSplit(), buildSiegeLine(), clamp() (+2 more)
 
-### Community 131 - "Community 131"
+### Community 130 - "Community 130"
 Cohesion: 0.24
 Nodes (5): handleBulkMigration(), handleConfirm(), invalidate(), isProgramTarget(), targetLabel()
 
-### Community 132 - "Community 132"
+### Community 131 - "Community 131"
 Cohesion: 0.27
 Nodes (7): addLineItem(), commit(), normalizeLineItemTypeInput(), removeLineItem(), setTotal(), slugifyLineItemType(), updateLineItem()
 
-### Community 133 - "Community 133"
+### Community 132 - "Community 132"
 Cohesion: 0.22
 Nodes (3): applyIntegrationMode(), onSave(), saveSettings()
 
-### Community 134 - "Community 134"
+### Community 133 - "Community 133"
 Cohesion: 0.31
 Nodes (7): errorMessage(), handleAdd(), handleSaveBudgetConfig(), handleSendNow(), handleToggle(), handleToggleDisable(), isDisabled()
 
-### Community 135 - "Community 135"
+### Community 134 - "Community 134"
 Cohesion: 0.18
 Nodes (0): 
 
-### Community 136 - "Community 136"
+### Community 135 - "Community 135"
 Cohesion: 0.42
 Nodes (8): addLineItemSpendAdjustment(), addSplitAmount(), docBelongsToGrant(), isoDate10(), recomputeGrantBudgetFromLedger(), rowBudgetDate(), rowInGrantWindow(), rowInSplitWindow()
 
-### Community 137 - "Community 137"
+### Community 136 - "Community 136"
 Cohesion: 0.38
 Nodes (8): buildAndSendEnrollmentDigest(), buildEnrollmentDigestData(), buildEnrollmentDigestHtml(), chunks(), enrollmentTable(), esc(), monthLabel(), section()
 
-### Community 138 - "Community 138"
+### Community 137 - "Community 137"
 Cohesion: 0.42
 Nodes (9): addMonthsISO(), computeLastAssistanceDate(), computeNextRentCertDue(), fmtShortMonth(), isISO(), isRentPayment(), lastDayOfMonth(), paymentNotes() (+1 more)
 
-### Community 139 - "Community 139"
+### Community 138 - "Community 138"
 Cohesion: 0.27
 Nodes (5): _normGroup(), paymentTypeTitleLabel(), resolvePaymentSubtype(), resolvePaymentType(), upsertInbox()
 
-### Community 140 - "Community 140"
+### Community 139 - "Community 139"
 Cohesion: 0.24
 Nodes (4): addMonthsISO(), isISO(), newSSRow(), ssRowId()
 
-### Community 141 - "Community 141"
+### Community 140 - "Community 140"
 Cohesion: 0.36
 Nodes (8): includesNeedle(), inNullableDateRange(), itemDateISO(), matchesSourceFilter(), matchesSubmissionAdvancedFilters(), projectSearchText(), rowSourceType(), textValue()
 
-### Community 142 - "Community 142"
+### Community 141 - "Community 141"
 Cohesion: 0.4
 Nodes (9): endpointNamespace(), getReqTemplateForEndpoint(), guessSchemaRef(), isZodSchema(), normalizeToken(), schemaToTemplate(), scoreCandidate(), toPascalCase() (+1 more)
 
-### Community 143 - "Community 143"
+### Community 142 - "Community 142"
 Cohesion: 0.2
 Nodes (0): 
 
-### Community 144 - "Community 144"
+### Community 143 - "Community 143"
 Cohesion: 0.22
 Nodes (2): countRuleConditions(), schemaRuleSummary()
 
-### Community 145 - "Community 145"
+### Community 144 - "Community 144"
 Cohesion: 0.29
 Nodes (7): asRecord(), findCachedPaymentQueueItem(), findCachedPaymentQueueItemById(), optimisticPostPaymentQueuePatches(), queueItemMatches(), removeQueueItem(), toOptimisticGrantActivity()
+
+### Community 145 - "Community 145"
+Cohesion: 0.2
+Nodes (0): 
 
 ### Community 146 - "Community 146"
 Cohesion: 0.2
 Nodes (0): 
 
 ### Community 147 - "Community 147"
-Cohesion: 0.2
-Nodes (0): 
-
-### Community 148 - "Community 148"
 Cohesion: 0.31
 Nodes (5): asStringArray(), getPageLayoutPreference(), normalizePageLayoutPreference(), readUserSettings(), writePageLayoutPreference()
 
-### Community 149 - "Community 149"
+### Community 148 - "Community 148"
 Cohesion: 0.47
 Nodes (8): emit(), getAllProgress(), KEY(), markCompleted(), markIndex(), mergeAllProgress(), toUpdatedAt(), write()
 
-### Community 150 - "Community 150"
+### Community 149 - "Community 149"
 Cohesion: 0.42
 Nodes (6): BudgetProjectedPanel(), BudgetSpentPanel(), fmtUsd(), getBudget(), getFinancialCapabilities(), modeLabel()
+
+### Community 150 - "Community 150"
+Cohesion: 0.33
+Nodes (4): matchGrant(), norm(), reportGrantRows(), wordTokens()
 
 ### Community 151 - "Community 151"
 Cohesion: 0.25

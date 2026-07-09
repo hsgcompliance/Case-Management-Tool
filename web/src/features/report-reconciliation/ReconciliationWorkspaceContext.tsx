@@ -88,6 +88,7 @@ function uploadFromPreview(profiles: ReportSourceProfile[], preview: ParsedRepor
     fieldOverrides: {},
     excludeRules: profile ? defaultExcludeRulesForProfile(profile) : [],
     manualGrantSignals: [],
+    manualGrantOverrides: {},
   };
   return {
     id: `${preview.fileName}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
