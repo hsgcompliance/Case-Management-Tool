@@ -177,7 +177,7 @@ export function buildBulkCustomerImportRows(
       firstName,
       lastName,
       dob: text(identity.dob),
-      cwId: text((record.raw as Record<string, unknown>)?.cwId ?? (record.raw as Record<string, unknown>)?.CWID ?? (record.raw as Record<string, unknown>)?.["CW ID"]),
+      cwId: text(identity.cwId ?? (record.raw as Record<string, unknown>)?.cwId ?? (record.raw as Record<string, unknown>)?.CWID ?? (record.raw as Record<string, unknown>)?.["CW ID"]),
       hmisId: text(identity.hmisId),
       caseworthyId: text(identity.caseworthyId),
       population: normalizePopulation((record.raw as Record<string, unknown>)?.Population ?? (record.raw as Record<string, unknown>)?.population),

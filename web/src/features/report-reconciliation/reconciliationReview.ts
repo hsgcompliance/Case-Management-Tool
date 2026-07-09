@@ -70,9 +70,28 @@ export type ReconciliationReviewSummary = {
   bySeverity: Record<ReportDiagnosticSeverity, number>;
 };
 
+/** Per-uploaded-source match rollup so the UI can show immediate results per file/sheet. */
+export type ReconciliationSourceSummary = {
+  sourceFile: string;
+  profileId: string;
+  profileLabel: string;
+  rows: number;
+  excludedRows: number;
+  /** Rows matched to a dashboard customer at >=0.95 confidence (ID or name+DOB). */
+  matchedExact: number;
+  /** Rows matched below 0.95 — needs identity review. */
+  matchedReview: number;
+  /** Rows with identity data but no dashboard customer match. */
+  missing: number;
+  /** Rows with no usable name/ID at all. */
+  noIdentity: number;
+  findingCount: number;
+};
+
 export type ReconciliationReviewResult = {
   findings: ReconciliationFinding[];
   summary: ReconciliationReviewSummary;
+  sourceSummaries: ReconciliationSourceSummary[];
 };
 
 type DashboardData = {
@@ -105,7 +124,7 @@ function sourceSystemLabel(system: ReconciliationSourceSystem) {
   if (system === "hmis") return "HMIS";
   if (system === "caseworthy") return "Caseworthy";
   if (system === "dashboard") return "Dashboard";
-  return "Unknown source";
+  return "Uploaded report";
 }
 
 function cents(value: unknown) {
@@ -153,8 +172,12 @@ function customerHmisId(customer: Record<string, unknown>) {
   return text(customer.hmisId ?? customer.HMISId ?? customer.hmisClientId ?? customer.clientId);
 }
 
+function customerCwId(customer: Record<string, unknown>) {
+  return text(customer.cwId ?? customer.CWID);
+}
+
 function customerCaseworthyId(customer: Record<string, unknown>) {
-  return text(customer.caseworthyId ?? customer.caseWorthyId ?? customer.cwId ?? customer.CWID);
+  return text(customer.caseworthyId ?? customer.caseWorthyId);
 }
 
 function customerDob(customer: Record<string, unknown>) {
@@ -253,6 +276,7 @@ function closeSpelling(a: string, b: string) {
 
 function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
   const byId = new Map<string, Record<string, unknown>>();
+  const byCw = new Map<string, Record<string, unknown>>();
   const byCaseworthy = new Map<string, Record<string, unknown>>();
   const byHmis = new Map<string, Record<string, unknown>>();
   const byNameDob = new Map<string, Record<string, unknown>>();
@@ -260,7 +284,9 @@ function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
   for (const customer of customers) {
     const id = text(customer.id);
     if (id) byId.set(id, customer);
-    const caseworthyId = customerCaseworthyId(customer);
+    const cwId = customerCwId(customer).toLowerCase();
+    if (cwId) byCw.set(cwId, customer);
+    const caseworthyId = customerCaseworthyId(customer).toLowerCase();
     if (caseworthyId) byCaseworthy.set(caseworthyId, customer);
     const hmisId = customerHmisId(customer);
     if (hmisId) byHmis.set(hmisId, customer);
@@ -269,14 +295,24 @@ function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
     if (name && dob) byNameDob.set(`${name}|${dob}`, customer);
     if (name) byName.set(name, [...(byName.get(name) ?? []), customer]);
   }
-  return { byId, byCaseworthy, byHmis, byNameDob, byName, all: customers };
+  return { byId, byCw, byCaseworthy, byHmis, byNameDob, byName, all: customers };
 }
 
 function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof buildCustomerIndexes>) {
   const dashboardId = text(record.customerIdentity.dashboardCustomerId);
   if (dashboardId && indexes.byId.has(dashboardId)) return { customer: indexes.byId.get(dashboardId) ?? null, confidence: 1, method: "dashboard customer ID" };
-  const caseworthyId = text(record.customerIdentity.caseworthyId);
-  if (caseworthyId && indexes.byCaseworthy.has(caseworthyId)) return { customer: indexes.byCaseworthy.get(caseworthyId) ?? null, confidence: 1, method: "Caseworthy ID (CWID)" };
+  // CWID and Caseworthy ID live in separate customer fields but describe the
+  // same external system, so each report value checks both indexes.
+  const cwId = text(record.customerIdentity.cwId).toLowerCase();
+  if (cwId) {
+    const matched = indexes.byCw.get(cwId) ?? indexes.byCaseworthy.get(cwId);
+    if (matched) return { customer: matched, confidence: 1, method: "Caseworthy ID (CWID)" };
+  }
+  const caseworthyId = text(record.customerIdentity.caseworthyId).toLowerCase();
+  if (caseworthyId) {
+    const matched = indexes.byCaseworthy.get(caseworthyId) ?? indexes.byCw.get(caseworthyId);
+    if (matched) return { customer: matched, confidence: 1, method: "Caseworthy ID (CWID)" };
+  }
   const hmisId = text(record.customerIdentity.hmisId);
   if (hmisId && indexes.byHmis.has(hmisId)) return { customer: indexes.byHmis.get(hmisId) ?? null, confidence: 1, method: "HMIS ID" };
   const name = recordNameKey(record);
@@ -289,6 +325,12 @@ function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof
     const matched = nameMatches[0];
     const dobMatch = dobAwareNameConfidence(dob, customerDob(matched));
     return { customer: matched, confidence: dobMatch.confidence, method: `first + last name exact; ${dobMatch.methodSuffix}` };
+  }
+  if (nameMatches.length > 1 && dob) {
+    const dobMatches = nameMatches.filter((customer) => customerDob(customer) === dob);
+    if (dobMatches.length === 1) {
+      return { customer: dobMatches[0], confidence: 0.96, method: "first + last name + DOB (same-name customers disambiguated by DOB)" };
+    }
   }
 
   const recordParts = namePartsFromRecord(record);
@@ -333,7 +375,66 @@ function dateOf(row: Record<string, unknown>, keys: string[]) {
 }
 
 function findEnrollments(customerId: string, enrollments: Array<Record<string, unknown>>) {
-  return enrollments.filter((enrollment) => text(enrollment.customerId ?? enrollment.clientId) === customerId && isActiveLike(enrollment));
+  // Closed/exited enrollments stay in the pool: report rows about past
+  // enrollments must reconcile against them instead of reading as "missing".
+  return enrollments.filter((enrollment) => {
+    if (text(enrollment.customerId ?? enrollment.clientId) !== customerId) return false;
+    if (enrollment.deleted === true) return false;
+    return lower(enrollment.status) !== "deleted";
+  });
+}
+
+function dateDiffDays(a: string, b: string) {
+  if (!a || !b) return Number.MAX_SAFE_INTEGER;
+  const left = Date.parse(a);
+  const right = Date.parse(b);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return Number.MAX_SAFE_INTEGER;
+  return Math.abs(left - right) / 86400000;
+}
+
+/**
+ * Pick the dashboard enrollment a report row is talking about.
+ * Grant/provider signal wins; ties break by entry-date proximity, then active
+ * status. When the report names a grant that matches nothing, no enrollment is
+ * returned — date findings against an unrelated enrollment are worse than a
+ * "missing enrollment" finding.
+ */
+function pickEnrollment(record: NormalizedReportRecord, enrollments: Array<Record<string, unknown>>) {
+  const reportGrant = recordGrantKey(record);
+  const grantMatches = reportGrant
+    ? enrollments.filter((enrollment) => {
+      const key = enrollmentGrantKey(enrollment);
+      if (!key) return false;
+      return reportGrant.includes(key) || key.includes(reportGrant) || hasTokenOverlap(reportGrant, key);
+    })
+    : [];
+  const entryDate = record.enrollmentEvidence.entryDate;
+  // Grant named in the report but matching no enrollment: a (near-)identical
+  // entry date still identifies the enrollment — the grant label is what needs
+  // review, not the enrollment's existence.
+  if (reportGrant && !grantMatches.length && entryDate) {
+    const dateHit = enrollments
+      .map((enrollment) => ({ enrollment, diff: dateDiffDays(entryDate, dateOf(enrollment, ["entryDate", "startDate", "enrolledAt"])) }))
+      .filter((candidate) => candidate.diff <= 3)
+      .sort((a, b) => a.diff - b.diff)[0];
+    if (dateHit) {
+      return { enrollment: dateHit.enrollment, criteria: "entry-date proximity (grant/provider name differs)", grantDiffers: true };
+    }
+  }
+  const pool = grantMatches.length ? grantMatches : reportGrant ? [] : enrollments;
+  if (!pool.length) return { enrollment: null as Record<string, unknown> | null, criteria: "", grantDiffers: false };
+  const sorted = [...pool].sort((a, b) => {
+    if (entryDate) {
+      const diff = dateDiffDays(entryDate, dateOf(a, ["entryDate", "startDate", "enrolledAt"]))
+        - dateDiffDays(entryDate, dateOf(b, ["entryDate", "startDate", "enrolledAt"]));
+      if (diff !== 0) return diff;
+    }
+    return Number(isActiveLike(b)) - Number(isActiveLike(a));
+  });
+  const criteria = grantMatches.length
+    ? `grant/provider signal${entryDate ? " + nearest entry date" : ""}${grantMatches.length > 1 ? ` (${grantMatches.length} candidates)` : ""}`
+    : `no report grant signal; ${entryDate ? "nearest entry date" : "active-first"} enrollment fallback`;
+  return { enrollment: sorted[0], criteria, grantDiffers: false };
 }
 
 function paymentRowMonth(row: Record<string, unknown>) {
@@ -374,7 +475,12 @@ function scoreReportPaymentCandidate(source: NormalizedReportRecord, candidate: 
   const warnings: string[] = [];
   let score = 0;
 
-  if (source.customerIdentity.hmisId && candidate.customerIdentity.hmisId && source.customerIdentity.hmisId === candidate.customerIdentity.hmisId) {
+  const sourceCw = source.customerIdentity.cwId || source.customerIdentity.caseworthyId;
+  const candidateCw = candidate.customerIdentity.cwId || candidate.customerIdentity.caseworthyId;
+  if (sourceCw && candidateCw && sourceCw.toLowerCase() === candidateCw.toLowerCase()) {
+    score += 45;
+    reasons.push("CWID/Caseworthy ID exact");
+  } else if (source.customerIdentity.hmisId && candidate.customerIdentity.hmisId && source.customerIdentity.hmisId === candidate.customerIdentity.hmisId) {
     score += 45;
     reasons.push("HMIS ID exact");
   } else if (sourceName && candidateName && sourceName === candidateName) {
@@ -578,8 +684,22 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
   const feKeys = new Set(fePaymentRecords.map(({ record }) => reportPaymentKey(record)));
   const matchedHmisKeys = new Set<string>();
 
+  const sourceSummaries: ReconciliationSourceSummary[] = [];
   for (const packet of packets) {
     addRecordDiagnostics(findings, packet);
+    const sourceSummary: ReconciliationSourceSummary = {
+      sourceFile: packet.sourceFile,
+      profileId: packet.profileId,
+      profileLabel: packet.profileLabel,
+      rows: packet.records.length,
+      excludedRows: packet.summary.excludedRows ?? 0,
+      matchedExact: 0,
+      matchedReview: 0,
+      missing: 0,
+      noIdentity: 0,
+      findingCount: 0,
+    };
+    sourceSummaries.push(sourceSummary);
     for (const record of packet.records) {
       const sourceSystem = sourceSystemFor(record.sourceType, record.recordKind);
       const sourceLabel = sourceSystemLabel(sourceSystem);
@@ -587,11 +707,15 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       const customer = match.customer;
       const customerId = customer ? text(customer.id) : "";
       const name = recordNameKey(record);
-      const hasIdentity = Boolean(record.customerIdentity.caseworthyId || record.customerIdentity.hmisId || name);
+      const hasIdentity = Boolean(record.customerIdentity.cwId || record.customerIdentity.caseworthyId || record.customerIdentity.hmisId || name);
+      if (!hasIdentity) sourceSummary.noIdentity += 1;
+      else if (!customer) sourceSummary.missing += 1;
+      else if (match.confidence >= 0.95) sourceSummary.matchedExact += 1;
+      else sourceSummary.matchedReview += 1;
 
       if (!customer && hasIdentity) {
         findings.push({
-          id: findingId("customer_missing", record, record.customerIdentity.hmisId || name),
+          id: findingId("customer_missing", record, record.customerIdentity.cwId || record.customerIdentity.hmisId || name),
           kind: "customer_missing",
           sourceSystem,
           sourceSystemLabel: sourceLabel,
@@ -602,7 +726,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           sourceProfileLabel: packet.profileLabel,
           sourceRowNumber: record.sourceRowNumber,
           recordKind: record.recordKind,
-          reportValue: record.customerIdentity.hmisId || name,
+          reportValue: record.customerIdentity.cwId || record.customerIdentity.hmisId || name,
           explanation: [`${sourceLabel} row has a customer identity that was not found in dashboard cached customers.`],
           proposedAction: "Review customer identity and create or link the dashboard customer if appropriate.",
           reportRecord: record,
@@ -634,13 +758,39 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       }
 
       if (customer) {
-        const activeEnrollments = findEnrollments(customerId, dashboard.enrollments);
+        const customerEnrollments = findEnrollments(customerId, dashboard.enrollments);
         const reportGrant = recordGrantKey(record);
-        const matchingEnrollment =
-          activeEnrollments.find((enrollment) => {
-            const key = enrollmentGrantKey(enrollment);
-            return reportGrant && key && (reportGrant.includes(key) || key.includes(reportGrant));
-          }) ?? activeEnrollments[0] ?? null;
+        const picked = pickEnrollment(record, customerEnrollments);
+        const matchingEnrollment = picked.enrollment;
+        const enrollmentCriteria = picked.criteria;
+
+        if (matchingEnrollment && picked.grantDiffers) {
+          const enrollmentId = text(matchingEnrollment.id);
+          findings.push({
+            id: findingId("grant_mapping_review", record, enrollmentId),
+            kind: "grant_mapping_review",
+            sourceSystem,
+            sourceSystemLabel: sourceLabel,
+            severity: "warning",
+            confidence: 0.7,
+            sourceFile: record.sourceFile,
+            sourceProfileId: packet.profileId,
+            sourceProfileLabel: packet.profileLabel,
+            sourceRowNumber: record.sourceRowNumber,
+            recordKind: record.recordKind,
+            customerId,
+            customerLabel: customerLabel(customer),
+            enrollmentId,
+            reportValue: record.enrollmentEvidence.projectName || record.paymentEvidence.grant,
+            dashboardValue: text(matchingEnrollment.grantName ?? matchingEnrollment.programName ?? matchingEnrollment.grantId),
+            explanation: [`${sourceLabel} grant/provider name did not match any of this customer's enrollments, but an enrollment with the same entry date exists. The provider → grant mapping likely differs between systems.`],
+            proposedAction: "Review grant/provider mapping; add a grant signal or alias if the names describe the same program.",
+            reportRecord: record,
+            matchedCustomer: customer,
+            matchedEnrollment: matchingEnrollment,
+            match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${enrollmentCriteria}.`] },
+          });
+        }
 
         if ((record.recordKind === "coordinatedEntryEnrollment" || record.enrollmentEvidence.projectName || record.enrollmentEvidence.entryDate) && !matchingEnrollment) {
           findings.push({
@@ -658,11 +808,22 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             customerId,
             customerLabel: customerLabel(customer),
             reportValue: record.enrollmentEvidence.projectName || record.enrollmentEvidence.programId,
-            explanation: [`${sourceLabel} row indicates enrollment evidence, but no matching dashboard enrollment was found for this customer/profile.`],
+            explanation: [
+              reportGrant && customerEnrollments.length
+                ? `${sourceLabel} row indicates enrollment evidence, but none of this customer's ${customerEnrollments.length} dashboard enrollment(s) matched the report grant/provider signal.`
+                : `${sourceLabel} row indicates enrollment evidence, but this customer has no dashboard enrollments.`,
+            ],
             proposedAction: "Review for CREATE_ENROLLMENT.",
             reportRecord: record,
             matchedCustomer: customer,
-            match: { criteria: [`Customer matched by ${match.method}.`, "No active dashboard enrollment matched the report grant/provider signal."] },
+            match: {
+              criteria: [
+                `Customer matched by ${match.method}.`,
+                reportGrant && customerEnrollments.length
+                  ? `Report grant/provider signal "${record.enrollmentEvidence.projectName || record.paymentEvidence.grant}" did not match any non-deleted enrollment for this customer.`
+                  : "Customer has no non-deleted dashboard enrollments.",
+              ],
+            },
           });
         }
 
@@ -693,7 +854,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               reportRecord: record,
               matchedCustomer: customer,
               matchedEnrollment: matchingEnrollment,
-              match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${reportGrant ? "grant/provider signal" : "first active enrollment fallback"}.`] },
+              match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${enrollmentCriteria}.`] },
             });
           }
           if (record.enrollmentEvidence.exitDate && record.enrollmentEvidence.exitDate !== dashboardExit) {
@@ -719,7 +880,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               reportRecord: record,
               matchedCustomer: customer,
               matchedEnrollment: matchingEnrollment,
-              match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${reportGrant ? "grant/provider signal" : "first active enrollment fallback"}.`] },
+              match: { criteria: [`Customer matched by ${match.method}.`, `Enrollment matched by ${enrollmentCriteria}.`] },
             });
           }
 
@@ -981,10 +1142,13 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
 
   const byKind: Record<string, number> = {};
   const bySeverity: Record<ReportDiagnosticSeverity, number> = { info: 0, warning: 0, error: 0 };
+  const summaryByFile = new Map(sourceSummaries.map((summary) => [summary.sourceFile, summary]));
   for (const finding of findings) {
     finding.title = findingTitle(finding);
     byKind[finding.kind] = (byKind[finding.kind] ?? 0) + 1;
     bySeverity[finding.severity] += 1;
+    const sourceSummary = summaryByFile.get(finding.sourceFile);
+    if (sourceSummary) sourceSummary.findingCount += 1;
   }
 
   return {
@@ -996,5 +1160,6 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       byKind,
       bySeverity,
     },
+    sourceSummaries,
   };
 }

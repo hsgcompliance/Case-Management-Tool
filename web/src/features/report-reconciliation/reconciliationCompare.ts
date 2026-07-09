@@ -98,8 +98,16 @@ function customerHmisId(customer: Record<string, unknown> | null | undefined) {
   return text(customer?.hmisId ?? customer?.HMISId ?? customer?.hmisClientId ?? customer?.clientId);
 }
 
+function customerCwId(customer: Record<string, unknown> | null | undefined) {
+  return text(customer?.cwId ?? customer?.CWID);
+}
+
 function customerCaseworthyId(customer: Record<string, unknown> | null | undefined) {
   return text(customer?.caseworthyId ?? customer?.caseWorthyId ?? customer?.cwId ?? customer?.CWID);
+}
+
+function recordCwId(record: NormalizedReportRecord) {
+  return text(record.customerIdentity.cwId || record.customerIdentity.caseworthyId);
 }
 
 function sourceId(label: string) {
@@ -130,8 +138,10 @@ function customerMaps(customers: Array<Record<string, unknown>>) {
   for (const customer of customers) {
     const id = text(customer.id);
     if (id) byId.set(id, customer);
-    const cwid = customerCaseworthyId(customer);
-    if (cwid) byCwid.set(cwid, customer);
+    // Register both external-ID fields; report CWIDs may live in either.
+    for (const cwid of [customerCwId(customer), customerCaseworthyId(customer)]) {
+      if (cwid) byCwid.set(cwid, customer);
+    }
     const hmis = customerHmisId(customer);
     if (hmis) byHmis.set(hmis, customer);
     const name = normalizeCustomerName(customerLabel(customer));
@@ -196,7 +206,7 @@ function closeSpelling(a: string, b: string) {
 }
 
 function findCustomerForRecord(record: NormalizedReportRecord, maps: ReturnType<typeof customerMaps>) {
-  const cwid = text(record.customerIdentity.caseworthyId);
+  const cwid = recordCwId(record);
   if (cwid && maps.byCwid.has(cwid)) return { customer: maps.byCwid.get(cwid) ?? null, confidence: 1, reason: "CWID exact match" };
   const hmis = text(record.customerIdentity.hmisId);
   if (hmis && maps.byHmis.has(hmis)) return { customer: maps.byHmis.get(hmis) ?? null, confidence: 1, reason: "HMIS ID exact match" };
@@ -230,7 +240,7 @@ function reportPaymentUnit(packet: ReconciliationPacket, source: { id: string; l
     name,
     nameKey: normalizeCustomerName(name),
     initialNameKey: firstInitialLastKey(name),
-    identityKey: identityKeyFromValues(record.customerIdentity.caseworthyId, record.customerIdentity.hmisId, ""),
+    identityKey: identityKeyFromValues(recordCwId(record), record.customerIdentity.hmisId, ""),
     grantKey: bestGrantKey(record.paymentEvidence.grant, record.enrollmentEvidence.projectName, record.enrollmentEvidence.programId, packet.sourceFile),
     date,
     month: record.paymentEvidence.serviceMonth || monthOf(date),
@@ -257,7 +267,7 @@ function databasePaymentUnit(source: "paymentQueue" | "ledger", row: Record<stri
     name,
     nameKey: normalizeCustomerName(name),
     initialNameKey: firstInitialLastKey(name),
-    identityKey: identityKeyFromValues(customerCaseworthyId(customer), customerHmisId(customer), ""),
+    identityKey: identityKeyFromValues(customerCwId(customer) || customerCaseworthyId(customer), customerHmisId(customer), ""),
     grantKey,
     date,
     month: text(row.month) || monthOf(row.dueDate ?? row.transactionDate ?? row.postedAt ?? row.date),
@@ -539,16 +549,64 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
   return { sources, rows: rows.sort((a, b) => a.name.localeCompare(b.name) || a.date.localeCompare(b.date)) };
 }
 
-function enrollmentKeyFromRecord(record: NormalizedReportRecord, granularity: EnrollmentCompareGranularity) {
-  const service = granularity === "service" ? record.paymentEvidence.reference || record.paymentEvidence.grant : "";
-  const name = record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`.trim();
-  return [
-    identityKeyFromValues(record.customerIdentity.caseworthyId, record.customerIdentity.hmisId, name),
-    record.enrollmentEvidence.projectName || record.enrollmentEvidence.programId || record.paymentEvidence.grant,
-    record.enrollmentEvidence.entryDate,
-    record.enrollmentEvidence.exitDate,
-    service,
-  ].map((value) => lower(value)).join("|");
+type EnrollmentUnit = {
+  id: string;
+  sourceId: string;
+  sourceLabel: string;
+  sourceKind: "report" | "database";
+  identityKey: string;
+  name: string;
+  cwid: string;
+  hmisId: string;
+  enrollmentName: string;
+  grantKey: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  serviceKey: string;
+  row: Record<string, unknown>;
+};
+
+function dateDiffDays(a: string, b: string) {
+  if (!a || !b) return Number.MAX_SAFE_INTEGER;
+  const left = Date.parse(a);
+  const right = Date.parse(b);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return Number.MAX_SAFE_INTEGER;
+  return Math.abs(left - right) / 86400000;
+}
+
+function hasTokenOverlap(a: unknown, b: unknown) {
+  const left = new Set(lower(a).split(/[^a-z0-9]+/).filter((token) => token.length >= 3));
+  if (!left.size) return false;
+  for (const token of lower(b).split(/[^a-z0-9]+/).filter((t) => t.length >= 3)) if (left.has(token)) return true;
+  return false;
+}
+
+function exactEnrollmentKey(unit: EnrollmentUnit) {
+  return [unit.identityKey, unit.grantKey || lower(unit.enrollmentName), unit.startDate, unit.endDate, unit.serviceKey].join("|");
+}
+
+/**
+ * Score whether a report-only cluster and a database-only cluster describe the
+ * same enrollment. Grant/name overlap is the strongest signal; start-date
+ * proximity backs it up so date drift still reconciles into one mismatch row.
+ */
+function enrollmentGrantsOverlap(report: EnrollmentUnit, db: EnrollmentUnit) {
+  return (Boolean(report.grantKey) && report.grantKey === db.grantKey) || hasTokenOverlap(report.enrollmentName, db.enrollmentName);
+}
+
+function enrollmentClusterScore(report: EnrollmentUnit, db: EnrollmentUnit) {
+  let score = 0;
+  if (enrollmentGrantsOverlap(report, db)) score += 4;
+  const startDiff = dateDiffDays(report.startDate, db.startDate);
+  if (startDiff <= 3) score += 3;
+  else if (startDiff <= 45) score += 2;
+  else if (startDiff <= 120) score += 1;
+  if (report.endDate && db.endDate && report.endDate === db.endDate) score += 1;
+  // Without grant/provider overlap, only a (near-)identical start date is
+  // strong enough to call two rows the same enrollment.
+  if (!enrollmentGrantsOverlap(report, db) && startDiff > 3) return 0;
+  return score;
 }
 
 function buildEnrollmentCompareRows(
@@ -559,50 +617,31 @@ function buildEnrollmentCompareRows(
   const granularity = options.enrollmentGranularity ?? "enrollment";
   const maps = customerMaps(database.customers);
   const sources = new Map<string, CompareSource>();
-  const rows = new Map<string, CompareRow>();
   const packetSources = packetSourceMetas(packets);
-  const put = (key: string, cell: CompareCell, base: Partial<CompareRow>) => {
-    sources.set(cell.sourceId, { id: cell.sourceId, label: cell.sourceLabel, kind: cell.sourceId.startsWith("report:") ? "report" : "database" });
-    const row = rows.get(key) ?? {
-      id: `enrollment:${key}`,
-      mode: "enrollments",
-      name: base.name || "-",
-      date: base.date || "-",
-      amount: null,
-      status: "matched",
-      matchStatus: "Matched",
-      fields: base.fields || {},
-      cells: [],
-      matchReasons: [],
-    };
-    row.cells.push(cell);
-    row.status = mergeStatus(row.status, cell.status);
-    rows.set(key, row);
-  };
+  const units: EnrollmentUnit[] = [];
 
   for (const [packetIndex, packet] of packets.entries()) {
     const reportSource = packetSources[packetIndex];
     for (const record of packet.records) {
       if (!record.enrollmentEvidence.projectName && !record.enrollmentEvidence.entryDate && !record.enrollmentEvidence.exitDate && granularity !== "service") continue;
-      const key = enrollmentKeyFromRecord(record, granularity);
       const name = record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`.trim();
-      put(key, {
+      sources.set(reportSource.id, { id: reportSource.id, label: reportSource.label, kind: "report" });
+      units.push({
+        id: `${reportSource.id}:${record.sourceRowNumber ?? units.length}`,
         sourceId: reportSource.id,
         sourceLabel: reportSource.label,
-        status: "matched",
-        value: [record.enrollmentEvidence.projectName || record.paymentEvidence.grant, record.enrollmentEvidence.entryDate, record.enrollmentEvidence.exitDate].filter(Boolean).join(" / ") || "present",
-        row: record.raw,
-      }, {
+        sourceKind: "report",
+        identityKey: identityKeyFromValues(recordCwId(record), record.customerIdentity.hmisId, name),
         name,
-        date: record.enrollmentEvidence.entryDate,
-        fields: {
-          cwid: record.customerIdentity.caseworthyId || "-",
-          hmisId: record.customerIdentity.hmisId || "-",
-          enrollmentName: record.enrollmentEvidence.projectName || record.paymentEvidence.grant || "-",
-          startDate: record.enrollmentEvidence.entryDate || "-",
-          endDate: record.enrollmentEvidence.exitDate || "-",
-          status: record.enrollmentEvidence.exitDate ? "Exited in report" : "Active/no report exit",
-        },
+        cwid: recordCwId(record),
+        hmisId: record.customerIdentity.hmisId,
+        enrollmentName: record.enrollmentEvidence.projectName || record.paymentEvidence.grant,
+        grantKey: bestGrantKey(record.enrollmentEvidence.projectName, record.paymentEvidence.grant, record.enrollmentEvidence.programId),
+        startDate: record.enrollmentEvidence.entryDate,
+        endDate: record.enrollmentEvidence.exitDate,
+        status: record.enrollmentEvidence.exitDate ? "Exited in report" : "Active/no report exit",
+        serviceKey: granularity === "service" ? lower(record.paymentEvidence.reference || record.paymentEvidence.grant) : "",
+        row: record.raw,
       });
     }
   }
@@ -614,86 +653,228 @@ function buildEnrollmentCompareRows(
     const startDate = normalizeDate(enrollment.entryDate ?? enrollment.startDate ?? enrollment.enrolledAt);
     const endDate = normalizeDate(enrollment.exitDate ?? enrollment.endDate ?? enrollment.closedAt);
     const enrollmentName = text(enrollment.grantName ?? enrollment.programName ?? enrollment.projectName ?? enrollment.grantId ?? enrollment.programId);
-    const key = [identityKeyFromValues(customerCaseworthyId(customer), customerHmisId(customer), name), enrollmentName.toLowerCase(), startDate, endDate, granularity === "service" ? "dashboard-enrollment" : ""].join("|");
-    put(key, {
+    sources.set("database:enrollments", { id: "database:enrollments", label: "Dashboard enrollments", kind: "database" });
+    units.push({
+      id: `db:${text(enrollment.id) || units.length}`,
       sourceId: "database:enrollments",
       sourceLabel: "Dashboard enrollments",
-      status: "matched",
-      value: [enrollmentName, startDate, endDate].filter(Boolean).join(" / ") || "present",
-      detail: text(enrollment.status ?? enrollment.active ?? ""),
-      row: enrollment,
-    }, {
+      sourceKind: "database",
+      identityKey: identityKeyFromValues(customerCwId(customer) || customerCaseworthyId(customer), customerHmisId(customer), name),
       name,
-      date: startDate,
-      fields: {
-        cwid: customerCaseworthyId(customer) || "-",
-        hmisId: customerHmisId(customer) || "-",
-        enrollmentName: enrollmentName || "-",
-        startDate: startDate || "-",
-        endDate: endDate || "-",
-        status: text(enrollment.status ?? enrollment.active ?? "") || "-",
-      },
+      cwid: customerCwId(customer) || customerCaseworthyId(customer),
+      hmisId: customerHmisId(customer),
+      enrollmentName,
+      grantKey: bestGrantKey(enrollment.grantName, enrollment.programName, enrollment.projectName, enrollment.grantId, enrollment.programId),
+      startDate,
+      endDate,
+      status: text(enrollment.status ?? enrollment.active ?? ""),
+      serviceKey: granularity === "service" ? "dashboard-enrollment" : "",
+      row: enrollment,
     });
   }
 
-  const sourceList = Array.from(sources.values());
-  const out = Array.from(rows.values()).map((row) => {
-    const existingSources = new Set(row.cells.map((cell) => cell.sourceId));
-    row.cells = sourceList.map((source) => row.cells.find((cell) => cell.sourceId === source.id) ?? {
-      sourceId: source.id,
-      sourceLabel: source.label,
-      status: "missing",
-      value: "-",
+  // Pass 1 — identical rows collapse across sources (two CSVs + dashboard that
+  // fully agree end up in one matched row).
+  const clusterMap = new Map<string, { units: EnrollmentUnit[]; method: string }>();
+  for (const unit of units) {
+    const key = exactEnrollmentKey(unit);
+    const cluster = clusterMap.get(key) ?? { units: [], method: "exact identity + enrollment + dates" };
+    cluster.units.push(unit);
+    clusterMap.set(key, cluster);
+  }
+  let clusters = Array.from(clusterMap.values());
+
+  // Pass 2 — pair leftover report-only and dashboard-only clusters for the same
+  // customer by grant overlap / start-date proximity so date differences become
+  // one mismatch row. Skipped in service granularity, where report rows are
+  // per-service and the dashboard row is the whole enrollment.
+  if (granularity !== "service") {
+    const byIdentity = new Map<string, { reportOnly: number[]; dbOnly: number[] }>();
+    clusters.forEach((cluster, index) => {
+      const identityKey = cluster.units[0].identityKey;
+      if (!identityKey) return;
+      const hasReport = cluster.units.some((unit) => unit.sourceKind === "report");
+      const hasDb = cluster.units.some((unit) => unit.sourceKind === "database");
+      if (hasReport && hasDb) return;
+      const entry = byIdentity.get(identityKey) ?? { reportOnly: [], dbOnly: [] };
+      (hasReport ? entry.reportOnly : entry.dbOnly).push(index);
+      byIdentity.set(identityKey, entry);
     });
-    const hasReport = row.cells.some((cell) => cell.sourceId.startsWith("report:") && cell.status !== "missing");
-    const hasDashboard = existingSources.has("database:enrollments");
-    row.status = hasReport && hasDashboard ? "matched" : "unmatched";
-    row.matchStatus = hasReport && hasDashboard ? "Enrollment exists in report and dashboard" : hasReport ? "Missing from dashboard" : "Only in dashboard";
-    row.matchReasons = [granularity === "service" ? "Service-level view; dashboard does not track services separately." : "Enrollment-level view."];
-    return row;
+    const mergedInto = new Map<number, number>();
+    for (const entry of byIdentity.values()) {
+      const takenDb = new Set<number>();
+      for (const reportIndex of entry.reportOnly) {
+        let bestDb = -1;
+        let bestScore = 0;
+        for (const dbIndex of entry.dbOnly) {
+          if (takenDb.has(dbIndex)) continue;
+          const score = enrollmentClusterScore(clusters[reportIndex].units[0], clusters[dbIndex].units[0]);
+          if (score > bestScore) {
+            bestScore = score;
+            bestDb = dbIndex;
+          }
+        }
+        if (bestDb >= 0 && bestScore >= 2) {
+          takenDb.add(bestDb);
+          mergedInto.set(reportIndex, bestDb);
+        }
+      }
+    }
+    if (mergedInto.size) {
+      for (const [reportIndex, dbIndex] of mergedInto) {
+        clusters[dbIndex].units.push(...clusters[reportIndex].units);
+        clusters[dbIndex].method = "same customer; paired by grant/provider overlap + start-date proximity";
+      }
+      clusters = clusters.filter((_, index) => !mergedInto.has(index));
+    }
+  }
+
+  const sourceList = Array.from(sources.values());
+  const uniq = (values: string[]) => Array.from(new Set(values));
+  const rows = clusters.map(({ units: group, method }) => {
+    const reportUnits = group.filter((unit) => unit.sourceKind === "report");
+    const first = reportUnits[0] ?? group[0];
+    const hasReport = reportUnits.length > 0;
+    const hasDashboard = group.some((unit) => unit.sourceKind === "database");
+    const startValues = uniq(group.map((unit) => unit.startDate || "none"));
+    const endValues = uniq(group.map((unit) => unit.endDate || "none"));
+    const startMismatch = hasReport && hasDashboard && startValues.length > 1;
+    const endMismatch = hasReport && hasDashboard && endValues.length > 1;
+    const dbUnits = group.filter((unit) => unit.sourceKind === "database");
+    const grantMismatch = hasReport && hasDashboard
+      && !reportUnits.some((report) => dbUnits.some((db) => enrollmentGrantsOverlap(report, db)));
+    const anyMismatch = startMismatch || endMismatch || grantMismatch;
+    const status: CompareCellStatus = hasReport && hasDashboard
+      ? (anyMismatch ? "mismatch" : "matched")
+      : "unmatched";
+    const matchStatus = hasReport && hasDashboard
+      ? (anyMismatch
+        ? `Enrollment matched; ${[startMismatch ? "start date differs" : "", endMismatch ? "end date differs" : "", grantMismatch ? "grant/provider name differs" : ""].filter(Boolean).join(" + ")}`
+        : "Enrollment exists in report and dashboard")
+      : hasReport ? "Missing from dashboard" : "Only in dashboard";
+    return {
+      id: `enrollment:${exactEnrollmentKey(group[0])}`,
+      mode: "enrollments" as const,
+      name: first.name || "-",
+      date: first.startDate || "-",
+      amount: null,
+      status,
+      matchStatus,
+      fields: {
+        cwid: uniq(group.map((unit) => unit.cwid).filter(Boolean)).join(", ") || "-",
+        hmisId: uniq(group.map((unit) => unit.hmisId).filter(Boolean)).join(", ") || "-",
+        enrollmentName: uniq(group.map((unit) => unit.enrollmentName).filter(Boolean)).join(" | ") || "-",
+        startDate: startValues.filter((value) => value !== "none").join(" vs ") || "-",
+        endDate: endValues.filter((value) => value !== "none").join(" vs ") || (endValues.includes("none") ? "no exit" : "-"),
+        status: uniq(group.map((unit) => unit.status).filter(Boolean)).join(" | ") || "-",
+      },
+      cells: sourceList.map((source) => {
+        const sourceUnits = group.filter((unit) => unit.sourceId === source.id);
+        if (!sourceUnits.length) return { sourceId: source.id, sourceLabel: source.label, status: "missing" as CompareCellStatus, value: "-", detail: "No row in this source" };
+        return {
+          sourceId: source.id,
+          sourceLabel: source.label,
+          status: status === "mismatch" ? "mismatch" as CompareCellStatus : "matched" as CompareCellStatus,
+          value: sourceUnits.map((unit) => [unit.enrollmentName, unit.startDate, unit.endDate].filter(Boolean).join(" / ") || "present").join("; "),
+          detail: sourceUnits.map((unit) => unit.status).filter(Boolean).join("; "),
+          row: sourceUnits[0].row,
+        };
+      }),
+      matchReasons: [
+        granularity === "service" ? "Service-level view; dashboard does not track services separately." : `Merged by ${method}.`,
+        startMismatch ? `Start dates differ: ${startValues.join(" vs ")}.` : "",
+        endMismatch ? `End dates differ: ${endValues.join(" vs ")}.` : "",
+        grantMismatch ? `Grant/provider names differ: ${uniq(group.map((unit) => unit.enrollmentName).filter(Boolean)).join(" vs ")}. Review provider → grant mapping.` : "",
+      ].filter(Boolean),
+    };
   });
-  return { sources: sourceList, rows: out.sort((a, b) => a.name.localeCompare(b.name) || a.date.localeCompare(b.date)) };
+  return { sources: sourceList, rows: rows.sort((a, b) => a.name.localeCompare(b.name) || a.date.localeCompare(b.date)) };
 }
 
 function buildCustomerExitCompareRows(packets: ReconciliationPacket[], database: DatabaseRows): { sources: CompareSource[]; rows: CompareRow[] } {
   const maps = customerMaps(database.customers);
   const sources = new Map<string, CompareSource>();
   const rows = new Map<string, CompareRow>();
+  const cellsByRow = new Map<string, Map<string, CompareCell>>();
   const packetSources = packetSourceMetas(packets);
   for (const [packetIndex, packet] of packets.entries()) {
     const reportSource = packetSources[packetIndex];
     for (const record of packet.records) {
       const name = record.customerIdentity.fullName || `${record.customerIdentity.firstName} ${record.customerIdentity.lastName}`.trim();
-      if (!name && !record.customerIdentity.hmisId && !record.customerIdentity.caseworthyId) continue;
-      const match = findCustomerForRecord(record, maps);
-      const matched = match.customer;
-      const key = identityKeyFromValues(record.customerIdentity.caseworthyId, record.customerIdentity.hmisId, name);
-      const reportSourceId = reportSource.id;
-      sources.set(reportSourceId, { id: reportSourceId, label: reportSource.label, kind: "report" });
+      const recordCw = recordCwId(record);
+      if (!name && !record.customerIdentity.hmisId && !recordCw) continue;
+      const key = identityKeyFromValues(recordCw, record.customerIdentity.hmisId, name);
+      sources.set(reportSource.id, { id: reportSource.id, label: reportSource.label, kind: "report" });
       sources.set("database:customers", { id: "database:customers", label: "Dashboard customers", kind: "database" });
-      rows.set(key, {
-        id: `customer:${key}`,
-        mode: "customer_exits",
-        name,
-        date: record.enrollmentEvidence.exitDate || record.enrollmentEvidence.entryDate || "-",
-        amount: null,
-        status: matched ? "matched" : "unmatched",
-        matchStatus: matched ? `Customer exists in dashboard (${Math.round(match.confidence * 100)}%)` : "Create/link customer candidate",
-        fields: {
-          cwid: record.customerIdentity.caseworthyId || customerCaseworthyId(matched) || "-",
-          hmisId: record.customerIdentity.hmisId || customerHmisId(matched) || "-",
-          activeState: matched ? (String(matched.active ?? matched.status ?? "present")) : "missing",
-          actionHint: matched ? "Review active/inactive and IDs" : "Create customer, assign CM, link IDs/folder",
-        },
-        cells: [
-          { sourceId: reportSourceId, sourceLabel: reportSource.label, status: "matched", value: "present", row: record.raw },
-          { sourceId: "database:customers", sourceLabel: "Dashboard customers", status: matched ? "matched" : "missing", value: matched ? "present" : "missing", row: matched },
-        ],
-        matchReasons: [match.reason],
-      });
+
+      let row = rows.get(key);
+      if (!row) {
+        const match = findCustomerForRecord(record, maps);
+        const matched = match.customer;
+        row = {
+          id: `customer:${key}`,
+          mode: "customer_exits",
+          name,
+          date: record.enrollmentEvidence.exitDate || record.enrollmentEvidence.entryDate || "-",
+          amount: null,
+          status: matched ? "matched" : "unmatched",
+          matchStatus: matched ? `Customer exists in dashboard (${Math.round(match.confidence * 100)}%)` : "Create/link customer candidate",
+          fields: {
+            cwid: recordCw || customerCaseworthyId(matched) || "-",
+            hmisId: record.customerIdentity.hmisId || customerHmisId(matched) || "-",
+            dob: record.customerIdentity.dob || "-",
+            activeState: matched ? (String(matched.active ?? matched.status ?? "present")) : "missing",
+            actionHint: matched ? "Review active/inactive and IDs" : "Create customer, assign CM, link IDs/folder",
+          },
+          cells: [],
+          matchReasons: [match.reason],
+        };
+        rows.set(key, row);
+        cellsByRow.set(key, new Map([[
+          "database:customers",
+          { sourceId: "database:customers", sourceLabel: "Dashboard customers", status: matched ? "matched" : "missing", value: matched ? "present" : "missing", row: matched ?? undefined },
+        ]]));
+      }
+
+      // Backfill identity fields the first record was missing, and flag
+      // cross-source DOB conflicts instead of silently keeping the first value.
+      if (row.fields.dob === "-" && record.customerIdentity.dob) row.fields.dob = record.customerIdentity.dob;
+      else if (record.customerIdentity.dob && row.fields.dob !== "-" && row.fields.dob !== record.customerIdentity.dob) {
+        const conflict = `DOB differs across sources: ${row.fields.dob} vs ${record.customerIdentity.dob}.`;
+        if (!row.matchReasons.includes(conflict)) {
+          row.matchReasons.push(conflict);
+          row.status = "mismatch";
+          row.matchStatus = "Same identity, but DOB differs across sources";
+        }
+      }
+      if (row.fields.cwid === "-" && recordCw) row.fields.cwid = recordCw;
+      if (row.fields.hmisId === "-" && record.customerIdentity.hmisId) row.fields.hmisId = record.customerIdentity.hmisId;
+
+      const cellMap = cellsByRow.get(key)!;
+      if (!cellMap.has(reportSource.id)) {
+        cellMap.set(reportSource.id, {
+          sourceId: reportSource.id,
+          sourceLabel: reportSource.label,
+          status: "matched",
+          value: [name, record.customerIdentity.dob].filter(Boolean).join(" / ") || "present",
+          row: record.raw,
+        });
+      }
     }
   }
-  return { sources: Array.from(sources.values()), rows: Array.from(rows.values()).sort((a, b) => a.name.localeCompare(b.name)) };
+  const sourceList = Array.from(sources.values());
+  const out = Array.from(rows.entries()).map(([key, row]) => {
+    const cellMap = cellsByRow.get(key)!;
+    row.cells = sourceList.map((source) => cellMap.get(source.id) ?? {
+      sourceId: source.id,
+      sourceLabel: source.label,
+      status: "missing",
+      value: "-",
+      detail: "No row in this source",
+    });
+    return row;
+  });
+  return { sources: sourceList, rows: out.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 export function buildReconciliationCompare(
