@@ -160,6 +160,11 @@ export const qk = {
     grant: (grantId: string) => ["metrics", "grant", grantId] as const,
     grantMonth: (grantId: string, month: string) => ["metrics", "grant", grantId, "month", month] as const,
   },
+  ai: {
+    root: ["ai"] as const,
+    caseNoteUsage: (filters?: Record<string, unknown>) =>
+      ["ai", "case-note-usage", stable(filters || {})] as const,
+  },
   dashboard: {
     root: ["dashboard"] as const,
     // Feature-owned orchestration key for dashboard warmup gate.

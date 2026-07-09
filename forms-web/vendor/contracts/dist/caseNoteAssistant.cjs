@@ -23,6 +23,8 @@ __export(caseNoteAssistant_exports, {
   CaseNoteActionSchema: () => CaseNoteActionSchema,
   CaseNoteInterviewFieldsSchema: () => CaseNoteInterviewFieldsSchema,
   CaseNoteModeSchema: () => CaseNoteModeSchema,
+  CaseNoteUsageSummaryQuerySchema: () => CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema: () => CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema
@@ -80,11 +82,36 @@ var RecordCaseNoteSuggestionDecisionBodySchema = import_zod.z.object({
   requestId: import_zod.z.string().uuid(),
   accepted: import_zod.z.boolean()
 });
+var CaseNoteUsageSummaryQuerySchema = import_zod.z.object({
+  month: import_zod.z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  orgId: import_zod.z.string().min(1).max(128).optional()
+});
+var CaseNoteUsageSummaryResponseSchema = import_zod.z.object({
+  ok: import_zod.z.literal(true),
+  month: import_zod.z.string(),
+  org: import_zod.z.object({
+    requests: import_zod.z.number().int().nonnegative(),
+    tokens: import_zod.z.number().int().nonnegative(),
+    monthlyRequestLimit: import_zod.z.number().int().nonnegative(),
+    monthlyTokenLimit: import_zod.z.number().int().nonnegative()
+  }),
+  users: import_zod.z.array(import_zod.z.object({
+    uid: import_zod.z.string(),
+    requests: import_zod.z.number().int().nonnegative(),
+    tokens: import_zod.z.number().int().nonnegative(),
+    daysActive: import_zod.z.number().int().nonnegative(),
+    dailyRequestLimit: import_zod.z.number().int().nonnegative(),
+    dailyTokenLimit: import_zod.z.number().int().nonnegative(),
+    enabled: import_zod.z.boolean()
+  }))
+});
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CaseNoteActionSchema,
   CaseNoteInterviewFieldsSchema,
   CaseNoteModeSchema,
+  CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema

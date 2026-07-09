@@ -28,6 +28,8 @@ __export(index_exports, {
   BudgetPipelineListQuery: () => BudgetPipelineListQuery,
   BudgetPipelinePreviewBody: () => BudgetPipelinePreviewBody,
   BudgetPipelineUpsertBody: () => BudgetPipelineUpsertBody,
+  CaseNoteUsageSummaryQuerySchema: () => CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema: () => CaseNoteUsageSummaryResponseSchema,
   CmActivitiesListQuery: () => CmActivitiesListQuery,
   CmActivitiesListResp: () => CmActivitiesListResp,
   CmActivity: () => CmActivity,
@@ -6100,6 +6102,8 @@ __export(caseNoteAssistant_exports, {
   CaseNoteActionSchema: () => CaseNoteActionSchema,
   CaseNoteInterviewFieldsSchema: () => CaseNoteInterviewFieldsSchema,
   CaseNoteModeSchema: () => CaseNoteModeSchema,
+  CaseNoteUsageSummaryQuerySchema: () => CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema: () => CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema
@@ -6156,6 +6160,29 @@ var RecordCaseNoteSuggestionDecisionBodySchema = import_zod5.z.object({
   requestId: import_zod5.z.string().uuid(),
   accepted: import_zod5.z.boolean()
 });
+var CaseNoteUsageSummaryQuerySchema = import_zod5.z.object({
+  month: import_zod5.z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  orgId: import_zod5.z.string().min(1).max(128).optional()
+});
+var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
+  ok: import_zod5.z.literal(true),
+  month: import_zod5.z.string(),
+  org: import_zod5.z.object({
+    requests: import_zod5.z.number().int().nonnegative(),
+    tokens: import_zod5.z.number().int().nonnegative(),
+    monthlyRequestLimit: import_zod5.z.number().int().nonnegative(),
+    monthlyTokenLimit: import_zod5.z.number().int().nonnegative()
+  }),
+  users: import_zod5.z.array(import_zod5.z.object({
+    uid: import_zod5.z.string(),
+    requests: import_zod5.z.number().int().nonnegative(),
+    tokens: import_zod5.z.number().int().nonnegative(),
+    daysActive: import_zod5.z.number().int().nonnegative(),
+    dailyRequestLimit: import_zod5.z.number().int().nonnegative(),
+    dailyTokenLimit: import_zod5.z.number().int().nonnegative(),
+    enabled: import_zod5.z.boolean()
+  }))
+});
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   BoolFromLike,
@@ -6166,6 +6193,8 @@ var RecordCaseNoteSuggestionDecisionBodySchema = import_zod5.z.object({
   BudgetPipelineListQuery,
   BudgetPipelinePreviewBody,
   BudgetPipelineUpsertBody,
+  CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema,
   CmActivitiesListQuery,
   CmActivitiesListResp,
   CmActivity,

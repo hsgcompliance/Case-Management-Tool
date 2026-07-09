@@ -171,6 +171,7 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
       includeRow: { required: false, aliases: ["Working", "Include", "Active"] },
       serviceDate: { required: false, type: "date", aliases: ["Month", "Invoice Date", "Payment Date", "Assistance Start", "Date"] },
       customerName: { required: true, type: "identity", aliases: ["Household", "Client Name", "Customer", "Customer Name", "Name"] },
+      cwId: { required: false, type: "identity", aliases: ["CWID", "CW ID", "HMIS/CW ID", "HMIS/CWID", "CaseWorthy ID", "Caseworthy ID"] },
       grant: { required: false, type: "grant", aliases: ["Project Enrollment", "Project", "Grant", "Program"] },
       serviceName: { required: false, aliases: ["Service Type", "Service", "Description", "Type"] },
       amount: { required: true, type: "money", aliases: ["Service Cost", "Total Assistance", "Total Service Cost", "Amount", "Cost"] },

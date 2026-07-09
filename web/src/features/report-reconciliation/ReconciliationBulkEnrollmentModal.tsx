@@ -311,9 +311,28 @@ export default function ReconciliationBulkEnrollmentModal({
             <div className="mt-1 text-xl font-semibold text-slate-950">Bulk Enroll From Report</div>
             <div className="mt-1 text-sm text-slate-500">Create missing enrollments and align report end dates through existing enrollment endpoints.</div>
           </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={busy}>
-            Close
-          </button>
+          <div className="flex flex-wrap items-end justify-end gap-3">
+            <label className="block w-64">
+              <div className="mb-1 text-xs font-medium text-slate-600">Default Grant</div>
+              <select className="input h-9 w-full text-sm" value={globalGrantId} onChange={(event) => setGlobalGrantId(event.currentTarget.value)}>
+                <option value="">Auto-match by provider/name</option>
+                {grants.map((grant) => <option key={grant.id} value={grant.id}>{grant.name || grant.id}</option>)}
+              </select>
+            </label>
+            <label className="flex h-9 items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={closeExited} onChange={(event) => setCloseExited(event.currentTarget.checked)} />
+              Close exited
+            </label>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAll} disabled={!eligibleRows.length || busy}>
+              {allEligibleSelected ? "Clear eligible" : "Select eligible"}
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void apply()} disabled={busy || selectedRows.length === 0}>
+              {busy ? "Applying..." : `Apply ${selectedRows.length}`}
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={busy}>
+              Close
+            </button>
+          </div>
         </div>
       }
       leftPane={
@@ -322,19 +341,6 @@ export default function ReconciliationBulkEnrollmentModal({
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Selected</div>
             <div className="mt-2 text-3xl font-semibold text-slate-950">{selectedRows.length}</div>
             <div className="mt-1 text-sm text-slate-500">{createRows.length} create, {patchRows.length} date update, {blockedRows.length} blocked</div>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <label className="block text-sm font-medium text-slate-700">
-              Default grant for unmatched providers
-              <select className="input mt-2 h-9 w-full text-sm" value={globalGrantId} onChange={(event) => setGlobalGrantId(event.currentTarget.value)}>
-                <option value="">Auto-match by provider/name</option>
-                {grants.map((grant) => <option key={grant.id} value={grant.id}>{grant.name || grant.id}</option>)}
-              </select>
-            </label>
-            <label className="mt-4 flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={closeExited} onChange={(event) => setCloseExited(event.currentTarget.checked)} />
-              Close enrollments when the report has an exit date
-            </label>
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
             Duplicate customer/grant/date rows are collapsed. Existing non-deleted enrollments are skipped by the backend bulk enroll guard.
@@ -348,14 +354,6 @@ export default function ReconciliationBulkEnrollmentModal({
               <div>
                 <div className="text-sm font-semibold text-slate-950">Enrollment Preview</div>
                 <div className="text-xs text-slate-500">Review grant mapping, start dates, and exit dates before applying.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAll} disabled={!eligibleRows.length || busy}>
-                  {allEligibleSelected ? "Clear eligible" : "Select eligible"}
-                </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => void apply()} disabled={busy || selectedRows.length === 0}>
-                  {busy ? "Applying..." : `Apply ${selectedRows.length}`}
-                </button>
               </div>
             </div>
             <div className="overflow-x-auto">

@@ -199,11 +199,13 @@ import {
   budgetPipeline_exports
 } from "./chunk-DS5NSSHV.js";
 import {
+  CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema,
   caseNoteAssistant_exports
-} from "./chunk-QYYQSCVK.js";
+} from "./chunk-UPBJ4VIQ.js";
 import {
   CmActivitiesListQuery,
   CmActivitiesListResp,
@@ -246,6 +248,8 @@ export {
   BudgetPipelineListQuery,
   BudgetPipelinePreviewBody,
   BudgetPipelineUpsertBody,
+  CaseNoteUsageSummaryQuerySchema,
+  CaseNoteUsageSummaryResponseSchema,
   CmActivitiesListQuery,
   CmActivitiesListResp,
   CmActivity,

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getApp } from "firebase-admin/app";
 import { FieldValue } from "firebase-admin/firestore";
 import type { TGenerateCaseNoteSuggestionReq } from "@hdb/contracts";
-import { canAccessDoc, db, requireOrgId, requireUid } from "../../core";
+import { canAccessDoc, db, isDev, requireOrgId, requireUid } from "../../core";
 import { assemblePrompt, promptTemplateIds } from "./prompts";
 import { hydrateCaseNoteBetaConfig } from "./config";
 import { estimateAiCostUsd } from "./pricing";
@@ -35,6 +35,69 @@ function parseStructuredSuggestion(text: string): { draftNote: string; missingOr
 }
 function monthKey(now = new Date()) { return now.toISOString().slice(0, 7); }
 function dayKey(now = new Date()) { return now.toISOString().slice(0, 10); }
+
+async function readCaseNoteConfig(orgId: string) {
+  const configDocs = await db.collection("orgs").doc(orgId).collection("Config").where("kind", "==", "display").get();
+  const displayConfig = configDocs.docs.find((doc) => /grant|budget|display/i.test(String(doc.data().label || ""))) ?? configDocs.docs[0];
+  return hydrateCaseNoteBetaConfig(displayConfig?.data()?.value?.aiFeatures?.caseNoteAssistantBeta ?? {});
+}
+
+export async function getCaseNoteUsageSummary(
+  caller: Record<string, unknown>,
+  input: { month?: string; orgId?: string },
+) {
+  const callerOrgId = requireOrgId(caller);
+  const requestedOrgId = String(input.orgId || callerOrgId).trim();
+  if (requestedOrgId !== callerOrgId && !isDev(caller)) {
+    throw new CaseNoteAssistantError(403, "You do not have access to this organization.");
+  }
+
+  const month = /^\d{4}-\d{2}$/.test(String(input.month || "")) ? String(input.month) : monthKey();
+  const config = await readCaseNoteConfig(requestedOrgId);
+  const quotaRef = db.collection("aiCaseNoteUsage").doc(`${requestedOrgId}_${month}`);
+  const [orgUsageSnap, usersSnap] = await Promise.all([quotaRef.get(), quotaRef.collection("users").get()]);
+  const byUid = new Map<string, { uid: string; requests: number; tokens: number; days: Set<string> }>();
+
+  for (const doc of usersSnap.docs) {
+    const data = doc.data() || {};
+    const uid = String(data.uid || doc.id.split("_")[0] || "").trim();
+    if (!uid) continue;
+    const day = String(data.day || doc.id.slice(uid.length + 1) || "").trim();
+    const current = byUid.get(uid) ?? { uid, requests: 0, tokens: 0, days: new Set<string>() };
+    current.requests += Math.max(0, Number(data.requests) || 0);
+    current.tokens += Math.max(0, Number(data.tokens) || 0);
+    if (day) current.days.add(day);
+    byUid.set(uid, current);
+  }
+
+  const userRows = Array.from(byUid.values()).map((row) => {
+    const override = config.userQuotaOverrides[row.uid] ?? {};
+    return {
+      uid: row.uid,
+      requests: row.requests,
+      tokens: row.tokens,
+      daysActive: row.days.size,
+      dailyRequestLimit: Math.max(0, Number(override.dailyRequestLimit ?? config.dailyUserRequestLimit) || 0),
+      dailyTokenLimit: Math.max(0, Number(override.dailyTokenLimit ?? config.dailyUserTokenLimit) || 0),
+      enabled: override.enabled === true,
+    };
+  }).sort((a, b) => b.requests - a.requests || b.tokens - a.tokens || a.uid.localeCompare(b.uid));
+
+  const orgData = orgUsageSnap.data() || {};
+  const summedRequests = userRows.reduce((total, row) => total + row.requests, 0);
+  const summedTokens = userRows.reduce((total, row) => total + row.tokens, 0);
+
+  return {
+    month,
+    org: {
+      requests: Math.max(Number(orgData.requests) || 0, summedRequests),
+      tokens: Math.max(Number(orgData.tokens) || 0, summedTokens),
+      monthlyRequestLimit: config.monthlyRequestLimit,
+      monthlyTokenLimit: config.monthlyTokenLimit,
+    },
+    users: userRows,
+  };
+}
 
 export async function generateSuggestion(caller: Record<string, unknown>, input: TGenerateCaseNoteSuggestionReq) {
   const uid = requireUid(caller); const orgId = requireOrgId(caller); const requestId = randomUUID();

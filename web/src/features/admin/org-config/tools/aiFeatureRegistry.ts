@@ -24,7 +24,7 @@ export type AiFeatureRegistryEntry = {
   ) => Record<string, unknown>;
 };
 
-const CASE_NOTE_ASSISTANT_DEFAULTS: Record<string, unknown> = {
+export const CASE_NOTE_ASSISTANT_DEFAULTS: Record<string, unknown> = {
   enabled: false,
   allowedWorkbookVariants: ["payer"],
   defaultClientLabel: "client",

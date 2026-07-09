@@ -6,6 +6,7 @@ import FullPageModal from "@entities/ui/FullPageModal";
 import { useUpsertCustomers } from "@hooks/useCustomers";
 import { useUsers } from "@hooks/useUsers";
 import { qk } from "@hooks/queryKeys";
+import { DUP_WARN_THRESHOLD, findDuplicates, type DupCandidate, type DupMatch } from "@lib/duplicateScore";
 import { toast } from "@lib/toast";
 import type { CustomersUpsertReq } from "@types";
 import type { ReconciliationFinding } from "./reconciliationReview";
@@ -27,11 +28,39 @@ type ImportRow = {
   sourceFile: string;
   sourceRowNumber: number | null;
   warnings: string[];
+  duplicateMatches: DupMatch<DupCandidate>[];
   blocked: boolean;
 };
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function compactHeader(value: unknown) {
+  return text(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function rawValueByAliases(raw: Record<string, unknown> | null | undefined, aliases: string[]) {
+  if (!raw) return "";
+  const targets = new Set(aliases.map(compactHeader).filter(Boolean));
+  for (const [key, value] of Object.entries(raw)) {
+    if (targets.has(compactHeader(key))) return text(value);
+  }
+  return "";
+}
+
+function reportRawCwId(raw: Record<string, unknown> | null | undefined) {
+  return rawValueByAliases(raw, [
+    "cwId",
+    "CWID",
+    "CW ID",
+    "HMIS/CW ID",
+    "HMIS/CWID",
+    "HMIS CW ID",
+    "CaseWorthy ID",
+    "Caseworthy ID",
+    "Case Worthy ID",
+  ]);
 }
 
 function splitName(fullName: string) {
@@ -84,6 +113,69 @@ function namesAreClose(left: Pick<ImportRow, "firstName" | "lastName">, right: R
   return editDistance(left.firstName, rightFirst) <= 2 && editDistance(left.lastName, rightLast) <= 2;
 }
 
+function customerNamePart(customer: Record<string, unknown>, key: "first" | "last") {
+  return key === "first"
+    ? text(customer.firstName ?? customer.givenName)
+    : text(customer.lastName ?? customer.surname);
+}
+
+function customerDob(customer: Record<string, unknown>) {
+  return text(customer.dob ?? customer.dateOfBirth ?? customer.birthDate);
+}
+
+function customerCwId(customer: Record<string, unknown>) {
+  return text(customer.cwId ?? customer.CWID ?? customer.caseworthyId ?? customer.caseWorthyId);
+}
+
+function toDuplicateCandidate(customer: Record<string, unknown>): DupCandidate | null {
+  const id = text(customer.id);
+  if (!id) return null;
+  return {
+    ...customer,
+    id,
+    firstName: customerNamePart(customer, "first"),
+    lastName: customerNamePart(customer, "last"),
+    name: text(customer.name ?? customer.fullName),
+    dob: customerDob(customer),
+    cwId: customerCwId(customer),
+  };
+}
+
+function duplicateMatchesForRow(row: ImportRow, customers: Array<Record<string, unknown>>) {
+  const candidates = customers
+    .map(toDuplicateCandidate)
+    .filter((candidate): candidate is DupCandidate => !!candidate);
+  const cwIds = Array.from(new Set([row.cwId, row.caseworthyId].map((value) => text(value)).filter(Boolean)));
+  const queries = cwIds.length ? cwIds : [""];
+  const byCustomerId = new Map<string, DupMatch<DupCandidate>>();
+
+  for (const cwId of queries) {
+    for (const match of findDuplicates(candidates, {
+      firstName: row.firstName,
+      lastName: row.lastName,
+      dob: row.dob,
+      cwId,
+    }, { limit: 5 })) {
+      const existing = byCustomerId.get(match.customer.id);
+      if (!existing || match.score > existing.score) byCustomerId.set(match.customer.id, match);
+    }
+  }
+
+  return Array.from(byCustomerId.values()).sort((a, b) => b.score - a.score).slice(0, 3);
+}
+
+function duplicateMatchLabel(match: DupMatch<DupCandidate>) {
+  const customer = match.customer as Record<string, unknown>;
+  const name = text(customer.name) || [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || customer.id;
+  const details = [
+    `${match.score}%`,
+    match.reasons.join(", "),
+    text(customer.dob) ? `DOB ${text(customer.dob)}` : "",
+    text(customer.cwId) ? `CWID ${text(customer.cwId)}` : "",
+  ].filter(Boolean).join("; ");
+  return `${name} (${details})`;
+}
+
 function identityKey(row: Pick<ImportRow, "hmisId" | "cwId" | "caseworthyId" | "firstName" | "lastName" | "dob">) {
   return [
     row.hmisId ? `hmis:${row.hmisId.toLowerCase()}` : "",
@@ -111,12 +203,12 @@ function existingCustomerConflict(row: ImportRow, customers: Array<Record<string
 
   return customers.some((customer) => {
     if (hmis && text(customer.hmisId ?? customer.HMISId).toLowerCase() === hmis) return true;
-    if (cw && text(customer.cwId ?? customer.CWID).toLowerCase() === cw) return true;
-    if (caseworthy && text(customer.caseworthyId).toLowerCase() === caseworthy) return true;
-    const customerFirst = text(customer.firstName ?? customer.givenName).toLowerCase();
-    const customerLast = text(customer.lastName ?? customer.surname).toLowerCase();
-    const customerDob = text(customer.dob ?? customer.dateOfBirth ?? customer.birthDate);
-    return Boolean(first && last && dob && customerFirst === first && customerLast === last && customerDob === dob);
+    if (cw && customerCwId(customer).toLowerCase() === cw) return true;
+    if (caseworthy && customerCwId(customer).toLowerCase() === caseworthy) return true;
+    const customerFirst = customerNamePart(customer, "first").toLowerCase();
+    const customerLast = customerNamePart(customer, "last").toLowerCase();
+    const customerDobValue = customerDob(customer);
+    return Boolean(first && last && dob && customerFirst === first && customerLast === last && customerDobValue === dob);
   });
 }
 
@@ -136,6 +228,8 @@ function validateImportRows(rows: ImportRow[], customers: Array<Record<string, u
   return rows.map((row) => {
     const warnings: string[] = [];
     const conflictingSourceIds = (externalIdsByName.get(normalizedName(row))?.size ?? 0) > 1;
+    const duplicateMatches = duplicateMatchesForRow(row, customers);
+    const hasHighDuplicate = duplicateMatches.some((match) => match.score >= DUP_WARN_THRESHOLD);
     const fuzzyCustomer = customers.find((customer) => namesAreClose(row, customer));
     if (!row.firstName || !row.lastName) warnings.push("First and last name are required before create.");
     if (!row.dob) warnings.push("DOB is blank; add it if the source report has it.");
@@ -143,6 +237,8 @@ function validateImportRows(rows: ImportRow[], customers: Array<Record<string, u
     if (identityKey(row) && (identityCounts.get(identityKey(row)) ?? 0) > 1) warnings.push("Duplicate identity appears in the selected import rows.");
     if (conflictingSourceIds) warnings.push("Blocked: the selected source rows contain the same name with different HMIS/CW/Caseworthy IDs.");
     if (existingCustomerConflict(row, customers)) warnings.push("A dashboard customer already appears to match this identity.");
+    if (duplicateMatches.length) warnings.push(`Duplicate recommendation: ${duplicateMatchLabel(duplicateMatches[0])}.`);
+    if (hasHighDuplicate) warnings.push("Blocked: high-confidence dashboard duplicate recommendation.");
     if (fuzzyCustomer) {
       const first = text(fuzzyCustomer.firstName ?? fuzzyCustomer.givenName);
       const last = text(fuzzyCustomer.lastName ?? fuzzyCustomer.surname);
@@ -151,7 +247,8 @@ function validateImportRows(rows: ImportRow[], customers: Array<Record<string, u
     return {
       ...row,
       warnings,
-      blocked: !row.firstName || !row.lastName || conflictingSourceIds || existingCustomerConflict(row, customers),
+      duplicateMatches,
+      blocked: !row.firstName || !row.lastName || conflictingSourceIds || existingCustomerConflict(row, customers) || hasHighDuplicate,
     };
   });
 }
@@ -168,6 +265,7 @@ export function buildBulkCustomerImportRows(
     const record = finding.reportRecord;
     if (!record || finding.matchedCustomer || finding.customerId) continue;
     const identity = record.customerIdentity;
+    const raw = record.raw as Record<string, unknown> | undefined;
     const parsed = splitName(identity.fullName || `${identity.firstName} ${identity.lastName}`.trim());
     const firstName = text(identity.firstName) || parsed.firstName;
     const lastName = text(identity.lastName) || parsed.lastName;
@@ -177,15 +275,16 @@ export function buildBulkCustomerImportRows(
       firstName,
       lastName,
       dob: text(identity.dob),
-      cwId: text(identity.cwId ?? (record.raw as Record<string, unknown>)?.cwId ?? (record.raw as Record<string, unknown>)?.CWID ?? (record.raw as Record<string, unknown>)?.["CW ID"]),
+      cwId: text(identity.cwId) || reportRawCwId(raw),
       hmisId: text(identity.hmisId),
       caseworthyId: text(identity.caseworthyId),
-      population: normalizePopulation((record.raw as Record<string, unknown>)?.Population ?? (record.raw as Record<string, unknown>)?.population),
+      population: normalizePopulation(raw?.Population ?? raw?.population),
       caseManagerId: globalCaseManagerId,
       active: true,
       sourceFile: finding.sourceFile,
       sourceRowNumber: finding.sourceRowNumber,
       warnings: [],
+      duplicateMatches: [],
       blocked: false,
     };
     const key = identityKey(row) || row.id;
@@ -309,9 +408,33 @@ export default function ReconciliationBulkCustomerImportModal({
             <div className="mt-1 text-xl font-semibold text-slate-950">Create Customers From Reports</div>
             <div className="mt-1 text-sm text-slate-500">Review parsed HMIS/Caseworthy rows, fill missing fields, then create customer records.</div>
           </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={upsertCustomers.isPending}>
-            Close
-          </button>
+          <div className="flex flex-wrap items-end justify-end gap-3">
+            <label className="block w-56">
+              <div className="mb-1 text-xs font-medium text-slate-600">Default CM</div>
+              <select className="select h-9 w-full" value={globalCaseManagerId} onChange={(event) => applyGlobalCaseManager(event.currentTarget.value)}>
+                <option value="">Unassigned</option>
+                {caseManagers.map((cm) => <option key={cm.id} value={cm.id}>{cm.name}</option>)}
+              </select>
+            </label>
+            <label className="block w-40">
+              <div className="mb-1 text-xs font-medium text-slate-600">Default Population</div>
+              <select className="select h-9 w-full" value={globalPopulation} onChange={(event) => applyGlobalPopulation(event.currentTarget.value as PopulationValue)}>
+                <option value="">Blank</option>
+                <option value="Youth">Youth</option>
+                <option value="Individual">Individual</option>
+                <option value="Family">Family</option>
+              </select>
+            </label>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAll} disabled={!eligibleRows.length || upsertCustomers.isPending}>
+              {allEligibleSelected ? "Clear eligible" : "Select eligible"}
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void apply()} disabled={upsertCustomers.isPending || selectedRows.length === 0}>
+              {upsertCustomers.isPending ? "Creating..." : `Create ${selectedRows.length}`}
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={upsertCustomers.isPending}>
+              Close
+            </button>
+          </div>
         </div>
       }
       leftPane={
@@ -320,24 +443,6 @@ export default function ReconciliationBulkCustomerImportModal({
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Selected Creates</div>
             <div className="mt-2 text-3xl font-semibold text-slate-950">{selectedRows.length}</div>
             <div className="mt-1 text-sm text-slate-500">{eligibleRows.length} eligible, {displayRows.length - eligibleRows.length} blocked</div>
-          </div>
-          <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Global assign all to CM</label>
-            <select className="select mt-2 w-full" value={globalCaseManagerId} onChange={(event) => applyGlobalCaseManager(event.currentTarget.value)}>
-              <option value="">Unassigned</option>
-              {caseManagers.map((cm) => <option key={cm.id} value={cm.id}>{cm.name}</option>)}
-            </select>
-            <div className="mt-2 text-xs text-slate-500">Blank rows use this value. Row-level CM wins when selected.</div>
-          </div>
-          <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Global population</label>
-            <select className="select mt-2 w-full" value={globalPopulation} onChange={(event) => applyGlobalPopulation(event.currentTarget.value as PopulationValue)}>
-              <option value="">Blank</option>
-              <option value="Youth">Youth</option>
-              <option value="Individual">Individual</option>
-              <option value="Family">Family</option>
-            </select>
-            <div className="mt-2 text-xs text-slate-500">Blank rows use this value. Row-level population wins when selected.</div>
           </div>
           <div className="rounded-[24px] border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
             Creates are blocked when the dashboard already appears to have the customer or the source has the same name with different IDs. Names that are only a couple letters off are flagged for review.
@@ -351,14 +456,6 @@ export default function ReconciliationBulkCustomerImportModal({
               <div>
                 <div className="text-sm font-semibold text-slate-950">Customer Import Preview</div>
                 <div className="text-xs text-slate-500">Rows come from selected findings and use the existing customersUpsert endpoint.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAll} disabled={!eligibleRows.length || upsertCustomers.isPending}>
-                  {allEligibleSelected ? "Clear eligible" : "Select eligible"}
-                </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => void apply()} disabled={upsertCustomers.isPending || selectedRows.length === 0}>
-                  {upsertCustomers.isPending ? "Creating..." : `Create ${selectedRows.length}`}
-                </button>
               </div>
             </div>
             <div className="overflow-x-auto">

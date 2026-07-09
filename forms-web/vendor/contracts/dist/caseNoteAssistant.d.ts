@@ -88,3 +88,28 @@ export type TRecordCaseNoteSuggestionDecisionReq = z.infer<typeof RecordCaseNote
 export type TRecordCaseNoteSuggestionDecisionResp = {
     ok: true;
 };
+export declare const CaseNoteUsageSummaryQuerySchema: z.ZodObject<{
+    month: z.ZodOptional<z.ZodString>;
+    orgId: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export declare const CaseNoteUsageSummaryResponseSchema: z.ZodObject<{
+    ok: z.ZodLiteral<true>;
+    month: z.ZodString;
+    org: z.ZodObject<{
+        requests: z.ZodNumber;
+        tokens: z.ZodNumber;
+        monthlyRequestLimit: z.ZodNumber;
+        monthlyTokenLimit: z.ZodNumber;
+    }, z.core.$strip>;
+    users: z.ZodArray<z.ZodObject<{
+        uid: z.ZodString;
+        requests: z.ZodNumber;
+        tokens: z.ZodNumber;
+        daysActive: z.ZodNumber;
+        dailyRequestLimit: z.ZodNumber;
+        dailyTokenLimit: z.ZodNumber;
+        enabled: z.ZodBoolean;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type TCaseNoteUsageSummaryReq = z.infer<typeof CaseNoteUsageSummaryQuerySchema>;
+export type TCaseNoteUsageSummaryResp = z.infer<typeof CaseNoteUsageSummaryResponseSchema>;

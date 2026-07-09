@@ -306,6 +306,7 @@ export const endpointsStrict = {
   toursStructure:                { method: 'GET',   path: 'toursStructure' },
 
   // OTHER
+  caseNoteUsageSummary:          { method: 'GET',  path: 'caseNoteUsageSummary' },
   createSession:                 { method: 'POST', path: 'createSession' },
   health:                        { method: 'GET',  path: 'health' },
 } as const satisfies StrictRegistry;
