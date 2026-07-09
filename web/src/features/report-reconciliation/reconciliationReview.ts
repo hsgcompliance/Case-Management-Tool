@@ -25,6 +25,7 @@ export type ReconciliationFindingKind =
   | "payment_missing_hmis"
   | "payment_missing_financial_edge"
   | "payment_missing_report"
+  | "payment_unpaid_dashboard"
   | "payment_possible_match"
   | "payment_amount_mismatch"
   | "grant_mapping_review"
@@ -750,6 +751,8 @@ function findingTitle(finding: ReconciliationFinding): string {
       return `${source} payment row missing from FE: ${who}`;
     case "payment_missing_report":
       return `Dashboard payment with no report evidence: ${who}`;
+    case "payment_unpaid_dashboard":
+      return `Paid in ${source}, still pending in dashboard: ${who}`;
     case "payment_possible_match":
       return `Multiple dashboard payment matches for ${source} row: ${who}`;
     case "payment_amount_mismatch":
@@ -1259,6 +1262,50 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
                 paymentCandidateCount: candidates.length,
               },
             });
+          } else if (candidates.length === 1) {
+            // Single clean match — but if the dashboard side is a queue item
+            // that is still pending, FE proves the payment went out and the
+            // item should be posted to the ledger.
+            const bestRow = best as Record<string, unknown>;
+            const bestSource = String(bestRow._matchSource || "");
+            const bestPaid = lower(bestRow.queueStatus) === "posted" || bestRow.paid === true || text(bestRow.ledgerEntryId) !== "";
+            if (bestSource === "payment queue" && !bestPaid && lower(bestRow.queueStatus) !== "void") {
+              findings.push({
+                id: findingId("payment_unpaid_dashboard", record, String(bestRow.id ?? "queue")),
+                kind: "payment_unpaid_dashboard",
+                sourceSystem,
+                sourceSystemLabel: sourceLabel,
+                severity: "warning",
+                confidence: Math.min(0.9, Number(bestRow._matchScore ?? 55) / 100),
+                sourceFile: record.sourceFile,
+                sourceProfileId: packet.profileId,
+                sourceProfileLabel: packet.profileLabel,
+                sourceRowNumber: record.sourceRowNumber,
+                recordKind: record.recordKind,
+                customerId: effectiveCustomerId || customerId || undefined,
+                customerLabel: effectiveCustomer ? customerLabel(effectiveCustomer) : customer ? customerLabel(customer) : undefined,
+                paymentId: text(bestRow.id) || undefined,
+                reportValue: `${record.paymentEvidence.amount} ${record.paymentEvidence.serviceMonth || record.paymentEvidence.transactionDate}`,
+                dashboardValue: `queue item ${lower(bestRow.queueStatus) || "pending"}`,
+                explanation: [`${sourceLabel} shows this payment went out, but the matched dashboard queue item has not been posted to the ledger.`],
+                proposedAction: "Post the queue item to the ledger (mark paid) if the FE evidence is confirmed.",
+                reportRecord: record,
+                matchedCustomer: effectiveCustomer ?? customer ?? undefined,
+                matchedPaymentCandidates: candidates.slice(0, 5),
+                match: {
+                  criteria: [
+                    effectiveCustomer ? `Customer matched by ${effectiveCustomerMethod}.` : "Payment matched without a confirmed dashboard customer.",
+                    ...bridgeCriteria,
+                    ...unpostedCriteria,
+                    ...((bestRow._matchReasons as string[]) ?? []),
+                    "Queue item is not posted/paid.",
+                  ],
+                  customerMethod: effectiveCustomerMethod || undefined,
+                  customerConfidence: effectiveCustomerConfidence || undefined,
+                  paymentCandidateCount: candidates.length,
+                },
+              });
+            }
           } else if (candidates.length > 1) {
           findings.push({
             id: findingId("payment_possible_match", record, String(candidates.length)),
