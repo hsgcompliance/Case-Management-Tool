@@ -18,6 +18,7 @@ import {
 import type { ReportUpload, ReportUploadConfig } from "@entities/report-upload/ReportUploadPanel";
 
 const ACTIVE_PROFILE_IDS = [
+  "other_csv",
   "financial_edge_project_activity",
   "rental_assistance_invoice_request",
   "coordinated_entry_by_name_list",
