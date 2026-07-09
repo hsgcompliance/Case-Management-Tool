@@ -1076,8 +1076,7 @@ export type ToursStructureResp = Ok<{ structure: Partial<TourFlowT> }>;
 export type HealthResp = Ok<Record<string, unknown>>;
 export type CreateSessionResp = Ok<Record<string, unknown>>;
 
-import type { TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp } from "./caseNoteAssistant";
-import type { TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
+import type { TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryResp, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
 
 /* ============================================================================
    EndpointMap (canonical)
@@ -1298,6 +1297,7 @@ export interface EndpointMap {
   // MISC
   generateCaseNoteSuggestion: { req: TGenerateCaseNoteSuggestionReq; resp: TGenerateCaseNoteSuggestionResp };
   recordCaseNoteSuggestionDecision: { req: TRecordCaseNoteSuggestionDecisionReq; resp: TRecordCaseNoteSuggestionDecisionResp };
+  caseNoteUsageSummary: { req: TCaseNoteUsageSummaryReq; resp: TCaseNoteUsageSummaryResp };
   createSession: { req: Record<string, unknown>; resp: CreateSessionResp };
   health: { req: void; resp: HealthResp };
 }

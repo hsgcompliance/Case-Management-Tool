@@ -59,7 +59,6 @@ type EnrollmentOption = {
 type LoadedEnrollmentMap = Record<string, Enrollment[]>;
 
 const PAGE_SIZE = 50;
-const BULK_SENTINEL = "__bulk__";
 
 function displayName(customer: Pick<CustomerRow, "name" | "firstName" | "lastName">): string {
   return (
@@ -199,6 +198,7 @@ function WorkspaceScaffold({
   subtitle,
   customers,
   onClose,
+  headerActions,
   leftPane,
   children,
 }: {
@@ -206,6 +206,7 @@ function WorkspaceScaffold({
   subtitle: string;
   customers: CustomerRow[];
   onClose: () => void;
+  headerActions?: React.ReactNode;
   leftPane?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -221,13 +222,16 @@ function WorkspaceScaffold({
             <div className="mt-1 text-xl font-semibold text-slate-950">{title}</div>
             <div className="mt-1 text-sm text-slate-500">{subtitle}</div>
           </div>
-          <button
-            type="button"
-            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-            onClick={onClose}
-          >
-            Close
-          </button>
+          <div className="flex flex-wrap items-end justify-end gap-3">
+            {headerActions}
+            <button
+              type="button"
+              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              onClick={onClose}
+            >
+              Close
+            </button>
+          </div>
         </div>
       }
       leftPane={
@@ -416,36 +420,47 @@ function BulkEnrollWorkspace({
       subtitle="Set global defaults once, then override by row where needed."
       customers={customers}
       onClose={onClose}
+      headerActions={
+        <>
+          <div className="w-60">
+            <div className="mb-1 text-xs font-medium text-slate-600">Default Program</div>
+            <GrantSelect
+              value={globalGrantId}
+              onChange={setGlobalGrantId}
+              placeholderLabel="Select program"
+              disabled={bulkEnroll.isPending}
+            />
+          </div>
+          <label className="block w-40">
+            <div className="mb-1 text-xs font-medium text-slate-600">Default Start</div>
+            <input
+              type="date"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+              value={globalStartDate}
+              onChange={(event) => setGlobalStartDate(event.currentTarget.value)}
+              disabled={bulkEnroll.isPending}
+            />
+          </label>
+          <button
+            type="button"
+            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            onClick={() => void handleSave(false)}
+            disabled={bulkEnroll.isPending}
+          >
+            {bulkEnroll.isPending ? "Saving..." : "Save"}
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
+            onClick={() => void handleSave(true)}
+            disabled={bulkEnroll.isPending}
+          >
+            {bulkEnroll.isPending ? "Saving..." : "Save And Exit"}
+          </button>
+        </>
+      }
     >
       <div className="space-y-4">
-        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_180px]">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Global Defaults</div>
-              <div className="mt-1 text-sm text-slate-500">These apply to every row unless the row overrides them.</div>
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">Program</div>
-              <GrantSelect
-                value={globalGrantId}
-                onChange={setGlobalGrantId}
-                placeholderLabel="Select program"
-                disabled={bulkEnroll.isPending}
-              />
-            </div>
-            <label className="block">
-              <div className="mb-1 text-xs font-medium text-slate-600">Start Date</div>
-              <input
-                type="date"
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
-                value={globalStartDate}
-                onChange={(event) => setGlobalStartDate(event.currentTarget.value)}
-                disabled={bulkEnroll.isPending}
-              />
-            </label>
-          </div>
-        </div>
-
         <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
             <div>
@@ -545,24 +560,6 @@ function BulkEnrollWorkspace({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <button
-            type="button"
-            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-            onClick={() => void handleSave(false)}
-            disabled={bulkEnroll.isPending}
-          >
-            {bulkEnroll.isPending ? "Saving..." : "Save"}
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
-            onClick={() => void handleSave(true)}
-            disabled={bulkEnroll.isPending}
-          >
-            {bulkEnroll.isPending ? "Saving..." : "Save And Exit"}
-          </button>
-        </div>
       </div>
     </WorkspaceScaffold>
   );
@@ -670,25 +667,40 @@ function BulkCaseManagersWorkspace({
       subtitle="Apply a shared case team, then override row by row where needed."
       customers={customers}
       onClose={onClose}
+      headerActions={
+        <>
+          <div className="w-52">
+            <div className="mb-1 text-xs font-medium text-slate-600">Default Primary</div>
+            <CaseManagerSelect value={globalPrimaryId} onChange={setGlobalPrimaryId} options={caseManagerOptions} allLabel="No default" className="w-full" />
+          </div>
+          <div className="w-52">
+            <div className="mb-1 text-xs font-medium text-slate-600">Default Secondary</div>
+            <CaseManagerSelect value={globalSecondaryId} onChange={setGlobalSecondaryId} options={caseManagerOptions} allLabel="No default" className="w-full" />
+          </div>
+          <div className="w-52">
+            <div className="mb-1 text-xs font-medium text-slate-600">Default Contact</div>
+            <CaseManagerSelect value={globalContactId} onChange={setGlobalContactId} options={caseManagerOptions} allLabel="No default" className="w-full" />
+          </div>
+          <button
+            type="button"
+            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            onClick={() => void handleSave(false)}
+            disabled={patchCustomers.isPending}
+          >
+            {patchCustomers.isPending ? "Saving..." : "Save"}
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
+            onClick={() => void handleSave(true)}
+            disabled={patchCustomers.isPending}
+          >
+            {patchCustomers.isPending ? "Saving..." : "Save And Exit"}
+          </button>
+        </>
+      }
     >
       <div className="space-y-4">
-        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">Primary Case Manager</div>
-              <CaseManagerSelect value={globalPrimaryId} onChange={setGlobalPrimaryId} options={caseManagerOptions} allLabel="No default" className="w-full" />
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">Secondary Case Manager</div>
-              <CaseManagerSelect value={globalSecondaryId} onChange={setGlobalSecondaryId} options={caseManagerOptions} allLabel="No default" className="w-full" />
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">Contact Case Manager</div>
-              <CaseManagerSelect value={globalContactId} onChange={setGlobalContactId} options={caseManagerOptions} allLabel="No default" className="w-full" />
-            </div>
-          </div>
-        </div>
-
         <div className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
             <div className="text-sm font-semibold text-slate-950">Assignments</div>
@@ -785,24 +797,6 @@ function BulkCaseManagersWorkspace({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <button
-            type="button"
-            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-            onClick={() => void handleSave(false)}
-            disabled={patchCustomers.isPending}
-          >
-            {patchCustomers.isPending ? "Saving..." : "Save"}
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
-            onClick={() => void handleSave(true)}
-            disabled={patchCustomers.isPending}
-          >
-            {patchCustomers.isPending ? "Saving..." : "Save And Exit"}
-          </button>
-        </div>
       </div>
     </WorkspaceScaffold>
   );
@@ -1329,6 +1323,16 @@ function BulkOperationsWorkspace({
       subtitle={descriptionByTool[tool]}
       customers={customers}
       onClose={onClose}
+      headerActions={
+        <button
+          type="button"
+          className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
+          onClick={() => void run()}
+          disabled={busy || (showsCascadePreview && !cascadeReady)}
+        >
+          {busy ? "Working..." : showsCascadePreview && !cascadeReady ? "Loading preview..." : "Run Action"}
+        </button>
+      }
     >
       <div className="max-w-3xl space-y-4">
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -1410,24 +1414,6 @@ function BulkOperationsWorkspace({
             </div>
           ) : null}
 
-          <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
-            <button
-              type="button"
-              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              onClick={onClose}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-40"
-              onClick={() => void run()}
-              disabled={busy || (showsCascadePreview && !cascadeReady)}
-            >
-              {busy ? "Working..." : showsCascadePreview && !cascadeReady ? "Loading preview…" : "Run Action"}
-            </button>
-          </div>
         </div>
       </div>
     </WorkspaceScaffold>

@@ -45,8 +45,8 @@ export * as tss from "./tss";
 export * as transactionWindows from "./transactionWindows";
 export * as cmActivities from "./cmActivities";
 export * as caseNoteAssistant from "./caseNoteAssistant";
-export { GenerateCaseNoteSuggestionBodySchema, GenerateCaseNoteSuggestionResponseSchema, RecordCaseNoteSuggestionDecisionBodySchema } from "./caseNoteAssistant";
-export type { TCaseNoteAction, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
+export { CaseNoteUsageSummaryQuerySchema, CaseNoteUsageSummaryResponseSchema, GenerateCaseNoteSuggestionBodySchema, GenerateCaseNoteSuggestionResponseSchema, RecordCaseNoteSuggestionDecisionBodySchema } from "./caseNoteAssistant";
+export type { TCaseNoteAction, TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryResp, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
 
 // ------------------------------
 // Top-level TYPE exports (leaf modules only)

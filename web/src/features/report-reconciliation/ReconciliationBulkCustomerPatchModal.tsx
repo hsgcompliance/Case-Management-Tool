@@ -177,9 +177,17 @@ export default function ReconciliationBulkCustomerPatchModal({
             <div className="mt-1 text-xl font-semibold text-slate-950">Push HMIS IDs</div>
             <div className="mt-1 text-sm text-slate-500">Review matched report rows before patching customer documents.</div>
           </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={patchCustomers.isPending}>
-            Close
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAll} disabled={!eligibleRows.length || patchCustomers.isPending}>
+              {allEligibleSelected ? "Clear eligible" : "Select eligible"}
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void apply()} disabled={patchCustomers.isPending || selectedRows.length === 0}>
+              {patchCustomers.isPending ? "Updating..." : `Apply ${selectedRows.length}`}
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={patchCustomers.isPending}>
+              Close
+            </button>
+          </div>
         </div>
       }
       leftPane={
@@ -206,14 +214,6 @@ export default function ReconciliationBulkCustomerPatchModal({
               <div>
                 <div className="text-sm font-semibold text-slate-950">Customer Patch Preview</div>
                 <div className="text-xs text-slate-500">Patches use the existing customersPatch endpoint and server BulkWriter.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={toggleAll} disabled={!eligibleRows.length || patchCustomers.isPending}>
-                  {allEligibleSelected ? "Clear eligible" : "Select eligible"}
-                </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => void apply()} disabled={patchCustomers.isPending || selectedRows.length === 0}>
-                  {patchCustomers.isPending ? "Updating..." : `Apply ${selectedRows.length}`}
-                </button>
               </div>
             </div>
 

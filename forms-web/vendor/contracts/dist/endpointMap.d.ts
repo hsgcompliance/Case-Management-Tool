@@ -569,8 +569,7 @@ export type ToursStructureResp = Ok<{
 }>;
 export type HealthResp = Ok<Record<string, unknown>>;
 export type CreateSessionResp = Ok<Record<string, unknown>>;
-import type { TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp } from "./caseNoteAssistant.js";
-import type { TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant.js";
+import type { TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryResp, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant.js";
 export interface EndpointMap {
     assessmentTemplatesUpsert: {
         req: TAssessmentTemplateUpsertReq;
@@ -1292,6 +1291,10 @@ export interface EndpointMap {
     recordCaseNoteSuggestionDecision: {
         req: TRecordCaseNoteSuggestionDecisionReq;
         resp: TRecordCaseNoteSuggestionDecisionResp;
+    };
+    caseNoteUsageSummary: {
+        req: TCaseNoteUsageSummaryReq;
+        resp: TCaseNoteUsageSummaryResp;
     };
     createSession: {
         req: Record<string, unknown>;
