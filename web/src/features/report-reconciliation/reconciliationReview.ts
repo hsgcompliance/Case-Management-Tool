@@ -795,6 +795,13 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
     const system = sourceSystemFor(record.sourceType, record.recordKind);
     return system === "hmis" || system === "caseworthy";
   });
+  // Rental assistance workbooks / custom CSVs with amounts are report payment
+  // evidence in their own right: like FE they reconcile directly against
+  // dashboard queue/ledger rows (minus FE row classification and HMIS bridging).
+  const reportEvidencePaymentRecords = paymentRecords.filter(({ record }) => {
+    const system = sourceSystemFor(record.sourceType, record.recordKind);
+    return system !== "financial_edge" && system !== "hmis" && system !== "caseworthy" && system !== "dashboard";
+  });
   const feKeys = new Set(fePaymentRecords.map(({ record }) => reportPaymentKey(record)));
   const matchedHmisKeys = new Set<string>();
   const allDashboardPaymentRows = [...dashboard.paymentQueueItems, ...(dashboard.ledger ?? [])];
@@ -1057,7 +1064,8 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       if (record.paymentEvidence.amount != null) {
         const isFinancialEdge = sourceSystem === "financial_edge";
         const isHmisLike = sourceSystem === "hmis" || sourceSystem === "caseworthy";
-        if (!isFinancialEdge && !isHmisLike) continue;
+        const isReportEvidence = !isFinancialEdge && !isHmisLike && sourceSystem !== "dashboard";
+        if (!isFinancialEdge && !isHmisLike && !isReportEvidence) continue;
         const isUnposted = feClassification?.paymentKind === "unposted";
         const unpostedCriteria = isUnposted && feClassification ? [`FE row classified as unposted/pending: ${feClassification.reason}.`] : [];
         let hmisBridgeMatch: ReturnType<typeof findCustomer> | null = null;
@@ -1180,7 +1188,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
           continue;
         }
 
-        if (!isFinancialEdge) continue;
+        if (!isFinancialEdge && !isReportEvidence) continue;
         const effectiveCustomer = customer ?? hmisBridgeMatch?.customer ?? null;
         const effectiveCustomerId = effectiveCustomer ? text(effectiveCustomer.id) : "";
         const effectiveCustomerMethod = match.method || hmisBridgeMatch?.method || "";
@@ -1367,17 +1375,20 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
     }
   }
 
-  // Reverse direction (FE is source of truth): dashboard queue/ledger rows in
-  // the FE report's month window that no report row claimed — a scheduled or
-  // recorded payment with no external payment evidence.
-  if (fePaymentRecords.length) {
+  // Reverse direction (the uploaded report is source of truth): dashboard
+  // queue/ledger rows in the report's month window that no report row claimed —
+  // a scheduled or recorded payment with no external payment evidence. Applies
+  // to FE reports and to standalone payment-evidence reports (rental assistance
+  // workbooks, custom CSVs with amounts).
+  const truthPaymentRecords = [...fePaymentRecords, ...reportEvidencePaymentRecords];
+  if (truthPaymentRecords.length) {
     const feMonths = new Set(
-      fePaymentRecords
+      truthPaymentRecords
         .map(({ record }) => record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate))
         .filter(Boolean),
     );
     const reportGrants = Array.from(new Set(
-      fePaymentRecords
+      truthPaymentRecords
         .map(({ record }) => record.paymentEvidence.grant || record.enrollmentEvidence.projectName)
         .filter(Boolean),
     ));
@@ -1410,15 +1421,15 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         reportValue: "(no report row)",
         dashboardValue: `${(amount / 100).toFixed(2)} ${month}`,
         explanation: [
-          `Dashboard ${paymentRowSource(row)} row (${month}, $${(amount / 100).toFixed(2)}) was not claimed by any Financial Edge row in the uploaded report months. The payment may be unpaid, cancelled, or missing from FE.`,
+          `Dashboard ${paymentRowSource(row)} row (${month}, $${(amount / 100).toFixed(2)}) was not claimed by any row of the uploaded payment report in the report's months. The payment may be unpaid, cancelled, or missing from the report.`,
           ...(grantInReportScope ? [] : [`Row grant "${rowGrant}" does not appear in the uploaded report's grant signals — it may simply be outside this report's scope.`]),
         ],
         proposedAction: "Verify whether this scheduled/recorded payment actually went out; correct the queue/ledger row if it was cancelled or never paid.",
         matchedPaymentCandidates: [row],
         match: {
           criteria: [
-            "FE is source of truth for payment reconciliation.",
-            "No kept FE row matched this dashboard payment by customer/amount/month (1:1 assignment).",
+            "The uploaded payment report is source of truth for payment reconciliation.",
+            "No kept report row matched this dashboard payment by customer/amount/month (1:1 assignment).",
           ],
         },
       });

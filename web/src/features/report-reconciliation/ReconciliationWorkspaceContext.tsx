@@ -72,6 +72,7 @@ function buildPacketForUpload(
     fieldOverrides: config.fieldOverrides,
     excludeRules,
     sourceGrant,
+    nameOrder: config.nameOrder,
   });
 }
 
