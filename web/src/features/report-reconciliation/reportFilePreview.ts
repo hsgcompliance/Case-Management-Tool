@@ -138,7 +138,13 @@ function buildPreview(
   const sheetText = normalizeHeader(`${sheetName || ""} ${rows.slice(0, 3).flat().join(" ")}`);
   const helperSheet = /\b(guide|budget|summary|data entry guide|instructions?)\b/.test(sheetText);
   const bestScore = profileCandidates[0]?.score ?? 0;
-  const recommendedEnabled = Boolean(caseworthy) || (!helperSheet && bestScore >= 30 && dataRows.length > 0);
+  // The score gate exists to skip helper/guide sheets inside multi-sheet
+  // workbooks. A standalone CSV/TXT (or a single-sheet upload, which arrives
+  // with no sheetName) was deliberately chosen by the operator — a weak profile
+  // match (e.g. a custom CSV with only name columns) must not silently disable it.
+  const standaloneUpload = fileType !== "xlsx" || !sheetName;
+  const recommendedEnabled = Boolean(caseworthy)
+    || (standaloneUpload ? dataRows.length > 0 : (!helperSheet && bestScore >= 30 && dataRows.length > 0));
   // Keep the full grid (capped) including leading title rows so the operator can re-pick the header row.
   const allRows = effectiveRows.slice(0, headerRowIndex + 1 + maxRows);
   const reportMetadata = caseworthy
