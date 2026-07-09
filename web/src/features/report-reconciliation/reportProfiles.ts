@@ -178,6 +178,15 @@ export const DEFAULT_REPORT_SOURCE_PROFILES: ReportSourceProfile[] = [
       invoice: { required: false, aliases: ["Invoice Status", "Status", "Notes on status"] },
       dataEntry: { required: false, aliases: ["Data Entry", "Data Entry (Compliance)", "Entered in CM Dashboard", "Data type"] },
     },
+    excludeRules: [
+      {
+        id: "rental_blank_household",
+        label: "Blank household/name",
+        fieldKey: "customerName",
+        operator: "is_blank",
+        enabled: true,
+      },
+    ],
   },
   {
     id: "hmis_service_payment_report",
@@ -403,18 +412,47 @@ export function normalizeCustomerName(input: unknown): string {
     .trim();
 }
 
-function namePartsFromReportName(input: unknown) {
-  const raw = String(input ?? "").trim();
-  if (!raw) return { firstName: "", lastName: "" };
-  if (raw.includes(",")) {
-    const [last, first] = raw.split(",").map((part) => part.trim());
-    return { firstName: first || "", lastName: last || "" };
+/** How a single name column orders its words. "auto" = comma means "Last, First". */
+export type ReportNameOrder = "auto" | "first_last" | "last_first";
+
+export const REPORT_NAME_ORDER_LABELS: Record<ReportNameOrder, string> = {
+  auto: "Smart (comma = Last, First)",
+  first_last: "First Last",
+  last_first: "Last, First",
+};
+
+/**
+ * Parse a person-name cell into ordered parts. Strips parenthetical/bracketed
+ * annotations trackers append to names ("Sara Da, Adayah (YHDP PSH)") so they
+ * never pollute matching. In "auto" order a comma reads as Last, First (the
+ * common tracker format); otherwise word order is read as First … Last.
+ */
+export function parseReportPersonName(input: unknown, order: ReportNameOrder = "auto") {
+  const raw = String(input ?? "").replace(/[([{][^)\]}]*[)\]}]?/g, " ").replace(/\s+/g, " ").trim();
+  if (!raw) return { firstName: "", lastName: "", fullName: "" };
+  const commaParts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+  let firstName = "";
+  let lastName = "";
+  let reordered = false;
+  if (order !== "first_last" && commaParts.length > 1) {
+    lastName = commaParts[0];
+    firstName = commaParts.slice(1).join(" ");
+    reordered = true;
+  } else {
+    const words = raw.replace(/,/g, " ").replace(/\./g, " ").split(/\s+/).filter(Boolean);
+    if (order === "last_first") {
+      lastName = words[0] ?? "";
+      firstName = words.slice(1).join(" ");
+      reordered = true;
+    } else {
+      firstName = words[0] ?? "";
+      lastName = words.length > 1 ? words[words.length - 1] : "";
+    }
   }
-  const parts = raw.replace(/\./g, " ").split(/\s+/).filter(Boolean);
-  return {
-    firstName: parts[0] ?? "",
-    lastName: parts.length > 1 ? parts[parts.length - 1] : "",
-  };
+  // Reordered names rebuild as "First … Last"; natural order keeps the full
+  // string so middle names still participate in exact-name matching.
+  const fullName = normalizeCustomerName(reordered ? `${firstName} ${lastName}` : raw);
+  return { firstName, lastName, fullName };
 }
 
 function firstText(...values: unknown[]) {
@@ -770,7 +808,7 @@ export function normalizeReportRow(
   profile: ReportSourceProfile,
   headers: unknown[],
   row: Record<string, unknown> | unknown[],
-  source: { sourceType?: string; sourceFile?: string; sourceRowNumber?: number | null; sourceGrant?: string } = {},
+  source: { sourceType?: string; sourceFile?: string; sourceRowNumber?: number | null; sourceGrant?: string; nameOrder?: ReportNameOrder } = {},
   overrides?: FieldColumnOverrides,
 ): NormalizedReportRecord {
   const { matches, diagnostics } = matchProfileHeaders(profile, headers, overrides);
@@ -779,7 +817,6 @@ export function normalizeReportRow(
 
   const firstName = String(values.get("firstName") ?? "").trim();
   const lastName = String(values.get("lastName") ?? "").trim();
-  const fullName = normalizeCustomerName(values.get("customerName") ?? `${firstName} ${lastName}`);
   const amount = normalizeAmount(values.get("amount"));
   const transactionDate = normalizeDate(values.get("transactionDate") ?? values.get("serviceStartDate") ?? values.get("serviceDate") ?? values.get("dueDate"));
   const serviceName = String(values.get("serviceName") ?? values.get("serviceDescription") ?? "").trim();
@@ -791,7 +828,8 @@ export function normalizeReportRow(
   const reportNameValue = firstText(values.get("customerName"), parsedFeName);
   const sourceGrant = String(source.sourceGrant ?? "").trim();
   const reportGrant = firstText(values.get("grant"), values.get("enrollment"), values.get("providerId"), values.get("serviceProvider"), sourceGrant, serviceName);
-  const reportNameParts = namePartsFromReportName(reportNameValue);
+  const parsedName = parseReportPersonName(reportNameValue, source.nameOrder ?? "auto");
+  const fullName = parsedName.fullName || normalizeCustomerName(`${firstName} ${lastName}`);
 
   return {
     sourceType: source.sourceType || profile.id,
@@ -803,9 +841,9 @@ export function normalizeReportRow(
       cwId: String(values.get("cwId") ?? "").trim(),
       hmisId: String(values.get("hmisId") ?? values.get("clientId") ?? "").trim(),
       caseworthyId: String(values.get("caseworthyId") ?? "").trim(),
-      firstName: firstName || reportNameParts.firstName,
-      lastName: lastName || reportNameParts.lastName,
-      fullName: fullName || normalizeCustomerName(reportNameValue),
+      firstName: firstName || parsedName.firstName,
+      lastName: lastName || parsedName.lastName,
+      fullName,
       dob: normalizeDate(values.get("dob")),
     },
     enrollmentEvidence: {
@@ -841,6 +879,7 @@ export function buildReconciliationPacket({
   fieldOverrides,
   excludeRules,
   sourceGrant,
+  nameOrder,
 }: {
   profile: ReportSourceProfile;
   headers: unknown[];
@@ -850,6 +889,7 @@ export function buildReconciliationPacket({
   fieldOverrides?: FieldColumnOverrides;
   excludeRules?: ReportExcludeRule[];
   sourceGrant?: string;
+  nameOrder?: ReportNameOrder;
 }): ReconciliationPacket {
   const normalizedHeaders = headers.map((header) => String(header ?? ""));
   const headerResult = matchProfileHeaders(profile, normalizedHeaders, fieldOverrides);
@@ -867,6 +907,7 @@ export function buildReconciliationPacket({
       sourceFile,
       sourceRowNumber: filterRow.sourceRowNumber,
       sourceGrant,
+      nameOrder,
     }, fieldOverrides),
   );
   const rowDiagnostics = records.flatMap((record) => record.diagnostics);

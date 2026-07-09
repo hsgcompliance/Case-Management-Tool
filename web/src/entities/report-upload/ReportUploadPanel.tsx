@@ -9,10 +9,12 @@ import {
   matchProfileHeaders,
   normalizeExcludeRules,
   normalizeReportRow,
+  REPORT_NAME_ORDER_LABELS,
   type FieldColumnOverrides,
   type ReconciliationPacket,
   type ReportExcludeOperator,
   type ReportExcludeRule,
+  type ReportNameOrder,
   type ReportSourceProfile,
 } from "@features/report-reconciliation/reportProfiles";
 import {
@@ -39,6 +41,8 @@ export type ReportUploadConfig = {
   fieldOverrides: FieldColumnOverrides;
   excludeRules: ReportExcludeRule[];
   manualGrantSignals: string[];
+  /** How single name columns order their words; "auto" reads a comma as Last, First. */
+  nameOrder?: ReportNameOrder;
 };
 
 export type ReportUpload = {
@@ -471,7 +475,8 @@ function AdvancedConfigPreview({
     sourceRowNumber: row.sourceRowNumber,
     sourceType: profile.id,
     sourceGrant: [...(upload.config.manualGrantSignals ?? []), upload.sheetName ? `${upload.fileName} / ${upload.sheetName}` : upload.fileName].filter(Boolean).join(" | "),
-  }, upload.config.fieldOverrides)), [headers, profile, upload.config.fieldOverrides, upload.config.manualGrantSignals, upload.fileName, upload.sheetName, visibleRows]);
+    nameOrder: upload.config.nameOrder,
+  }, upload.config.fieldOverrides)), [headers, profile, upload.config.fieldOverrides, upload.config.manualGrantSignals, upload.config.nameOrder, upload.fileName, upload.sheetName, visibleRows]);
   const rawHeaders = headers.slice(0, 14);
   const normalizedHeaders = ["Row", "Name", "Client ID", "Date", "Amount", "Grant/Provider", "Reference", "Exclude reason"];
   return (
@@ -677,8 +682,9 @@ function ConfigureTab({
       sourceRowNumber: filterRow.sourceRowNumber,
       sourceType: profile.id,
       sourceGrant: [...(selected.config.manualGrantSignals ?? []), selected.sheetName ? `${selected.fileName} / ${selected.sheetName}` : selected.fileName].filter(Boolean).join(" | "),
+      nameOrder: selected.config.nameOrder,
     }, selected.config.fieldOverrides)),
-    [filterCounts.previewRows, headers, profile, selected.config.fieldOverrides, selected.config.manualGrantSignals, selected.fileName, selected.sheetName],
+    [filterCounts.previewRows, headers, profile, selected.config.fieldOverrides, selected.config.manualGrantSignals, selected.config.nameOrder, selected.fileName, selected.sheetName],
   );
   const ignoredByTool = acceptedProfileIds && !acceptedProfileIds.includes(selected.config.profileId);
   const visibleSheetTabs = React.useMemo(() => {
@@ -893,6 +899,25 @@ function ConfigureTab({
                 <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">Required fields mapped</span>
               )}
             </div>
+            {profile.fields.customerName ? (
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="w-32 shrink-0 font-medium text-slate-700 dark:text-slate-200" title="How the name column orders its words. Smart reads a comma as Last, First and strips (parenthetical) notes.">
+                  Name format
+                </span>
+                <select
+                  className="input h-8 flex-1 px-2 text-xs"
+                  value={selected.config.nameOrder ?? "auto"}
+                  onChange={(event) => onUpdateConfig(selected.id, { nameOrder: event.currentTarget.value as ReportNameOrder })}
+                >
+                  {(Object.entries(REPORT_NAME_ORDER_LABELS) as Array<[ReportNameOrder, string]>).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                <div className="w-24 shrink-0 truncate text-[11px] text-slate-400" title={previewNormalized[0]?.customerIdentity.fullName || ""}>
+                  {previewNormalized[0]?.customerIdentity.fullName || ""}
+                </div>
+              </div>
+            ) : null}
             <div className="max-h-64 space-y-1 overflow-y-auto rounded border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
               {matches.map((match) => {
                 const field = profile.fields[match.fieldKey];
