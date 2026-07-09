@@ -23,6 +23,7 @@ import {
   parseFinancialEdgeReference,
 } from "@features/report-reconciliation/reportParsingEngines";
 import { rowsToCsv } from "@features/report-reconciliation/reportFilePreview";
+import GrantSelect from "@entities/selectors/GrantSelect";
 
 /**
  * Reusable report upload + mapping-config entity.
@@ -41,6 +42,7 @@ export type ReportUploadConfig = {
   fieldOverrides: FieldColumnOverrides;
   excludeRules: ReportExcludeRule[];
   manualGrantSignals: string[];
+  manualGrantOverrides?: Record<string, string>;
   /** How single name columns order their words; "auto" reads a comma as Last, First. */
   nameOrder?: ReportNameOrder;
 };
@@ -100,7 +102,7 @@ function matchGrant(value: string, grants: ReportUploadGrant[]): ReportUploadGra
     const n = norm(grant.name);
     if (!n) continue;
     let score = 0;
-    if (n === v) score = 100;
+    if (norm(grant.id) === v || n === v) score = 100;
     else if (n.includes(v) || v.includes(n)) score = 70;
     else {
       const grantTokens = wordTokens(grant.name);
@@ -117,14 +119,18 @@ function matchGrant(value: string, grants: ReportUploadGrant[]): ReportUploadGra
 function reportGrantRows(upload: ReportUpload, grants: ReportUploadGrant[]): { value: string; match: ReportUploadGrant | null; manual?: boolean }[] {
   const signals = collectReportGrantSignals(upload.packet);
   const manualSignals = (upload.config.manualGrantSignals ?? []).map((value) => value.trim()).filter(Boolean);
+  const overrideFor = (value: string) => {
+    const grantId = upload.config.manualGrantOverrides?.[value];
+    return grantId ? grants.find((grant) => grant.id === grantId) ?? null : null;
+  };
   if (signals.length) {
-    const rows: { value: string; match: ReportUploadGrant | null; manual?: boolean }[] = signals.map((value) => ({ value, match: matchGrant(value, grants) }));
-    rows.push(...manualSignals.map((value) => ({ value, match: matchGrant(value, grants), manual: true })));
+    const rows: { value: string; match: ReportUploadGrant | null; manual?: boolean }[] = signals.map((value) => ({ value, match: overrideFor(value) ?? matchGrant(value, grants) }));
+    rows.push(...manualSignals.map((value) => ({ value, match: overrideFor(value) ?? matchGrant(value, grants), manual: true })));
     return rows;
   }
   // Financial Edge and workbook sheets often carry the grant in file/sheet/title context.
   const seen = new Set<string>();
-  const rows: { value: string; match: ReportUploadGrant | null; manual?: boolean }[] = manualSignals.map((value) => ({ value, match: matchGrant(value, grants), manual: true }));
+  const rows: { value: string; match: ReportUploadGrant | null; manual?: boolean }[] = manualSignals.map((value) => ({ value, match: overrideFor(value) ?? matchGrant(value, grants), manual: true }));
   const context = [
     upload.fileName,
     upload.sheetName || "",
@@ -624,19 +630,7 @@ function WorkbookSheetSelector({
   );
 }
 
-function ConfigureTab({
-  uploads,
-  profiles,
-  grants,
-  selectedId,
-  onSelect,
-  onUpdateConfig,
-  onApplyConfigToWorkbook,
-  onSetUploadEnabled,
-  onSetWorkbookEnabled,
-  toolKind,
-  acceptedProfileIds,
-}: {
+type ConfigureTabProps = {
   uploads: ReportUpload[];
   profiles: ReportSourceProfile[];
   grants: ReportUploadGrant[];
@@ -648,15 +642,34 @@ function ConfigureTab({
   onSetWorkbookEnabled?: ReportUploadPanelProps["onSetWorkbookEnabled"];
   toolKind?: ReportUploadPanelProps["toolKind"];
   acceptedProfileIds?: string[];
-}) {
+};
+
+function ConfigureTab(props: ConfigureTabProps) {
+  const selected = props.uploads.find((upload) => upload.id === props.selectedId) ?? props.uploads[0] ?? null;
+  if (!selected) {
+    return <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950">Upload a report to configure its mapping.</div>;
+  }
+  return <SelectedConfigureTab {...props} selected={selected} />;
+}
+
+function SelectedConfigureTab({
+  uploads,
+  profiles,
+  grants,
+  selected,
+  onSelect,
+  onUpdateConfig,
+  onApplyConfigToWorkbook,
+  onSetUploadEnabled,
+  onSetWorkbookEnabled,
+  toolKind,
+  acceptedProfileIds,
+}: ConfigureTabProps & { selected: ReportUpload }) {
   const [sheetPage, setSheetPage] = React.useState(0);
   const [configTool, setConfigTool] = React.useState<"header" | "fields" | "grants" | "excludes">("fields");
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [manualGrantDraft, setManualGrantDraft] = React.useState("");
-  const selected = uploads.find((upload) => upload.id === selectedId) ?? uploads[0] ?? null;
-  if (!selected) {
-    return <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950">Upload a report to configure its mapping.</div>;
-  }
+  const [editingGrantValue, setEditingGrantValue] = React.useState<string | null>(null);
 
   const profile = profiles.find((item) => item.id === selected.config.profileId) ?? profiles[0];
   const { headers, dataRows } = deriveHeadersAndRows(selected.allRows, selected.config.headerRowIndex);
@@ -721,6 +734,24 @@ function ConfigureTab({
       onUpdateConfig(selected.id, { manualGrantSignals: [...current, value] });
     }
     setManualGrantDraft("");
+  };
+  const setManualGrantMatch = (rowValue: string, grantId: string | null) => {
+    const nextOverrides = { ...(selected.config.manualGrantOverrides ?? {}) };
+    const currentSignals = selected.config.manualGrantSignals ?? [];
+    if (!grantId) {
+      delete nextOverrides[rowValue];
+      onUpdateConfig(selected.id, { manualGrantOverrides: nextOverrides });
+      setEditingGrantValue(null);
+      return;
+    }
+    const grant = grants.find((item) => item.id === grantId);
+    const signal = grant?.name || grantId;
+    // Manual chip picks are stored as overrides plus grant-name signals so packet rebuilds reuse the existing grant matching path.
+    onUpdateConfig(selected.id, {
+      manualGrantOverrides: { ...nextOverrides, [rowValue]: grantId },
+      manualGrantSignals: currentSignals.some((item) => norm(item) === norm(signal)) ? currentSignals : [...currentSignals, signal],
+    });
+    setEditingGrantValue(null);
   };
   const referenceSamples = React.useMemo(() => {
     const referenceMatch = matches.find((match) => match.fieldKey === "reference");
@@ -968,32 +999,59 @@ function ConfigureTab({
               <button type="button" className="btn btn-primary btn-xs" onClick={addManualGrantSignal}>Add grant</button>
             </div>
             <div className="max-h-40 space-y-1 overflow-y-auto rounded border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-950">
-              {grantRows.length ? grantRows.map((row, index) => (
-                <div key={`${row.value}-${index}`} className="flex items-center gap-2 text-xs">
-                  <div className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300" title={row.value}>
-                    {row.manual ? <span className="mr-1 rounded bg-sky-50 px-1 text-[10px] uppercase text-sky-700">manual</span> : null}
-                    {row.value}
+              {grantRows.length ? grantRows.map((row, index) => {
+                const isEditing = editingGrantValue === row.value;
+                const manualGrantId = selected.config.manualGrantOverrides?.[row.value] ?? row.match?.id ?? null;
+                return (
+                  <div key={`${row.value}-${index}`} className="flex items-center gap-2 text-xs">
+                    <div className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300" title={row.value}>
+                      {row.manual ? <span className="mr-1 rounded bg-sky-50 px-1 text-[10px] uppercase text-sky-700">manual</span> : null}
+                      {row.value}
+                    </div>
+                    <div className="w-[260px] shrink-0">
+                      {isEditing ? (
+                        <GrantSelect
+                          value={manualGrantId}
+                          onChange={(grantId) => setManualGrantMatch(row.value, grantId)}
+                          includeUnassigned
+                          mode="grant"
+                          placeholderLabel="Select grant"
+                          className="min-h-7 w-full text-[11px]"
+                        />
+                      ) : row.match ? (
+                        <button
+                          type="button"
+                          className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-left text-[11px] text-emerald-700 hover:border-emerald-500 hover:bg-emerald-100"
+                          onClick={() => setEditingGrantValue(row.value)}
+                          title="Change grant match"
+                        >
+                          {row.match.name}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="rounded border border-slate-300 bg-slate-50 px-2 py-0.5 text-left text-[11px] text-slate-500 hover:border-slate-400 hover:bg-slate-100"
+                          onClick={() => setEditingGrantValue(row.value)}
+                          title="Select grant match"
+                        >
+                          no grant match
+                        </button>
+                      )}
+                    </div>
+                    {row.manual ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => onUpdateConfig(selected.id, {
+                          manualGrantSignals: (selected.config.manualGrantSignals ?? []).filter((value) => value !== row.value),
+                        })}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="shrink-0">
-                    {row.match ? (
-                      <span className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">{row.match.name}</span>
-                    ) : (
-                      <span className="rounded border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500">no grant match</span>
-                    )}
-                  </div>
-                  {row.manual ? (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => onUpdateConfig(selected.id, {
-                        manualGrantSignals: (selected.config.manualGrantSignals ?? []).filter((value) => value !== row.value),
-                      })}
-                    >
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
-              )) : (
+                );
+              }) : (
                 <div className="text-center text-[11px] text-slate-400">No grant/provider values detected in rows or file name.</div>
               )}
             </div>
