@@ -19,7 +19,7 @@ node scripts/deploy-functions-safe.mjs housing-db-v2 [--list-only] [--no-push] [
 - `--no-push` - skip GitHub push
 
 ### `deploy-hosting-safe.mjs`
-Deploy Firebase Hosting targets with target-aware checkouts. This defaults to `hosting:web`; pass `--target=mobile` or `--target=forms` for static targets, and `--build` to run that target's build first. Pass `--all` only when every configured Firebase Hosting target should deploy.
+Deploy Firebase Hosting targets with target-aware checkouts. This defaults to `hosting:web,functions:firebase-frameworks-housing-db-v2:ssrhousingdbv2` for the web app so Firebase deploys the generated Next SSR function without discovering the unrelated default functions codebase. Pass `--target=mobile` or `--target=forms` for static targets, and `--build` to run that target's build first. Pass `--all` only when every configured Firebase Hosting target should deploy. Child deploy commands have a 90-minute timeout by default; override with `HDB_DEPLOY_COMMAND_TIMEOUT_MS`.
 ```sh
 node scripts/deploy-hosting-safe.mjs [--no-push] [--all] [--target=web|mobile|forms] [--build]
 ```

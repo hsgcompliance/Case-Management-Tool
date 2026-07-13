@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { Enrollment, TCustomerEntity } from "@types";
-import { useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
+import { CUSTOMER_CARD_ENROLLMENTS_LIMIT, useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
 import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
 import { currentMonthKey } from "@hooks/useMetrics";
@@ -52,6 +52,7 @@ type CustomerCardProps = {
   ) => void;
   onOpen: (customerId: string, options?: { tab?: "tasks" }) => void;
   onHide?: (customerId: string) => void;
+  loadEnrollmentData?: boolean;
   loading?: boolean;
 };
 
@@ -914,6 +915,7 @@ function CustomerCardInner({
   onOpen,
   loading = false,
   onHide,
+  loadEnrollmentData = false,
 }: CustomerCardProps) {
   const { profile } = useAuth();
   const canManageEnrollments = !isViewerLike(profile as any);
@@ -1032,9 +1034,12 @@ function CustomerCardInner({
   const [workbookModalOpen, setWorkbookModalOpen] = React.useState(false);
   const [hoveredEnrollmentSection, setHoveredEnrollmentSection] = React.useState(false);
   const [shouldLoadEnrollments, setShouldLoadEnrollments] = React.useState(false);
+  React.useEffect(() => {
+    if (loadEnrollmentData) setShouldLoadEnrollments(true);
+  }, [loadEnrollmentData]);
   const enrollmentsQuery = useCustomerEnrollments(customer.id, {
     enabled: !!customer.id && shouldLoadEnrollments,
-    limit: 25,
+    limit: CUSTOMER_CARD_ENROLLMENTS_LIMIT,
   });
   const enrollments = enrollmentsQuery.data || [];
   const hasEnrollmentData = enrollmentsQuery.data !== undefined;

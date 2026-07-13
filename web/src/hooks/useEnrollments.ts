@@ -22,6 +22,7 @@ import { RQ_DEFAULTS, RQ_DETAIL } from "./base";
 import { useInvalidateMutation } from "./optimistic";
 
 export const CUSTOMER_ENROLLMENTS_LIMIT = 800;
+export const CUSTOMER_CARD_ENROLLMENTS_LIMIT = 25;
 export const CUSTOMER_ENROLLMENTS_STALE_MS =
   typeof RQ_DEFAULTS.staleTime === "number" ? RQ_DEFAULTS.staleTime : 60_000;
 
@@ -61,10 +62,11 @@ function customerEnrollmentsQueryOptions(customerId?: string | null, limit?: num
 export function hasFreshCustomerEnrollmentsCache(
   qc: ReturnType<typeof useQueryClient>,
   customerId?: string | null,
+  limit?: number,
 ): boolean {
   const normalizedCustomerId = String(customerId || "").trim();
   if (!normalizedCustomerId) return false;
-  const queryKey = customerEnrollmentsQueryKey(normalizedCustomerId);
+  const queryKey = customerEnrollmentsQueryKey(normalizedCustomerId, limit);
   const state = qc.getQueryState(queryKey);
   const data = qc.getQueryData<Enrollment[]>(queryKey);
   if (!Array.isArray(data) || !state?.dataUpdatedAt) return false;
@@ -74,6 +76,7 @@ export function hasFreshCustomerEnrollmentsCache(
 export function getStaleCustomerEnrollmentIds(
   qc: ReturnType<typeof useQueryClient>,
   customerIds: Iterable<string | null | undefined>,
+  opts?: { limit?: number },
 ): string[] {
   return Array.from(
     new Set(
@@ -81,13 +84,13 @@ export function getStaleCustomerEnrollmentIds(
         .map((customerId) => String(customerId || "").trim())
         .filter(Boolean),
     ),
-  ).filter((customerId) => !hasFreshCustomerEnrollmentsCache(qc, customerId));
+  ).filter((customerId) => !hasFreshCustomerEnrollmentsCache(qc, customerId, opts?.limit));
 }
 
 export async function preloadCustomerEnrollments(
   qc: ReturnType<typeof useQueryClient>,
   customerIds: Iterable<string | null | undefined>,
-  opts?: { batchSize?: number },
+  opts?: { batchSize?: number; limit?: number },
 ) {
   const requestedCustomerIds = Array.from(
     new Set(
@@ -96,7 +99,7 @@ export async function preloadCustomerEnrollments(
         .filter(Boolean),
     ),
   );
-  const staleCustomerIds = getStaleCustomerEnrollmentIds(qc, requestedCustomerIds);
+  const staleCustomerIds = getStaleCustomerEnrollmentIds(qc, requestedCustomerIds, { limit: opts?.limit });
   const batchSize = Math.max(1, Number(opts?.batchSize || 8));
   let loadedCount = 0;
   let failedCount = 0;
@@ -104,7 +107,7 @@ export async function preloadCustomerEnrollments(
   for (let i = 0; i < staleCustomerIds.length; i += batchSize) {
     const batch = staleCustomerIds.slice(i, i + batchSize);
     const results = await Promise.allSettled(
-      batch.map((customerId) => qc.fetchQuery(customerEnrollmentsQueryOptions(customerId))),
+      batch.map((customerId) => qc.fetchQuery(customerEnrollmentsQueryOptions(customerId, opts?.limit))),
     );
 
     for (const result of results) {
@@ -128,7 +131,8 @@ export function usePreloadCustomerEnrollments() {
     mutationFn: (args: {
       customerIds: Iterable<string | null | undefined>;
       batchSize?: number;
-    }) => preloadCustomerEnrollments(qc, args.customerIds, { batchSize: args.batchSize }),
+      limit?: number;
+    }) => preloadCustomerEnrollments(qc, args.customerIds, { batchSize: args.batchSize, limit: args.limit }),
   });
 }
 
