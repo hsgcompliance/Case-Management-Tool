@@ -6,15 +6,16 @@ import type { TCaseNoteAction } from "@hdb/contracts";
  * names, customer/workbook identifiers, or error objects to this record.
  */
 export function buildAiUsageAudit(input: {
-  requestId: string; uid: string; orgId: string; action: TCaseNoteAction; model: string;
+  requestId: string; uid: string; orgId: string; action: TCaseNoteAction | "smart_goal"; model: string;
   inputTokens: number; outputTokens: number; estimatedCostUsd: number | null; latencyMs: number;
   promptTemplateIds: readonly string[];
+  feature?: "case-note-assistant" | "smart-goal-assistant";
 }) {
   return {
     requestId: input.requestId,
     uid: input.uid,
     orgId: input.orgId,
-    feature: "case-note-assistant",
+    feature: input.feature ?? "case-note-assistant",
     action: input.action,
     model: input.model,
     promptTemplateIds: [...input.promptTemplateIds],

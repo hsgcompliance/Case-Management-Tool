@@ -27,7 +27,10 @@ __export(caseNoteAssistant_exports, {
   CaseNoteUsageSummaryResponseSchema: () => CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
-  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema
+  GenerateSmartGoalSuggestionBodySchema: () => GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema: () => GenerateSmartGoalSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema: () => SmartGoalFieldsSchema
 });
 module.exports = __toCommonJS(caseNoteAssistant_exports);
 var import_zod = require("zod");
@@ -82,6 +85,26 @@ var RecordCaseNoteSuggestionDecisionBodySchema = import_zod.z.object({
   requestId: import_zod.z.string().uuid(),
   accepted: import_zod.z.boolean()
 });
+var GenerateSmartGoalSuggestionBodySchema = import_zod.z.object({
+  customerId: import_zod.z.string().min(1).max(128),
+  description: import_zod.z.string().min(1).max(2e3),
+  clientLabel: import_zod.z.string().min(1).max(40).default("client"),
+  staffLabel: import_zod.z.string().min(1).max(40).default("case manager")
+});
+var SmartGoalFieldsSchema = import_zod.z.object({
+  goalSmart: import_zod.z.string(),
+  objective: import_zod.z.string(),
+  interventionTask: import_zod.z.string(),
+  goalCompletionCriteria: import_zod.z.string()
+});
+var GenerateSmartGoalSuggestionResponseSchema = import_zod.z.object({
+  ok: import_zod.z.literal(true),
+  requestId: import_zod.z.string(),
+  model: import_zod.z.string(),
+  goal: SmartGoalFieldsSchema,
+  missingInfo: import_zod.z.array(import_zod.z.string()).default([]),
+  usage: import_zod.z.object({ inputTokens: import_zod.z.number().int().nonnegative(), outputTokens: import_zod.z.number().int().nonnegative() })
+});
 var CaseNoteUsageSummaryQuerySchema = import_zod.z.object({
   month: import_zod.z.string().regex(/^\d{4}-\d{2}$/).optional(),
   orgId: import_zod.z.string().min(1).max(128).optional()
@@ -114,5 +137,8 @@ var CaseNoteUsageSummaryResponseSchema = import_zod.z.object({
   CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
-  RecordCaseNoteSuggestionDecisionBodySchema
+  GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema
 });

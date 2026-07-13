@@ -203,9 +203,12 @@ import {
   CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
+  GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema,
   caseNoteAssistant_exports
-} from "./chunk-UPBJ4VIQ.js";
+} from "./chunk-HG6KB7WC.js";
 import {
   CmActivitiesListQuery,
   CmActivitiesListResp,
@@ -273,6 +276,8 @@ export {
   GRANT_PIN_COLORS,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
+  GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema,
   GoogleAuthMode,
   GoogleConnectStartBody,
   GoogleIntegrationMode,
@@ -344,6 +349,7 @@ export {
   RolesArray,
   SetActiveBody,
   SetRoleBody,
+  SmartGoalFieldsSchema,
   TRANSACTION_WINDOW_FORM_IDS,
   TasksAdminRegenerateForGrantBody,
   TasksAssignBody,

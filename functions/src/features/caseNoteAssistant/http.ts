@@ -1,6 +1,6 @@
-import { CaseNoteUsageSummaryQuerySchema, GenerateCaseNoteSuggestionBodySchema, RecordCaseNoteSuggestionDecisionBodySchema } from "@hdb/contracts";
+import { CaseNoteUsageSummaryQuerySchema, GenerateCaseNoteSuggestionBodySchema, GenerateSmartGoalSuggestionBodySchema, RecordCaseNoteSuggestionDecisionBodySchema } from "@hdb/contracts";
 import { db, FieldValue, requireUid, secureHandler } from "../../core";
-import { CaseNoteAssistantError, generateSuggestion, getCaseNoteUsageSummary } from "./service";
+import { CaseNoteAssistantError, generateSmartGoalSuggestion as generateSmartGoalSuggestionService, generateSuggestion, getCaseNoteUsageSummary } from "./service";
 
 const dedicatedServiceAccount =
   process.env.CASE_NOTE_VERTEX_SERVICE_ACCOUNT ||
@@ -14,6 +14,17 @@ export const generateCaseNoteSuggestion = secureHandler(async (req, res) => {
   } catch (error) {
     if (error instanceof CaseNoteAssistantError) { res.status(error.status).json({ ok: false, error: "case_note_assistant_unavailable", message: error.safeMessage }); return; }
     res.status(400).json({ ok: false, error: "invalid_request", message: "Could not generate suggestion. Please check the note and try again." });
+  }
+}, { auth: "user", methods: ["POST", "OPTIONS"], serviceAccount: dedicatedServiceAccount });
+
+export const generateSmartGoalSuggestion = secureHandler(async (req, res) => {
+  try {
+    const body = GenerateSmartGoalSuggestionBodySchema.parse(req.body || {});
+    const result = await generateSmartGoalSuggestionService(req.user as Record<string, unknown>, body);
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    if (error instanceof CaseNoteAssistantError) { res.status(error.status).json({ ok: false, error: "smart_goal_assistant_unavailable", message: error.safeMessage }); return; }
+    res.status(400).json({ ok: false, error: "invalid_request", message: "Could not generate the goal. Please check the description and try again." });
   }
 }, { auth: "user", methods: ["POST", "OPTIONS"], serviceAccount: dedicatedServiceAccount });
 

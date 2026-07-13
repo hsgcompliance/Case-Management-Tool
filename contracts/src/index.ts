@@ -1,4 +1,4 @@
-// contracts/src/index.ts
+﻿// contracts/src/index.ts
 
 /**
  * Contracts index policy:
@@ -17,7 +17,7 @@ export * from "./http";
 // Budget pipeline
 export * as budgetPipeline from "./budgetPipeline";
 
-// Canonical endpoint req/resp typing (this is where most “API types” live)
+// Canonical endpoint req/resp typing (this is where most â€œAPI typesâ€ live)
 export * from "./endpointMap";
 
 // ------------------------------
@@ -45,8 +45,8 @@ export * as tss from "./tss";
 export * as transactionWindows from "./transactionWindows";
 export * as cmActivities from "./cmActivities";
 export * as caseNoteAssistant from "./caseNoteAssistant";
-export { CaseNoteUsageSummaryQuerySchema, CaseNoteUsageSummaryResponseSchema, GenerateCaseNoteSuggestionBodySchema, GenerateCaseNoteSuggestionResponseSchema, RecordCaseNoteSuggestionDecisionBodySchema } from "./caseNoteAssistant";
-export type { TCaseNoteAction, TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryResp, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp } from "./caseNoteAssistant";
+export { CaseNoteUsageSummaryQuerySchema, CaseNoteUsageSummaryResponseSchema, GenerateCaseNoteSuggestionBodySchema, GenerateCaseNoteSuggestionResponseSchema, RecordCaseNoteSuggestionDecisionBodySchema, GenerateSmartGoalSuggestionBodySchema, GenerateSmartGoalSuggestionResponseSchema, SmartGoalFieldsSchema } from "./caseNoteAssistant";
+export type { TCaseNoteAction, TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryResp, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp, TGenerateSmartGoalSuggestionReq, TGenerateSmartGoalSuggestionResp, TSmartGoalFields } from "./caseNoteAssistant";
 
 // ------------------------------
 // Top-level TYPE exports (leaf modules only)
@@ -90,11 +90,11 @@ export type {
   TAssessmentSubmission,
 } from "./assessments";
 
-// Customers (local types) — UPDATED
+// Customers (local types) â€” UPDATED
 export type {
   CustomerInput,
 
-  // surface types (match endpointMap “style”)
+  // surface types (match endpointMap â€œstyleâ€)
   TCustomerEntity,
   TPopulation,
   TCustomerStatus,
@@ -317,7 +317,7 @@ export {
   GoogleService,
 } from "./google";
 
-// Grants — UPDATED
+// Grants â€” UPDATED
 export type {
   // core
   TGrant,
@@ -521,7 +521,7 @@ export type {
   TPaymentsBulkCopyScheduleBody,
   TPaymentsUpdateGrantBudgetBody,
   TPaymentsUpsertProjectionsBody,
-  // operation DTOs (responses) — useful for callers even if wrapped by endpointMap responses
+  // operation DTOs (responses) â€” useful for callers even if wrapped by endpointMap responses
   TPaymentsRecalculateFutureResp,
   TPaymentsRecalcGrantProjectedResp,
 } from "./payments";

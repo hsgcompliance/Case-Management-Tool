@@ -13,8 +13,14 @@ import { useResolvedTssConfig } from "@hooks/useTssConfig";
 import { useGoogleIntegrationConnect } from "@hooks/useGoogleIntegrations";
 import { DriveAuthBanner } from "@entities/gdrive/DriveAuthBanner";
 import { AddRowForm } from "./AddRowForm";
+import { AddSessionForm, type GoalOption } from "./AddSessionForm";
+import { GoalForm } from "./GoalForm";
+import { GoalsList } from "./HousingPlan/GoalsList";
 import { NotesList } from "./ProgressNotes/NotesList";
 import type { tss as TssNS } from "@hdb/contracts";
+
+// The companion mobile app (same data, same pushes) — linked from the header.
+const MOBILE_APP_URL = "https://housing-db-mobile.web.app";
 
 // ── Status pill ────────────────────────────────────────────────────────────────
 
@@ -115,6 +121,7 @@ function EntityBlock({
   customerId,
   customerName,
   config,
+  goalsForLinking,
   onSaved,
 }: {
   entity: TssNS.TssExtractedEntity;
@@ -122,9 +129,18 @@ function EntityBlock({
   customerId: string;
   customerName?: string;
   config: TssNS.TssWorksheetConfig;
+  /** Numbered goals from the extract — offered as link targets on new sessions. */
+  goalsForLinking: GoalOption[];
   onSaved: () => void;
 }) {
   const [adding, setAdding] = React.useState(false);
+  // Goals only: edit an extracted row in place (mobile GoalEditSheet parity).
+  const [editingGoalRow, setEditingGoalRow] = React.useState<TssNS.TssExtractedRow | null>(null);
+
+  // Goals and progress notes get dedicated forms that mirror the mobile app's
+  // Add Goal / Log Session workflows; other writable tables keep the generic form.
+  const isGoals = entity.entityId === "goals";
+  const isNotes = entity.entityId === "progressNotes";
 
   // Append is available for writable dataTable entities that resolved their
   // layout (extracted or empty — both have a known table to append into).
@@ -158,7 +174,9 @@ function EntityBlock({
         : entity.renderKind === "dataTable"
           ? (entity.section === "notes"
               ? <NotesList entity={entity} cfgEntity={cfgEntity} />
-              : <DataTable entity={entity} cfgEntity={cfgEntity} />)
+              : isGoals
+                ? <GoalsList entity={entity} onEditRow={canAdd ? (row) => { setEditingGoalRow(row); setAdding(false); } : undefined} />
+                : <DataTable entity={entity} cfgEntity={cfgEntity} />)
           : <StatusNote tone="slate">Open the Sheet view to see this section.</StatusNote>;
       break;
     default:
@@ -169,27 +187,56 @@ function EntityBlock({
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <h5 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{entity.label}</h5>
-        {canAdd && !adding ? (
+        {canAdd && !adding && !editingGoalRow ? (
           <button
             type="button"
             className="rounded-md px-2 py-0.5 text-xs font-medium text-sky-600 hover:bg-sky-50"
             onClick={() => setAdding(true)}
           >
-            + Add
+            {isGoals ? "+ Add goal" : isNotes ? "+ Add session" : "+ Add"}
           </button>
         ) : null}
       </div>
       {body}
       {canAdd && adding && cfgEntity ? (
-        <AddRowForm
+        isNotes ? (
+          <AddSessionForm
+            customerId={customerId}
+            customerName={customerName}
+            goals={goalsForLinking}
+            onSaved={() => { setAdding(false); onSaved(); }}
+            onCancel={() => setAdding(false)}
+          />
+        ) : isGoals ? (
+          <GoalForm
+            customerId={customerId}
+            cfgEntity={cfgEntity}
+            config={config}
+            goalRow={null}
+            onSaved={() => { setAdding(false); onSaved(); }}
+            onCancel={() => setAdding(false)}
+          />
+        ) : (
+          <AddRowForm
+            customerId={customerId}
+            customerName={customerName}
+            entityId={entity.entityId}
+            cfgEntity={cfgEntity}
+            config={config}
+            allowCalendarPush={entity.section === "notes"}
+            onSaved={() => { setAdding(false); onSaved(); }}
+            onCancel={() => setAdding(false)}
+          />
+        )
+      ) : null}
+      {isGoals && editingGoalRow && cfgEntity ? (
+        <GoalForm
           customerId={customerId}
-          customerName={customerName}
-          entityId={entity.entityId}
           cfgEntity={cfgEntity}
           config={config}
-          allowCalendarPush={entity.section === "notes"}
-          onSaved={() => { setAdding(false); onSaved(); }}
-          onCancel={() => setAdding(false)}
+          goalRow={editingGoalRow}
+          onSaved={() => { setEditingGoalRow(null); onSaved(); }}
+          onCancel={() => setEditingGoalRow(null)}
         />
       ) : null}
     </section>
@@ -256,8 +303,37 @@ export function WorkbookStructuredView({
     return rank(a.section) - rank(b.section);
   });
 
+  // Structured goals, numbered by table position — progress notes reference
+  // them by that position ("Goal #2"), same convention as the mobile app.
+  const goalRows = extract.entities.find((e) => e.entityId === "goals")?.rows ?? [];
+  const goalsForLinking: GoalOption[] = goalRows.map((row, i) => {
+    const cell = row.values?.goalSmart;
+    const label = cell ? String(cell.displayValue ?? cell.value ?? "").trim() : "";
+    return { n: i + 1, label: label || `Goal ${i + 1}` };
+  });
+
   return (
     <div className="space-y-5">
+      {/* Companion mobile app — same data entry, streamlined for the field. */}
+      <div className="flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+        <span aria-hidden>📱</span>
+        <a
+          href={MOBILE_APP_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="This small app was designed to streamline case manager data entry and may be easier to manage than the website."
+          className="text-xs font-semibold text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+        >
+          Mobile app
+        </a>
+        <span className="rounded-full border border-indigo-300 bg-white px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+          Beta
+        </span>
+        <span className="hidden text-[11px] text-indigo-700/70 sm:inline">
+          Streamlined case manager data entry — sessions and goals sync to this same workbook.
+        </span>
+      </div>
+
       {ordered.map((entity) => (
         <EntityBlock
           key={entity.entityId}
@@ -266,6 +342,7 @@ export function WorkbookStructuredView({
           customerId={customerId}
           customerName={customerName}
           config={config}
+          goalsForLinking={goalsForLinking}
           onSaved={() => void dataQ.refetch()}
         />
       ))}
