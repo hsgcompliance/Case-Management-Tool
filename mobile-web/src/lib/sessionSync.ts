@@ -64,7 +64,10 @@ export function buildProgressNoteValues(args: {
   useTodayDate?: boolean;
 }): Record<string, string> {
   const { session, staffName, staffInitial, linkedGoals, useTodayDate } = args;
-  const progressDate = useTodayDate ? new Date().toISOString().slice(0, 10) : session.date;
+  // LOCAL date, not UTC — toISOString() rolls to tomorrow in the evening.
+  const now = new Date();
+  const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const progressDate = useTodayDate ? localToday : session.date;
   const summary = buildProgressNoteSummary({
     type: session.type,
     note: session.note,

@@ -27,7 +27,7 @@ function resolveOrgId(claims: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-async function createActivity(user: User, body: TCmActivityCreateBody): Promise<string> {
+export async function createActivity(user: User, body: TCmActivityCreateBody): Promise<string> {
   const { claims } = await user.getIdTokenResult();
   const orgId = resolveOrgId(claims as Record<string, unknown>);
 

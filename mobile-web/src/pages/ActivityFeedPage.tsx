@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useCmActivitiesFeed, type ActivityFeedFilters } from "@/hooks/useCmActivitiesFeed";
 import { useArchiveActivity } from "@/hooks/useArchiveActivity";
+import { useOutboxAutoFlush } from "@/hooks/useOutboxAutoFlush";
 import { DATE_RANGE_CHIPS, type DateRangeKey } from "@/lib/dateRange";
 import type { TCmActivity, TCmActivityType } from "@hdb/contracts";
 
@@ -330,10 +331,16 @@ export function ActivityFeedPage() {
   const {
     data,
     isLoading,
+    isError,
+    error,
+    refetch,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
   } = useCmActivitiesFeed(user?.uid, feedFilters);
+
+  // Offline drafts (all customers) + manual "Sync now" for the banner.
+  const outbox = useOutboxAutoFlush(user ?? null);
 
   // Flatten all pages
   const allActivities = useMemo(
@@ -449,6 +456,40 @@ export function ActivityFeedPage() {
 
       {/* List */}
       <div className="flex-1 overflow-y-auto pb-safe-bottom">
+        {/* Offline sessions waiting to sync (auto-flushes when online; manual kick here) */}
+        {outbox.pendingDrafts.length > 0 && (
+          <div className="mx-4 mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3.5 py-2.5">
+            <span className="text-xs font-medium text-amber-700">
+              {outbox.pendingDrafts.length} offline session{outbox.pendingDrafts.length !== 1 ? "s" : ""} waiting to sync
+            </span>
+            <button
+              type="button"
+              onClick={() => void outbox.flush()}
+              disabled={outbox.flushing}
+              className="flex-shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 active:bg-amber-100 disabled:opacity-50 transition-colors"
+            >
+              {outbox.flushing ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+        )}
+
+        {/* Query failure — surface it instead of masquerading as an empty feed */}
+        {isError && (
+          <div className="mx-4 mt-3 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
+            <p className="text-xs font-semibold text-red-700">Couldn't load activity</p>
+            <p className="text-xs text-red-600/80 mt-0.5 break-words">
+              {error instanceof Error ? error.message : "Please try again."}
+            </p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="mt-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 active:bg-red-100 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex flex-col">
             {[...Array(5)].map((_, i) => (
@@ -463,7 +504,7 @@ export function ActivityFeedPage() {
           </div>
         )}
 
-        {!isLoading && filtered.length === 0 && (
+        {!isLoading && !isError && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
             <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3">
               <svg className="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -482,6 +523,9 @@ export function ActivityFeedPage() {
                 Log your first session
               </button>
             )}
+            {/* A page can be all-archived (filtered client-side) yet more pages
+                remain — keep paging instead of dead-ending on an empty state. */}
+            {hasNextPage && !isFetchingNextPage && <LoadMoreTrigger onVisible={fetchNextPage} />}
           </div>
         )}
 
