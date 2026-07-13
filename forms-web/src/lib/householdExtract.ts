@@ -12,6 +12,12 @@ export type ExtractedValue = {
   receivedAtISO: string | null;
 };
 
+export type UnmatchedField = {
+  label: string;
+  value: string;
+  sourceFormTitle: string;
+};
+
 export type HouseholdInfo = {
   /** Ordered head-of-household slots (label → newest value, if any). */
   slots: { key: string; label: string; found: ExtractedValue | null }[];
@@ -20,6 +26,8 @@ export type HouseholdInfo = {
   hhSize: ExtractedValue | null;
   adults: ExtractedValue | null;
   children: ExtractedValue | null;
+  /** Fields no matcher consumed — the troubleshooting list for tuning the regexes. */
+  unmatched: UnmatchedField[];
 };
 
 type SlotDef = {
@@ -106,6 +114,7 @@ export function extractHousehold(
   let hhSize: ExtractedValue | null = null;
   let adults: ExtractedValue | null = null;
   let children: ExtractedValue | null = null;
+  const unmatched = new Map<string, UnmatchedField>(); // key: label::value
 
   // Oldest → newest so later submissions overwrite earlier answers.
   const ordered = [...events].sort((a, b) =>
@@ -122,16 +131,19 @@ export function extractHousehold(
       const label = f.label;
       const value = f.value.trim();
       if (!value) continue;
+      let consumed = false;
 
       for (const def of SLOT_DEFS) {
         if (!def.match.test(label)) continue;
         if (def.exclude?.test(label)) continue;
         if (def.valueOk && !def.valueOk(value)) continue;
+        consumed = true;
         const candidate: ExtractedValue = { value, ...src };
         if (newer(found.get(def.key) ?? null, candidate)) found.set(def.key, candidate);
       }
 
       if (MEMBER_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
+        consumed = true;
         // Multi-member answers come through as newline or "·"-separated lists.
         for (const part of value.split(/\n|·/)) {
           const name = part.replace(/^[^:]*:\s*/, "").trim();
@@ -143,9 +155,25 @@ export function extractHousehold(
       }
 
       const numeric = /^\d{1,2}$/.test(value);
-      if (HH_SIZE_MATCH.test(label) && numeric && newer(hhSize, { value, ...src })) hhSize = { value, ...src };
-      if (ADULTS_MATCH.test(label) && numeric && newer(adults, { value, ...src })) adults = { value, ...src };
-      if (CHILDREN_MATCH.test(label) && numeric && newer(children, { value, ...src })) children = { value, ...src };
+      if (HH_SIZE_MATCH.test(label) && numeric) {
+        consumed = true;
+        if (newer(hhSize, { value, ...src })) hhSize = { value, ...src };
+      }
+      if (ADULTS_MATCH.test(label) && numeric) {
+        consumed = true;
+        if (newer(adults, { value, ...src })) adults = { value, ...src };
+      }
+      if (CHILDREN_MATCH.test(label) && numeric) {
+        consumed = true;
+        if (newer(children, { value, ...src })) children = { value, ...src };
+      }
+
+      if (!consumed) {
+        const k = `${label.toLowerCase()}::${value.toLowerCase()}`;
+        if (!unmatched.has(k) && unmatched.size < 150) {
+          unmatched.set(k, { label, value, sourceFormTitle: src.sourceFormTitle });
+        }
+      }
     }
   }
 
@@ -165,5 +193,5 @@ export function extractHousehold(
     }
   }
 
-  return { slots, members: [...members.values()], hhSize, adults, children };
+  return { slots, members: [...members.values()], hhSize, adults, children, unmatched: [...unmatched.values()] };
 }
