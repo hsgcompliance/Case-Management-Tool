@@ -9,3 +9,4 @@ export {
   formsCustomerDetail_http as formsCustomerDetail,
   formsCreditCardsSummary_http as formsCreditCardsSummary,
 } from "./http";
+export { formsCustomerCreate_http as formsCustomerCreate } from "./customerCreate";

@@ -329,6 +329,109 @@ export async function listFormsRegistry(): Promise<FormsRegistryItem[]> {
     .filter((r) => /^\d{6,24}$/.test(r.formId));
 }
 
+/* ───────────────────────── event details (intake sidebar) ─────────────────────────
+ * Flattened label/value rows per event so the forms-app Webhooks sidebar can build
+ * structured household info and show copy-pastable raw fields. The authoritative
+ * apiSubmission answers are preferred; the webhook rawRequest parse is the fallback.
+ */
+export type WebhookEventFieldRow = { label: string; value: string };
+
+export type WebhookEventDetailItem = {
+  id: string;
+  formId: string;
+  submissionId: string;
+  submitterName: string;
+  receivedAtISO: string | null;
+  pretty: string;
+  fields: WebhookEventFieldRow[];
+};
+
+function flattenAnswerValue(a: Record<string, unknown>): string {
+  const ans = a?.answer;
+  const prettyFmt = typeof a?.prettyFormat === "string" ? (a.prettyFormat as string).trim() : "";
+  if (ans == null || ans === "") return prettyFmt;
+  if (typeof ans === "string") return ans.trim();
+  if (Array.isArray(ans)) return ans.map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+  if (typeof ans === "object") {
+    if (prettyFmt) return prettyFmt;
+    const o = ans as Record<string, unknown>;
+    const nameParts = [o.first, o.middle, o.last].map((x) => String(x || "").trim()).filter(Boolean);
+    if (nameParts.length) return nameParts.join(" ");
+    return Object.entries(o)
+      .map(([k, v]) => `${k}: ${String(v ?? "").trim()}`)
+      .filter((s) => !/:\s*$/.test(s))
+      .join(" · ");
+  }
+  return String(ans);
+}
+
+/** Deriving a label from a rawRequest key like "q12_incomeSource" (fallback path). */
+function labelFromRawKey(key: string): string {
+  return key
+    .replace(/^q\d+_/, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+}
+
+function fieldsFromEvent(r: Record<string, unknown>): WebhookEventFieldRow[] {
+  const api = r.apiSubmission as Record<string, unknown> | null;
+  const answers = api?.answers;
+  if (answers && typeof answers === "object") {
+    return Object.values(answers as Record<string, Record<string, unknown>>)
+      .filter((a) => a && !NON_INPUT_TYPES.has(String(a.type || "")))
+      .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
+      .map((a) => ({
+        label: String(a.text || a.name || "").trim().slice(0, 200),
+        value: flattenAnswerValue(a).slice(0, 2000),
+      }))
+      .filter((f) => f.label && f.value);
+  }
+  // Fallback: the webhook's parsed rawRequest ({ q3_name: ..., q5_dob: ... }).
+  const raw = r.answers;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return Object.entries(raw as Record<string, unknown>)
+      .filter(([k]) => /^q\d+_/.test(k))
+      .map(([k, v]) => ({
+        label: labelFromRawKey(k).slice(0, 200),
+        value: (typeof v === "object" ? flattenAnswerValue({ answer: v }) : String(v ?? "").trim()).slice(0, 2000),
+      }))
+      .filter((f) => f.label && f.value);
+  }
+  return [];
+}
+
+export async function listWebhookEventDetails(
+  opts: { formIds?: string[]; limit?: number; callerOrg?: string | null } = {}
+): Promise<WebhookEventDetailItem[]> {
+  const limit = Math.max(1, Math.min(100, Number(opts.limit || 50)));
+  const org = normId(opts.callerOrg);
+  const wanted = new Set((opts.formIds ?? []).filter(isValidFormId));
+
+  // Scan the latest events and filter in memory (same index-free pattern as
+  // listWebhookEvents; formId-in + orderBy would need a composite index).
+  const snap = await db.collection(COLLECTION).orderBy("createdAt", "desc").limit(300).get();
+  const out: WebhookEventDetailItem[] = [];
+  for (const d of snap.docs) {
+    if (out.length >= limit) break;
+    const r = { id: d.id, ...(d.data() || {}) } as Record<string, unknown>;
+    const ro = normId(r.orgId);
+    if (ro && org && ro !== org) continue;
+    const formId = String(r.formId || "");
+    if (wanted.size && !wanted.has(formId)) continue;
+    out.push({
+      id: String(r.id),
+      formId,
+      submissionId: String(r.submissionId || ""),
+      submitterName: String(r.submitterName || ""),
+      receivedAtISO: (r.receivedAtISO as string | null) ?? null,
+      pretty: String(r.pretty || "").slice(0, 4000),
+      fields: fieldsFromEvent(r),
+    });
+  }
+  return out;
+}
+
 export async function listWebhookEvents(opts: { limit?: number; callerOrg?: string | null } = {}): Promise<WebhookEventListItem[]> {
   const limit = Math.max(1, Math.min(200, Number(opts.limit || 50)));
   const org = normId(opts.callerOrg);

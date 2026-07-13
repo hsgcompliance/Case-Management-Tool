@@ -1,4 +1,4 @@
-import { getAuthed } from "./authedApi";
+import { getAuthed, postAuthed } from "./authedApi";
 
 export type FormsCustomer = {
   id: string;
@@ -19,6 +19,36 @@ export function loadCustomers(force = false): Promise<FormsCustomer[]> {
       .catch(() => []);
   }
   return cache;
+}
+
+export type CreateCustomerBody = {
+  firstName: string;
+  lastName: string;
+  dob?: string;
+  cwId?: string;
+  caseManagerName?: string;
+  secondaryCaseManagerName?: string;
+  medicaid?: "yes" | "no" | "not_sure";
+  buildDrive?: boolean;
+  force?: boolean;
+};
+
+export type CreateCustomerResp = {
+  ok: true;
+  customer: FormsCustomer;
+  drive: {
+    built: boolean;
+    folderUrl?: string;
+    folderName?: string;
+    workbookLinked?: boolean;
+    reason?: string;
+    error?: string;
+  };
+};
+
+/** Create a customer (+ best-effort Drive folder build/link) via the backend. */
+export function createCustomer(body: CreateCustomerBody): Promise<CreateCustomerResp> {
+  return postAuthed<CreateCustomerResp>("formsCustomerCreate", body);
 }
 
 export function filterCustomers(list: FormsCustomer[], q: string, limit = 12): FormsCustomer[] {
