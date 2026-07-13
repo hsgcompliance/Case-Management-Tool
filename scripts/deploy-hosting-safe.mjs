@@ -14,8 +14,18 @@ const deployArgs = process.argv
   .slice(2)
   .filter((arg) => !SKIP_FLAGS.has(arg) && !arg.startsWith("--commit-msg=") && !arg.startsWith("--target="));
 const hasExplicitOnly = deployArgs.some((arg) => arg === "--only" || arg.startsWith("--only="));
-const defaultOnlyTarget = DEPLOY_ALL_HOSTING ? "hosting" : `hosting:${TARGET}`;
+const WEB_HOSTING_ONLY_TARGET = "hosting:web,functions:firebase-frameworks-housing-db-v2:ssrhousingdbv2";
+const defaultOnlyTarget = DEPLOY_ALL_HOSTING
+  ? "hosting"
+  : TARGET === "web"
+    ? WEB_HOSTING_ONLY_TARGET
+    : `hosting:${TARGET}`;
 const ROOT = resolve(".");
+const DEFAULT_COMMAND_TIMEOUT_MS = 90 * 60 * 1000;
+const COMMAND_TIMEOUT_MS = Number.isFinite(Number(process.env.HDB_DEPLOY_COMMAND_TIMEOUT_MS))
+  && Number(process.env.HDB_DEPLOY_COMMAND_TIMEOUT_MS) > 0
+  ? Number(process.env.HDB_DEPLOY_COMMAND_TIMEOUT_MS)
+  : DEFAULT_COMMAND_TIMEOUT_MS;
 
 if (!["web", "mobile", "forms"].includes(TARGET)) {
   throw new Error(`Unsupported hosting target: ${TARGET}. Expected web, mobile, or forms.`);
@@ -25,7 +35,16 @@ function run(command, args) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
     shell: process.platform === "win32",
+    timeout: COMMAND_TIMEOUT_MS,
   });
+
+  if (result.error) {
+    if (result.error.code === "ETIMEDOUT") {
+      console.error(`Command timed out after ${Math.round(COMMAND_TIMEOUT_MS / 60000)} minutes: ${command} ${args.join(" ")}`);
+      process.exit(124);
+    }
+    throw result.error;
+  }
 
   if (result.status !== 0) {
     process.exit(result.status ?? 1);

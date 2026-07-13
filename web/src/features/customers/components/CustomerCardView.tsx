@@ -9,6 +9,7 @@ import { PageBulkActionsBar } from "@entities/Page";
 import { CardGrid, Modal } from "@entities/ui";
 import { CustomerFilterBar } from "./CustomerFilterBar";
 import {
+  CUSTOMER_CARD_ENROLLMENTS_LIMIT,
   getStaleCustomerEnrollmentIds,
   preloadCustomerEnrollments,
   type EnrollmentStatusBucket,
@@ -137,6 +138,7 @@ export function CustomerCardView({
   const [pendingEnrollmentRefreshIds, setPendingEnrollmentRefreshIds] = React.useState<string[]>([]);
   const [gridCols, setGridCols] = React.useState<1 | 2 | 3>(3);
   const [pendingCardId, setPendingCardId] = React.useState<string | null>(null);
+  const [loadedEnrollmentCustomerIds, setLoadedEnrollmentCustomerIds] = React.useState<Set<string>>(new Set());
 
   // Clear loading state once the route actually changes (modal opened or closed)
   React.useEffect(() => {
@@ -267,8 +269,15 @@ export function CustomerCardView({
 
     setIsRefreshingEnrollments(true);
     try {
+      const normalizedCustomerIds = Array.from(new Set(customerIds.map((id) => String(id || "").trim()).filter(Boolean)));
       const result = await preloadCustomerEnrollments(queryClient, customerIds, {
         batchSize: ENROLLMENT_PRELOAD_BATCH_SIZE,
+        limit: CUSTOMER_CARD_ENROLLMENTS_LIMIT,
+      });
+      setLoadedEnrollmentCustomerIds((current) => {
+        const next = new Set(current);
+        for (const customerId of normalizedCustomerIds) next.add(customerId);
+        return next;
       });
 
       if (!result.fetchedCount) {
@@ -299,8 +308,15 @@ export function CustomerCardView({
       toast("No customers in the current filter scope.", { type: "warn" });
       return;
     }
-    const staleCustomerIds = getStaleCustomerEnrollmentIds(queryClient, customerIdsInScope);
+    const staleCustomerIds = getStaleCustomerEnrollmentIds(queryClient, customerIdsInScope, {
+      limit: CUSTOMER_CARD_ENROLLMENTS_LIMIT,
+    });
     if (!staleCustomerIds.length) {
+      setLoadedEnrollmentCustomerIds((current) => {
+        const next = new Set(current);
+        for (const customerId of customerIdsInScope) next.add(customerId);
+        return next;
+      });
       toast(
         `Enrollments are already current for ${customerIdsInScope.length} customer${customerIdsInScope.length === 1 ? "" : "s"}.`,
         { type: "success" },
@@ -312,13 +328,20 @@ export function CustomerCardView({
       setShowEnrollmentRefreshDialog(true);
       return;
     }
-    void runEnrollmentRefresh(staleCustomerIds);
+    void runEnrollmentRefresh(customerIdsInScope);
   }, [customerIdsInScope, queryClient, runEnrollmentRefresh]);
 
   const confirmEnrollmentRefresh = React.useCallback(() => {
     setShowEnrollmentRefreshDialog(false);
-    void runEnrollmentRefresh(pendingEnrollmentRefreshIds);
-  }, [pendingEnrollmentRefreshIds, runEnrollmentRefresh]);
+    void (async () => {
+      await runEnrollmentRefresh(pendingEnrollmentRefreshIds);
+      setLoadedEnrollmentCustomerIds((current) => {
+        const next = new Set(current);
+        for (const customerId of customerIdsInScope) next.add(customerId);
+        return next;
+      });
+    })();
+  }, [customerIdsInScope, pendingEnrollmentRefreshIds, runEnrollmentRefresh]);
 
   const bulkStatusText = React.useMemo(() => {
     if (!selectedIds.size) return null;
@@ -513,6 +536,7 @@ export function CustomerCardView({
             onSelectGesture={handleCardSelectGesture}
             onOpen={handleCardOpen}
             onHide={onHideCustomer}
+            loadEnrollmentData={loadedEnrollmentCustomerIds.has(String(customer.id || ""))}
             loading={pendingCardId === String(customer.id || "")}
           />
         ))}
