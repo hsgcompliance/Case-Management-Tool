@@ -1,23 +1,92 @@
 "use client";
 
 // "Add session" form for the structured view's Progress Notes section — the
-// website counterpart of the mobile app's Log Session flow. Collects the same
-// inputs (type, date, time range, note, linked goals) and pushes a progress-note
-// row formatted by the SAME shared helpers (sessionNoteFormat.ts mirrors
-// mobile-web/src/lib/sessionSync.ts), so notes look identical from either app.
+// website counterpart of the mobile app's Log Session flow. Saves the session
+// to the shared cmActivities activity log FIRST (same doc shape the mobile
+// app's All Sessions feed and per-customer Sessions tab query), then pushes a
+// progress-note row formatted by the SAME shared helpers (sessionNoteFormat.ts
+// mirrors mobile-web/src/lib/sessionSync.ts), so a session logged here is
+// indistinguishable from one logged on the phone.
 
 import React from "react";
 import Link from "next/link";
+import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import api from "@client/api";
 import { useAuth } from "@app/auth/AuthProvider";
 import { useGoogleIntegrationStatus } from "@hooks/useGoogleIntegrations";
+import { db } from "@lib/firebase";
 import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
 import { toast } from "@lib/toast";
+import type { User } from "firebase/auth";
 import {
   buildProgressNoteValues,
   staffInitials,
   type SessionType,
 } from "./sessionNoteFormat";
+
+// ── cmActivities write (MIRROR of mobile-web/src/hooks/useCreateActivity.ts) ──
+// The mobile feed/per-customer views query cmActivities by caseManagerId, so
+// the doc shape here must stay in lockstep with the mobile createActivity.
+
+function resolveOrgId(claims: Record<string, unknown>): string | undefined {
+  // Mirror orgIdFromClaims() in functions/src/core/org.ts — supports all claim shapes.
+  const direct =
+    (claims.orgId as string) ||
+    (claims.orgID as string) ||
+    (claims.organizationId as string) ||
+    (claims.org as string) ||
+    undefined;
+  if (direct) return direct;
+  for (const nested of [claims.customClaims, claims.claims] as Record<string, unknown>[]) {
+    if (!nested || typeof nested !== "object") continue;
+    const id =
+      (nested.orgId as string) ||
+      (nested.orgID as string) ||
+      (nested.org as string) ||
+      undefined;
+    if (id) return id;
+  }
+  return undefined;
+}
+
+async function createActivityDoc(user: User, body: {
+  customerId: string;
+  customerName: string;
+  type: SessionType;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  note?: string;
+}): Promise<string> {
+  const { claims } = await user.getIdTokenResult();
+  const orgId = resolveOrgId(claims as Record<string, unknown>);
+  // Only write orgId if resolved — omitting it lets sameOrg() in Firestore rules pass.
+  const ref = await addDoc(collection(db, "cmActivities"), {
+    ...(orgId ? { orgId } : {}),
+    caseManagerId: user.uid,
+    caseManagerName: user.displayName ?? "",
+    customerId: body.customerId,
+    customerName: body.customerName ?? "",
+    type: body.type,
+    date: body.date,
+    startTime: body.startTime ?? null,
+    endTime: body.endTime ?? null,
+    note: body.note ?? null,
+    calendarSynced: false,
+    workbookSynced: false,
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+async function markSessionWorkbookSynced(sessionId: string, rowKey?: string): Promise<void> {
+  await updateDoc(doc(db, "cmActivities", sessionId), {
+    workbookSynced: true,
+    workbookSyncedAt: new Date().toISOString(),
+    ...(rowKey ? { workbookRowKey: rowKey } : {}),
+    updatedAt: serverTimestamp(),
+  });
+}
 
 const TYPES: { value: SessionType; label: string; emoji: string }[] = [
   { value: "in-person",  label: "In Person",   emoji: "🤝" },
@@ -51,8 +120,8 @@ export function AddSessionForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  const { profile } = useAuth();
-  const staffName = String(profile?.displayName ?? "").trim();
+  const { user, profile } = useAuth();
+  const staffName = String(profile?.displayName ?? user?.displayName ?? "").trim();
 
   const [type, setType] = React.useState<SessionType>("in-person");
   const [date, setDate] = React.useState(todayISO());
@@ -78,12 +147,39 @@ export function AddSessionForm({
   const [pushCalendar, setPushCalendar] = React.useState(false);
   React.useEffect(() => { setPushCalendar(calendarPushDefault); }, [calendarPushDefault]);
   const [calNotice, setCalNotice] = React.useState(false);
+  // Session doc saved but the workbook push stalled — amber notice; Close refreshes.
+  const [savedNotice, setSavedNotice] = React.useState<string | null>(null);
 
   const save = async () => {
     if (!date) { setError("Pick a session date."); return; }
+    if (!user) { setError("You must be signed in to log a session."); return; }
     setSaving(true);
     setError(null);
     setCalNotice(false);
+    setSavedNotice(null);
+
+    // 1. Save the session to the shared activity log FIRST (mobile parity: the
+    //    record must exist even if the calendar/workbook pushes fail — the
+    //    mobile app's per-row Sync can retry those later).
+    let sessionId: string;
+    try {
+      sessionId = await createActivityDoc(user, {
+        customerId,
+        customerName: customerName || "",
+        type,
+        date,
+        startTime: startTime || undefined,
+        endTime: endTime || undefined,
+        note: note.trim() || undefined,
+      });
+    } catch (e: unknown) {
+      setError(String((e as Error)?.message || "Could not save the session."));
+      setSaving(false);
+      return;
+    }
+
+    // 2. Push the progress-note row to the workbook (independent of calendar).
+    let workbookError: string | null = null;
     try {
       const values = buildProgressNoteValues({
         session: {
@@ -102,17 +198,26 @@ export function AddSessionForm({
         { customerId, entityId: "progressNotes", values },
         driveHeaders(),
       )) as Record<string, unknown>;
-      if (!resp?.ok) {
-        setError(String(resp?.error || "Could not save the session."));
-        return;
+      if (resp?.ok) {
+        // Flag the session doc so both apps show it as synced (non-fatal).
+        try { await markSessionWorkbookSynced(sessionId, String(resp.rowKey ?? "") || undefined); } catch { /* row is in the sheet regardless */ }
+      } else {
+        workbookError = String(resp?.error || "workbook push failed");
       }
+    } catch (e: unknown) {
+      const body = (e as { meta?: { response?: { error?: string } } })?.meta?.response;
+      workbookError = String(body?.error || (e as Error)?.message || "workbook push failed");
+    }
 
-      // Session saved. Optional calendar push (non-blocking on the save itself).
-      if (pushCalendar) {
-        if (!calConnected) {
-          setCalNotice(true); // note is already in the sheet — surface + keep context
-          return;
-        }
+    // 3. Optional calendar push. Passing the session id lets the backend dedupe
+    //    re-submits and stamp calendarSynced/calendarEventId on the doc.
+    let calendarFailed = false;
+    let showCalNotice = false;
+    if (pushCalendar) {
+      if (!calConnected) {
+        showCalNotice = true;
+        setCalNotice(true);
+      } else {
         try {
           await (api as any).postWith("calendarPostEvent", {
             customerName: customerName || "Customer",
@@ -121,23 +226,35 @@ export function AddSessionForm({
             startTime: startTime || undefined,
             endTime: endTime || undefined,
             note: note.trim() || undefined,
+            activityId: sessionId,
           });
-          toast("Session added to the sheet and your calendar.", { type: "success" });
         } catch {
-          toast("Session saved to the sheet. Calendar push failed — check Settings.", { type: "warn" });
+          calendarFailed = true;
         }
-        onSaved();
-        return;
       }
-
-      toast("Session added to the sheet.", { type: "success" });
-      onSaved();
-    } catch (e: unknown) {
-      const body = (e as { meta?: { response?: { error?: string } } })?.meta?.response;
-      setError(String(body?.error || (e as Error)?.message || "Could not save the session."));
-    } finally {
-      setSaving(false);
     }
+
+    setSaving(false);
+
+    // 4. Surface outcomes. The session itself is already in the activity log.
+    if (workbookError) {
+      setSavedNotice(
+        `Session saved to the activity log, but the workbook push failed (${workbookError}). ` +
+        "You can retry the sync from the session's row in the mobile app." +
+        (calendarFailed ? " Calendar sync also failed — check Settings." : ""),
+      );
+      return;
+    }
+    if (calendarFailed) {
+      toast("Session logged and added to the sheet. Calendar push failed — check Settings.", { type: "warn" });
+      onSaved();
+      return;
+    }
+    if (showCalNotice) {
+      return; // calendar-connect notice is showing; Close refreshes
+    }
+    toast(pushCalendar ? "Session logged, added to the sheet and your calendar." : "Session logged and added to the sheet.", { type: "success" });
+    onSaved();
   };
 
   const inputCls = "input w-full text-sm";
@@ -257,15 +374,28 @@ export function AddSessionForm({
         </div>
       ) : null}
 
+      {savedNotice ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {savedNotice}
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-end gap-2">
-        {/* After a save that only stalled on the calendar notice, the row is
-            already in the sheet — Close refreshes instead of discarding. */}
-        <button type="button" className="btn btn-ghost btn-sm" onClick={calNotice ? onSaved : onCancel} disabled={saving}>
-          {calNotice ? "Close" : "Cancel"}
+        {/* After a save that only stalled on a push notice, the session doc is
+            already in the activity log — Close refreshes instead of discarding. */}
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={calNotice || savedNotice ? onSaved : onCancel}
+          disabled={saving}
+        >
+          {calNotice || savedNotice ? "Close" : "Cancel"}
         </button>
-        <button type="button" className="btn btn-sm btn-primary" onClick={() => void save()} disabled={saving || !date}>
-          {saving ? "Saving…" : "Save session"}
-        </button>
+        {!calNotice && !savedNotice ? (
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => void save()} disabled={saving || !date}>
+            {saving ? "Saving…" : "Save session"}
+          </button>
+        ) : null}
       </div>
     </div>
   );
