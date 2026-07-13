@@ -30,6 +30,7 @@ import { useSystemMetrics } from "@hooks/useMetrics";
 import { CustomersMetricsBar } from "./components/CustomersMetricsBar";
 import CustomersNewStateView from "./components/CustomersNewStateView";
 import { contactCaseManagerIdsForCustomer } from "./contactCaseManagers";
+import CustomerWorkspaceModal from "./CustomerWorkspaceModal";
 
 const PAGE_SIZE = 50;
 
@@ -81,6 +82,10 @@ type CustomerSortMode =
   | "tier-asc"
   | "tier-desc";
 type CardPoolMode = "mine" | "all";
+type CustomerModalState = {
+  customerId: string | null;
+  initialTab?: "tasks";
+};
 
 function defaultScopeMode(myUid: string, isCM: boolean): ScopeMode {
   return myUid && isCM ? "my" : "all";
@@ -281,6 +286,7 @@ export function CustomersPage() {
   const [pageMode, setPageMode] = React.useState<CustomersPageMode>("card");
   const [cardPoolMode, _setCardPoolMode] = React.useState<CardPoolMode>(persisted.current.cardPoolMode ?? "all");
   const setCardPoolMode = React.useCallback((v: CardPoolMode) => { _setCardPoolMode(v); writePersistedFilters({ cardPoolMode: v }); }, []);
+  const [localCustomerModal, setLocalCustomerModal] = React.useState<CustomerModalState | null>(null);
 
   const { data: me } = useMe();
   const meUser = (me || null) as CompositeUser | null;
@@ -561,8 +567,15 @@ export function CustomersPage() {
     setCursorId(prev);
   };
 
-  const openDetailModal = (id: string) => router.push(`/customers/${id}`);
-  const openNewModal = () => router.push(`/customers/new`);
+  const openDetailModal = React.useCallback((id: string, options?: { tab?: "tasks" }) => {
+    setLocalCustomerModal({ customerId: id, initialTab: options?.tab });
+  }, []);
+  const openNewModal = React.useCallback(() => {
+    setLocalCustomerModal({ customerId: null });
+  }, []);
+  const closeLocalCustomerModal = React.useCallback(() => {
+    setLocalCustomerModal(null);
+  }, []);
 
   const { data: systemMetrics } = useSystemMetrics();
   // True total from the weekly-reconciled metric doc — avoids the page-size cap
@@ -741,9 +754,10 @@ export function CustomersPage() {
   const metricsBar = pageMode === "card" ? <CustomersMetricsBar myUid={myUid} /> : undefined;
 
   return (
-    <ListStyleLayout metricsBar={metricsBar}>
-    <TourProvider tourKey="CustomersPage">
-      <section className="space-y-4" data-tour="customers-page">
+    <>
+      <ListStyleLayout metricsBar={metricsBar}>
+      <TourProvider tourKey="CustomersPage">
+        <section className="space-y-4" data-tour="customers-page">
         {staleBannerVisible && (
           <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
             <span>
@@ -825,6 +839,7 @@ export function CustomersPage() {
             hiddenCustomerIds={hiddenCustomerIds}
             onHideCustomer={hideCustomer}
             onShowAllCustomers={showAllCustomers}
+            onCustomerOpen={openDetailModal}
             featureFlags={isViewer ? { showEnrollmentRefreshAction: false, showBulkActions: false } : undefined}
           />
         ) : (
@@ -986,9 +1001,17 @@ export function CustomersPage() {
             </div>
           </>
         )}
-      </section>
-    </TourProvider>
-    </ListStyleLayout>
+        </section>
+      </TourProvider>
+      </ListStyleLayout>
+      {localCustomerModal ? (
+        <CustomerWorkspaceModal
+          customerId={localCustomerModal.customerId}
+          initialTab={localCustomerModal.initialTab}
+          onClose={closeLocalCustomerModal}
+        />
+      ) : null}
+    </>
   );
 }
 
