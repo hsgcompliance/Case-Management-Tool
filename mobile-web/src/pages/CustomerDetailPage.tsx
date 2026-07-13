@@ -1135,15 +1135,34 @@ function SessionsTab({ customer, user }: { customer: Customer; user: User | null
         </div>
       )}
 
+      {/* Query failure — surface it instead of masquerading as an empty list */}
+      {q.isError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
+          <p className="text-xs font-semibold text-red-700">Couldn't load sessions</p>
+          <p className="text-xs text-red-600/80 mt-0.5 break-words">
+            {q.error instanceof Error ? q.error.message : "Please try again."}
+          </p>
+          <button
+            type="button"
+            onClick={() => void q.refetch()}
+            className="mt-2 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 active:bg-red-100 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {q.isLoading ? (
         <div className="flex flex-col gap-2">
           {[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-white rounded-xl animate-pulse" />)}
         </div>
       ) : grouped.length === 0 && drafts.length === 0 ? (
-        <div className="text-center py-8">
-          <p className="text-slate-400 text-sm">No sessions in this range</p>
-          <p className="text-slate-400 text-xs mt-1">Try a wider filter or log a new session</p>
-        </div>
+        !q.isError && (
+          <div className="text-center py-8">
+            <p className="text-slate-400 text-sm">No sessions in this range</p>
+            <p className="text-slate-400 text-xs mt-1">Try a wider filter or log a new session</p>
+          </div>
+        )
       ) : (
         <>
           {grouped.map(({ date, items }) => (

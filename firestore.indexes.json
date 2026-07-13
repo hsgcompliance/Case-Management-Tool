@@ -540,6 +540,20 @@
         { "fieldPath": "customerId",    "order": "ASCENDING" },
         { "fieldPath": "date",          "order": "DESCENDING" }
       ]
+    },
+
+    // ── cmActivities — by CM + type, date+createdAt desc (feed type-filter pills) ───
+    // Without this the All Activity feed errors (and looked empty) whenever a
+    // type pill was selected.
+    {
+      "collectionGroup": "cmActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "caseManagerId", "order": "ASCENDING" },
+        { "fieldPath": "type",          "order": "ASCENDING" },
+        { "fieldPath": "date",          "order": "DESCENDING" },
+        { "fieldPath": "createdAt",     "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

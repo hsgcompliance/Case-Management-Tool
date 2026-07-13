@@ -3,8 +3,10 @@ import { useCmActivities } from "@/hooks/useCmActivities";
 import { ActivityCard } from "@/components/ActivityCard";
 import { useNavigate } from "react-router-dom";
 
+// LOCAL date, not UTC — evening sessions must count toward today's stats.
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function greeting(name: string | null) {

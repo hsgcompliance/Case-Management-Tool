@@ -95,8 +95,11 @@ const TYPES: { value: SessionType; label: string; emoji: string }[] = [
   { value: "other",      label: "On Behalf of", emoji: "📋" },
 ];
 
+// LOCAL date, not UTC: toISOString() rolls to tomorrow in the evening (UTC-6/7),
+// which would date the session outside the mobile feed's Today/Week/Month windows.
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function driveHeaders() {

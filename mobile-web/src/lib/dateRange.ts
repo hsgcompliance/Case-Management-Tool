@@ -24,25 +24,33 @@ export function toLocalISODate(d: Date): string {
  * Inclusive [start, end] "YYYY-MM-DD" bounds for a preset, or null for "all".
  * Week starts Sunday. Used both to drive the Firestore query window and to label
  * the active filter.
+ *
+ * Week/month windows extend to the END of the period (Saturday / last day),
+ * not just today: sessions can carry a forward date — intentionally, or from
+ * legacy evening saves that stamped the UTC (next-day) date — and clipping the
+ * window at today made them silently vanish from every default view.
  */
 export function rangeBounds(key: DateRangeKey, now = new Date()): { start: string; end: string } | null {
   if (key === "all") return null;
 
-  const end = toLocalISODate(now);
+  const today = toLocalISODate(now);
 
   if (key === "today") {
-    return { start: end, end };
+    return { start: today, end: today };
   }
 
   if (key === "week") {
     const start = new Date(now);
     start.setDate(now.getDate() - now.getDay()); // back to Sunday
-    return { start: toLocalISODate(start), end };
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6); // forward to Saturday
+    return { start: toLocalISODate(start), end: toLocalISODate(end) };
   }
 
   // month
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { start: toLocalISODate(start), end };
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // last day of month
+  return { start: toLocalISODate(start), end: toLocalISODate(end) };
 }
 
 /** True when a "YYYY-MM-DD" date falls within the preset window. */
