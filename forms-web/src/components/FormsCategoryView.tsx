@@ -1,10 +1,43 @@
-import { useState } from "react";
-import type { FormDef } from "@/lib/formsCatalog";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { FormDef, IntakeFlowStep } from "@/lib/formsCatalog";
+import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { JotformEmbed } from "./JotformEmbed";
 import { SendToCustomerModal } from "./SendToCustomerModal";
+import { CreateCustomerModal } from "./CreateCustomerModal";
+import { WebhooksSidebar } from "./WebhooksSidebar";
 import { CreditCardCards } from "./CreditCardCards";
 import { CustomerDetailsHeader } from "./CustomerDetailsHeader";
 import { ReferencePanel } from "./ReferencePanel";
+
+// ── Flow progress (localStorage, per customer) ─────────────────────────────
+
+type FlowProgress = {
+  done: Record<string, boolean>;
+  /** stepKey → checked checklist item indexes */
+  checks: Record<string, number[]>;
+};
+
+const EMPTY_PROGRESS: FlowProgress = { done: {}, checks: {} };
+
+function loadProgress(key: string): FlowProgress {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return EMPTY_PROGRESS;
+    const p = JSON.parse(raw) as Partial<FlowProgress>;
+    return { done: p.done ?? {}, checks: p.checks ?? {} };
+  } catch {
+    return EMPTY_PROGRESS;
+  }
+}
+
+type ResolvedStep = IntakeFlowStep & {
+  /** Stable key for progress tracking: formId, or a slug of the task title. */
+  key: string;
+  title: string;
+  form: FormDef | null;
+};
+
+type View = { kind: "list" } | { kind: "step"; idx: number } | { kind: "form"; form: FormDef };
 
 export function FormsCategoryView({
   heading,
@@ -16,6 +49,12 @@ export function FormsCategoryView({
   showCustomerHeader = false,
   /** Intake: enable prev/next nav through the customer index in the header. */
   customerNav = false,
+  /** Ordered flow steps (forms + tasks): numbered checklist + next/back nav. */
+  flowSteps,
+  /** Full catalog for resolving flow form ids outside this tab's category. */
+  catalog,
+  /** Intake: persistent right-hand Webhooks sidebar (structured + raw). */
+  webhooksSidebar = false,
 }: {
   heading: string;
   description?: string;
@@ -23,12 +62,113 @@ export function FormsCategoryView({
   showCreditCards?: boolean;
   showCustomerHeader?: boolean;
   customerNav?: boolean;
+  flowSteps?: IntakeFlowStep[];
+  catalog?: FormDef[];
+  webhooksSidebar?: boolean;
 }) {
-  const [selected, setSelected] = useState<FormDef | null>(null);
+  const { customer } = useCurrentCustomer();
+  const [view, setView] = useState<View>({ kind: "list" });
   const [sendForm, setSendForm] = useState<FormDef | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
-  // Persisted across both list and open-form views so the context (card spend,
-  // current customer) stays visible while a form is being filled in the iframe.
+  // Resolve flow steps against the full catalog (flow forms may live in other categories).
+  const steps = useMemo<ResolvedStep[]>(() => {
+    if (!flowSteps?.length) return [];
+    const byId = new Map((catalog ?? forms).map((f) => [f.id, f]));
+    return flowSteps.map((s) => {
+      const form = s.formId ? byId.get(s.formId) ?? null : null;
+      const title = s.title ?? form?.title ?? (s.formId ? `Form ${s.formId}` : "Untitled step");
+      return { ...s, key: s.formId ?? title.toLowerCase().replace(/[^a-z0-9]+/g, "-"), title, form };
+    });
+  }, [flowSteps, catalog, forms]);
+
+  const flowIds = useMemo(() => new Set(steps.map((s) => s.formId).filter(Boolean)), [steps]);
+  const extraForms = useMemo(() => forms.filter((f) => !flowIds.has(f.id)), [forms, flowIds]);
+
+  // Progress is persisted per active customer so the list doubles as a checklist.
+  const storageKey = `hdb:forms:intake-progress:${customer?.id ?? "no-customer"}`;
+  const [progress, setProgressState] = useState<FlowProgress>(() => loadProgress(storageKey));
+  const keyRef = useRef(storageKey);
+  useEffect(() => {
+    if (keyRef.current === storageKey) return;
+    const prevKey = keyRef.current;
+    keyRef.current = storageKey;
+    const next = loadProgress(storageKey);
+    // Intake usually STARTS without a customer (ROIs/disclosures come first).
+    // When one gets created/linked mid-flow, carry the anonymous checklist
+    // over into their bucket so nothing has to be re-ticked.
+    if (prevKey.endsWith(":no-customer") && customer) {
+      const anon = loadProgress(prevKey);
+      if (Object.keys(anon.done).length || Object.keys(anon.checks).length) {
+        const merged: FlowProgress = {
+          done: { ...anon.done, ...next.done },
+          checks: { ...anon.checks, ...next.checks },
+        };
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+          localStorage.removeItem(prevKey);
+        } catch {
+          /* ignore */
+        }
+        setProgressState(merged);
+        return;
+      }
+    }
+    setProgressState(next);
+  }, [storageKey, customer]);
+  const updateProgress = useCallback(
+    (fn: (p: FlowProgress) => FlowProgress) => {
+      setProgressState((p) => {
+        const next = fn(p);
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+    },
+    [storageKey]
+  );
+
+  const setDone = useCallback(
+    (stepKey: string, done: boolean) => {
+      updateProgress((p) => ({ ...p, done: { ...p.done, [stepKey]: done } }));
+    },
+    [updateProgress]
+  );
+
+  const toggleCheck = (stepKey: string, itemIdx: number) => {
+    updateProgress((p) => {
+      const cur = new Set(p.checks[stepKey] ?? []);
+      if (cur.has(itemIdx)) cur.delete(itemIdx);
+      else cur.add(itemIdx);
+      return { ...p, checks: { ...p.checks, [stepKey]: [...cur].sort((a, b) => a - b) } };
+    });
+  };
+
+  const doneCount = steps.filter((s) => progress.done[s.key]).length;
+  const firstOpen = steps.findIndex((s) => !progress.done[s.key]);
+
+  const step = view.kind === "step" ? steps[view.idx] : null;
+  const stepKey = step?.key ?? null;
+
+  // Bumped when the embed detects a submit → the Webhooks sidebar refetches
+  // right away instead of waiting for its next poll tick.
+  const [webhookRefresh, setWebhookRefresh] = useState(0);
+
+  // Stable per-step callback: an inline arrow would re-run JotformEmbed's
+  // message-listener effect every parent render and wipe its submitted state.
+  const handleSubmitted = useCallback(() => {
+    if (stepKey) setDone(stepKey, true);
+    setWebhookRefresh((n) => n + 1);
+  }, [stepKey, setDone]);
+
+  const resolveHref = (href: string): string =>
+    customer ? href.replace("{customerId}", customer.id) : href.replace(/\/\{customerId\}/, "");
+
+  // Persisted across list and open views so context (card spend, current
+  // customer) stays visible while a form is being filled in the iframe.
   const persistentContext = (
     <>
       {showCustomerHeader ? <CustomerDetailsHeader nav={customerNav} /> : null}
@@ -36,77 +176,379 @@ export function FormsCategoryView({
     </>
   );
 
-  if (selected) {
-    return (
+  const createModal = createOpen ? <CreateCustomerModal onClose={() => setCreateOpen(false)} /> : null;
+
+  // The Webhooks sidebar sits OUTSIDE the view switch so it persists (and keeps
+  // its data/scroll) across the list, step, and form views of the flow.
+  const flowFormIds = useMemo(
+    () => steps.map((s) => s.formId).filter((x): x is string => !!x),
+    [steps]
+  );
+  const withSidebar = (node: ReactNode) =>
+    webhooksSidebar ? (
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">{node}</div>
+        <WebhooksSidebar formIds={flowFormIds} refreshKey={webhookRefresh} />
+      </div>
+    ) : (
+      <>{node}</>
+    );
+
+  // ── Open flow step ─────────────────────────────────────────────────────
+  if (view.kind === "step" && step) {
+    const idx = view.idx;
+    const prev = idx > 0 ? steps[idx - 1] : null;
+    const next = idx < steps.length - 1 ? steps[idx + 1] : null;
+    const isDone = !!progress.done[step.key];
+
+    const nav = (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
+        <button
+          type="button"
+          disabled={!prev}
+          onClick={() => prev && setView({ kind: "step", idx: idx - 1 })}
+          className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          ← Back{prev ? `: ${prev.title}` : ""}
+        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500">
+            Step {idx + 1} of {steps.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => setDone(step.key, !isDone)}
+            className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
+              isDone
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {isDone ? "✓ Completed" : "Mark complete"}
+          </button>
+        </div>
+        {next ? (
+          <button
+            type="button"
+            onClick={() => setView({ kind: "step", idx: idx + 1 })}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white ${
+              isDone ? "bg-emerald-600 hover:bg-emerald-500" : "bg-indigo-600 hover:bg-indigo-500"
+            }`}
+          >
+            Next: {next.title} →
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setView({ kind: "list" })}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+          >
+            Finish — return to intake flow ✓
+          </button>
+        )}
+      </div>
+    );
+
+    return withSidebar(
       <div className="space-y-3">
         <button
           type="button"
-          onClick={() => setSelected(null)}
+          onClick={() => setView({ kind: "list" })}
+          className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+        >
+          ← Return to intake flow
+        </button>
+        {persistentContext}
+        <h2 className="text-base font-semibold text-slate-900">
+          Step {idx + 1}: {step.title}
+          {step.optional ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700">optional</span> : null}
+        </h2>
+        {step.note ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{step.note}</div>
+        ) : null}
+        {nav}
+        {step.customerSetup ? (
+          customer ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              ✓ <b>{customer.name}</b> is linked as the current customer
+              {customer.cwId ? <span className="text-emerald-600"> · {customer.cwId}</span> : null}.
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+              <div className="min-w-0 text-sm text-indigo-900">
+                <b>No customer in the database yet?</b> Create them now — the Drive folder gets built and
+                linked automatically. Your checklist progress so far carries over.
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+              >
+                + Create / link customer
+              </button>
+            </div>
+          )
+        ) : null}
+        {step.checklist?.length || step.links?.length ? (
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+            {step.checklist?.length ? (
+              <ul className="space-y-1.5">
+                {step.checklist.map((item, i) => {
+                  const checked = (progress.checks[step.key] ?? []).includes(i);
+                  return (
+                    <li key={i}>
+                      <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCheck(step.key, i)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+                        />
+                        <span className={checked ? "text-slate-400 line-through" : ""}>{item}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {step.links?.length ? (
+              <div className="flex flex-wrap gap-2">
+                {step.links.map((l) => (
+                  <a
+                    key={l.href}
+                    href={resolveHref(l.href)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                  >
+                    {l.label} ↗
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {step.form ? (
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+            <div className="min-w-0 flex-1">
+              <JotformEmbed formId={step.form.id} title={step.title} debug onSubmitted={handleSubmitted} />
+            </div>
+            {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDone(step.key, true);
+              if (next) setView({ kind: "step", idx: idx + 1 });
+              else setView({ kind: "list" });
+            }}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+          >
+            Mark complete {next ? "& continue →" : "✓"}
+          </button>
+        )}
+        {nav}
+        {createModal}
+      </div>
+    );
+  }
+
+  // ── Open non-flow form ─────────────────────────────────────────────────
+  if (view.kind === "form") {
+    const f = view.form;
+    return withSidebar(
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setView({ kind: "list" })}
           className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
         >
           ← Back to {heading}
         </button>
         {persistentContext}
-        <h2 className="text-base font-semibold text-slate-900">{selected.title}</h2>
+        <h2 className="text-base font-semibold text-slate-900">{f.title}</h2>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
-            <JotformEmbed formId={selected.id} title={selected.title} debug />
+            <JotformEmbed formId={f.id} title={f.title} debug />
           </div>
-          <ReferencePanel className="lg:w-80 lg:shrink-0" />
+          {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
         </div>
       </div>
     );
   }
 
-  return (
+  // ── List ───────────────────────────────────────────────────────────────
+  return withSidebar(
     <div className="space-y-4">
       {persistentContext}
       <div>
         <h2 className="text-base font-semibold text-slate-900">{heading}</h2>
         {description ? <p className="text-sm text-slate-500">{description}</p> : null}
       </div>
-      {forms.length === 0 ? (
+
+      {steps.length > 0 ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-700">
+              Flow steps
+              <span className="ml-2 text-xs font-medium text-slate-400">
+                {doneCount} of {steps.length} complete{customer ? ` · ${customer.name}` : " · no customer selected"}
+              </span>
+            </h3>
+            <div className="flex items-center gap-2">
+              {doneCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm("Reset intake flow progress" + (customer ? ` for ${customer.name}` : "") + "?")) {
+                      updateProgress(() => EMPTY_PROGRESS);
+                    }
+                  }}
+                  className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                >
+                  Reset
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setView({ kind: "step", idx: firstOpen === -1 ? 0 : firstOpen })}
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+              >
+                {doneCount === 0 ? "Start intake flow →" : firstOpen === -1 ? "Review flow →" : `Resume at step ${firstOpen + 1} →`}
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            {steps.map((s, i) => (
+              <StepRow
+                key={s.key}
+                step={s}
+                index={i}
+                done={!!progress.done[s.key]}
+                onOpen={() => setView({ kind: "step", idx: i })}
+                onSend={setSendForm}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {extraForms.length > 0 ? (
+        <div className="space-y-2">
+          {steps.length > 0 ? <h3 className="text-sm font-semibold text-slate-700">More forms</h3> : null}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {extraForms.map((f) => (
+              <FormRow key={f.id} form={f} onOpen={(form) => setView({ kind: "form", form })} onSend={setSendForm} />
+            ))}
+          </div>
+        </div>
+      ) : steps.length === 0 && forms.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
           No forms in this category yet.
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {forms.map((f) => (
-            <div
-              key={f.id}
-              className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40"
-            >
-              <button type="button" onClick={() => setSelected(f)} className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-sm font-semibold text-slate-900">{f.title}</span>
-                <span className="block text-[11px] text-slate-400">{f.submissions} submissions · form {f.id}</span>
-              </button>
-              {f.customerSendable ? (
-                <button
-                  type="button"
-                  onClick={() => setSendForm(f)}
-                  className="shrink-0 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50"
-                >
-                  Send to customer
-                </button>
-              ) : null}
-              <a
-                href={`https://form.jotform.com/${f.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open the live form in a new tab"
-                className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
-              >
-                New tab ↗
-              </a>
-              <button type="button" onClick={() => setSelected(f)} className="shrink-0 text-xs font-semibold text-indigo-600">
-                Open →
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      ) : null}
 
       {sendForm ? <SendToCustomerModal form={sendForm} onClose={() => setSendForm(null)} /> : null}
+      {createModal}
+    </div>
+  );
+}
+
+function StepRow({
+  step,
+  index,
+  done,
+  onOpen,
+  onSend,
+}: {
+  step: ResolvedStep;
+  index: number;
+  done: boolean;
+  onOpen: () => void;
+  onSend: (f: FormDef) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40">
+      <span
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+          done ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"
+        }`}
+      >
+        {done ? "✓" : index + 1}
+      </span>
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <span className={`block truncate text-sm font-semibold ${done ? "text-slate-400 line-through" : "text-slate-900"}`}>
+          {step.title}
+          {step.optional ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 no-underline">optional</span> : null}
+        </span>
+        <span className="block truncate text-[11px] text-slate-400">
+          {step.note ?? (step.form ? `${step.form.submissions} submissions · form ${step.form.id}` : "Task")}
+        </span>
+      </button>
+      {step.form?.customerSendable ? (
+        <button
+          type="button"
+          onClick={() => step.form && onSend(step.form)}
+          className="shrink-0 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50"
+        >
+          Send to customer
+        </button>
+      ) : null}
+      {step.form ? (
+        <a
+          href={`https://form.jotform.com/${step.form.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open the live form in a new tab"
+          className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
+        >
+          New tab ↗
+        </a>
+      ) : null}
+      <button type="button" onClick={onOpen} className="shrink-0 text-xs font-semibold text-indigo-600">
+        Open →
+      </button>
+    </div>
+  );
+}
+
+function FormRow({
+  form: f,
+  onOpen,
+  onSend,
+}: {
+  form: FormDef;
+  onOpen: (f: FormDef) => void;
+  onSend: (f: FormDef) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40">
+      <button type="button" onClick={() => onOpen(f)} className="min-w-0 flex-1 text-left">
+        <span className="block truncate text-sm font-semibold text-slate-900">{f.title}</span>
+        <span className="block text-[11px] text-slate-400">{f.submissions} submissions · form {f.id}</span>
+      </button>
+      {f.customerSendable ? (
+        <button
+          type="button"
+          onClick={() => onSend(f)}
+          className="shrink-0 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50"
+        >
+          Send to customer
+        </button>
+      ) : null}
+      <a
+        href={`https://form.jotform.com/${f.id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open the live form in a new tab"
+        className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
+      >
+        New tab ↗
+      </a>
+      <button type="button" onClick={() => onOpen(f)} className="shrink-0 text-xs font-semibold text-indigo-600">
+        Open →
+      </button>
     </div>
   );
 }

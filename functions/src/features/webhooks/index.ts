@@ -3,6 +3,7 @@
 export {
   jotformWebhook_http as jotformWebhook,
   listWebhookEvents_http as listWebhookEvents,
+  listWebhookEventDetails_http as listWebhookEventDetails,
   formsWebhookConfig_http as formsWebhookConfig,
   listFormsRegistry_http as listFormsRegistry,
   formsAuthInfo_http as formsAuthInfo,

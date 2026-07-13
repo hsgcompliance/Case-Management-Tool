@@ -5,6 +5,7 @@ import {
   parseRequestFields,
   storeJotformWebhookEvent,
   listWebhookEvents,
+  listWebhookEventDetails,
   upsertFormRegistry,
   listFormsRegistry,
   updateFormRegistry,
@@ -132,6 +133,30 @@ export const listFormsRegistry_http = secureHandler(
     const caller = req.user!;
     void caller;
     const items = await listFormsRegistry();
+    res.status(200).json({ ok: true, items, count: items.length });
+  },
+  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+);
+
+/**
+ * GET /listWebhookEventDetails?formIds=a,b,c&limit= — authed staff. Flattened
+ * label/value fields per event for the forms-app Webhooks sidebar (structured
+ * household extraction + copy-pastable raw view).
+ */
+export const listWebhookEventDetails_http = secureHandler(
+  async (req, res) => {
+    const caller = req.user!;
+    const q = (req.query || {}) as Record<string, unknown>;
+    const formIds = String(q.formIds || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+    const items = await listWebhookEventDetails({
+      formIds,
+      limit: Number(q.limit) || 50,
+      callerOrg: orgIdFromClaims(caller),
+    });
     res.status(200).json({ ok: true, items, count: items.length });
   },
   { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
