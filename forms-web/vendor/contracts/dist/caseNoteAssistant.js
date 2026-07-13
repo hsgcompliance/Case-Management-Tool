@@ -6,8 +6,11 @@ import {
   CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
-  RecordCaseNoteSuggestionDecisionBodySchema
-} from "./chunk-UPBJ4VIQ.js";
+  GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema
+} from "./chunk-HG6KB7WC.js";
 import "./chunk-MLKGABMK.js";
 export {
   CaseNoteActionSchema,
@@ -17,5 +20,8 @@ export {
   CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
-  RecordCaseNoteSuggestionDecisionBodySchema
+  GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema
 };

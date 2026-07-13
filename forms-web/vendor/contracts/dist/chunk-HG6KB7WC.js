@@ -12,7 +12,10 @@ __export(caseNoteAssistant_exports, {
   CaseNoteUsageSummaryResponseSchema: () => CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
-  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema
+  GenerateSmartGoalSuggestionBodySchema: () => GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema: () => GenerateSmartGoalSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema: () => SmartGoalFieldsSchema
 });
 import { z } from "zod";
 var CaseNoteActionSchema = z.enum([
@@ -66,6 +69,26 @@ var RecordCaseNoteSuggestionDecisionBodySchema = z.object({
   requestId: z.string().uuid(),
   accepted: z.boolean()
 });
+var GenerateSmartGoalSuggestionBodySchema = z.object({
+  customerId: z.string().min(1).max(128),
+  description: z.string().min(1).max(2e3),
+  clientLabel: z.string().min(1).max(40).default("client"),
+  staffLabel: z.string().min(1).max(40).default("case manager")
+});
+var SmartGoalFieldsSchema = z.object({
+  goalSmart: z.string(),
+  objective: z.string(),
+  interventionTask: z.string(),
+  goalCompletionCriteria: z.string()
+});
+var GenerateSmartGoalSuggestionResponseSchema = z.object({
+  ok: z.literal(true),
+  requestId: z.string(),
+  model: z.string(),
+  goal: SmartGoalFieldsSchema,
+  missingInfo: z.array(z.string()).default([]),
+  usage: z.object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative() })
+});
 var CaseNoteUsageSummaryQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   orgId: z.string().min(1).max(128).optional()
@@ -97,6 +120,9 @@ export {
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
   RecordCaseNoteSuggestionDecisionBodySchema,
+  GenerateSmartGoalSuggestionBodySchema,
+  SmartGoalFieldsSchema,
+  GenerateSmartGoalSuggestionResponseSchema,
   CaseNoteUsageSummaryQuerySchema,
   CaseNoteUsageSummaryResponseSchema,
   caseNoteAssistant_exports

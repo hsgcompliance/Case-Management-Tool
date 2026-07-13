@@ -49,6 +49,38 @@ export const RecordCaseNoteSuggestionDecisionBodySchema = z.object({
 export type TRecordCaseNoteSuggestionDecisionReq = z.infer<typeof RecordCaseNoteSuggestionDecisionBodySchema>;
 export type TRecordCaseNoteSuggestionDecisionResp = { ok: true };
 
+// ── SMART goal assistant ──────────────────────────────────────────────────────
+// 1-2 sentence description → structured SMART goal fields for the TSS goals
+// table. Responsible / target date / service tier are staff decisions: the AI
+// never fills them, it only flags them in missingInfo when they aren't stated.
+
+export const GenerateSmartGoalSuggestionBodySchema = z.object({
+  customerId: z.string().min(1).max(128),
+  description: z.string().min(1).max(2000),
+  clientLabel: z.string().min(1).max(40).default("client"),
+  staffLabel: z.string().min(1).max(40).default("case manager"),
+});
+
+export const SmartGoalFieldsSchema = z.object({
+  goalSmart: z.string(),
+  objective: z.string(),
+  interventionTask: z.string(),
+  goalCompletionCriteria: z.string(),
+});
+
+export const GenerateSmartGoalSuggestionResponseSchema = z.object({
+  ok: z.literal(true),
+  requestId: z.string(),
+  model: z.string(),
+  goal: SmartGoalFieldsSchema,
+  missingInfo: z.array(z.string()).default([]),
+  usage: z.object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative() }),
+});
+
+export type TGenerateSmartGoalSuggestionReq = z.infer<typeof GenerateSmartGoalSuggestionBodySchema>;
+export type TSmartGoalFields = z.infer<typeof SmartGoalFieldsSchema>;
+export type TGenerateSmartGoalSuggestionResp = z.infer<typeof GenerateSmartGoalSuggestionResponseSchema>;
+
 export const CaseNoteUsageSummaryQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   orgId: z.string().min(1).max(128).optional(),

@@ -53,6 +53,8 @@ __export(index_exports, {
   GRANT_PIN_COLORS: () => GRANT_PIN_COLORS,
   GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
+  GenerateSmartGoalSuggestionBodySchema: () => GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema: () => GenerateSmartGoalSuggestionResponseSchema,
   GoogleAuthMode: () => GoogleAuthMode,
   GoogleConnectStartBody: () => GoogleConnectStartBody,
   GoogleIntegrationMode: () => GoogleIntegrationMode,
@@ -124,6 +126,7 @@ __export(index_exports, {
   RolesArray: () => RolesArray,
   SetActiveBody: () => SetActiveBody,
   SetRoleBody: () => SetRoleBody,
+  SmartGoalFieldsSchema: () => SmartGoalFieldsSchema,
   TRANSACTION_WINDOW_FORM_IDS: () => TRANSACTION_WINDOW_FORM_IDS,
   TasksAdminRegenerateForGrantBody: () => TasksAdminRegenerateForGrantBody,
   TasksAssignBody: () => TasksAssignBody,
@@ -6106,7 +6109,10 @@ __export(caseNoteAssistant_exports, {
   CaseNoteUsageSummaryResponseSchema: () => CaseNoteUsageSummaryResponseSchema,
   GenerateCaseNoteSuggestionBodySchema: () => GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema: () => GenerateCaseNoteSuggestionResponseSchema,
-  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema
+  GenerateSmartGoalSuggestionBodySchema: () => GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema: () => GenerateSmartGoalSuggestionResponseSchema,
+  RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema,
+  SmartGoalFieldsSchema: () => SmartGoalFieldsSchema
 });
 var import_zod5 = require("zod");
 var CaseNoteActionSchema = import_zod5.z.enum([
@@ -6159,6 +6165,26 @@ var GenerateCaseNoteSuggestionResponseSchema = import_zod5.z.object({
 var RecordCaseNoteSuggestionDecisionBodySchema = import_zod5.z.object({
   requestId: import_zod5.z.string().uuid(),
   accepted: import_zod5.z.boolean()
+});
+var GenerateSmartGoalSuggestionBodySchema = import_zod5.z.object({
+  customerId: import_zod5.z.string().min(1).max(128),
+  description: import_zod5.z.string().min(1).max(2e3),
+  clientLabel: import_zod5.z.string().min(1).max(40).default("client"),
+  staffLabel: import_zod5.z.string().min(1).max(40).default("case manager")
+});
+var SmartGoalFieldsSchema = import_zod5.z.object({
+  goalSmart: import_zod5.z.string(),
+  objective: import_zod5.z.string(),
+  interventionTask: import_zod5.z.string(),
+  goalCompletionCriteria: import_zod5.z.string()
+});
+var GenerateSmartGoalSuggestionResponseSchema = import_zod5.z.object({
+  ok: import_zod5.z.literal(true),
+  requestId: import_zod5.z.string(),
+  model: import_zod5.z.string(),
+  goal: SmartGoalFieldsSchema,
+  missingInfo: import_zod5.z.array(import_zod5.z.string()).default([]),
+  usage: import_zod5.z.object({ inputTokens: import_zod5.z.number().int().nonnegative(), outputTokens: import_zod5.z.number().int().nonnegative() })
 });
 var CaseNoteUsageSummaryQuerySchema = import_zod5.z.object({
   month: import_zod5.z.string().regex(/^\d{4}-\d{2}$/).optional(),
@@ -6218,6 +6244,8 @@ var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
   GRANT_PIN_COLORS,
   GenerateCaseNoteSuggestionBodySchema,
   GenerateCaseNoteSuggestionResponseSchema,
+  GenerateSmartGoalSuggestionBodySchema,
+  GenerateSmartGoalSuggestionResponseSchema,
   GoogleAuthMode,
   GoogleConnectStartBody,
   GoogleIntegrationMode,
@@ -6289,6 +6317,7 @@ var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
   RolesArray,
   SetActiveBody,
   SetRoleBody,
+  SmartGoalFieldsSchema,
   TRANSACTION_WINDOW_FORM_IDS,
   TasksAdminRegenerateForGrantBody,
   TasksAssignBody,

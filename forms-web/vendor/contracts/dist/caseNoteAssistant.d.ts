@@ -88,6 +88,37 @@ export type TRecordCaseNoteSuggestionDecisionReq = z.infer<typeof RecordCaseNote
 export type TRecordCaseNoteSuggestionDecisionResp = {
     ok: true;
 };
+export declare const GenerateSmartGoalSuggestionBodySchema: z.ZodObject<{
+    customerId: z.ZodString;
+    description: z.ZodString;
+    clientLabel: z.ZodDefault<z.ZodString>;
+    staffLabel: z.ZodDefault<z.ZodString>;
+}, z.core.$strip>;
+export declare const SmartGoalFieldsSchema: z.ZodObject<{
+    goalSmart: z.ZodString;
+    objective: z.ZodString;
+    interventionTask: z.ZodString;
+    goalCompletionCriteria: z.ZodString;
+}, z.core.$strip>;
+export declare const GenerateSmartGoalSuggestionResponseSchema: z.ZodObject<{
+    ok: z.ZodLiteral<true>;
+    requestId: z.ZodString;
+    model: z.ZodString;
+    goal: z.ZodObject<{
+        goalSmart: z.ZodString;
+        objective: z.ZodString;
+        interventionTask: z.ZodString;
+        goalCompletionCriteria: z.ZodString;
+    }, z.core.$strip>;
+    missingInfo: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    usage: z.ZodObject<{
+        inputTokens: z.ZodNumber;
+        outputTokens: z.ZodNumber;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type TGenerateSmartGoalSuggestionReq = z.infer<typeof GenerateSmartGoalSuggestionBodySchema>;
+export type TSmartGoalFields = z.infer<typeof SmartGoalFieldsSchema>;
+export type TGenerateSmartGoalSuggestionResp = z.infer<typeof GenerateSmartGoalSuggestionResponseSchema>;
 export declare const CaseNoteUsageSummaryQuerySchema: z.ZodObject<{
     month: z.ZodOptional<z.ZodString>;
     orgId: z.ZodOptional<z.ZodString>;
