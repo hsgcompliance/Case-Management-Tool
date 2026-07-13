@@ -3,6 +3,7 @@
 import React from "react";
 import { useCustomer } from "@hooks/useCustomers";
 import FullPageModal from "@entities/ui/FullPageModal";
+import { toast } from "@lib/toast";
 import CustomersModal from "./CustomersModal";
 
 type Props = {
@@ -66,13 +67,31 @@ class CustomerWorkspaceErrorBoundary extends React.Component<
 }
 
 export default function CustomerWorkspaceModal({ customerId, onClose, initialTab }: Props) {
-  const { data: customer } = useCustomer(customerId ?? undefined, {
-    enabled: !!customerId && customerId !== "new",
+  const [currentCustomerId, setCurrentCustomerId] = React.useState(customerId);
+
+  React.useEffect(() => {
+    setCurrentCustomerId(customerId);
+  }, [customerId]);
+
+  const { data: customer } = useCustomer(currentCustomerId ?? undefined, {
+    enabled: !!currentCustomerId && currentCustomerId !== "new",
   });
 
-  const breadcrumbLabel = customerId === "new" || !customerId
+  const shareCustomerLink = React.useCallback(async () => {
+    if (!currentCustomerId || currentCustomerId === "new") return;
+    const url = `${window.location.origin}/customers/${encodeURIComponent(currentCustomerId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Customer link copied.", { type: "success" });
+    } catch {
+      toast(url, { type: "info" });
+    }
+  }, [currentCustomerId]);
+
+  const breadcrumbLabel = currentCustomerId === "new" || !currentCustomerId
     ? "New Customer"
-    : displayName(customer as { name?: string; firstName?: string; lastName?: string } | null) ?? customerId;
+    : displayName(customer as { name?: string; firstName?: string; lastName?: string } | null) ?? currentCustomerId;
+  const canShare = !!currentCustomerId && currentCustomerId !== "new";
 
   return (
     <FullPageModal
@@ -81,18 +100,43 @@ export default function CustomerWorkspaceModal({ customerId, onClose, initialTab
       hideSidebar
       leftPane={null}
       topBar={
-        <div className="workspace-breadcrumb">
-          <button type="button" className="workspace-breadcrumb-back" onClick={onClose}>
-            &larr; Customers
-          </button>
-          <span className="workspace-breadcrumb-sep">/</span>
-          <span className="workspace-breadcrumb-current">{breadcrumbLabel}</span>
+        <div className="flex w-full items-center gap-2">
+          {canShare ? (
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              onClick={() => void shareCustomerLink()}
+              title="Copy customer link"
+              aria-label="Copy customer link"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <path d="M8.6 10.7 15.4 6.3" />
+                <path d="M8.6 13.3 15.4 17.7" />
+              </svg>
+            </button>
+          ) : null}
+          <div className="workspace-breadcrumb min-w-0">
+            <button type="button" className="workspace-breadcrumb-back" onClick={onClose}>
+              &larr; Customers
+            </button>
+            <span className="workspace-breadcrumb-sep">/</span>
+            <span className="workspace-breadcrumb-current truncate">{breadcrumbLabel}</span>
+          </div>
         </div>
       }
       rightPane={
         <div className="h-full overflow-y-auto p-6 md:p-8">
-          <CustomerWorkspaceErrorBoundary resetKey={`${customerId || "new"}:${initialTab || ""}`}>
-            <CustomersModal customerId={customerId} onClose={onClose} pageMode initialTab={initialTab} />
+          <CustomerWorkspaceErrorBoundary resetKey={`${currentCustomerId || "new"}:${initialTab || ""}`}>
+            <CustomersModal
+              customerId={currentCustomerId}
+              onClose={onClose}
+              pageMode
+              initialTab={initialTab}
+              onCreated={setCurrentCustomerId}
+            />
           </CustomerWorkspaceErrorBoundary>
         </div>
       }

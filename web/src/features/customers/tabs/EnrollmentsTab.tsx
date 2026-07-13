@@ -736,8 +736,13 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             </span>
           </label>
         ) : null}
-        <div className="mt-0.5 text-xs text-slate-400">
-          Default start date is today. End date is optional — leave blank for open-ended enrollments. If the grant has an end date, the enrollment cannot extend past it.
+        <div className="mt-0.5 space-y-1 text-xs text-slate-500">
+          <p>
+            Use the customer&apos;s housing move-in date for the enrollment start date. If an HMIS enrollment date applies, use that same date.
+          </p>
+          <p className="text-slate-400">
+            Default start date is today. End date is optional - leave blank for open-ended enrollments. If the grant has an end date, the enrollment cannot extend past it.
+          </p>
         </div>
         {error ? <div className="mt-2 text-sm text-red-700">{error}</div> : null}
       </div>

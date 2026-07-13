@@ -103,8 +103,14 @@ function isCustomerActive(model: Record<string, unknown>, detail: unknown) {
   return String(source.status || "active").trim().toLowerCase() === "active";
 }
 
-export function CustomersModal(props: { customerId: string | null; onClose?: () => void; pageMode?: boolean; initialTab?: TabKey }) {
-  const { customerId, onClose: onCloseProp, pageMode = false, initialTab } = props;
+export function CustomersModal(props: {
+  customerId: string | null;
+  onClose?: () => void;
+  pageMode?: boolean;
+  initialTab?: TabKey;
+  onCreated?: (customerId: string) => void;
+}) {
+  const { customerId, onClose: onCloseProp, pageMode = false, initialTab, onCreated } = props;
   const { profile } = useAuth();
   const isViewer = isViewerLike(profile as { roles?: unknown } | null);
   const router = useRouter();
@@ -325,7 +331,11 @@ export function CustomersModal(props: { customerId: string | null; onClose?: () 
             ? { ...(row as Record<string, unknown>), ...(prev as Record<string, unknown>), id: createdId }
             : { ...(row as Record<string, unknown>), id: createdId }
         );
-        router.push(`/customers/${createdId}`);
+        if (onCreated) {
+          onCreated(createdId);
+        } else {
+          router.push(`/customers/${createdId}`);
+        }
         return;
       }
       onClose();
