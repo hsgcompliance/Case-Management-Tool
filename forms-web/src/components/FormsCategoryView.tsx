@@ -331,7 +331,7 @@ export function FormsCategoryView({
         {step.form ? (
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
             <div className="min-w-0 flex-1">
-              <JotformEmbed formId={step.form.id} title={step.title} debug onSubmitted={handleSubmitted} />
+              <JotformEmbed formId={step.form.id} title={step.title} onSubmitted={handleSubmitted} />
             </div>
             {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
           </div>
@@ -370,7 +370,7 @@ export function FormsCategoryView({
         <h2 className="text-base font-semibold text-slate-900">{f.title}</h2>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
-            <JotformEmbed formId={f.id} title={f.title} debug />
+            <JotformEmbed formId={f.id} title={f.title} />
           </div>
           {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
         </div>

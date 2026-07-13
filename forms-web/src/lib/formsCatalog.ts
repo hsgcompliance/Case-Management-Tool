@@ -26,7 +26,8 @@ export const FORMS: FormDef[] = [
   { id: "251037066837055", title: "HMIS and Coordinated Entry ROI", category: "intake", submissions: 65 },
   { id: "251001226310030", title: "Eligibility Determination", category: "intake", submissions: 59 },
   { id: "251106237751148", title: "Customer Self-Declarations", category: "intake", submissions: 45 },
-  { id: "250596908552063", title: "Intake Form: Eviction Prevention", category: "intake", submissions: 13 },
+  // Removed from the Intake tab (2026-07-13) but kept in All forms:
+  { id: "250596908552063", title: "Intake Form: Eviction Prevention", category: "other", submissions: 13 },
 
   // ── Referral ────────────────────────────────────────────────────────────
   { id: "250809472429059", title: "Connect with Resources", category: "referral", submissions: 508 },

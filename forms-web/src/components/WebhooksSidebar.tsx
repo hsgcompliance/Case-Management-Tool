@@ -15,6 +15,7 @@ import { matchName, type NameMatch } from "@/lib/nameMatch";
 // auto-linked to the current customer's integrations.
 
 const COLLAPSE_KEY = "hdb:forms:webhooks-sidebar-collapsed";
+const SESSION_KEY = "hdb:forms:webhooks-session-start";
 const POLL_MS = 20_000;
 
 function shortTime(iso: string | null): string {
@@ -90,6 +91,28 @@ export function WebhooksSidebar({
   const [links, setLinks] = useState<Record<string, Record<string, SubmissionLink>>>({});
   const autoLinkTried = useRef(new Set<string>());
   const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [showUnmatched, setShowUnmatched] = useState(false);
+
+  // The sidebar starts blank each browser-tab session and builds out from the
+  // forms submitted DURING it (older webhook traffic stays hidden). Survives
+  // reloads in the same tab; "New session" resets the watermark to now.
+  const [sessionStartISO, setSessionStartISO] = useState<string>(() => {
+    try {
+      let v = sessionStorage.getItem(SESSION_KEY);
+      if (!v) {
+        v = new Date().toISOString();
+        sessionStorage.setItem(SESSION_KEY, v);
+      }
+      return v;
+    } catch {
+      return new Date().toISOString();
+    }
+  });
+  const resetSession = () => {
+    const now = new Date().toISOString();
+    try { sessionStorage.setItem(SESSION_KEY, now); } catch { /* ignore */ }
+    setSessionStartISO(now);
+  };
 
   const formIdsKey = formIds.join(",");
 
@@ -144,13 +167,15 @@ export function WebhooksSidebar({
   }, [events, links]);
 
   const rows = useMemo(() => {
-    return (events ?? []).map((ev) => {
-      const match: NameMatch = customer ? matchName(ev.submitterName, customer.name) : "none";
-      const link = links[ev.formId]?.[ev.submissionId];
-      const linkedToCurrent = !!customer && !!link?.customers.some((c) => c.customerId === customer.id);
-      return { ev, match, link, linkedToCurrent };
-    });
-  }, [events, customer, links]);
+    return (events ?? [])
+      .filter((ev) => (ev.receivedAtISO || "") >= sessionStartISO)
+      .map((ev) => {
+        const match: NameMatch = customer ? matchName(ev.submitterName, customer.name) : "none";
+        const link = links[ev.formId]?.[ev.submissionId];
+        const linkedToCurrent = !!customer && !!link?.customers.some((c) => c.customerId === customer.id);
+        return { ev, match, link, linkedToCurrent };
+      });
+  }, [events, customer, links, sessionStartISO]);
 
   const doLink = useCallback(
     async (ev: WebhookEventDetail) => {
@@ -195,14 +220,12 @@ export function WebhooksSidebar({
     }
   }, [rows, customer, links, doLink]);
 
-  // Structured extraction from events attributable to this flow: name-matching
-  // (or already-linked) submissions when a customer is set; everything otherwise.
-  const household = useMemo(() => {
-    const usable = rows
-      .filter((r) => !customer || r.match !== "none" || r.linkedToCurrent)
-      .map((r) => r.ev);
-    return extractHousehold(usable, (id) => formById(id)?.title || `Form ${id}`);
-  }, [rows, customer]);
+  // Structured extraction from everything submitted this session (the session
+  // watermark is the scope — match dots stay purely informational).
+  const household = useMemo(
+    () => extractHousehold(rows.map((r) => r.ev), (id) => formById(id)?.title || `Form ${id}`),
+    [rows]
+  );
 
   const copyAll = () => {
     const lines: string[] = [];
@@ -224,8 +247,8 @@ export function WebhooksSidebar({
       >
         <span className="text-sm">⟨</span>
         <span className="text-[11px] font-semibold [writing-mode:vertical-rl]">Webhooks</span>
-        {events?.length ? (
-          <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{events.length}</span>
+        {rows.length ? (
+          <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{rows.length}</span>
         ) : null}
       </button>
     );
@@ -240,6 +263,14 @@ export function WebhooksSidebar({
             {loading ? <span className="text-[10px] text-slate-300">refreshing…</span> : null}
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={resetSession}
+              title={`Start a blank session (currently since ${shortTime(sessionStartISO) || "start"})`}
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+            >
+              New session
+            </button>
             <button
               type="button"
               onClick={load}
@@ -269,7 +300,7 @@ export function WebhooksSidebar({
                 tab === t ? "border-indigo-500 text-indigo-700" : "border-transparent text-slate-400 hover:text-slate-600"
               }`}
             >
-              {t}{t === "raw" && events?.length ? ` (${events.length})` : ""}
+              {t}{t === "raw" && rows.length ? ` (${rows.length})` : ""}
             </button>
           ))}
         </div>
@@ -328,16 +359,47 @@ export function WebhooksSidebar({
                 </div>
               </div>
 
+              <div className="border-t border-slate-100 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUnmatched((v) => !v)}
+                  className="flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-600"
+                >
+                  <span>Unmatched fields ({household.unmatched.length})</span>
+                  <span>{showUnmatched ? "▲" : "▼"}</span>
+                </button>
+                {showUnmatched ? (
+                  household.unmatched.length ? (
+                    <div className="mt-1">
+                      {household.unmatched.map((u, i) => (
+                        <div key={i} className="flex items-start justify-between gap-2 border-b border-slate-50 py-1 last:border-0">
+                          <div className="min-w-0">
+                            <div className="text-[10px] uppercase tracking-wide text-slate-400">
+                              {u.label} <span className="normal-case text-slate-300">· {u.sourceFormTitle}</span>
+                            </div>
+                            <div className="whitespace-pre-wrap break-words text-xs text-slate-700">{u.value}</div>
+                          </div>
+                          <CopyButton text={u.value} small />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-slate-300">Every submitted field matched a structured slot.</p>
+                  )
+                ) : null}
+              </div>
+
               <p className="text-[10px] leading-relaxed text-slate-300">
-                Built live from {customer ? `submissions matching ${customer.name}` : "recent intake submissions"}.
-                Newest answer wins; hover a value for its source form.
+                Built live from forms submitted this session (since {shortTime(sessionStartISO) || "start"}).
+                Newest answer wins; unmatched fields land above for troubleshooting.
               </p>
             </div>
           ) : (
             <div className="space-y-2">
-              {!events?.length ? (
+              {!rows.length ? (
                 <div className="py-6 text-center text-xs text-slate-400">
-                  No webhooks yet for the intake forms. They appear here as forms are submitted.
+                  Blank session (since {shortTime(sessionStartISO) || "start"}) — webhooks appear here as you submit
+                  the intake forms.
                 </div>
               ) : (
                 rows.map(({ ev, match, link, linkedToCurrent }) => {
