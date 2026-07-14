@@ -8,15 +8,15 @@ const tabs = [
 
 export function BottomNav() {
   return (
-    <nav className="nav-safe-bottom fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex z-50">
+    <nav aria-label="Primary" className="nav-safe-bottom fixed bottom-0 inset-x-0 z-50 flex border-t border-slate-200 bg-white shadow-[0_-10px_30px_rgba(15,23,42,0.08)]">
       {tabs.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
           to={to}
           end={to === "/"}
           className={({ isActive }) =>
-            `flex-1 flex flex-col items-center justify-center pt-2 pb-1 gap-0.5 text-xs font-medium transition-colors ${
-              isActive ? "text-indigo-600" : "text-slate-400"
+            `flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-t-xl px-1 pt-2 pb-1 text-xs font-medium transition-colors ${
+              isActive ? "bg-indigo-50 text-indigo-600" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
             }`
           }
         >

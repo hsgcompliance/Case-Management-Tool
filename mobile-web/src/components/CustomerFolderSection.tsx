@@ -29,6 +29,16 @@ function FolderGlyph({ muted = false }: { muted?: boolean }) {
   );
 }
 
+function DriveIcon({ className = "w-5 h-5 flex-shrink-0" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M7.1 3.5h5.8l4.6 8H11.7z" fill="#fbbc04" />
+      <path d="M2.5 11.5 7.1 3.5l4.6 8-2.9 5z" fill="#34a853" />
+      <path d="M8.8 16.5h8.7l-2.9-5H5.9z" fill="#4285f4" />
+    </svg>
+  );
+}
+
 export function CustomerFolderSection({ customer }: { customer: Customer }) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -93,7 +103,7 @@ export function CustomerFolderSection({ customer }: { customer: Customer }) {
           <p className="text-sm font-semibold text-slate-900">Google Drive folder</p>
           <p className="text-xs text-slate-500 truncate">{linked.label}</p>
         </div>
-        <span className="text-slate-300 text-sm flex-shrink-0">↗</span>
+        <DriveIcon />
       </a>
     );
   }

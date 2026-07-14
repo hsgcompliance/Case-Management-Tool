@@ -4,6 +4,7 @@
 // fallback. Has no auth awareness — auth banners belong in the parent panel.
 
 import React from "react";
+import { ExternalServiceIcon } from "@entities/gdrive/FileTypeIcon";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,8 @@ function FailedState({
           rel="noreferrer"
           className="btn btn-sm btn-secondary"
         >
-          Open {spreadsheetName} ↗
+          <ExternalServiceIcon service="sheets" />
+          Open {spreadsheetName}
         </a>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
           Try again

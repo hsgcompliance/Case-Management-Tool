@@ -9,6 +9,17 @@ import { qk } from "@/hooks/queryKeys";
 
 const SHEET_MIME = "application/vnd.google-apps.spreadsheet";
 
+function SheetsIcon({ className = "h-4 w-4 shrink-0" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="3" y="2" width="14" height="16" rx="1.5" fill="#0f9d58" />
+      <rect x="6" y="6" width="8" height="1.5" rx=".5" fill="white" opacity=".9" />
+      <rect x="6" y="9" width="8" height="1.5" rx=".5" fill="white" opacity=".9" />
+      <rect x="6" y="12" width="5" height="1.5" rx=".5" fill="white" opacity=".9" />
+    </svg>
+  );
+}
+
 /**
  * Workbook linking for a customer with no TSS workbook yet. Mirrors the web
  * flows: build one from the org template, paste a Sheets URL, or scan the
@@ -178,8 +189,9 @@ export function WorkbookLinkSection({
               type="button"
               disabled={busy === "scan"}
               onClick={() => void scanFolder()}
-              className="text-xs font-semibold text-indigo-600 active:text-indigo-800 disabled:opacity-50 text-left"
+              className="inline-flex items-center gap-1.5 text-left text-xs font-semibold text-indigo-600 active:text-indigo-800 disabled:opacity-50"
             >
+              <SheetsIcon />
               {busy === "scan" ? "Scanning folder…" : "Find a sheet in the customer folder →"}
             </button>
           ) : candidates.length === 0 ? (
@@ -199,8 +211,9 @@ export function WorkbookLinkSection({
                       type="button"
                       disabled={!!busy}
                       onClick={() => void linkCandidate(item)}
-                      className="flex-shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 active:bg-indigo-100 disabled:opacity-50"
+                      className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 active:bg-indigo-100 disabled:opacity-50"
                     >
+                      {!isExcel && busy !== item.id ? <SheetsIcon /> : null}
                       {busy === item.id ? (isExcel ? "Converting…" : "Linking…") : isExcel ? "Convert" : "Link"}
                     </button>
                   </div>

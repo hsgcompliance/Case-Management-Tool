@@ -812,6 +812,20 @@ function GDriveBlock({ customerId }: { customerId: string }) {
           {diagRunning ? "…" : "Diagnose"}
         </button>
       )}
+      {firstFolder && !hasLinkedWorkbook && tssTemplateReady ? (
+        <button
+          type="button"
+          className="btn btn-xs btn-primary"
+          disabled={workbookBusy}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (tssTemplateHasVariants) setShowWorkbookVariantDialog(true);
+            else void buildWorkbookFromTemplate();
+          }}
+        >
+          {workbookBusy ? "Creating..." : "Create workbook from template"}
+        </button>
+      ) : null}
       <button
         type="button"
         className="btn btn-xs btn-primary"
@@ -1248,7 +1262,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
                           else void buildWorkbookFromTemplate();
                         }}
                       >
-                        {workbookBusy ? "Building..." : "Create workbook"}
+                        {workbookBusy ? "Creating..." : "Create new workbook from template"}
                       </button>
                     </div>
                   ) : null}

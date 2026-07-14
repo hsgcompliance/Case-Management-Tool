@@ -27,6 +27,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button,
+a {
+  touch-action: manipulation;
+}
+
 /* Prevent accidental horizontal expansion from wide children */
 img,
 svg,

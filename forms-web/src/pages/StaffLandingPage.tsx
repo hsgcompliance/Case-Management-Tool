@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { ExternalServiceIcon } from "@/components/ui";
 
 // Quick-links landing — sleek cards, no iframes. Rendered authed at /staff
 // (inside StaffLayout) AND public at /. Signed-in users get "Open" (embedded,
@@ -87,7 +88,7 @@ function CardItem({ card, authed }: { card: Card; authed: boolean }) {
       <a href={card.href} target="_blank" rel="noopener noreferrer" className={cls}>
         <div className="flex items-center justify-between gap-2">
           {body}
-          <span className="shrink-0 self-start text-slate-300 group-hover:text-indigo-400">↗</span>
+          <ExternalServiceIcon href={card.href} className="h-5 w-5 shrink-0 self-start" />
         </div>
       </a>
     );
@@ -108,7 +109,10 @@ function CardItem({ card, authed }: { card: Card; authed: boolean }) {
         title="Open the live form in a new tab"
         className="absolute right-3 top-3 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
       >
-        New tab ↗
+        <span className="inline-flex items-center gap-1.5">
+          <ExternalServiceIcon href={card.href} className="h-3.5 w-3.5" />
+          New tab
+        </span>
       </a>
     </div>
   );

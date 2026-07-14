@@ -1,5 +1,56 @@
 import type { ReactNode } from "react";
 
+type ExternalService = "drive" | "sheets" | "jotform" | "external";
+
+function serviceFromHref(href?: string): ExternalService {
+  const value = String(href || "").toLowerCase();
+  if (value.includes("docs.google.com/spreadsheets")) return "sheets";
+  if (value.includes("drive.google.com")) return "drive";
+  if (value.includes("jotform.com")) return "jotform";
+  return "external";
+}
+
+export function ExternalServiceIcon({ href, service, className = "h-4 w-4 shrink-0" }: { href?: string; service?: ExternalService; className?: string }) {
+  const resolved = service || serviceFromHref(href);
+
+  if (resolved === "drive") {
+    return (
+      <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M7.1 3.5h5.8l4.6 8H11.7z" fill="#fbbc04" />
+        <path d="M2.5 11.5 7.1 3.5l4.6 8-2.9 5z" fill="#34a853" />
+        <path d="M8.8 16.5h8.7l-2.9-5H5.9z" fill="#4285f4" />
+      </svg>
+    );
+  }
+
+  if (resolved === "sheets") {
+    return (
+      <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect x="3" y="2" width="14" height="16" rx="1.5" fill="#0f9d58" />
+        <rect x="6" y="6" width="8" height="1.5" rx=".5" fill="white" opacity=".9" />
+        <rect x="6" y="9" width="8" height="1.5" rx=".5" fill="white" opacity=".9" />
+        <rect x="6" y="12" width="5" height="1.5" rx=".5" fill="white" opacity=".9" />
+      </svg>
+    );
+  }
+
+  if (resolved === "jotform") {
+    return (
+      <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect x="3" y="2" width="14" height="16" rx="4" fill="#ff6100" />
+        <path d="M10.4 5.2h3v7.3c0 2-1.3 3.3-3.5 3.3-1.5 0-2.6-.6-3.3-1.6l2-1.7c.3.4.6.6 1.1.6.4 0 .7-.3.7-.8z" fill="white" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M8 5H5.5A2.5 2.5 0 0 0 3 7.5v7A2.5 2.5 0 0 0 5.5 17h7A2.5 2.5 0 0 0 15 14.5V12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M11 3h6v6M10 10l7-7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** Centered card shell used by every forms page. */
 export function FormShell({ title, subtitle, children }: { title?: string; subtitle?: string; children: ReactNode }) {
   return (
@@ -86,10 +137,11 @@ export function PrimaryButton({
   disabled?: boolean;
 }) {
   const cls =
-    "block w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50";
+    "flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50";
   if (href) {
     return (
       <a className={cls} href={href} target="_blank" rel="noreferrer">
+        <ExternalServiceIcon href={href} />
         {children}
       </a>
     );

@@ -11,7 +11,7 @@ import React from "react";
 import api from "@client/api";
 import { GDrive } from "@client/gdrive";
 import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
-import { FileTypeIcon, SHEETS_MIME, FOLDER_MIME } from "@entities/gdrive/FileTypeIcon";
+import { ExternalServiceIcon, FileTypeIcon, SHEETS_MIME, FOLDER_MIME } from "@entities/gdrive/FileTypeIcon";
 import { isScopeError } from "@entities/ui/PermissionErrorBanner";
 import type { ScopeErrorPayload } from "@entities/ui/PermissionErrorBanner";
 import { isGoogleReauthError, GOOGLE_REAUTH_ISSUE } from "@lib/googleAuthError";
@@ -294,7 +294,8 @@ function CandidateList({
                 </button>
               ) : null}
               <a href={item.webViewLink} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-                {item.isFolder ? "Open folder" : "Open"} ↗
+                <ExternalServiceIcon service={item.isFolder ? "drive" : "sheets"} />
+                {item.isFolder ? "Open folder" : "Open"}
               </a>
             </div>
           </div>

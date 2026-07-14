@@ -35,6 +35,7 @@ import {
   type WorkbookTemplateVariant,
 } from "./WorkbookVariantDialog";
 import { WorkbookVariantToggle } from "./WorkbookVariantToggle";
+import { ExternalServiceIcon } from "@entities/gdrive/FileTypeIcon";
 
 type WorkbookView = "sheet" | "structured";
 
@@ -249,7 +250,7 @@ function WorkbookTemplateCreate({
             else void run();
           }}
         >
-          {busy ? "Creating..." : "Create workbook"}
+          {busy ? "Creating..." : "Create new workbook from template"}
         </button>
       </div>
       {error ? <div className="text-xs text-red-600">{error}</div> : null}
@@ -393,12 +394,14 @@ export function WorkbookPanel({
             </div>
             {folderId ? (
               <a href={buildFolderUrl(folderId)} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-                Folder ↗
+                <ExternalServiceIcon service="drive" />
+                Folder
               </a>
             ) : null}
             {openUrl ? (
               <a href={openUrl} target="_blank" rel="noreferrer" className="btn btn-sm btn-secondary">
-                Open Sheet ↗
+                <ExternalServiceIcon service="sheets" />
+                Open Sheet
               </a>
             ) : null}
             {!isViewer ? (
@@ -478,7 +481,10 @@ export function WorkbookPanel({
                 </div>
               </div>
               <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 group-hover:border-sky-300 group-hover:text-sky-700">
-                Open sheet →
+                <span className="inline-flex items-center gap-1.5">
+                  <ExternalServiceIcon service="sheets" />
+                  Open sheet
+                </span>
               </span>
             </button>
 
@@ -515,7 +521,8 @@ export function WorkbookPanel({
         <div className="flex shrink-0 items-center gap-2">
           {folderId ? (
             <a href={buildFolderUrl(folderId)} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
-              Folder ↗
+              <ExternalServiceIcon service="drive" />
+              Folder
             </a>
           ) : null}
           {changingWorkbook ? (
