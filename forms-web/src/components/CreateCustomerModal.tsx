@@ -5,15 +5,57 @@ import {
   type FormsCustomer,
   type CreateCustomerResp,
 } from "@/lib/customersApi";
+import { loadUsers, type FormsUser } from "@/lib/usersApi";
+import { listWebhookEventDetails } from "@/lib/webhookDetailsApi";
+import { extractHousehold } from "@/lib/householdExtract";
+import { INTAKE_FLOW, formById } from "@/lib/formsCatalog";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 
 // Super-simple create/link customer flow for intake. Name + DOB + CWID + case
-// managers (caller is assumed primary). Live matches against the cached customer
-// index double as the "link existing" path; the backend enforces a duplicate
-// guard (CWID / name+DOB) as the bomber backstop and builds + links the Google
-// Drive folder with the same gdrive functions the web app uses.
+// managers (dropdowns from the org user list; caller preselected as primary).
+// Live matches against the cached customer index double as the "link existing"
+// path; the backend enforces a duplicate guard (CWID / name+DOB) and builds +
+// links the Google Drive folder with the same gdrive functions the web app
+// uses. Name / DOB / CWID prefill from this session's intake webhooks.
+
+const SESSION_KEY = "hdb:forms:webhooks-session-start";
+
+function sessionStartISO(): string {
+  try {
+    const v = sessionStorage.getItem(SESSION_KEY);
+    if (v) return v;
+  } catch { /* ignore */ }
+  // Sidebar not mounted yet this tab — fall back to a recent window.
+  return new Date(Date.now() - 4 * 3600_000).toISOString();
+}
+
+/** Normalize assorted DOB formats to the date input's YYYY-MM-DD. */
+function toISODate(v: string): string | null {
+  const s = v.trim();
+  const pad = (x: string) => x.padStart(2, "0");
+  const mdy = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/.exec(s);
+  if (mdy) return `${mdy[3]}-${pad(mdy[1])}-${pad(mdy[2])}`;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${pad(String(d.getMonth() + 1))}-${pad(String(d.getDate()))}`;
+}
+
+/** "Last, First" or "First [Middle] Last" → { first, last }. */
+function splitName(full: string): { first: string; last: string } | null {
+  const s = full.trim().replace(/\s{2,}/g, " ");
+  if (!s) return null;
+  if (s.includes(",")) {
+    const [last, first] = s.split(",").map((x) => x.trim());
+    if (first && last) return { first, last };
+  }
+  const parts = s.split(" ");
+  if (parts.length < 2) return null;
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+}
 
 function Input({
   label,
@@ -22,6 +64,7 @@ function Input({
   type = "text",
   placeholder,
   autoFocus = false,
+  hint = false,
 }: {
   label: string;
   value: string;
@@ -29,21 +72,60 @@ function Input({
   type?: string;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Highlight as prefilled-from-webhooks. */
+  hint?: boolean;
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+        {hint ? <span className="ml-1 normal-case text-indigo-400">· from webhooks</span> : null}
+      </span>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+        className={`w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${
+          hint ? "border-indigo-200 bg-indigo-50/40" : "border-slate-200"
+        }`}
       />
     </label>
   );
 }
+
+function CmSelect({
+  label,
+  users,
+  value,
+  onChange,
+  allowNone = false,
+}: {
+  label: string;
+  users: FormsUser[];
+  value: string; // uid, or "" for none
+  onChange: (uid: string) => void;
+  allowNone?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-indigo-400"
+      >
+        {allowNone ? <option value="">— None —</option> : null}
+        {users.map((u) => (
+          <option key={u.uid} value={u.uid}>{u.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+type ContactRow = { uid: string; role: string };
 
 export function CreateCustomerModal({
   onClose,
@@ -60,22 +142,73 @@ export function CreateCustomerModal({
   const [last, setLast] = useState("");
   const [dob, setDob] = useState("");
   const [cwId, setCwId] = useState("");
-  const [cm, setCm] = useState(user?.displayName ?? "");
-  const [cm2, setCm2] = useState("");
   const [medicaid, setMedicaid] = useState<"not_sure" | "yes" | "no">(presetMedicaid ?? "not_sure");
   const [buildDrive, setBuildDrive] = useState(true);
+
+  // CM selects — dropdowns when the org user list loads; free-text fallback otherwise.
+  const [users, setUsers] = useState<FormsUser[] | null>(null);
+  const [cmUid, setCmUid] = useState("");
+  const [cm2Uid, setCm2Uid] = useState("");
+  const [cmText, setCmText] = useState(user?.displayName ?? "");
+  const [cm2Text, setCm2Text] = useState("");
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
 
   const [all, setAll] = useState<FormsCustomer[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsForce, setNeedsForce] = useState(false);
   const [created, setCreated] = useState<CreateCustomerResp | null>(null);
+  const [prefilled, setPrefilled] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let alive = true;
     loadCustomers().then((rows) => { if (alive) setAll(rows); });
+    loadUsers().then((rows) => {
+      if (!alive) return;
+      setUsers(rows);
+      // Preselect the signed-in user as primary CM.
+      if (rows.length && user?.email) {
+        const me = rows.find((u) => (u.email ?? "").toLowerCase() === user.email!.toLowerCase());
+        if (me) setCmUid((cur) => cur || me.uid);
+      }
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Prefill name / DOB / CWID from this session's intake webhooks — only into
+  // fields the user hasn't touched yet.
+  useEffect(() => {
+    let alive = true;
+    const flowIds = INTAKE_FLOW.map((s) => s.formId).filter((x): x is string => !!x);
+    listWebhookEventDetails(flowIds, 60)
+      .then((events) => {
+        if (!alive) return;
+        const start = sessionStartISO();
+        const session = events.filter((e) => (e.receivedAtISO || "") >= start);
+        if (!session.length) return;
+        const hh = extractHousehold(session, (id) => formById(id)?.title || `Form ${id}`);
+        const slot = (k: string) => hh.slots.find((s) => s.key === k)?.found?.value ?? "";
+        const marks = new Set<string>();
+
+        const name = splitName(slot("hohName"));
+        setFirst((cur) => (cur || !name ? cur : (marks.add("first"), name.first)));
+        setLast((cur) => (cur || !name ? cur : (marks.add("last"), name.last)));
+
+        const isoDob = slot("dob") ? toISODate(slot("dob")) : null;
+        setDob((cur) => (cur || !isoDob ? cur : (marks.add("dob"), isoDob)));
+
+        const cw = slot("cwId");
+        setCwId((cur) => (cur || !cw ? cur : (marks.add("cwId"), cw)));
+
+        if (marks.size) setPrefilled(marks);
+      })
+      .catch(() => {});
     return () => { alive = false; };
   }, []);
+
+  const usersById = useMemo(() => new Map((users ?? []).map((u) => [u.uid, u])), [users]);
+  const hasUserList = !!users?.length;
 
   // Live "already exists?" matches — this is also the link-existing path.
   const matches = useMemo(() => {
@@ -98,6 +231,11 @@ export function CreateCustomerModal({
     onClose();
   };
 
+  const addContact = () => setContacts((cur) => (cur.length >= 3 ? cur : [...cur, { uid: "", role: "" }]));
+  const setContact = (i: number, patch: Partial<ContactRow>) =>
+    setContacts((cur) => cur.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  const removeContact = (i: number) => setContacts((cur) => cur.filter((_, idx) => idx !== i));
+
   const submit = async (force = false) => {
     if (!first.trim() || !last.trim()) {
       setError("First and last name are required.");
@@ -106,13 +244,24 @@ export function CreateCustomerModal({
     setBusy(true);
     setError(null);
     try {
+      const primary = usersById.get(cmUid);
+      const secondary = usersById.get(cm2Uid);
       const resp = await createCustomer({
         firstName: first.trim(),
         lastName: last.trim(),
         dob: dob.trim() || undefined,
         cwId: cwId.trim() || undefined,
-        caseManagerName: cm.trim() || undefined,
-        secondaryCaseManagerName: cm2.trim() || undefined,
+        caseManagerName: hasUserList ? primary?.name : cmText.trim() || undefined,
+        caseManagerId: hasUserList ? primary?.uid : undefined,
+        secondaryCaseManagerName: hasUserList ? secondary?.name : cm2Text.trim() || undefined,
+        secondaryCaseManagerId: hasUserList ? secondary?.uid : undefined,
+        otherContacts: contacts
+          .filter((c) => c.uid && c.uid !== cmUid && c.uid !== cm2Uid)
+          .map((c) => ({
+            uid: c.uid,
+            name: usersById.get(c.uid)?.name,
+            role: c.role.trim() || undefined,
+          })),
         medicaid,
         buildDrive,
         force,
@@ -154,7 +303,8 @@ export function CreateCustomerModal({
             </div>
             {created.drive.built ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                Drive folder <b>{created.drive.folderName}</b> built and linked
+                Drive folder <b>{created.drive.folderName}</b> built
+                {created.drive.linkError ? " (linking failed — fix from the web app)" : " and linked"}
                 {created.drive.workbookLinked ? " (TSS workbook linked)" : ""}.{" "}
                 {created.drive.folderUrl ? (
                   <a href={created.drive.folderUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-indigo-600 hover:text-indigo-500">
@@ -175,13 +325,53 @@ export function CreateCustomerModal({
         ) : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <Input label="First name" value={first} onChange={setFirst} autoFocus />
-              <Input label="Last name" value={last} onChange={setLast} />
-              <Input label="Date of birth" value={dob} onChange={setDob} type="date" />
-              <Input label="Caseworthy ID" value={cwId} onChange={setCwId} placeholder="CWID" />
-              <Input label="Case manager (primary)" value={cm} onChange={setCm} placeholder="You" />
-              <Input label="Secondary case manager" value={cm2} onChange={setCm2} placeholder="Optional" />
+              <Input label="First name" value={first} onChange={setFirst} autoFocus hint={prefilled.has("first")} />
+              <Input label="Last name" value={last} onChange={setLast} hint={prefilled.has("last")} />
+              <Input label="Date of birth" value={dob} onChange={setDob} type="date" hint={prefilled.has("dob")} />
+              <Input label="Caseworthy ID" value={cwId} onChange={setCwId} placeholder="CWID" hint={prefilled.has("cwId")} />
+              {hasUserList ? (
+                <>
+                  <CmSelect label="Case manager (primary)" users={users!} value={cmUid} onChange={setCmUid} allowNone />
+                  <CmSelect label="Secondary case manager" users={users!} value={cm2Uid} onChange={setCm2Uid} allowNone />
+                </>
+              ) : (
+                <>
+                  <Input label="Case manager (primary)" value={cmText} onChange={setCmText} placeholder="You" />
+                  <Input label="Secondary case manager" value={cm2Text} onChange={setCm2Text} placeholder="Optional" />
+                </>
+              )}
             </div>
+
+            {hasUserList ? (
+              <div className="space-y-1.5">
+                {contacts.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <select
+                      value={c.uid}
+                      onChange={(e) => setContact(i, { uid: e.target.value })}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm"
+                    >
+                      <option value="">— Select contact —</option>
+                      {users!.map((u) => (
+                        <option key={u.uid} value={u.uid}>{u.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      value={c.role}
+                      onChange={(e) => setContact(i, { role: e.target.value })}
+                      placeholder="Role (optional)"
+                      className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                    />
+                    <button type="button" onClick={() => removeContact(i)} className="text-slate-300 hover:text-rose-500">✕</button>
+                  </div>
+                ))}
+                {contacts.length < 3 ? (
+                  <button type="button" onClick={addContact} className="text-xs font-semibold text-indigo-600 hover:text-indigo-500">
+                    + Add other contact
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">

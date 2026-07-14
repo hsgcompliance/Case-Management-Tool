@@ -30,7 +30,21 @@ const FormsCustomerCreateBody = z.object({
   cwId: z.string().trim().max(40).optional().default(""),
   /** Primary case manager display name; defaults to the caller. */
   caseManagerName: z.string().trim().max(120).optional().default(""),
+  /** Explicit CM uid (from the CM dropdown); wins over the name heuristic. */
+  caseManagerId: z.string().trim().max(128).optional().default(""),
   secondaryCaseManagerName: z.string().trim().max(120).optional().default(""),
+  secondaryCaseManagerId: z.string().trim().max(128).optional().default(""),
+  /** Additional staff contacts (customers service caps at 3, dedupes by uid). */
+  otherContacts: z
+    .array(
+      z.object({
+        uid: z.string().trim().min(1).max(128),
+        name: z.string().trim().max(120).optional(),
+        role: z.string().trim().max(60).optional(),
+      })
+    )
+    .max(3)
+    .optional(),
   /** Picks the payer/nonpayer TSS workbook template variant. */
   medicaid: z.enum(["yes", "no", "not_sure"]).optional(),
   /** Build + link the customer's Google Drive folder (default true). */
@@ -51,7 +65,31 @@ type DriveResult = {
   workbookLinked?: boolean;
   reason?: string;
   error?: string;
+  /** Folder exists but customer linking failed (fix from the web app). */
+  linkError?: string;
 };
+
+/**
+ * GET /formsUsersList — active org users for the forms-app CM dropdowns
+ * (primary / secondary / other contacts). Minimal fields only.
+ */
+export const formsUsersList_http = secureHandler(
+  async (req, res) => {
+    const caller = req.user!;
+    const orgId = orgIdFromClaims(caller) || requireOrg(caller);
+    const { listUsersService } = await import("../users/service.js");
+    const { users } = await listUsersService({ limit: 1000, status: "active" }, { orgId });
+    const items = users
+      .map((u) => ({
+        uid: u.uid,
+        name: String(u.displayName || u.email || u.uid),
+        email: u.email ?? null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.status(200).json({ ok: true, items, count: items.length });
+  },
+  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+);
 
 const FormsCustomerTssStatusBody = z.object({
   customerId: z.string().trim().min(1),
@@ -136,9 +174,14 @@ export const formsCustomerCreate_http = secureHandler(
       dob,
       cwId,
       caseManagerName: cmName || null,
-      // Only claim the caller's uid when the primary CM actually is the caller.
-      caseManagerId: cmName && low(cmName) === low(callerName) ? String(caller.uid || "") : null,
+      // Explicit uid from the CM dropdown wins; otherwise only claim the
+      // caller's uid when the primary CM actually is the caller.
+      caseManagerId:
+        body.caseManagerId ||
+        (cmName && low(cmName) === low(callerName) ? String(caller.uid || "") : null),
       secondaryCaseManagerName: body.secondaryCaseManagerName || null,
+      secondaryCaseManagerId: body.secondaryCaseManagerId || null,
+      ...(body.otherContacts?.length ? { otherContacts: body.otherContacts } : {}),
       status: "active",
       // TSS payer status rides along when the intake gate already decided it.
       ...(body.medicaid && body.medicaid !== "not_sure"
@@ -185,51 +228,58 @@ export const formsCustomerCreate_http = secureHandler(
             userUid: String(caller.uid || ""),
           });
 
-          // Link atomically like gdriveBuildCustomerFolder: folder ref +
-          // auto-linked TSS workbook + cached index seed.
-          const { linkFolderToCustomer } = await import("../gdrive/customerFolderLink.js");
-          const { upsertFolderIndexEntry } = await import("../gdrive/folderIndexCache.js");
-          await linkFolderToCustomer({
-            customerId,
-            orgId,
-            folderId: folder.id,
-            folderUrl: folder.url,
-            folderName: folder.name,
-          });
-          if (folder.workbook?.spreadsheetId) {
-            await db.collection("customers").doc(customerId).set(
-              {
-                customerDrive: {
-                  linkedWorkbooks: {
-                    tss: {
-                      spreadsheetId: folder.workbook.spreadsheetId,
-                      spreadsheetUrl: folder.workbook.url,
-                      spreadsheetName: folder.workbook.name,
-                      status: "linked",
-                      linkedAt: isoNow(),
-                      updatedAt: isoNow(),
-                      linkedBy: String(caller.uid || ""),
-                      variant: medicaid === "yes" ? "payer" : "nonpayer",
-                    },
-                  },
-                },
-                updatedAt: FieldValue.serverTimestamp(),
-              },
-              { merge: true }
-            );
-          }
-          await upsertFolderIndexEntry(
-            orgId,
-            { id: folder.id, name: folder.name, url: folder.url, status: "active" },
-            customerId
-          );
+          // The folder now exists — report built even if linking below fails
+          // (mirrors gdriveBuildCustomerFolder's linkError behavior).
           drive = {
             built: true,
             folderId: folder.id,
             folderUrl: folder.url,
             folderName: folder.name,
-            workbookLinked: !!folder.workbook?.spreadsheetId,
+            workbookLinked: false,
           };
+          try {
+            // Link atomically like gdriveBuildCustomerFolder: folder ref +
+            // auto-linked TSS workbook + cached index seed.
+            const { linkFolderToCustomer } = await import("../gdrive/customerFolderLink.js");
+            const { upsertFolderIndexEntry } = await import("../gdrive/folderIndexCache.js");
+            await linkFolderToCustomer({
+              customerId,
+              orgId,
+              folderId: folder.id,
+              folderUrl: folder.url,
+              folderName: folder.name,
+            });
+            if (folder.workbook?.spreadsheetId) {
+              await db.collection("customers").doc(customerId).set(
+                {
+                  customerDrive: {
+                    linkedWorkbooks: {
+                      tss: {
+                        spreadsheetId: folder.workbook.spreadsheetId,
+                        spreadsheetUrl: folder.workbook.url,
+                        spreadsheetName: folder.workbook.name,
+                        status: "linked",
+                        linkedAt: isoNow(),
+                        updatedAt: isoNow(),
+                        linkedBy: String(caller.uid || ""),
+                        variant: medicaid === "yes" ? "payer" : "nonpayer",
+                      },
+                    },
+                  },
+                  updatedAt: FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              );
+              drive.workbookLinked = true;
+            }
+            await upsertFolderIndexEntry(
+              orgId,
+              { id: folder.id, name: folder.name, url: folder.url, status: "active" },
+              customerId
+            );
+          } catch (linkErr: any) {
+            drive.linkError = String(linkErr?.message || linkErr || "link_failed");
+          }
         }
       } catch (e: any) {
         drive = { built: false, error: String(e?.message || e || "drive_build_failed") };
