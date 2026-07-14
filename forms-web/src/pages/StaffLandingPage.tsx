@@ -53,18 +53,18 @@ const RESOURCE_CARDS: Card[] = [
     href: "https://www.jotform.com/app/251040945339153?st=bmU3aUNmekdJWXVtUEhpaUhYN2pGT0tFR250elk3TkhEOXpyRlZwZXNKS1phNVI1UGo2U200bW1SZ2JJUGxQTHpBMU16N0pZUnB2S3pNS2lSd2htc2NHRGVINnRhNENNL2R1ZUtreE9VNEtpNnBNNVBxZzY2NXh1alQ2Y0EwaTI=",
   },
   {
-    label: "Referral Status",
-    description: "Track incoming referrals on the intake board.",
+    label: "Referral Board",
+    description: "Track the status of your referrals to rental assistance, Bridging Home, and homelessness prevention.",
     href: "https://www.jotform.com/boards/251318461516050",
   },
   {
-    label: "HHDB",
-    description: "The main Households DB web app — customers, grants, payments.",
+    label: "Case Management Dashboard",
+    description: "See Budgets, Caseloads, Customer payment schedules, invoicing, and more.",
     href: "https://housing-db-v2.web.app",
   },
   {
-    label: "HHDB Mobile",
-    description: "Sessions, goals, and case notes on the go.",
+    label: "Case Manager Mobile",
+    description: "Quickly manage your case loads, update enrollments and Workbooks.",
     href: "https://housing-db-mobile.web.app",
   },
 ];

@@ -18,6 +18,7 @@ import { toast } from "@lib/toast";
 import { AddRowForm } from "./AddRowForm";
 import { AddSessionForm, type GoalOption } from "./AddSessionForm";
 import { GoalForm } from "./GoalForm";
+import { BudgetTable } from "./Budget/BudgetTable";
 import { GoalsList } from "./HousingPlan/GoalsList";
 import { NotesList } from "./ProgressNotes/NotesList";
 import type { tss as TssNS } from "@hdb/contracts";
@@ -321,6 +322,7 @@ function EntityBlock({
   const isNotes = entity.entityId === "progressNotes";
   const isCover = entity.entityId === "coverSheet";
   const isStrengths = entity.entityId === "customerStrengths";
+  const isBudget = entity.entityId === "budget";
 
   // Append is available for writable dataTable entities that resolved their
   // layout (extracted or empty — both have a known table to append into).
@@ -393,7 +395,9 @@ function EntityBlock({
       body = <StatusNote tone="amber">Couldn’t read this section.</StatusNote>;
       break;
     case "empty":
-      body = isStrengths
+      body = isBudget
+        ? <BudgetTable customerId={customerId} entity={entity} cfgEntity={cfgEntity} onSaved={onSaved} />
+        : isStrengths
         ? <SummaryBoxEditor customerId={customerId} entity={entity} onSaved={onSaved} />
         : <StatusNote tone="slate">No entries yet.</StatusNote>;
       break;
@@ -407,6 +411,8 @@ function EntityBlock({
           )
         : isStrengths
           ? <SummaryBoxEditor customerId={customerId} entity={entity} onSaved={onSaved} />
+          : isBudget
+            ? <BudgetTable customerId={customerId} entity={entity} cfgEntity={cfgEntity} onSaved={onSaved} />
           : entity.renderKind === "keyValueCard"
             ? <KeyValueCard entity={entity} cfgEntity={cfgEntity} />
             : entity.renderKind === "dataTable"
@@ -588,7 +594,7 @@ export function WorkbookStructuredView({
 
   const cfgById = new Map(Object.values(config.entities).map((e) => [e.id, e]));
   // Section order: cover → notes → others (config section grouping is enough for slice A).
-  const ordered = [...extract.entities].sort((a, b) => {
+  const ordered = [...extract.entities].filter((entity) => entity.entityId !== "smartGoalsAcronym").sort((a, b) => {
     const rank = (s: string) => (s === "cover" ? 0 : s === "notes" ? 1 : s === "housingPlan" ? 2 : 3);
     return rank(a.section) - rank(b.section);
   });

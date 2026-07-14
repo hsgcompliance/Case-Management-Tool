@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ALL_FORMS, mergeWithRegistry, type FormDef, type FormCategory } from "@/lib/formsCatalog";
+import { ALL_FORMS, mergeWithRegistry, formInCategory, type FormDef, type FormCategory } from "@/lib/formsCatalog";
 import { listFormsRegistry } from "@/lib/formsRegistryApi";
 
 /**
@@ -18,5 +18,5 @@ export function useCatalog(): FormDef[] {
 
 export function useCatalogByCategory(category: FormCategory): FormDef[] {
   const forms = useCatalog();
-  return forms.filter((f) => f.category === category);
+  return forms.filter((f) => formInCategory(f, category));
 }

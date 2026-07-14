@@ -243,10 +243,12 @@ export function FormsCategoryView({
 
   // The Webhooks sidebar sits OUTSIDE the view switch so it persists (and keeps
   // its data/scroll) across the list, step, and form views of the flow.
-  const flowFormIds = useMemo(
-    () => steps.map((s) => s.formId).filter((x): x is string => !!x),
-    [steps]
-  );
+  const flowFormIds = useMemo(() => {
+    const ids = new Set(steps.map((s) => s.formId).filter((x): x is string => !!x));
+    // "Build household model" forms feed the sidebar too, wherever they live.
+    for (const f of catalog ?? forms) if (f.buildHousehold) ids.add(f.id);
+    return [...ids];
+  }, [steps, catalog, forms]);
   const withSidebar = (node: ReactNode) =>
     webhooksSidebar ? (
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -502,6 +504,7 @@ export function FormsCategoryView({
           ← Back to {heading}
         </button>
         {persistentContext}
+        {!showCreditCards && f.showCreditCards ? <CreditCardCards /> : null}
         <h2 className="text-base font-semibold text-slate-900">{f.title}</h2>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">

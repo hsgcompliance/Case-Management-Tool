@@ -289,7 +289,17 @@ export async function upsertFormRegistry(formId: string, kind: string): Promise<
 /** Admin override of a form's catalog metadata (creates the doc if needed). */
 export async function updateFormRegistry(
   formId: string,
-  patch: { title?: string; category?: string; customerSendable?: boolean; notifyOnSubmit?: boolean }
+  patch: {
+    title?: string;
+    category?: string;
+    /** Multi-category membership; first entry becomes the legacy `category`. */
+    categories?: string[];
+    customerSendable?: boolean;
+    notifyOnSubmit?: boolean;
+    followUpIntake?: boolean;
+    buildHousehold?: boolean;
+    showCreditCards?: boolean;
+  }
 ): Promise<void> {
   if (!isValidFormId(formId)) {
     const e = new Error("invalid_form_id") as Error & { code: number };
@@ -298,22 +308,40 @@ export async function updateFormRegistry(
   }
   const update: Record<string, unknown> = { formId, adminEdited: true, updatedAt: FieldValue.serverTimestamp() };
   if (typeof patch.title === "string") update.title = patch.title.slice(0, 200);
-  if (patch.category && VALID_CATEGORIES.has(patch.category)) update.category = patch.category;
+  if (Array.isArray(patch.categories)) {
+    const cats = [...new Set(patch.categories.map(String).filter((c) => VALID_CATEGORIES.has(c)))];
+    if (cats.length) {
+      update.categories = cats;
+      update.category = cats[0]; // legacy single-category compat
+    }
+  } else if (patch.category && VALID_CATEGORIES.has(patch.category)) {
+    update.category = patch.category;
+  }
   if (typeof patch.customerSendable === "boolean") update.customerSendable = patch.customerSendable;
   if (typeof patch.notifyOnSubmit === "boolean") update.notifyOnSubmit = patch.notifyOnSubmit;
+  if (typeof patch.followUpIntake === "boolean") update.followUpIntake = patch.followUpIntake;
+  if (typeof patch.buildHousehold === "boolean") update.buildHousehold = patch.buildHousehold;
+  if (typeof patch.showCreditCards === "boolean") update.showCreditCards = patch.showCreditCards;
   await db.collection(REGISTRY).doc(formId).set(update, { merge: true });
 }
 
 export type FormsRegistryItem = {
   formId: string;
   category: string;
+  categories: string[];
   title: string;
   customerSendable: boolean;
-  notifyOnSubmit: boolean;
+  /** Tri-state flags: null = never set (hardcoded catalog default stays in charge). */
+  notifyOnSubmit: boolean | null;
+  followUpIntake: boolean | null;
+  buildHousehold: boolean | null;
+  showCreditCards: boolean | null;
   adminEdited: boolean;
   submissionCount: number;
   lastKind: string | null;
 };
+
+const triState = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
 
 export async function listFormsRegistry(): Promise<FormsRegistryItem[]> {
   const snap = await db.collection(REGISTRY).limit(500).get();
@@ -322,9 +350,15 @@ export async function listFormsRegistry(): Promise<FormsRegistryItem[]> {
     .map((r) => ({
       formId: String(r.formId || r.id || ""),
       category: String(r.category || "other"),
+      categories: Array.isArray(r.categories)
+        ? (r.categories as unknown[]).map(String).filter((c) => VALID_CATEGORIES.has(c))
+        : [],
       title: String(r.title || ""),
       customerSendable: !!r.customerSendable,
-      notifyOnSubmit: !!r.notifyOnSubmit,
+      notifyOnSubmit: triState(r.notifyOnSubmit),
+      followUpIntake: triState(r.followUpIntake),
+      buildHousehold: triState(r.buildHousehold),
+      showCreditCards: triState(r.showCreditCards),
       adminEdited: !!r.adminEdited,
       submissionCount: Number(r.submissionCount || 0) || 0,
       lastKind: (r.lastKind as string | null) ?? null,

@@ -7,12 +7,26 @@ export type FormCategory = "purchases" | "intake" | "referral" | "other";
 export type FormDef = {
   id: string;
   title: string;
+  /** Primary category (legacy single-select). */
   category: FormCategory;
+  /** Multi-category membership (admin-set); when present it wins over `category`. */
+  categories?: FormCategory[];
   submissions: number;
   customerSendable?: boolean;
   /** Surface new submissions of this form in the header notification bell. */
   notifyOnSubmit?: boolean;
+  /** Submitting this form continues into the Basic Intake flow. */
+  followUpIntake?: boolean;
+  /** Feed this form's webhooks into the household model (Webhooks sidebar). */
+  buildHousehold?: boolean;
+  /** Show the credit-card spend cards when this form is open. */
+  showCreditCards?: boolean;
 };
+
+/** Category membership check honoring multi-category admin overrides. */
+export function formInCategory(f: FormDef, cat: FormCategory): boolean {
+  return f.categories?.length ? f.categories.includes(cat) : f.category === cat;
+}
 
 export const FORMS: FormDef[] = [
   // ── Purchases (staff only) ──────────────────────────────────────────────
@@ -38,6 +52,7 @@ export const FORMS: FormDef[] = [
   { id: "253555227407155", title: "Bridging Home Referral", category: "referral", submissions: 74 },
   { id: "250021786346152", title: "Referral to Homelessness Prevention Screening", category: "referral", submissions: 71 },
   { id: "250785697676075", title: "Health Dept Referral to HRDC Case Management", category: "referral", submissions: 14 },
+  { id: "260766127603053", title: "Referral to Family Shelter", category: "referral", submissions: 0 },
 
   // ── Other (high-volume) ─────────────────────────────────────────────────
   { id: "253485149991067", title: "TSS Client Session Timer", category: "other", submissions: 272 },
@@ -57,7 +72,8 @@ export const FORMS: FormDef[] = [
   { id: "260347030470043", title: "Self-Declaration of Zero Income", category: "other", submissions: 7 },
   { id: "260346243018046", title: "Self-Declaration of Zero Assets", category: "other", submissions: 1 },
   { id: "251613294244151", title: "Initiate Landlord Verification Process", category: "other", submissions: 0 },
-  { id: "260345071136045", title: "Referral to TSS (Payer)", category: "other", submissions: 4 },
+  // Doubles as the TSS payer variant in the intake tssGate (referenced by id).
+  { id: "260345071136045", title: "Referral to TSS", category: "referral", submissions: 4 },
 ];
 
 /** The staff web app (customer documents + Google Drive folders live there). */
@@ -184,7 +200,7 @@ export const INTAKE_RESOURCES: { href: string; label: string }[] = [
 ];
 
 export function formsByCategory(category: FormCategory): FormDef[] {
-  return FORMS.filter((f) => f.category === category).sort((a, b) => b.submissions - a.submissions);
+  return FORMS.filter((f) => formInCategory(f, category)).sort((a, b) => b.submissions - a.submissions);
 }
 
 export const ALL_FORMS = [...FORMS].sort((a, b) => b.submissions - a.submissions);
@@ -203,9 +219,13 @@ export function mergeWithRegistry(
   registry: Array<{
     formId: string;
     category: string;
+    categories?: string[];
     title?: string;
     customerSendable?: boolean;
-    notifyOnSubmit?: boolean;
+    notifyOnSubmit?: boolean | null;
+    followUpIntake?: boolean | null;
+    buildHousehold?: boolean | null;
+    showCreditCards?: boolean | null;
     adminEdited?: boolean;
     submissionCount: number;
   }>
@@ -214,26 +234,38 @@ export function mergeWithRegistry(
   for (const r of registry) {
     if (!/^\d{6,24}$/.test(r.formId)) continue;
     const category = (VALID_CATEGORIES.includes(r.category as FormCategory) ? r.category : "other") as FormCategory;
+    const categories = (r.categories ?? []).filter((c): c is FormCategory =>
+      VALID_CATEGORIES.includes(c as FormCategory)
+    );
     const base = byId.get(r.formId);
     if (base) {
       // Admin edits override the hardcoded definition; auto entries only enrich.
       if (r.adminEdited) {
         base.category = category;
+        base.categories = categories.length ? categories : [category];
         if (r.title) base.title = r.title;
+        // Flags come back as bare booleans, so only an admin edit may override
+        // the hardcoded defaults (auto rows would wipe them with false).
+        if (typeof r.notifyOnSubmit === "boolean") base.notifyOnSubmit = r.notifyOnSubmit;
+        if (typeof r.followUpIntake === "boolean") base.followUpIntake = r.followUpIntake;
+        if (typeof r.buildHousehold === "boolean") base.buildHousehold = r.buildHousehold;
+        if (typeof r.showCreditCards === "boolean") base.showCreditCards = r.showCreditCards;
       } else if (r.title && (!base.title || base.title.startsWith("Form "))) {
         base.title = r.title;
       }
       if (typeof r.customerSendable === "boolean") base.customerSendable = r.customerSendable;
-      // Only an admin edit can override the hardcoded notify default.
-      if (r.adminEdited && typeof r.notifyOnSubmit === "boolean") base.notifyOnSubmit = r.notifyOnSubmit;
     } else {
       byId.set(r.formId, {
         id: r.formId,
         title: r.title || `Form ${r.formId}`,
         category,
+        ...(categories.length ? { categories } : {}),
         submissions: r.submissionCount || 0,
         customerSendable: !!r.customerSendable,
-        notifyOnSubmit: !!r.notifyOnSubmit,
+        ...(typeof r.notifyOnSubmit === "boolean" ? { notifyOnSubmit: r.notifyOnSubmit } : {}),
+        ...(typeof r.followUpIntake === "boolean" ? { followUpIntake: r.followUpIntake } : {}),
+        ...(typeof r.buildHousehold === "boolean" ? { buildHousehold: r.buildHousehold } : {}),
+        ...(typeof r.showCreditCards === "boolean" ? { showCreditCards: r.showCreditCards } : {}),
       });
     }
   }

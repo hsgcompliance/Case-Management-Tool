@@ -21,6 +21,7 @@ export {
   setCustomerWorkbookVariant,
   getWorkbookData,
   appendCustomerWorkbookRow,
+  patchCustomerWorkbookBudget,
   patchCustomerWorkbookScaffold,
   deleteCustomerWorkbookRow,
 } from "./workbookHttp";
