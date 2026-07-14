@@ -9,6 +9,7 @@ import { CreateCustomerModal } from "./CreateCustomerModal";
 import { WebhooksSidebar } from "./WebhooksSidebar";
 import { CreditCardCards } from "./CreditCardCards";
 import { CustomerDetailsHeader } from "./CustomerDetailsHeader";
+import { MissingIntakeInfoBuilder } from "./MissingIntakeInfoBuilder";
 import { ReferencePanel } from "./ReferencePanel";
 import { ExternalServiceIcon } from "./ui";
 
@@ -420,6 +421,7 @@ export function FormsCategoryView({
             ) : null}
           </div>
         ) : null}
+        {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
         {step.tssGate && !tssVariant ? (
           // Full-page gate: payer vs non-payer decides which form loads (and
           // presets the folder build + customer doc payer status).

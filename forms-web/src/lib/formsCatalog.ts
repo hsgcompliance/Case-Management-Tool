@@ -107,6 +107,8 @@ export type IntakeFlowStep = {
   tssGate?: { payerFormId: string; nonpayerFormId: string };
   /** Show an "Open customer folder" button (Drive pointer from the customer doc). */
   customerFolderLink?: boolean;
+  /** Show the local missing-information fallback builder for incomplete intake data. */
+  manualInfoBuilder?: boolean;
 };
 
 /**
@@ -184,13 +186,14 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
   {
     title: "Link intake submissions to customer",
-    note: "Open the Submissions tab and confirm each completed intake submission is linked to the current customer. This uses the canonical customer linked-submissions store.",
+    note: "Open the Submissions tab and confirm each completed intake submission is linked to the current customer. If linked submissions are missing key answers, use the builder below to capture the fallback intake facts.",
     checklist: [
       "Open the Submissions tab",
       "Link each matching intake submission to the current customer",
       "Confirm linked submissions appear in the customer details header",
     ],
     links: [{ href: "/staff/submissions", label: "Open Submissions tab" }],
+    manualInfoBuilder: true,
   },
   {
     title: "Memorandum of Understanding",
