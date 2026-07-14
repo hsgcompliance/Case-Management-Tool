@@ -217,7 +217,8 @@ export default function SettingsPage() {
   );
   const [taskMode, setTaskMode] = React.useState<TTaskMode | null>(() => profileTaskMode);
   const [calendarPushDefault, setCalendarPushDefault] = React.useState<boolean>(() => Boolean(profileSettings?.calendarPushDefault));
-  const [allowAiAssistance, setAllowAiAssistance] = React.useState<boolean>(() => profileSettings?.allowAiAssistance === true);
+  // Default-ON: only an explicit stored `false` reads as off (matches the backend gate).
+  const [allowAiAssistance, setAllowAiAssistance] = React.useState<boolean>(() => profileSettings?.allowAiAssistance !== false);
   const [calendarMode, setCalendarMode] = React.useState<GoogleIntegrationMode>(() =>
     integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar")
   );
@@ -233,7 +234,7 @@ export default function SettingsPage() {
     setCalendarMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleCalendar"));
     setDriveMode(integrationModeFromSettings(profileSettings as Record<string, unknown> | undefined, "googleDrive"));
     setCalendarPushDefault(Boolean(profileSettings?.calendarPushDefault));
-    setAllowAiAssistance(profileSettings?.allowAiAssistance === true);
+    setAllowAiAssistance(profileSettings?.allowAiAssistance !== false);
   }, [profileSettings?.textScale, profileSettings?.themeMode, profileSettings?.googleIntegrationModes, profileSettings?.calendarPushDefault, profileSettings?.allowAiAssistance]);
 
   React.useEffect(() => {

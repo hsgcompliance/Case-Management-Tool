@@ -1,30 +1,19 @@
 "use client";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HousingPlan section renderers (SCAFFOLD — next build-out)
+// HousingPlan section renderers
 // ─────────────────────────────────────────────────────────────────────────────
-// Home for dedicated renderers of the "housingPlan" section entities:
+// Current state (2026-07-14):
+//   • customerStrengths (summaryBox) — extracts fine; rendered by SummaryBoxEditor
+//     in WorkbookStructuredView (not here).
+//   • goals — rendered by GoalsList.tsx (cards + edit/delete).
+//   • housingBarriers — still renders via the generic DataTable in
+//     WorkbookStructuredView; the remaining build-out is a BarriersList with
+//     per-row edit/delete, mirroring the GoalsList pattern
+//     (deleteCustomerWorkbookRow already accepts any dataTable entityId).
 //
-//   • customerStrengths  — renderKind "summaryBox"  (Client Strengths + CM Summary)
-//   • housingBarriers    — renderKind "dataTable"   (Barrier / Mitigation / Service Tier)
-//   • goals              — renderKind "dataTable"   (SMART goal / objective / target date / status …)
-//
-// Current state:
-//   - goals + housingBarriers are dataTables and ALREADY render via the generic
-//     DataTable in WorkbookStructuredView (section !== "notes" path).
-//   - customerStrengths is "summaryBox", which the extractor does NOT yet support
-//     (SUPPORTED_RENDER_KINDS = keyValueCard, dataTable) → shows "unsupported".
-//
-// To build out (future agent):
-//   1. Backend (functions/.../workbookExtractor.ts): add a summaryBox extractor
-//      and include "summaryBox" in SUPPORTED_RENDER_KINDS so customerStrengths
-//      extracts (it's an anchored 1–2 column block, not a header table).
-//   2. Frontend: implement GoalsList (cards: SMART goal title, objective, target
-//      date, status badge) and a StrengthsSummary renderer here, then route
-//      section === "housingPlan" entities to them in WorkbookStructuredView's
-//      EntityBlock "extracted" switch (mirroring how "notes" routes to NotesList).
-//   3. Goals are bidirectional dataTables → the shared AddRowForm can power an
-//      "+ Add goal" affordance once routed (same pattern as progress notes).
+// This component is an unused generic card renderer kept as the starting point
+// for that BarriersList specialization.
 //
 // See docs/active-projects.local/google-integrations/WORKBOOK_SYSTEM.md.
 

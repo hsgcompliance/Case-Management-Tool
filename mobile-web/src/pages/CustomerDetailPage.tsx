@@ -995,12 +995,28 @@ function LoadMoreTrigger({ onVisible }: { onVisible: () => void }) {
   return <div ref={ref} className="h-1" />;
 }
 
+const SESSION_SYNC_CHIPS = [
+  { key: "all" as const, label: "All" },
+  { key: "synced" as const, label: "Synced" },
+  { key: "unsynced" as const, label: "Not synced" },
+];
+type SessionSyncFilter = (typeof SESSION_SYNC_CHIPS)[number]["key"];
+
 function SessionsTab({ customer, user }: { customer: Customer; user: User | null }) {
   const navigate = useNavigate();
   const [range, setRange] = useState<DateRangeKey>("month");
+  const [syncFilter, setSyncFilter] = useState<SessionSyncFilter>("all");
 
   const q = useCustomerSessions(user?.uid, customer.id, range);
   const sessions = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  // Workbook synced/not-synced filter (list only — pendingCount/Sync all still
+  // look at every loaded session so nothing silently drops out of a bulk sync).
+  const visibleSessions = useMemo(() => {
+    if (syncFilter === "all") return sessions;
+    return sessions.filter((s) =>
+      syncFilter === "synced" ? s.workbookSynced === true : s.workbookSynced !== true,
+    );
+  }, [sessions, syncFilter]);
 
   const customerHasWorkbook = !!getWorkbookLink(customer);
   const sync = useSessionSync(user, { customerHasWorkbook });
@@ -1012,7 +1028,7 @@ function SessionsTab({ customer, user }: { customer: Customer; user: User | null
   const [editing, setEditing] = useState<TCmActivity | null>(null);
   const [syncingDraftId, setSyncingDraftId] = useState<string | null>(null);
 
-  const grouped = useMemo(() => groupByDate(sessions), [sessions]);
+  const grouped = useMemo(() => groupByDate(visibleSessions), [visibleSessions]);
   const pendingCount = sync.pendingCount(sessions) + drafts.length;
 
   async function flushDraft(draft: OutboxEntry) {
@@ -1114,6 +1130,23 @@ function SessionsTab({ customer, user }: { customer: Customer; user: User | null
             onClick={() => setRange(chip.key)}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border flex-shrink-0 transition-colors ${
               range === chip.key ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200"
+            }`}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Workbook sync filter chips */}
+      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none -mx-1 px-1">
+        <span className="text-[11px] font-semibold text-slate-400 flex-shrink-0">Workbook</span>
+        {SESSION_SYNC_CHIPS.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => setSyncFilter(chip.key)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-full border flex-shrink-0 transition-colors ${
+              syncFilter === chip.key ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-500 border-slate-200"
             }`}
           >
             {chip.label}

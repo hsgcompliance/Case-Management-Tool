@@ -1,9 +1,13 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import type { User } from "firebase/auth";
 import { useAuth } from "@/hooks/useAuth";
 import { useCmActivitiesFeed, type ActivityFeedFilters } from "@/hooks/useCmActivitiesFeed";
 import { useArchiveActivity } from "@/hooks/useArchiveActivity";
 import { useOutboxAutoFlush } from "@/hooks/useOutboxAutoFlush";
+import { useCustomer, getWorkbookLink } from "@/hooks/useCustomers";
+import { useSessionSync } from "@/hooks/useSessionSync";
+import { SyncChip, SyncButton } from "@/components/SyncControls";
 import { DATE_RANGE_CHIPS, type DateRangeKey } from "@/lib/dateRange";
 import type { TCmActivity, TCmActivityType } from "@hdb/contracts";
 
@@ -15,8 +19,71 @@ function fmtDateLong(iso: string): string {
   });
 }
 
-function ActivityDetailSheet({ activity, onClose, onCustomerClick }: {
+/**
+ * Workbook sync status + later-sync action inside the detail sheet. The feed
+ * spans customers, so the linked-workbook check is done here (one customer) —
+ * not per row. Sync is restricted to the workbook push; the backend dedupes
+ * appended progress notes by date + time, so a re-push can't double-write.
+ */
+function WorkbookSyncSection({ activity, user }: { activity: TCmActivity; user: User | null }) {
+  const { data: customer, isLoading } = useCustomer(activity.customerId);
+  const customerHasWorkbook = customer ? !!getWorkbookLink(customer) : false;
+  const sync = useSessionSync(user, { customerHasWorkbook });
+  const [pushed, setPushed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const synced = activity.workbookSynced === true || pushed;
+  const syncing = sync.isSyncing(activity.id);
+
+  async function handleSync() {
+    setError(null);
+    try {
+      const result = await sync.syncOne(activity, { only: { calendar: false } });
+      if (result.workbook === "ok") {
+        setPushed(true);
+      } else if (result.workbook === "not_connected") {
+        setError("Connect Google Drive in Settings to push notes to the workbook.");
+      } else if (result.workbook === "not_linked") {
+        setError("No workbook is linked to this customer.");
+      } else if (result.errors.length) {
+        setError(result.errors.join(" "));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sync failed — please try again.");
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="text-sm">📓</span>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex-1">Workbook</p>
+        <SyncChip kind={syncing ? "syncing" : synced ? "synced" : "notsynced"} />
+      </div>
+      {!synced && (
+        <div className="mt-2.5 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500 flex-1">
+            {isLoading
+              ? "Checking for a linked workbook…"
+              : !customerHasWorkbook
+                ? "No workbook linked to this customer."
+                : !sync.driveConnected
+                  ? "Connect Google Drive in Settings to sync."
+                  : "This session hasn't been pushed as a progress note yet."}
+          </p>
+          {customerHasWorkbook && sync.driveConnected && (
+            <SyncButton onClick={() => void handleSync()} busy={syncing} label="Sync now" />
+          )}
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function ActivityDetailSheet({ activity, user, onClose, onCustomerClick }: {
   activity: TCmActivity;
+  user: User | null;
   onClose: () => void;
   onCustomerClick: (id: string, name: string) => void;
 }) {
@@ -86,6 +153,9 @@ function ActivityDetailSheet({ activity, onClose, onCustomerClick }: {
             )}
           </div>
 
+          {/* Workbook sync status + later sync */}
+          <WorkbookSyncSection activity={activity} user={user} />
+
           {/* Go to customer */}
           {activity.customerName && (
             <button
@@ -115,6 +185,14 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+export type SyncFilterKey = "all" | "synced" | "unsynced";
+
+const SYNC_OPTIONS: { value: SyncFilterKey; label: string }[] = [
+  { value: "all",      label: "All" },
+  { value: "synced",   label: "Synced" },
+  { value: "unsynced", label: "Not synced" },
+];
 
 const TYPE_OPTIONS: { value: TCmActivityType | "all"; label: string }[] = [
   { value: "all",         label: "All" },
@@ -257,9 +335,12 @@ function SwipeableActivityRow({ activity, onTap, onArchive }: {
               <p className="text-sm text-slate-500 mt-1 leading-snug line-clamp-2">{activity.note}</p>
             )}
           </div>
-          <svg className="w-4 h-4 text-slate-300 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m9 18 6-6-6-6" />
-          </svg>
+          <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+            <SyncChip kind={activity.workbookSynced ? "synced" : "notsynced"} />
+            <svg className="w-4 h-4 text-slate-300 mt-0.5 self-end" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m9 18 6-6-6-6" />
+            </svg>
+          </div>
         </div>
       </button>
     </div>
@@ -320,6 +401,7 @@ export function ActivityFeedPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TCmActivityType | "all">("all");
   const [rangeFilter, setRangeFilter] = useState<DateRangeKey>("month");
+  const [syncFilter, setSyncFilter] = useState<SyncFilterKey>("all");
   const [selected, setSelected] = useState<TCmActivity | null>(null);
   const archive = useArchiveActivity(user?.uid);
 
@@ -348,14 +430,16 @@ export function ActivityFeedPage() {
     [data],
   );
 
-  // Client-side search by customer name
+  // Client-side search by customer name + workbook sync filter
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return allActivities;
-    return allActivities.filter(
-      (a) => (a.customerName ?? "").toLowerCase().includes(q),
-    );
-  }, [allActivities, search]);
+    return allActivities.filter((a) => {
+      if (q && !(a.customerName ?? "").toLowerCase().includes(q)) return false;
+      if (syncFilter === "synced" && a.workbookSynced !== true) return false;
+      if (syncFilter === "unsynced" && a.workbookSynced === true) return false;
+      return true;
+    });
+  }, [allActivities, search, syncFilter]);
 
   // Group by date
   const grouped = useMemo(() => {
@@ -379,6 +463,7 @@ export function ActivityFeedPage() {
       {selected && (
         <ActivityDetailSheet
           activity={selected}
+          user={user ?? null}
           onClose={() => setSelected(null)}
           onCustomerClick={(id) => { setSelected(null); goToCustomer(id); }}
         />
@@ -436,7 +521,7 @@ export function ActivityFeedPage() {
         </div>
 
         {/* Type filter pills */}
-        <div className="px-4 pb-3 flex gap-2 overflow-x-auto scrollbar-none">
+        <div className="px-4 pb-2 flex gap-2 overflow-x-auto scrollbar-none">
           {TYPE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
@@ -445,6 +530,25 @@ export function ActivityFeedPage() {
               className={`text-sm font-medium px-3 py-1.5 rounded-full border flex-shrink-0 transition-colors ${
                 typeFilter === opt.value
                   ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-white text-slate-500 border-slate-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Workbook sync filter pills */}
+        <div className="px-4 pb-3 flex items-center gap-2 overflow-x-auto scrollbar-none">
+          <span className="text-xs font-semibold text-slate-400 flex-shrink-0">Workbook</span>
+          {SYNC_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setSyncFilter(opt.value)}
+              className={`text-sm font-medium px-3 py-1.5 rounded-full border flex-shrink-0 transition-colors ${
+                syncFilter === opt.value
+                  ? "bg-emerald-600 text-white border-emerald-600"
                   : "bg-white text-slate-500 border-slate-200"
               }`}
             >
@@ -512,9 +616,13 @@ export function ActivityFeedPage() {
               </svg>
             </div>
             <p className="text-slate-500 font-medium">
-              {search ? `No entries matching "${search}"` : "No activity logged yet"}
+              {search
+                ? `No entries matching "${search}"`
+                : syncFilter !== "all"
+                  ? "No sessions match this filter"
+                  : "No activity logged yet"}
             </p>
-            {!search && (
+            {!search && syncFilter === "all" && (
               <button
                 type="button"
                 onClick={() => navigate("/log")}

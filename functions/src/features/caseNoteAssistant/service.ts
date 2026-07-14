@@ -117,7 +117,10 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
   const profile = userSnap.data() || {};
   const userLimits = config.userQuotaOverrides[uid] ?? {};
   if (userLimits.enabled !== true) throw new CaseNoteAssistantError(403, "AI assistant access has not been enabled for your account.");
-  if (profile.settings?.allowAiAssistance !== true) throw new CaseNoteAssistantError(403, "Enable AI assistance in your personal settings before using this feature.");
+  // Personal opt-in is default-ON: only an explicit `false` (user turned it off
+  // in Settings) blocks. Admin gates above (org enabled + per-user override)
+  // still govern who can use AI at all.
+  if (profile.settings?.allowAiAssistance === false) throw new CaseNoteAssistantError(403, "AI assistance is turned off in your personal settings.");
   const wb = customer.customerDrive?.linkedWorkbooks?.tss;
   const customerVariant = variantOf(customer);
   if (!String(wb?.spreadsheetId ?? "").trim() || !customerVariant || !config.allowedWorkbookVariants.map(normVariant).includes(customerVariant)) throw new CaseNoteAssistantError(403, "AI assistant is only available for payer-linked customers.");
@@ -201,7 +204,10 @@ export async function generateSmartGoalSuggestion(caller: Record<string, unknown
   const profile = userSnap.data() || {};
   const userLimits = config.userQuotaOverrides[uid] ?? {};
   if (userLimits.enabled !== true) throw new CaseNoteAssistantError(403, "AI assistant access has not been enabled for your account.");
-  if (profile.settings?.allowAiAssistance !== true) throw new CaseNoteAssistantError(403, "Enable AI assistance in your personal settings before using this feature.");
+  // Personal opt-in is default-ON: only an explicit `false` (user turned it off
+  // in Settings) blocks. Admin gates above (org enabled + per-user override)
+  // still govern who can use AI at all.
+  if (profile.settings?.allowAiAssistance === false) throw new CaseNoteAssistantError(403, "AI assistance is turned off in your personal settings.");
   const wb = customer.customerDrive?.linkedWorkbooks?.tss;
   const customerVariant = variantOf(customer);
   if (!String(wb?.spreadsheetId ?? "").trim() || !customerVariant || !config.allowedWorkbookVariants.map(normVariant).includes(customerVariant)) throw new CaseNoteAssistantError(403, "AI assistant is only available for payer-linked customers.");

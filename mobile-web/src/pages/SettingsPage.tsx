@@ -8,6 +8,45 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { clearWebsiteCache } from "@/lib/clearCache";
 
+function PrefToggleRow({
+  emoji,
+  title,
+  description,
+  checked,
+  onToggle,
+}: {
+  emoji: string;
+  title: string;
+  description: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-4">
+      <span className="text-lg">{emoji}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-800">{title}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onToggle}
+        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${
+          checked ? "bg-indigo-600" : "bg-slate-200"
+        }`}
+      >
+        <span
+          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -317,32 +356,38 @@ export function SettingsPage() {
           busy={driveIntegration.connecting || driveIntegration.disconnecting}
         />
 
-        {connected && (
-          <div className="flex items-center gap-3 px-4 py-4">
-            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-600">
-              DEF
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-800">Add to calendar by default</p>
-              <p className="text-xs text-slate-400 mt-0.5">Pre-check the calendar toggle when logging sessions</p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={prefs.calendarDefault}
-              onClick={() => updatePrefs({ calendarDefault: !prefs.calendarDefault })}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${
-                prefs.calendarDefault ? "bg-indigo-600" : "bg-slate-200"
-              }`}
-            >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                  prefs.calendarDefault ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
-          </div>
-        )}
+      </div>
+
+      {/* Session defaults — all ON by default for every user; turn off here. */}
+      <div className="mx-4 mb-5 bg-white rounded-xl border border-slate-100 shadow-sm divide-y divide-slate-100">
+        <PrefToggleRow
+          emoji="📅"
+          title="Add to calendar by default"
+          description="Pre-check the calendar toggle when logging sessions"
+          checked={prefs.calendarDefault}
+          onToggle={() => updatePrefs({ calendarDefault: !prefs.calendarDefault })}
+        />
+        <PrefToggleRow
+          emoji="📓"
+          title="Push to workbook by default"
+          description="Pre-check the workbook toggle when logging sessions"
+          checked={prefs.workbookPushDefault}
+          onToggle={() => updatePrefs({ workbookPushDefault: !prefs.workbookPushDefault })}
+        />
+        <PrefToggleRow
+          emoji="⏱"
+          title="Require session time"
+          description="A start time must be entered before a session can be saved"
+          checked={prefs.requireSessionTime}
+          onToggle={() => updatePrefs({ requireSessionTime: !prefs.requireSessionTime })}
+        />
+        <PrefToggleRow
+          emoji="✨"
+          title="AI assistance"
+          description="AI case-note suggestions, where your organization allows them"
+          checked={prefs.allowAiAssistance}
+          onToggle={() => updatePrefs({ allowAiAssistance: !prefs.allowAiAssistance })}
+        />
       </div>
 
       {/* Cache controls */}

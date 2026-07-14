@@ -9,6 +9,7 @@ export interface MobilePrefs {
   timeInterval: 5 | 15;
   calendarDefault: boolean;
   workbookPushDefault: boolean;
+  requireSessionTime: boolean;
   allowAiAssistance: boolean;
   googleIntegrationModes: {
     googleCalendar: "permanent" | "temporary" | "off";
@@ -16,12 +17,16 @@ export interface MobilePrefs {
   };
 }
 
+// calendarDefault / workbookPushDefault / requireSessionTime / allowAiAssistance
+// are opt-OUT: they default ON for every user until the user explicitly turns
+// them off in Settings (stored value `false`).
 const DEFAULTS: MobilePrefs = {
   timeFormat: "12h",
   timeInterval: 15,
-  calendarDefault: false,
-  workbookPushDefault: false,
-  allowAiAssistance: false,
+  calendarDefault: true,
+  workbookPushDefault: true,
+  requireSessionTime: true,
+  allowAiAssistance: true,
   googleIntegrationModes: { googleCalendar: "off", googleDrive: "off" },
 };
 
@@ -44,9 +49,10 @@ export function useUserPrefs(uid: string | undefined) {
         timeInterval: ([5, 15].includes(s.timeInterval as number)
           ? s.timeInterval
           : 15) as 5 | 15,
-        calendarDefault: s.calendarDefault === true,
-        workbookPushDefault: s.workbookPushDefault === true,
-        allowAiAssistance: s.allowAiAssistance === true,
+        calendarDefault: s.calendarDefault !== false,
+        workbookPushDefault: s.workbookPushDefault !== false,
+        requireSessionTime: s.requireSessionTime !== false,
+        allowAiAssistance: s.allowAiAssistance !== false,
         googleIntegrationModes: {
           googleCalendar: integrationMode((s.googleIntegrationModes as Record<string, unknown> | undefined)?.googleCalendar),
           googleDrive: integrationMode((s.googleIntegrationModes as Record<string, unknown> | undefined)?.googleDrive),

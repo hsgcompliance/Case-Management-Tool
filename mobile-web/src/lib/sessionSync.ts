@@ -132,7 +132,7 @@ export function computeSyncState(session: TCmActivity, ctx: SyncContext): SyncSt
 
 export interface SyncResult {
   calendar: "ok" | "skip" | "not_connected" | "error";
-  workbook: "ok" | "skip" | "not_connected" | "not_linked" | "error";
+  workbook: "ok" | "skip" | "not_connected" | "not_linked" | "not_found" | "error";
   errors: string[];
   /** True when every attempted push succeeded (nothing left pending+actionable). */
   ok: boolean;
@@ -205,6 +205,9 @@ export async function syncSession(
           values,
         });
         if (resp.ok) {
+          // resp.duplicate means the backend found a progress-note row with the
+          // same date + time already in the sheet and skipped the write — the
+          // note is there either way, so mark the session synced the same way.
           workbook = "ok";
           try {
             await updateDoc(doc(db, "cmActivities", session.id), {
@@ -220,6 +223,12 @@ export async function syncSession(
           workbook = "not_linked";
         } else if (resp.error === "google_not_connected") {
           workbook = "not_connected";
+        } else if (resp.error === "workbook_not_found") {
+          workbook = "not_found";
+          errors.push("Workbook: the linked workbook could not be found — it may have been moved or deleted.");
+        } else if (resp.error === "workbook_access_denied") {
+          workbook = "error";
+          errors.push("Workbook: your Google account doesn't have access to the linked workbook.");
         } else {
           workbook = "error";
           errors.push(`Workbook: ${resp.error ?? "failed"}`);

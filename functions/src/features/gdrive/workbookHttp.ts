@@ -21,6 +21,7 @@ import {
   extractWorkbook,
   appendWorkbookRow,
   patchWorkbookBudget,
+  createWorkbookBudget,
   deleteWorkbookRow,
   patchWorkbookScaffold,
   WorkbookNotLinkedError,
@@ -335,6 +336,18 @@ const WorkbookScaffoldPatchBody = z.object({
 
 const WorkbookBudgetPatchBody = z.object({
   customerId: z.string().min(1),
+  sheetTitle: z.string().optional(),
+  items: z.array(z.object({
+    rowKey: z.string().regex(/^row-\d+$/),
+    amount: z.string(),
+    expectedLabel: z.string().optional(),
+  })).max(200),
+});
+
+const WorkbookBudgetCreateBody = z.object({
+  customerId: z.string().min(1),
+  budgetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  sourceSheetTitle: z.string().optional(),
   items: z.array(z.object({
     rowKey: z.string().regex(/^row-\d+$/),
     amount: z.string(),
@@ -379,6 +392,22 @@ export const appendCustomerWorkbookRow = secureHandler(
         res.status(422).json({ ok: false, error: String(err?.message || "entity_not_writable") });
         return;
       }
+      if (String(err?.message) === "forbidden") {
+        res.status(403).json({ ok: false, error: "forbidden" });
+        return;
+      }
+      // Google API failures on the linked sheet itself: 404 → the spreadsheet
+      // was deleted/moved after linking; 403 → the user's Google account lost
+      // access. Structured so the app can explain instead of a generic failure.
+      const googleStatus = Number(err?.code ?? err?.response?.status ?? 0);
+      if (googleStatus === 404) {
+        res.status(404).json({ ok: false, error: "workbook_not_found" });
+        return;
+      }
+      if (googleStatus === 403) {
+        res.status(403).json({ ok: false, error: "workbook_access_denied" });
+        return;
+      }
       const isZod = err?.name === "ZodError";
       res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_append_failed") });
     }
@@ -412,6 +441,7 @@ export const patchCustomerWorkbookBudget = secureHandler(
         customerId: body.customerId,
         uid,
         orgId,
+        sheetTitle: body.sheetTitle,
         items: body.items,
         caller,
       });
@@ -441,6 +471,60 @@ export const patchCustomerWorkbookBudget = secureHandler(
       }
       const isZod = err?.name === "ZodError";
       res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_budget_patch_failed") });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+);
+
+export const createCustomerWorkbookBudget = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+
+    try {
+      const body = WorkbookBudgetCreateBody.parse(req.body ?? {});
+      const result = await createWorkbookBudget({
+        customerId: body.customerId,
+        uid,
+        orgId,
+        budgetDate: body.budgetDate,
+        sourceSheetTitle: body.sourceSheetTitle,
+        items: body.items,
+        caller,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      if (err instanceof WorkbookNotConnectedError || String(err?.message) === "google_not_connected") {
+        res.status(409).json({ ok: false, error: "google_not_connected", category: "not_connected", reconnectService: "googleDrive" });
+        return;
+      }
+      if (err instanceof WorkbookNotLinkedError || String(err?.message) === "workbook_not_linked") {
+        res.status(404).json({ ok: false, error: "workbook_not_linked" });
+        return;
+      }
+      if (err instanceof WorkbookRowOutOfSyncError) {
+        res.status(409).json({
+          ok: false,
+          error: String(err?.message || "budget_row_out_of_sync"),
+          manualActionRequired: true,
+          message: "The source budget rows no longer match what was loaded. Open the workbook and make this change manually.",
+        });
+        return;
+      }
+      if (err instanceof WorkbookEntityNotWritableError) {
+        res.status(422).json({ ok: false, error: String(err?.message || "entity_not_writable") });
+        return;
+      }
+      const isZod = err?.name === "ZodError";
+      res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_budget_create_failed") });
     }
   },
   {

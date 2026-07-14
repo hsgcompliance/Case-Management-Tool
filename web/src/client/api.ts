@@ -377,6 +377,7 @@ export const endpointsLoose = {
   getWorkbookData:                          { method: 'GET',  path: 'getWorkbookData' },
   appendCustomerWorkbookRow:                { method: 'POST', path: 'appendCustomerWorkbookRow' },
   patchCustomerWorkbookBudget:              { method: 'POST', path: 'patchCustomerWorkbookBudget' },
+  createCustomerWorkbookBudget:             { method: 'POST', path: 'createCustomerWorkbookBudget' },
   patchCustomerWorkbookScaffold:            { method: 'POST', path: 'patchCustomerWorkbookScaffold' },
   deleteCustomerWorkbookRow:                { method: 'POST', path: 'deleteCustomerWorkbookRow' },
 

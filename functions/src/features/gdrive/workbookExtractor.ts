@@ -654,6 +654,13 @@ type BudgetSummaryOut = {
   amount: TssNS.TssExtractedCell;
 };
 
+type BudgetSnapshotOut = {
+  sheetTitle: string;
+  dateLabel?: string;
+  sections: BudgetSectionOut[];
+  summaryRows: BudgetSummaryOut[];
+};
+
 function budgetStatic(entity: TssNS.TssDisplayEntityConfig): any {
   return entity.source.staticContent && typeof entity.source.staticContent === "object"
     ? entity.source.staticContent as any
@@ -669,6 +676,34 @@ function budgetRowsFromSection(section: any): number[] {
     rows.push(...budgetRowsFromSection(sub));
   }
   return rows;
+}
+
+function isBudgetSheetTitle(title: string): boolean {
+  const normalized = normKeepNum(title);
+  return normalized === "budget" || /^budget \d{4}[.\-]\d{2}[.\-]\d{2}$/.test(normalized);
+}
+
+function budgetDateLabel(title: string): string | undefined {
+  const m = /^budget\s+(\d{4})[.\-](\d{2})[.\-](\d{2})$/i.exec(String(title || "").trim());
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : undefined;
+}
+
+function resolveBudgetSheetTitle(
+  cfg: TssNS.TssWorksheetConfig,
+  sheets: SheetMeta[],
+  requestedTitle?: string,
+): string | null {
+  const requested = String(requestedTitle || "").trim();
+  if (requested) {
+    const exact = sheets.find((s) => s.title === requested);
+    const configuredBase = resolveSheetTitle(cfg, "budget", sheets);
+    return exact && (isBudgetSheetTitle(exact.title) || exact.title === configuredBase) ? exact.title : null;
+  }
+  const dated = sheets
+    .filter((s) => budgetDateLabel(s.title))
+    .sort((a, b) => String(budgetDateLabel(b.title)).localeCompare(String(budgetDateLabel(a.title))));
+  if (dated[0]) return dated[0].title;
+  return resolveSheetTitle(cfg, "budget", sheets);
 }
 
 function extractBudgetSection(grid: Grid, section: any, itemCol: number, amountCol: number): BudgetSectionOut {
@@ -713,6 +748,8 @@ function extractBudgetSection(grid: Grid, section: any, itemCol: number, amountC
 function extractBudgetEntity(
   entity: TssNS.TssDisplayEntityConfig,
   grid: Grid,
+  sheetTitle: string,
+  snapshots: BudgetSnapshotOut[] = [],
 ): { budget: unknown; status: TssNS.TssExtractedEntityStatus; warnings: TssNS.TssExtractionWarning[] } {
   const staticContent = budgetStatic(entity);
   if (!staticContent) {
@@ -740,10 +777,13 @@ function extractBudgetEntity(
 
   return {
     budget: {
+      sheetTitle,
+      dateLabel: budgetDateLabel(sheetTitle),
       amountColumn: String(staticContent.amountColumn || "B"),
       itemColumn: String(staticContent.itemColumn || "A"),
       sections,
       summaryRows,
+      snapshots,
     },
     status: sections.length ? "extracted" : "empty",
     warnings: [],
@@ -792,7 +832,7 @@ export async function extractWorkbook(args: {
   // 5. Cache sheet grids we read (avoid re-reading the same tab).
   const gridCache = new Map<string, Grid>();
   const getGrid = async (sheetId: string): Promise<{ grid: Grid | null; title: string | null }> => {
-    const title = resolveSheetTitle(cfg, sheetId, sheets);
+    const title = sheetId === "budget" ? resolveBudgetSheetTitle(cfg, sheets) : resolveSheetTitle(cfg, sheetId, sheets);
     if (!title) return { grid: null, title: null };
     if (!gridCache.has(title)) gridCache.set(title, await readSheetGrid(sheetsApi, spreadsheetId, title));
     return { grid: gridCache.get(title)!, title };
@@ -838,7 +878,36 @@ export async function extractWorkbook(args: {
         const { values, warnings, status } = extractCover(entity, grid);
         entities.push({ ...base, status, values, ...(warnings.length ? { warnings } : {}) });
       } else if (entity.renderKind === "budgetTable") {
-        const { budget, warnings, status } = extractBudgetEntity(entity, grid);
+        const staticContent = budgetStatic(entity);
+        const snapshots: BudgetSnapshotOut[] = [];
+        if (staticContent) {
+          const itemCol = colToIdx(String(staticContent.itemColumn || "A"));
+          const amountCol = colToIdx(String(staticContent.amountColumn || "B"));
+          for (const sheet of sheets.filter((s) => isBudgetSheetTitle(s.title)).sort((a, b) => a.title.localeCompare(b.title))) {
+            const snapshotGrid = sheet.title === title
+              ? grid
+              : gridCache.get(sheet.title) ?? await readSheetGrid(sheetsApi, spreadsheetId, sheet.title);
+            if (!gridCache.has(sheet.title)) gridCache.set(sheet.title, snapshotGrid);
+            snapshots.push({
+              sheetTitle: sheet.title,
+              ...(budgetDateLabel(sheet.title) ? { dateLabel: budgetDateLabel(sheet.title) } : {}),
+              sections: (Array.isArray(staticContent.sections) ? staticContent.sections : [])
+                .map((section: any) => extractBudgetSection(snapshotGrid, section, itemCol, amountCol)),
+              summaryRows: (Array.isArray(staticContent.summaryRows) ? staticContent.summaryRows : [])
+                .map((row: any) => {
+                  const oneBasedRow = Number(row?.row || 0);
+                  return {
+                    id: String(row?.id || `summary-${oneBasedRow}`),
+                    label: String(row?.label || gridCell(snapshotGrid, oneBasedRow - 1, itemCol) || "Summary"),
+                    rowKey: `row-${oneBasedRow}`,
+                    amount: makeCell(gridCell(snapshotGrid, oneBasedRow - 1, amountCol), "currency"),
+                  };
+                })
+                .filter((row: BudgetSummaryOut) => row.rowKey !== "row-0"),
+            });
+          }
+        }
+        const { budget, warnings, status } = extractBudgetEntity(entity, grid, title, snapshots);
         entities.push({ ...base, status, budget, ...(warnings.length ? { warnings } : {}) });
       } else if (entity.renderKind === "summaryBox") {
         const { rows, warnings, status } = extractDataTable(entity, grid, variant);
@@ -1150,6 +1219,72 @@ export async function patchWorkbookScaffold(args: {
   return { spreadsheetId, updated: data.length, warnings };
 }
 
+// ── Progress-note duplicate detection ────────────────────────────────────────
+// A later "Sync to workbook" (per-row Sync, Sync all, offline flush, or a plain
+// re-tap after a partial failure) must never write the same note twice. Rows are
+// matched on date + start time; cell values are normalized so Sheets display
+// formats ("6/18/2026", "2:30 PM") match the app's canonical values
+// ("2026-06-18", "14:30").
+
+function normDateKey(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (m) return `${+m[1]}-${+m[2]}-${+m[3]}`;
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(s);
+  if (m) {
+    const y = +m[3] < 100 ? 2000 + +m[3] : +m[3];
+    return `${y}-${+m[1]}-${+m[2]}`;
+  }
+  return null;
+}
+
+function normTimeKey(v: unknown): number | null {
+  const s = String(v ?? "").trim().toUpperCase();
+  if (!s) return null;
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/.exec(s);
+  if (!m) return null;
+  let h = +m[1];
+  const min = +m[2];
+  if (h > 23 || min > 59) return null;
+  if (m[3] === "PM" && h < 12) h += 12;
+  if (m[3] === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+/**
+ * 0-based grid row of an existing progress note matching the incoming values,
+ * or null. Match rule: same date AND same start time; when the incoming note
+ * has no time, fall back to an exact summary match so two legitimately
+ * different same-day notes are never collapsed into one.
+ */
+function findDuplicateProgressRow(args: {
+  grid: Grid;
+  colMap: Map<string, number>;
+  startRow: number;
+  endRow: number;
+  values: Record<string, string>;
+}): number | null {
+  const dateCol = args.colMap.get("progressDate");
+  if (dateCol == null) return null;
+  const wantDate = normDateKey(args.values.progressDate);
+  if (!wantDate) return null;
+  const timeCol = args.colMap.get("startTime");
+  const summaryCol = args.colMap.get("summary");
+  const wantTime = normTimeKey(args.values.startTime);
+  const wantSummary = String(args.values.summary ?? "").trim();
+
+  for (let r = args.startRow; r < args.endRow; r++) {
+    if (normDateKey(gridCell(args.grid, r, dateCol)) !== wantDate) continue;
+    if (wantTime != null) {
+      if (timeCol != null && normTimeKey(gridCell(args.grid, r, timeCol)) === wantTime) return r;
+      continue;
+    }
+    if (wantSummary && summaryCol != null && gridCell(args.grid, r, summaryCol) === wantSummary) return r;
+  }
+  return null;
+}
+
 /**
  * Write a row to a dataTable entity. Strict per-user server OAuth so the write is
  * attributed to the signed-in user. Three modes:
@@ -1172,7 +1307,7 @@ export async function appendWorkbookRow(args: {
   /** Required for mode "update": the "row-N" key from extraction. */
   rowKey?: string;
   caller?: Record<string, unknown>;
-}): Promise<{ rowKey: string; spreadsheetId: string }> {
+}): Promise<{ rowKey: string; spreadsheetId: string; duplicate?: boolean }> {
   const { customerId, uid, orgId, entityId, values } = args;
   const mode = args.mode ?? "append";
 
@@ -1260,6 +1395,22 @@ export async function appendWorkbookRow(args: {
     if (rowHasContent(grid, r, contentCols)) lastContent = r;
   }
 
+  // 4a. Progress-note dedupe: if a note with the same date + time is already in
+  //     the active section, report success with the EXISTING row instead of
+  //     appending a second copy (`duplicate: true` for observability).
+  if (mode !== "update" && entityId === "progressNotes") {
+    const dupRow = findDuplicateProgressRow({
+      grid,
+      colMap,
+      startRow: start,
+      endRow: anchorRow >= 0 ? anchorRow : lastContent >= 0 ? lastContent + 1 : start,
+      values,
+    });
+    if (dupRow != null) {
+      return { rowKey: `row-${dupRow + 1}`, spreadsheetId, duplicate: true };
+    }
+  }
+
   // 4b. Resolve the 0-based target row per mode.
   let targetRow: number;
   let didInsert = false;
@@ -1326,6 +1477,7 @@ export async function patchWorkbookBudget(args: {
   customerId: string;
   uid: string;
   orgId: string;
+  sheetTitle?: string;
   items: Array<{ rowKey: string; amount: string; expectedLabel?: string }>;
   caller?: Record<string, unknown>;
 }): Promise<{ spreadsheetId: string; updated: number }> {
@@ -1354,7 +1506,7 @@ export async function patchWorkbookBudget(args: {
   const sheets: SheetMeta[] = (meta.data?.sheets ?? [])
     .map((s: any) => ({ title: String(s?.properties?.title ?? ""), sheetId: Number(s?.properties?.sheetId ?? 0) }))
     .filter((s: SheetMeta) => s.title);
-  const sheetTitle = resolveSheetTitle(cfg, String(entity.source.sheetId || "budget"), sheets);
+  const sheetTitle = resolveBudgetSheetTitle(cfg, sheets, args.sheetTitle);
   if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
 
   const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
@@ -1391,6 +1543,99 @@ export async function patchWorkbookBudget(args: {
   }
 
   return { spreadsheetId, updated: data.length };
+}
+
+export async function createWorkbookBudget(args: {
+  customerId: string;
+  uid: string;
+  orgId: string;
+  budgetDate: string;
+  sourceSheetTitle?: string;
+  items: Array<{ rowKey: string; amount: string; expectedLabel?: string }>;
+  caller?: Record<string, unknown>;
+}): Promise<{ spreadsheetId: string; sheetTitle: string; updated: number }> {
+  const { customerId, uid, orgId } = args;
+  const snap = await admin.firestore().collection("customers").doc(customerId).get();
+  const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  if (customer && args.caller && !canAccessDoc(args.caller as any, customer)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
+  const spreadsheetId = String(customer?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
+  if (!spreadsheetId) throw new WorkbookNotLinkedError();
+
+  const mDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(args.budgetDate || "").trim());
+  if (!mDate) throw new WorkbookEntityNotWritableError("invalid_budget_date");
+  const newSheetTitle = `Budget ${mDate[1]}.${mDate[2]}.${mDate[3]}`;
+
+  const orgConfig = await getOrgGDriveConfig(orgId);
+  const override = orgConfig.worksheetConfig ?? null;
+  const cfg = tss.resolveTssWorksheetConfig(override);
+  const entity = cfg.entities.budget as TssNS.TssDisplayEntityConfig | undefined;
+  if (!entity || entity.renderKind !== "budgetTable") throw new WorkbookEntityNotWritableError("budget_entity_not_found");
+  const staticContent = budgetStatic(entity);
+  if (!staticContent) throw new WorkbookEntityNotWritableError("budget_config_missing");
+
+  const sheetsApi = await getWorkbookSheetsClient({ userUid: uid, requiredScopes: [SHEETS_SCOPE] });
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(title,sheetId,index)",
+  });
+  const sheets: SheetMeta[] = (meta.data?.sheets ?? [])
+    .map((s: any) => ({ title: String(s?.properties?.title ?? ""), sheetId: Number(s?.properties?.sheetId ?? 0) }))
+    .filter((s: SheetMeta) => s.title);
+  if (sheets.some((s) => s.title === newSheetTitle)) throw new WorkbookEntityNotWritableError("budget_sheet_already_exists");
+
+  const sourceTitle = resolveBudgetSheetTitle(cfg, sheets, args.sourceSheetTitle);
+  if (!sourceTitle) throw new WorkbookEntityNotWritableError("source_budget_sheet_not_found");
+  const sourceSheet = sheets.find((s) => s.title === sourceTitle);
+  if (!sourceSheet) throw new WorkbookEntityNotWritableError("source_budget_sheet_not_found");
+
+  const sourceGrid = await readSheetGrid(sheetsApi, spreadsheetId, sourceTitle);
+  const itemCol = colToIdx(String(staticContent.itemColumn || "A"));
+  const amountCol = colToIdx(String(staticContent.amountColumn || "B"));
+  const allowedRows = new Set<number>();
+  for (const section of Array.isArray(staticContent.sections) ? staticContent.sections : []) {
+    for (const row of budgetRowsFromSection(section)) allowedRows.add(Number(row));
+  }
+
+  for (const item of args.items) {
+    const m = /^row-(\d+)$/.exec(String(item.rowKey || ""));
+    if (!m) throw new WorkbookEntityNotWritableError("invalid_row_key");
+    const oneBasedRow = Number(m[1]);
+    if (!allowedRows.has(oneBasedRow)) throw new WorkbookEntityNotWritableError("budget_row_not_editable");
+    const expectedLabel = String(item.expectedLabel ?? "").trim();
+    if (expectedLabel && gridCell(sourceGrid, oneBasedRow - 1, itemCol) !== expectedLabel) {
+      throw new WorkbookRowOutOfSyncError("budget_row_out_of_sync");
+    }
+  }
+
+  await sheetsApi.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{
+        duplicateSheet: {
+          sourceSheetId: sourceSheet.sheetId,
+          newSheetName: newSheetTitle,
+        },
+      }],
+    },
+  });
+
+  const data = args.items.map((item) => {
+    const oneBasedRow = Number(/^row-(\d+)$/.exec(String(item.rowKey || ""))![1]);
+    return {
+      range: `${quoteTitle(newSheetTitle)}!${idxToCol(amountCol)}${oneBasedRow}`,
+      values: [[String(item.amount ?? "").trim()]],
+    };
+  });
+  if (data.length) {
+    await sheetsApi.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: "USER_ENTERED", data },
+    });
+  }
+
+  return { spreadsheetId, sheetTitle: newSheetTitle, updated: data.length };
 }
 
 /**

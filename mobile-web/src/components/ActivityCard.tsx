@@ -1,4 +1,5 @@
 import type { TCmActivity, TCmActivityType } from "@hdb/contracts";
+import { SyncChip } from "@/components/SyncControls";
 
 const TYPE_STYLES: Record<TCmActivityType, { label: string; bg: string; text: string }> = {
   "in-person": { label: "In Person", bg: "bg-green-100", text: "text-green-700" },
@@ -36,6 +37,7 @@ export function ActivityCard({ activity }: Props) {
         {activity.calendarSynced && (
           <span className="text-indigo-400">📅 synced</span>
         )}
+        <SyncChip kind={activity.workbookSynced ? "synced" : "notsynced"} className="ml-auto" />
       </div>
 
       {activity.note && (
