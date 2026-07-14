@@ -25,6 +25,12 @@ import type { tss as TssNS } from "@hdb/contracts";
 // The companion mobile app (same data, same pushes) — linked from the header.
 const MOBILE_APP_URL = "https://housing-db-mobile.web.app";
 
+type SuggestedIdentity = {
+  clientName?: string;
+  dob?: string;
+  hmisCwId?: string;
+};
+
 function driveHeaders() {
   const token = getGoogleDriveAccessToken();
   return token ? { "x-drive-access-token": token } : undefined;
@@ -73,6 +79,153 @@ function KeyValueCard({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function coverDisplay(entity: TssNS.TssExtractedEntity, fieldId: keyof SuggestedIdentity): string {
+  const cell = entity.values?.[fieldId];
+  return String(cell?.displayValue ?? cell?.value ?? "").trim();
+}
+
+function CoverIdentityEditor({
+  customerId,
+  entity,
+  suggestedIdentity,
+  onSaved,
+}: {
+  customerId: string;
+  entity: TssNS.TssExtractedEntity;
+  suggestedIdentity?: SuggestedIdentity;
+  onSaved: () => void;
+}) {
+  const [values, setValues] = React.useState<SuggestedIdentity>(() => ({
+    clientName: coverDisplay(entity, "clientName"),
+    dob: coverDisplay(entity, "dob"),
+    hmisCwId: coverDisplay(entity, "hmisCwId"),
+  }));
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setValues({
+      clientName: coverDisplay(entity, "clientName"),
+      dob: coverDisplay(entity, "dob"),
+      hmisCwId: coverDisplay(entity, "hmisCwId"),
+    });
+  }, [entity]);
+
+  const fillSuggested = () => {
+    setValues((cur) => ({
+      clientName: String(cur.clientName || "").trim() ? cur.clientName : suggestedIdentity?.clientName ?? "",
+      dob: String(cur.dob || "").trim() ? cur.dob : suggestedIdentity?.dob ?? "",
+      hmisCwId: String(cur.hmisCwId || "").trim() ? cur.hmisCwId : suggestedIdentity?.hmisCwId ?? "",
+    }));
+  };
+
+  const hasSuggestion = !!(suggestedIdentity?.clientName || suggestedIdentity?.dob || suggestedIdentity?.hmisCwId);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const resp = (await (api as any).postWith(
+        "patchCustomerWorkbookScaffold",
+        { customerId, cover: values },
+        driveHeaders(),
+      )) as Record<string, unknown>;
+      if (!resp?.ok) {
+        toast(String(resp?.error || "Could not save workbook details."), { type: "error" });
+        return;
+      }
+      toast("Workbook details saved.", { type: "success" });
+      onSaved();
+    } catch (e: unknown) {
+      const body = (e as { meta?: { response?: { error?: string } } })?.meta?.response;
+      toast(String(body?.error || (e as Error)?.message || "Could not save workbook details."), { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <label className="text-xs font-medium text-slate-600">
+          Name
+          <input className="input mt-1 w-full text-sm" value={values.clientName ?? ""} onChange={(e) => setValues((cur) => ({ ...cur, clientName: e.target.value }))} />
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          DOB
+          <input className="input mt-1 w-full text-sm" value={values.dob ?? ""} onChange={(e) => setValues((cur) => ({ ...cur, dob: e.target.value }))} />
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          CW ID
+          <input className="input mt-1 w-full text-sm" value={values.hmisCwId ?? ""} onChange={(e) => setValues((cur) => ({ ...cur, hmisCwId: e.target.value }))} />
+        </label>
+      </div>
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={fillSuggested} disabled={!hasSuggestion || saving}>
+          Fill suggested
+        </button>
+        <button type="button" className="btn btn-sm" onClick={() => void save()} disabled={saving}>
+          {saving ? "Saving..." : "Save details"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SummaryBoxEditor({
+  customerId,
+  entity,
+  onSaved,
+}: {
+  customerId: string;
+  entity: TssNS.TssExtractedEntity;
+  onSaved: () => void;
+}) {
+  const current = String(entity.values?.clientStrengths?.displayValue ?? entity.values?.clientStrengths?.value ?? "").trim();
+  const [clientStrengths, setClientStrengths] = React.useState(current);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => setClientStrengths(current), [current]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const resp = (await (api as any).postWith(
+        "patchCustomerWorkbookScaffold",
+        { customerId, strengths: { clientStrengths } },
+        driveHeaders(),
+      )) as Record<string, unknown>;
+      if (!resp?.ok) {
+        toast(String(resp?.error || "Could not save client strengths."), { type: "error" });
+        return;
+      }
+      toast("Client strengths saved.", { type: "success" });
+      onSaved();
+    } catch (e: unknown) {
+      const body = (e as { meta?: { response?: { error?: string } } })?.meta?.response;
+      toast(String(body?.error || (e as Error)?.message || "Could not save client strengths."), { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <label className="text-xs font-medium text-slate-600">
+        Client Strengths
+        <textarea
+          className="textarea mt-1 min-h-24 w-full text-sm"
+          value={clientStrengths}
+          onChange={(e) => setClientStrengths(e.target.value)}
+        />
+      </label>
+      <div className="mt-3 flex justify-end">
+        <button type="button" className="btn btn-sm" onClick={() => void save()} disabled={saving}>
+          {saving ? "Saving..." : "Save strengths"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -137,6 +290,7 @@ function EntityBlock({
   cfgEntity,
   customerId,
   customerName,
+  suggestedIdentity,
   config,
   goalsForLinking,
   onSaved,
@@ -145,6 +299,7 @@ function EntityBlock({
   cfgEntity: TssNS.TssDisplayEntityConfig | undefined;
   customerId: string;
   customerName?: string;
+  suggestedIdentity?: SuggestedIdentity;
   config: TssNS.TssWorksheetConfig;
   /** Numbered goals from the extract — offered as link targets on new sessions. */
   goalsForLinking: GoalOption[];
@@ -164,6 +319,8 @@ function EntityBlock({
   // Add Goal / Log Session workflows; other writable tables keep the generic form.
   const isGoals = entity.entityId === "goals";
   const isNotes = entity.entityId === "progressNotes";
+  const isCover = entity.entityId === "coverSheet";
+  const isStrengths = entity.entityId === "customerStrengths";
 
   // Append is available for writable dataTable entities that resolved their
   // layout (extracted or empty — both have a known table to append into).
@@ -236,22 +393,33 @@ function EntityBlock({
       body = <StatusNote tone="amber">Couldn’t read this section.</StatusNote>;
       break;
     case "empty":
-      body = <StatusNote tone="slate">No entries yet.</StatusNote>;
+      body = isStrengths
+        ? <SummaryBoxEditor customerId={customerId} entity={entity} onSaved={onSaved} />
+        : <StatusNote tone="slate">No entries yet.</StatusNote>;
       break;
     case "extracted":
-      body = entity.renderKind === "keyValueCard"
-        ? <KeyValueCard entity={entity} cfgEntity={cfgEntity} />
-        : entity.renderKind === "dataTable"
-          ? (entity.section === "notes"
-              ? <NotesList entity={entity} cfgEntity={cfgEntity} onDeleteRow={canAdd ? requestDeleteRow : undefined} />
-              : isGoals
-                ? <GoalsList
-                    entity={entity}
-                    onEditRow={canAdd ? (row) => { setEditingGoalRow(row); setAdding(false); } : undefined}
-                    onDeleteRow={canAdd ? requestDeleteRow : undefined}
-                  />
-                : <DataTable entity={entity} cfgEntity={cfgEntity} />)
-          : <StatusNote tone="slate">Open the Sheet view to see this section.</StatusNote>;
+      body = isCover
+        ? (
+            <div className="space-y-2">
+              <KeyValueCard entity={entity} cfgEntity={cfgEntity} />
+              <CoverIdentityEditor customerId={customerId} entity={entity} suggestedIdentity={suggestedIdentity} onSaved={onSaved} />
+            </div>
+          )
+        : isStrengths
+          ? <SummaryBoxEditor customerId={customerId} entity={entity} onSaved={onSaved} />
+          : entity.renderKind === "keyValueCard"
+            ? <KeyValueCard entity={entity} cfgEntity={cfgEntity} />
+            : entity.renderKind === "dataTable"
+              ? (entity.section === "notes"
+                  ? <NotesList entity={entity} cfgEntity={cfgEntity} onDeleteRow={canAdd ? requestDeleteRow : undefined} />
+                  : isGoals
+                    ? <GoalsList
+                        entity={entity}
+                        onEditRow={canAdd ? (row) => { setEditingGoalRow(row); setAdding(false); } : undefined}
+                        onDeleteRow={canAdd ? requestDeleteRow : undefined}
+                      />
+                    : <DataTable entity={entity} cfgEntity={cfgEntity} />)
+              : <StatusNote tone="slate">Open the Sheet view to see this section.</StatusNote>;
       break;
     default:
       body = null;
@@ -354,16 +522,36 @@ function EntityBlock({
 export function WorkbookStructuredView({
   customerId,
   customerName,
+  suggestedIdentity,
   onOpenSheet,
 }: {
   customerId: string;
   customerName?: string;
+  suggestedIdentity?: SuggestedIdentity;
   /** Switch back to the iframe/Sheet view (used as the fallback affordance). */
   onOpenSheet?: () => void;
 }) {
   const dataQ = useWorkbookData(customerId);
   const { config } = useResolvedTssConfig();
   const driveConnect = useGoogleIntegrationConnect("googleDrive");
+  const result = dataQ.data;
+  const issue = result?.issue ?? null;
+  const extract = result?.extract ?? null;
+
+  React.useEffect(() => {
+    if (!extract?.spreadsheetId || issue || dataQ.isLoading) return;
+    const key = `hdb:tss-scaffold:${customerId}:${extract.spreadsheetId}`;
+    if (typeof window !== "undefined" && window.sessionStorage.getItem(key)) return;
+    if (typeof window !== "undefined") window.sessionStorage.setItem(key, "1");
+
+    void (api as any).postWith(
+      "patchCustomerWorkbookScaffold",
+      { customerId, fillPageNames: true, planDate: "createdAt", seedDefaults: true },
+      driveHeaders(),
+    ).then((resp: Record<string, unknown>) => {
+      if (Number(resp?.updated ?? 0) > 0) void dataQ.refetch();
+    }).catch(() => null);
+  }, [customerId, dataQ, dataQ.isLoading, extract?.spreadsheetId, issue]);
 
   if (dataQ.isLoading) {
     return (
@@ -376,10 +564,6 @@ export function WorkbookStructuredView({
       </div>
     );
   }
-
-  const result = dataQ.data;
-  const issue = result?.issue ?? null;
-  const extract = result?.extract ?? null;
 
   // Auth / scope / not-linked → banner + keep Sheet view available.
   if (issue) {

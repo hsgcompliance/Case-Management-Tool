@@ -21,6 +21,7 @@ import {
   extractWorkbook,
   appendWorkbookRow,
   deleteWorkbookRow,
+  patchWorkbookScaffold,
   WorkbookNotLinkedError,
   WorkbookNotConnectedError,
   WorkbookEntityNotWritableError,
@@ -317,6 +318,21 @@ const AppendRowBody = z.object({
   rowKey: z.string().optional(),
 });
 
+const WorkbookScaffoldPatchBody = z.object({
+  customerId: z.string().min(1),
+  cover: z.object({
+    clientName: z.string().optional(),
+    dob: z.string().optional(),
+    hmisCwId: z.string().optional(),
+  }).optional(),
+  strengths: z.object({
+    clientStrengths: z.string().optional(),
+  }).optional(),
+  fillPageNames: z.boolean().optional(),
+  planDate: z.enum(["createdAt", "today"]).optional(),
+  seedDefaults: z.boolean().optional(),
+});
+
 export const appendCustomerWorkbookRow = secureHandler(
   async (req, res) => {
     const caller = (req as any).user;
@@ -374,6 +390,51 @@ export const appendCustomerWorkbookRow = secureHandler(
 // only customerId — the spreadsheet id is resolved from the customer record and
 // the config is resolved server-side. Fails closed: not connected / missing scope
 // returns a structured error so the UI falls back to the iframe / open-sheet path.
+
+export const patchCustomerWorkbookScaffold = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+
+    try {
+      const body = WorkbookScaffoldPatchBody.parse(req.body ?? {});
+      const result = await patchWorkbookScaffold({
+        customerId: body.customerId,
+        uid,
+        orgId,
+        input: {
+          cover: body.cover,
+          strengths: body.strengths,
+          fillPageNames: body.fillPageNames,
+          planDate: body.planDate,
+          seedDefaults: body.seedDefaults,
+        },
+        caller,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      if (err instanceof WorkbookNotConnectedError || String(err?.message) === "google_not_connected") {
+        res.status(409).json({ ok: false, error: "google_not_connected", category: "not_connected", reconnectService: "googleDrive" });
+        return;
+      }
+      if (err instanceof WorkbookNotLinkedError || String(err?.message) === "workbook_not_linked") {
+        res.status(404).json({ ok: false, error: "workbook_not_linked" });
+        return;
+      }
+      const isZod = err?.name === "ZodError";
+      res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_scaffold_patch_failed") });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "512MiB",
+    timeoutSeconds: 90,
+  },
+);
 
 const DeleteRowBody = z.object({
   customerId: z.string().min(1),

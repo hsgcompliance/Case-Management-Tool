@@ -376,6 +376,7 @@ export const endpointsLoose = {
   copyCustomerWorkbookFromTemplate:         { method: 'POST', path: 'copyCustomerWorkbookFromTemplate' },
   getWorkbookData:                          { method: 'GET',  path: 'getWorkbookData' },
   appendCustomerWorkbookRow:                { method: 'POST', path: 'appendCustomerWorkbookRow' },
+  patchCustomerWorkbookScaffold:            { method: 'POST', path: 'patchCustomerWorkbookScaffold' },
   deleteCustomerWorkbookRow:                { method: 'POST', path: 'deleteCustomerWorkbookRow' },
 
   // AI recommendation helpers
