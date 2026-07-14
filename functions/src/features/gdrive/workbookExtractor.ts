@@ -619,7 +619,7 @@ function extractDataTable(
 
 // ── Main extract ──────────────────────────────────────────────────────────────
 
-const SUPPORTED_RENDER_KINDS = new Set(["keyValueCard", "dataTable"]);
+const SUPPORTED_RENDER_KINDS = new Set(["keyValueCard", "summaryBox", "dataTable"]);
 
 export async function extractWorkbook(args: {
   customerId: string;
@@ -708,6 +708,15 @@ export async function extractWorkbook(args: {
       if (entity.renderKind === "keyValueCard") {
         const { values, warnings, status } = extractCover(entity, grid);
         entities.push({ ...base, status, values, ...(warnings.length ? { warnings } : {}) });
+      } else if (entity.renderKind === "summaryBox") {
+        const { rows, warnings, status } = extractDataTable(entity, grid, variant);
+        entities.push({
+          ...base,
+          status,
+          values: rows[0]?.values ?? {},
+          rows,
+          ...(warnings.length ? { warnings } : {}),
+        });
       } else if (entity.section === "notes") {
         // Stacked multi-variant notes table.
         const { rows, sectionBreaks, warnings, status } = extractNotesEntity(entity, grid, variant);
@@ -764,6 +773,263 @@ export class WorkbookEntityNotWritableError extends Error {
 
 export class WorkbookRowOutOfSyncError extends Error {
   constructor(msg = "row_out_of_sync") { super(msg); }
+}
+
+export type WorkbookScaffoldPatchInput = {
+  cover?: Partial<Record<"clientName" | "dob" | "hmisCwId", string>>;
+  strengths?: { clientStrengths?: string };
+  fillPageNames?: boolean;
+  planDate?: "createdAt" | "today";
+  seedDefaults?: boolean;
+};
+
+function isoDateOnly(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") {
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+  }
+  if (typeof (value as { toDate?: unknown })?.toDate === "function") {
+    const d = (value as { toDate: () => Date }).toDate();
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  const parsed = new Date(value as any);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+}
+
+function localTodayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function valueA1FromLabelSearch(grid: Grid, labelSearch: NonNullable<TssNS.TssKeyValueCellConfig["labelSearch"]>): string | null {
+  const [start, end] = labelSearch.scanRange.split(":");
+  const s = parseA1(start);
+  const e = parseA1(end);
+  if (!s || !e) return null;
+  const wantIds = new Set(labelSearch.labelAliases.map((a) => tss.smartHeaderId(a)));
+  for (let r = s.row; r <= e.row; r++) {
+    for (let c = s.col; c <= e.col; c++) {
+      if (!wantIds.has(tss.smartHeaderId(gridCell(grid, r, c)))) continue;
+      const offsets = [labelSearch.valueOffset ?? { rows: 0, cols: 1 }, ...(labelSearch.fallbackValueOffsets ?? [])];
+      for (const off of offsets) {
+        const row = r + off.rows;
+        const col = c + off.cols;
+        if (row >= 0 && col >= 0) return `${idxToCol(col)}${row + 1}`;
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeTemplateText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+const TEMPLATE_STRENGTHS = "I always get things done once I know the steps.";
+const TEMPLATE_BARRIER = "Limited rental history.";
+const TEMPLATE_BARRIER_SUPPORTS = "TSS CM will help the client draft a Letter of Explanation that addresses rental history, gather two alternative references (e.g., employer/case manager), and assemble a complete application packet (ID, income proof, references, letter).";
+const TEMPLATE_BARRIER_TIER = "U2 - Pre-Tenancy";
+
+async function tagTemplateRange(args: {
+  sheetsApi: any;
+  spreadsheetId: string;
+  sheetId: number;
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+  key: string;
+  value: string;
+}) {
+  try {
+    await args.sheetsApi.spreadsheets.batchUpdate({
+      spreadsheetId: args.spreadsheetId,
+      requestBody: {
+        requests: [{
+          createDeveloperMetadata: {
+            developerMetadata: {
+              metadataKey: args.key,
+              metadataValue: args.value,
+              visibility: "DOCUMENT",
+              location: {
+                dimensionRange: {
+                  sheetId: args.sheetId,
+                  dimension: "ROWS",
+                  startIndex: args.startRow,
+                  endIndex: args.endRow,
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+  } catch (err) {
+    logger.warn("workbook_template_metadata_failed", { key: args.key, value: args.value, err: String((err as Error)?.message || err) });
+  }
+}
+
+/**
+ * Patch first-wave workbook scaffold fields. All targets are resolved from the
+ * TSS config and current workbook layout; sheet reads happen sequentially so a
+ * first structured load does not fan out many Sheets calls at once.
+ */
+export async function patchWorkbookScaffold(args: {
+  customerId: string;
+  uid: string;
+  orgId: string;
+  input: WorkbookScaffoldPatchInput;
+  caller?: Record<string, unknown>;
+}): Promise<{ spreadsheetId: string; updated: number; warnings: string[] }> {
+  const { customerId, uid, orgId, input } = args;
+  const snap = await admin.firestore().collection("customers").doc(customerId).get();
+  const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  if (customer && args.caller && !canAccessDoc(args.caller as any, customer)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
+  const spreadsheetId = String(customer?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
+  if (!spreadsheetId) throw new WorkbookNotLinkedError();
+
+  const orgConfig = await getOrgGDriveConfig(orgId);
+  const override = orgConfig.worksheetConfig ?? null;
+  const cfg = tss.resolveTssWorksheetConfig(override);
+  const sheetsApi = await getWorkbookSheetsClient({ userUid: uid, requiredScopes: [SHEETS_SCOPE] });
+  const meta = await sheetsApi.spreadsheets.get({ spreadsheetId, fields: "sheets.properties(title,sheetId)" });
+  const sheets: SheetMeta[] = (meta.data?.sheets ?? [])
+    .map((s: any) => ({ title: String(s?.properties?.title ?? ""), sheetId: Number(s?.properties?.sheetId ?? 0) }))
+    .filter((s: SheetMeta) => s.title);
+  const variant = tss.resolveWorkbookVariant(override, detectVariant(cfg, sheets));
+
+  const data: Array<{ range: string; values: string[][] }> = [];
+  const warnings: string[] = [];
+  let metadataTags: Array<() => Promise<void>> = [];
+
+  const coverEntity = cfg.entities.coverSheet as TssNS.TssDisplayEntityConfig | undefined;
+  const coverTitle = resolveSheetTitle(cfg, "cover", sheets);
+  if (coverEntity && coverTitle && input.cover) {
+    const grid = await readSheetGrid(sheetsApi, spreadsheetId, coverTitle);
+    for (const kv of coverEntity.source.keyValues ?? []) {
+      if (!["clientName", "dob", "hmisCwId"].includes(kv.id)) continue;
+      const fieldId = kv.id as "clientName" | "dob" | "hmisCwId";
+      if (!Object.prototype.hasOwnProperty.call(input.cover, fieldId)) continue;
+      const nextValue = String(input.cover[fieldId] ?? "").trim();
+      const a1 = kv.sheetValueCell ?? (kv.labelSearch ? valueA1FromLabelSearch(grid, kv.labelSearch) : null);
+      if (!a1) { warnings.push(`cover_${kv.id}_target_not_found`); continue; }
+      data.push({ range: `${quoteTitle(coverTitle)}!${a1}`, values: [[nextValue]] });
+    }
+  } else if (input.cover) {
+    warnings.push("cover_sheet_not_found");
+  }
+
+  if (input.fillPageNames) {
+    const customerName = String(input.cover?.clientName || customer?.name || [customer?.firstName, customer?.lastName].filter(Boolean).join(" ")).trim();
+    if (customerName) {
+      const nameAliases = ["Client Name", "Customer Name", "Member Name", "Participant Name"];
+      for (const sheet of sheets) {
+        const title = sheet.title;
+        const grid = await readSheetGrid(sheetsApi, spreadsheetId, title);
+        let wrote = false;
+        for (let r = 0; r < Math.min(12, grid.length || 12) && !wrote; r++) {
+          for (let c = 0; c < Math.min(8, (grid[r] ?? []).length || 8); c++) {
+            const labelId = tss.smartHeaderId(gridCell(grid, r, c));
+            if (!nameAliases.some((label) => tss.smartHeaderId(label) === labelId)) continue;
+            const targetCol = c + 1;
+            const current = gridCell(grid, r, targetCol);
+            if (current && normalizeTemplateText(current) !== "client name" && normalizeTemplateText(current) !== "customer name") {
+              wrote = true;
+              break;
+            }
+            data.push({ range: `${quoteTitle(title)}!${idxToCol(targetCol)}${r + 1}`, values: [[customerName]] });
+            wrote = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const housingTitle = resolveSheetTitle(cfg, "housingPlan", sheets);
+  const housingSheet = housingTitle ? sheets.find((s) => s.title === housingTitle) : undefined;
+  if (housingTitle) {
+    const grid = await readSheetGrid(sheetsApi, spreadsheetId, housingTitle);
+
+    if (input.planDate) {
+      const planDate = input.planDate === "createdAt"
+        ? isoDateOnly(customer?.createdAt) || localTodayISO()
+        : localTodayISO();
+      const aliases = ["Plan Date", "Housing Plan Date"];
+      outerPlan: for (let r = 0; r < Math.min(12, grid.length || 12); r++) {
+        for (let c = 0; c < Math.min(8, (grid[r] ?? []).length || 8); c++) {
+          if (!aliases.some((label) => tss.smartHeaderId(label) === tss.smartHeaderId(gridCell(grid, r, c)))) continue;
+          const targetCol = c + 1;
+          const current = gridCell(grid, r, targetCol);
+          if (!current || current === "11/05/2025") {
+            data.push({ range: `${quoteTitle(housingTitle)}!${idxToCol(targetCol)}${r + 1}`, values: [[planDate]] });
+          }
+          break outerPlan;
+        }
+      }
+    }
+
+    const strengthsEntity = cfg.entities.customerStrengths as TssNS.TssDisplayEntityConfig | undefined;
+    const strengthsRange = strengthsEntity ? effectiveRange(strengthsEntity, variant) : undefined;
+    const strengthsFields = strengthsEntity?.fields ?? [];
+    if ((input.seedDefaults || input.strengths) && strengthsRange && strengthsFields.length && housingSheet) {
+      const layout = resolveTableLayout(grid, strengthsRange, strengthsFields, strengthsEntity!.id);
+      const col = layout?.colMap.get("clientStrengths");
+      const row = layout ? dataStartRow(strengthsRange, layout.headerRow) : -1;
+      if (layout && col != null && row >= 0) {
+        const current = gridCell(grid, row, col);
+        const explicit = input.strengths && Object.prototype.hasOwnProperty.call(input.strengths, "clientStrengths");
+        const nextStrengths = explicit ? String(input.strengths?.clientStrengths ?? "").trim() : TEMPLATE_STRENGTHS;
+        if (explicit || !current) {
+          data.push({ range: `${quoteTitle(housingTitle)}!${idxToCol(col)}${row + 1}`, values: [[nextStrengths]] });
+          if (!explicit) {
+            metadataTags.push(() => tagTemplateRange({ sheetsApi, spreadsheetId, sheetId: housingSheet.sheetId, startRow: row, endRow: row + 1, startCol: col, endCol: col + 1, key: "hdb_template_item", value: "customerStrengths:v1" }));
+          }
+        }
+      } else warnings.push("strengths_target_not_found");
+    }
+
+    if (input.seedDefaults) {
+      const barrierEntity = cfg.entities.housingBarriers as TssNS.TssDisplayEntityConfig | undefined;
+      const barrierRange = barrierEntity ? effectiveRange(barrierEntity, variant) : undefined;
+      const barrierFields = barrierEntity?.fields ?? [];
+      if (barrierRange && barrierFields.length && housingSheet) {
+        const layout = resolveTableLayout(grid, barrierRange, barrierFields, barrierEntity!.id);
+        if (layout) {
+          const contentCols = contentColumns(barrierFields, layout.colMap);
+          const start = dataStartRow(barrierRange, layout.headerRow);
+          let targetRow = -1;
+          for (let r = start; r < MAX_SCAN_ROWS; r++) {
+            if (!rowHasContent(grid, r, contentCols)) { targetRow = r; break; }
+          }
+          if (targetRow >= 0) {
+            const barrierCol = layout.colMap.get("barrier");
+            const supportsCol = layout.colMap.get("mitigationSupports");
+            const tierCol = layout.colMap.get("serviceTier");
+            if (barrierCol != null) data.push({ range: `${quoteTitle(housingTitle)}!${idxToCol(barrierCol)}${targetRow + 1}`, values: [[TEMPLATE_BARRIER]] });
+            if (supportsCol != null) data.push({ range: `${quoteTitle(housingTitle)}!${idxToCol(supportsCol)}${targetRow + 1}`, values: [[TEMPLATE_BARRIER_SUPPORTS]] });
+            if (tierCol != null) data.push({ range: `${quoteTitle(housingTitle)}!${idxToCol(tierCol)}${targetRow + 1}`, values: [[TEMPLATE_BARRIER_TIER]] });
+            metadataTags.push(() => tagTemplateRange({ sheetsApi, spreadsheetId, sheetId: housingSheet.sheetId, startRow: targetRow, endRow: targetRow + 1, startCol: 0, endCol: 1, key: "hdb_template_item", value: "housingBarriers:limited_rental_history:v1" }));
+          }
+        } else warnings.push("barrier_target_not_found");
+      }
+    }
+  } else if (input.planDate || input.seedDefaults) {
+    warnings.push("housing_plan_sheet_not_found");
+  }
+
+  if (data.length) {
+    await sheetsApi.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: "USER_ENTERED", data },
+    });
+  }
+  for (const tag of metadataTags) await tag();
+
+  return { spreadsheetId, updated: data.length, warnings };
 }
 
 /**
