@@ -296,8 +296,10 @@ export function FormsCategoryView({
           <button
             type="button"
             onClick={() => setView({ kind: "step", idx: idx + 1 })}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white ${
-              isDone ? "bg-emerald-600 hover:bg-emerald-500" : "bg-indigo-600 hover:bg-indigo-500"
+            className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${
+              isDone
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
             }`}
           >
             Next: {next.title} →
@@ -306,7 +308,7 @@ export function FormsCategoryView({
           <button
             type="button"
             onClick={() => setView({ kind: "list" })}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+            className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
           >
             Finish — return to intake flow ✓
           </button>
@@ -480,7 +482,7 @@ export function FormsCategoryView({
               if (next) setView({ kind: "step", idx: idx + 1 });
               else setView({ kind: "list" });
             }}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
           >
             Mark complete {next ? "& continue →" : "✓"}
           </button>

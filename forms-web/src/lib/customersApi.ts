@@ -27,7 +27,10 @@ export type CreateCustomerBody = {
   dob?: string;
   cwId?: string;
   caseManagerName?: string;
+  caseManagerId?: string;
   secondaryCaseManagerName?: string;
+  secondaryCaseManagerId?: string;
+  otherContacts?: { uid: string; name?: string; role?: string }[];
   medicaid?: "yes" | "no" | "not_sure";
   buildDrive?: boolean;
   force?: boolean;
@@ -43,6 +46,7 @@ export type CreateCustomerResp = {
     workbookLinked?: boolean;
     reason?: string;
     error?: string;
+    linkError?: string;
   };
 };
 

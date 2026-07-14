@@ -55,6 +55,11 @@ const SLOT_DEFS: SlotDef[] = [
     exclude: /member|child|spouse|dependent/i,
   },
   {
+    key: "cwId",
+    label: "CWID",
+    match: /\bcw ?id\b|caseworthy/i,
+  },
+  {
     key: "citizenship",
     label: "Citizenship status",
     match: /citizen/i,
