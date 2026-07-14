@@ -3,9 +3,13 @@ import { getAuthed, postAuthed } from "./authedApi";
 export type FormsRegistryItem = {
   formId: string;
   category: string;
+  categories?: string[];
   title: string;
   customerSendable: boolean;
-  notifyOnSubmit?: boolean;
+  notifyOnSubmit?: boolean | null;
+  followUpIntake?: boolean | null;
+  buildHousehold?: boolean | null;
+  showCreditCards?: boolean | null;
   adminEdited: boolean;
   submissionCount: number;
   lastKind: string | null;
@@ -24,7 +28,16 @@ export function listFormsRegistry(force = false): Promise<FormsRegistryItem[]> {
 
 export async function updateForm(
   formId: string,
-  patch: { title?: string; category?: string; customerSendable?: boolean; notifyOnSubmit?: boolean }
+  patch: {
+    title?: string;
+    category?: string;
+    categories?: string[];
+    customerSendable?: boolean;
+    notifyOnSubmit?: boolean;
+    followUpIntake?: boolean;
+    buildHousehold?: boolean;
+    showCreditCards?: boolean;
+  }
 ): Promise<void> {
   await postAuthed("formsRegistryUpdate", { formId, ...patch });
   cache = null; // bust so the next load reflects the edit

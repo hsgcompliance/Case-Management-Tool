@@ -20,6 +20,7 @@ import { ScopeMissingError } from "./service";
 import {
   extractWorkbook,
   appendWorkbookRow,
+  patchWorkbookBudget,
   deleteWorkbookRow,
   patchWorkbookScaffold,
   WorkbookNotLinkedError,
@@ -332,6 +333,15 @@ const WorkbookScaffoldPatchBody = z.object({
   planDate: z.enum(["createdAt", "today"]).optional(),
 });
 
+const WorkbookBudgetPatchBody = z.object({
+  customerId: z.string().min(1),
+  items: z.array(z.object({
+    rowKey: z.string().regex(/^row-\d+$/),
+    amount: z.string(),
+    expectedLabel: z.string().optional(),
+  })).max(200),
+});
+
 export const appendCustomerWorkbookRow = secureHandler(
   async (req, res) => {
     const caller = (req as any).user;
@@ -389,6 +399,58 @@ export const appendCustomerWorkbookRow = secureHandler(
 // only customerId — the spreadsheet id is resolved from the customer record and
 // the config is resolved server-side. Fails closed: not connected / missing scope
 // returns a structured error so the UI falls back to the iframe / open-sheet path.
+
+export const patchCustomerWorkbookBudget = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+
+    try {
+      const body = WorkbookBudgetPatchBody.parse(req.body ?? {});
+      const result = await patchWorkbookBudget({
+        customerId: body.customerId,
+        uid,
+        orgId,
+        items: body.items,
+        caller,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      if (err instanceof WorkbookNotConnectedError || String(err?.message) === "google_not_connected") {
+        res.status(409).json({ ok: false, error: "google_not_connected", category: "not_connected", reconnectService: "googleDrive" });
+        return;
+      }
+      if (err instanceof WorkbookNotLinkedError || String(err?.message) === "workbook_not_linked") {
+        res.status(404).json({ ok: false, error: "workbook_not_linked" });
+        return;
+      }
+      if (err instanceof WorkbookRowOutOfSyncError) {
+        res.status(409).json({
+          ok: false,
+          error: String(err?.message || "budget_row_out_of_sync"),
+          manualActionRequired: true,
+          message: "The workbook budget rows no longer match what was loaded. Open the workbook and make the change manually.",
+        });
+        return;
+      }
+      if (err instanceof WorkbookEntityNotWritableError) {
+        res.status(422).json({ ok: false, error: String(err?.message || "entity_not_writable") });
+        return;
+      }
+      const isZod = err?.name === "ZodError";
+      res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_budget_patch_failed") });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+);
 
 export const patchCustomerWorkbookScaffold = secureHandler(
   async (req, res) => {

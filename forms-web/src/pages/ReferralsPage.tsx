@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useCatalog } from "@/hooks/useCatalog";
 import { JotformEmbed } from "@/components/JotformEmbed";
-import type { FormDef } from "@/lib/formsCatalog";
+import { CreditCardCards } from "@/components/CreditCardCards";
+import { formInCategory, type FormDef } from "@/lib/formsCatalog";
 
 // Referrals tab: the common referral forms, embedded. Completing a referral
 // that starts a case (Bridging Home, Homelessness Prevention screening) pipes
@@ -12,13 +13,20 @@ const PINNED_ORDER = [
   "251346523348053", // Referral to Rental Assistance (Homelessness)
   "253555227407155", // Bridging Home Referral
   "250021786346152", // Referral to Homelessness Prevention Screening
+  "260766127603053", // Referral to Family Shelter
+  "260345071136045", // Referral to TSS
 ];
 
-/** Referrals whose submission auto-starts Basic Intake. */
-const PIPE_TO_INTAKE = new Set([
+/**
+ * Referrals whose submission auto-starts Basic Intake. Defaults — the admin
+ * "Follow up with intake flow" checkbox (followUpIntake) extends this at runtime.
+ */
+const PIPE_TO_INTAKE_DEFAULTS = [
+  "251346523348053", // Referral to Rental Assistance
   "253555227407155", // Bridging Home Referral
   "250021786346152", // Referral to Homelessness Prevention Screening (eviction prevention)
-]);
+  "260345071136045", // Referral to TSS
+];
 
 export default function ReferralsPage() {
   const catalog = useCatalog();
@@ -28,12 +36,24 @@ export default function ReferralsPage() {
   const timer = useRef<number | null>(null);
 
   const forms = useMemo(() => {
-    const referral = catalog.filter((f) => f.category === "referral");
+    // Pinned forms resolve by id from the FULL catalog so an admin rename or
+    // re-categorization never knocks them off this page.
+    const byId = new Map(catalog.map((f) => [f.id, f]));
     const pinned = new Set(PINNED_ORDER);
     return [
-      ...PINNED_ORDER.map((id) => referral.find((f) => f.id === id)).filter((f): f is FormDef => !!f),
-      ...referral.filter((f) => !pinned.has(f.id)),
+      ...PINNED_ORDER.map((id) => byId.get(id)).filter((f): f is FormDef => !!f),
+      ...catalog.filter((f) => formInCategory(f, "referral") && !pinned.has(f.id)),
     ];
+  }, [catalog]);
+
+  // Hardcoded defaults ∪ the admin "Follow up with intake flow" flag.
+  const pipeToIntake = useMemo(() => {
+    const s = new Set(PIPE_TO_INTAKE_DEFAULTS);
+    for (const f of catalog) {
+      if (f.followUpIntake === true) s.add(f.id);
+      else if (f.followUpIntake === false) s.delete(f.id); // admin explicitly off
+    }
+    return s;
   }, [catalog]);
 
   // ?open=formId (landing page "Open") auto-opens that referral embedded.
@@ -51,7 +71,7 @@ export default function ReferralsPage() {
   }, [openParam, forms]);
 
   const selectedId = selected?.id ?? null;
-  const pipesToIntake = !!selectedId && PIPE_TO_INTAKE.has(selectedId);
+  const pipesToIntake = !!selectedId && pipeToIntake.has(selectedId);
 
   // New form opened: clear the submitted banner + any pending auto-navigation.
   useEffect(() => {
@@ -69,10 +89,10 @@ export default function ReferralsPage() {
 
   const onSubmittedCb = useCallback(() => {
     setSubmitted(true);
-    if (selectedId && PIPE_TO_INTAKE.has(selectedId) && timer.current == null) {
+    if (selectedId && pipeToIntake.has(selectedId) && timer.current == null) {
       timer.current = window.setTimeout(() => navigate("/staff/intake?start=basic"), 2500);
     }
-  }, [selectedId, navigate]);
+  }, [selectedId, navigate, pipeToIntake]);
 
   if (selected) {
     return (
@@ -102,6 +122,7 @@ export default function ReferralsPage() {
             </button>
           </div>
         ) : null}
+        {selected.showCreditCards ? <CreditCardCards /> : null}
         <JotformEmbed formId={selected.id} title={selected.title} onSubmitted={onSubmittedCb} />
       </div>
     );
@@ -124,7 +145,7 @@ export default function ReferralsPage() {
             <button type="button" onClick={() => setSelected(f)} className="min-w-0 flex-1 text-left">
               <span className="block truncate text-sm font-semibold text-slate-900">
                 {f.title}
-                {PIPE_TO_INTAKE.has(f.id) ? (
+                {pipeToIntake.has(f.id) ? (
                   <span className="ml-2 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">→ intake</span>
                 ) : null}
               </span>

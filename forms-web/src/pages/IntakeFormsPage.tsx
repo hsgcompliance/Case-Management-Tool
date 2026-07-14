@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { FormsCategoryView } from "@/components/FormsCategoryView";
 import { useCatalog } from "@/hooks/useCatalog";
-import { INTAKE_FLOW, INTAKE_RESOURCES } from "@/lib/formsCatalog";
+import { INTAKE_FLOW, INTAKE_RESOURCES, formInCategory } from "@/lib/formsCatalog";
 
 export default function IntakeFormsPage() {
   // ?start=… (e.g. from a completed referral) jumps into the first open step.
@@ -9,7 +9,7 @@ export default function IntakeFormsPage() {
   // Full catalog: flow steps reference forms outside the "intake" category
   // (citizenship, TSS, landlord verification, zero income/assets).
   const catalog = useCatalog();
-  const forms = catalog.filter((f) => f.category === "intake");
+  const forms = catalog.filter((f) => formInCategory(f, "intake"));
   return (
     <FormsCategoryView
       heading="Intake flow"

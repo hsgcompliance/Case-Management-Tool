@@ -624,7 +624,131 @@ function extractDataTable(
 
 // ── Main extract ──────────────────────────────────────────────────────────────
 
-const SUPPORTED_RENDER_KINDS = new Set(["keyValueCard", "summaryBox", "dataTable"]);
+const SUPPORTED_RENDER_KINDS = new Set(["keyValueCard", "summaryBox", "dataTable", "budgetTable"]);
+
+type BudgetItemOut = {
+  id: string;
+  label: string;
+  rowKey: string;
+  amount: TssNS.TssExtractedCell;
+  editable: boolean;
+};
+
+type BudgetSectionOut = {
+  id: string;
+  label: string;
+  items: BudgetItemOut[];
+  subsections?: BudgetSectionOut[];
+  total?: {
+    label: string;
+    rowKey: string;
+    amount: TssNS.TssExtractedCell;
+  };
+  rollsInto?: string;
+};
+
+type BudgetSummaryOut = {
+  id: string;
+  label: string;
+  rowKey: string;
+  amount: TssNS.TssExtractedCell;
+};
+
+function budgetStatic(entity: TssNS.TssDisplayEntityConfig): any {
+  return entity.source.staticContent && typeof entity.source.staticContent === "object"
+    ? entity.source.staticContent as any
+    : null;
+}
+
+function budgetRowsFromSection(section: any): number[] {
+  const rows = [
+    ...(Array.isArray(section?.itemRows) ? section.itemRows : []),
+    ...(Array.isArray(section?.optionalRows) ? section.optionalRows : []),
+  ];
+  for (const sub of Array.isArray(section?.subsections) ? section.subsections : []) {
+    rows.push(...budgetRowsFromSection(sub));
+  }
+  return rows;
+}
+
+function extractBudgetSection(grid: Grid, section: any, itemCol: number, amountCol: number): BudgetSectionOut {
+  const rows = [
+    ...(Array.isArray(section?.itemRows) ? section.itemRows : []),
+    ...(Array.isArray(section?.optionalRows) ? section.optionalRows : []),
+  ];
+  const items: BudgetItemOut[] = rows.map((oneBasedRow: number) => {
+    const rowIdx = Number(oneBasedRow) - 1;
+    const label = gridCell(grid, rowIdx, itemCol);
+    const rawAmount = gridCell(grid, rowIdx, amountCol);
+    return {
+      id: `${section.id || "section"}:${oneBasedRow}`,
+      label,
+      rowKey: `row-${oneBasedRow}`,
+      amount: makeCell(rawAmount, "currency"),
+      editable: true,
+    };
+  });
+
+  const subsections = (Array.isArray(section?.subsections) ? section.subsections : [])
+    .map((sub: any) => extractBudgetSection(grid, sub, itemCol, amountCol));
+  const totalRow = Number(section?.totalRow || 0);
+  const total = totalRow > 0
+    ? {
+        label: String(section?.totalLabel || gridCell(grid, totalRow - 1, itemCol) || "Total"),
+        rowKey: `row-${totalRow}`,
+        amount: makeCell(gridCell(grid, totalRow - 1, amountCol), "currency"),
+      }
+    : undefined;
+
+  return {
+    id: String(section?.id || section?.label || `section-${section?.expectedHeaderRow || ""}`),
+    label: String(section?.label || section?.anchorText || "Budget Section"),
+    items,
+    ...(subsections.length ? { subsections } : {}),
+    ...(total ? { total } : {}),
+    ...(section?.rollsInto ? { rollsInto: String(section.rollsInto) } : {}),
+  };
+}
+
+function extractBudgetEntity(
+  entity: TssNS.TssDisplayEntityConfig,
+  grid: Grid,
+): { budget: unknown; status: TssNS.TssExtractedEntityStatus; warnings: TssNS.TssExtractionWarning[] } {
+  const staticContent = budgetStatic(entity);
+  if (!staticContent) {
+    return {
+      budget: null,
+      status: "missing_headers",
+      warnings: [{ code: "budget_config_missing", message: "Budget configuration is missing.", entityId: entity.id, severity: "warning" }],
+    };
+  }
+  const itemCol = colToIdx(String(staticContent.itemColumn || "A"));
+  const amountCol = colToIdx(String(staticContent.amountColumn || "B"));
+  const sections = (Array.isArray(staticContent.sections) ? staticContent.sections : [])
+    .map((section: any) => extractBudgetSection(grid, section, itemCol, amountCol));
+  const summaryRows: BudgetSummaryOut[] = (Array.isArray(staticContent.summaryRows) ? staticContent.summaryRows : [])
+    .map((row: any) => {
+      const oneBasedRow = Number(row?.row || 0);
+      return {
+        id: String(row?.id || `summary-${oneBasedRow}`),
+        label: String(row?.label || gridCell(grid, oneBasedRow - 1, itemCol) || "Summary"),
+        rowKey: `row-${oneBasedRow}`,
+        amount: makeCell(gridCell(grid, oneBasedRow - 1, amountCol), "currency"),
+      };
+    })
+    .filter((row: BudgetSummaryOut) => row.rowKey !== "row-0");
+
+  return {
+    budget: {
+      amountColumn: String(staticContent.amountColumn || "B"),
+      itemColumn: String(staticContent.itemColumn || "A"),
+      sections,
+      summaryRows,
+    },
+    status: sections.length ? "extracted" : "empty",
+    warnings: [],
+  };
+}
 
 export async function extractWorkbook(args: {
   customerId: string;
@@ -713,6 +837,9 @@ export async function extractWorkbook(args: {
       if (entity.renderKind === "keyValueCard") {
         const { values, warnings, status } = extractCover(entity, grid);
         entities.push({ ...base, status, values, ...(warnings.length ? { warnings } : {}) });
+      } else if (entity.renderKind === "budgetTable") {
+        const { budget, warnings, status } = extractBudgetEntity(entity, grid);
+        entities.push({ ...base, status, budget, ...(warnings.length ? { warnings } : {}) });
       } else if (entity.renderKind === "summaryBox") {
         const { rows, warnings, status } = extractDataTable(entity, grid, variant);
         entities.push({
@@ -1193,6 +1320,77 @@ export async function appendWorkbookRow(args: {
   }
 
   return { rowKey: `row-${targetRow + 1}`, spreadsheetId };
+}
+
+export async function patchWorkbookBudget(args: {
+  customerId: string;
+  uid: string;
+  orgId: string;
+  items: Array<{ rowKey: string; amount: string; expectedLabel?: string }>;
+  caller?: Record<string, unknown>;
+}): Promise<{ spreadsheetId: string; updated: number }> {
+  const { customerId, uid, orgId } = args;
+  const snap = await admin.firestore().collection("customers").doc(customerId).get();
+  const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  if (customer && args.caller && !canAccessDoc(args.caller as any, customer)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
+  const spreadsheetId = String(customer?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
+  if (!spreadsheetId) throw new WorkbookNotLinkedError();
+
+  const orgConfig = await getOrgGDriveConfig(orgId);
+  const override = orgConfig.worksheetConfig ?? null;
+  const cfg = tss.resolveTssWorksheetConfig(override);
+  const entity = cfg.entities.budget as TssNS.TssDisplayEntityConfig | undefined;
+  if (!entity || entity.renderKind !== "budgetTable") throw new WorkbookEntityNotWritableError("budget_entity_not_found");
+  const staticContent = budgetStatic(entity);
+  if (!staticContent) throw new WorkbookEntityNotWritableError("budget_config_missing");
+
+  const sheetsApi = await getWorkbookSheetsClient({ userUid: uid, requiredScopes: [SHEETS_SCOPE] });
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(title,sheetId)",
+  });
+  const sheets: SheetMeta[] = (meta.data?.sheets ?? [])
+    .map((s: any) => ({ title: String(s?.properties?.title ?? ""), sheetId: Number(s?.properties?.sheetId ?? 0) }))
+    .filter((s: SheetMeta) => s.title);
+  const sheetTitle = resolveSheetTitle(cfg, String(entity.source.sheetId || "budget"), sheets);
+  if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
+
+  const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
+  const itemCol = colToIdx(String(staticContent.itemColumn || "A"));
+  const amountCol = colToIdx(String(staticContent.amountColumn || "B"));
+  const allowedRows = new Set<number>();
+  for (const section of Array.isArray(staticContent.sections) ? staticContent.sections : []) {
+    for (const row of budgetRowsFromSection(section)) allowedRows.add(Number(row));
+  }
+
+  const data: Array<{ range: string; values: string[][] }> = [];
+  for (const item of args.items) {
+    const m = /^row-(\d+)$/.exec(String(item.rowKey || ""));
+    if (!m) throw new WorkbookEntityNotWritableError("invalid_row_key");
+    const oneBasedRow = Number(m[1]);
+    if (!allowedRows.has(oneBasedRow)) throw new WorkbookEntityNotWritableError("budget_row_not_editable");
+
+    const currentLabel = gridCell(grid, oneBasedRow - 1, itemCol);
+    const expectedLabel = String(item.expectedLabel ?? "").trim();
+    if (expectedLabel && currentLabel !== expectedLabel) {
+      throw new WorkbookRowOutOfSyncError("budget_row_out_of_sync");
+    }
+    data.push({
+      range: `${quoteTitle(sheetTitle)}!${idxToCol(amountCol)}${oneBasedRow}`,
+      values: [[String(item.amount ?? "").trim()]],
+    });
+  }
+
+  if (data.length) {
+    await sheetsApi.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: "USER_ENTERED", data },
+    });
+  }
+
+  return { spreadsheetId, updated: data.length };
 }
 
 /**

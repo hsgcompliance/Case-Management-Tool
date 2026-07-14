@@ -120,8 +120,12 @@ export const formsRegistryUpdate_http = secureHandler(
     await updateFormRegistry(formId, {
       title: typeof body.title === "string" ? body.title : undefined,
       category: typeof body.category === "string" ? body.category : undefined,
+      categories: Array.isArray(body.categories) ? (body.categories as unknown[]).map(String) : undefined,
       customerSendable: typeof body.customerSendable === "boolean" ? body.customerSendable : undefined,
       notifyOnSubmit: typeof body.notifyOnSubmit === "boolean" ? body.notifyOnSubmit : undefined,
+      followUpIntake: typeof body.followUpIntake === "boolean" ? body.followUpIntake : undefined,
+      buildHousehold: typeof body.buildHousehold === "boolean" ? body.buildHousehold : undefined,
+      showCreditCards: typeof body.showCreditCards === "boolean" ? body.showCreditCards : undefined,
     });
     res.status(200).json({ ok: true, formId });
   },
