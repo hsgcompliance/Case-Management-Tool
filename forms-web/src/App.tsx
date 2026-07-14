@@ -33,9 +33,13 @@ function NoSession() {
   );
 }
 
+
 export default function App() {
   return (
     <Routes>
+      {/* Root = sign-in page with quick links below; signed-in users bounce to /staff. */}
+      <Route path="/" element={<LoginPage />} />
+
       {/* Customer token routes — public, no auth. */}
       <Route path="/checkout/:token" element={<CheckoutPage />} />
       <Route path="/status/:token" element={<StatusPage />} />

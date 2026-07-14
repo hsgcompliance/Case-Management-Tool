@@ -330,7 +330,6 @@ const WorkbookScaffoldPatchBody = z.object({
   }).optional(),
   fillPageNames: z.boolean().optional(),
   planDate: z.enum(["createdAt", "today"]).optional(),
-  seedDefaults: z.boolean().optional(),
 });
 
 export const appendCustomerWorkbookRow = secureHandler(
@@ -408,7 +407,6 @@ export const patchCustomerWorkbookScaffold = secureHandler(
           strengths: body.strengths,
           fillPageNames: body.fillPageNames,
           planDate: body.planDate,
-          seedDefaults: body.seedDefaults,
         },
         caller,
       });

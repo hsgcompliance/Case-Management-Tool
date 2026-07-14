@@ -546,7 +546,7 @@ export function WorkbookStructuredView({
 
     void (api as any).postWith(
       "patchCustomerWorkbookScaffold",
-      { customerId, fillPageNames: true, planDate: "createdAt", seedDefaults: true },
+      { customerId, fillPageNames: true, planDate: "createdAt" },
       driveHeaders(),
     ).then((resp: Record<string, unknown>) => {
       if (Number(resp?.updated ?? 0) > 0) void dataQ.refetch();
