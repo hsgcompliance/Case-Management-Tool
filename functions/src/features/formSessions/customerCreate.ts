@@ -53,6 +53,41 @@ type DriveResult = {
   error?: string;
 };
 
+const FormsCustomerTssStatusBody = z.object({
+  customerId: z.string().trim().min(1),
+  status: z.enum(["payer", "nonpayer"]),
+});
+
+/**
+ * POST /formsCustomerSetTssStatus — persist the intake TSS payer/non-payer
+ * gate selection onto the customer doc (org-checked).
+ */
+export const formsCustomerSetTssStatus_http = secureHandler(
+  async (req, res) => {
+    const body = FormsCustomerTssStatusBody.parse(req.body ?? {});
+    const caller = req.user!;
+    const orgId = orgIdFromClaims(caller) || requireOrg(caller);
+
+    const ref = db.collection("customers").doc(body.customerId);
+    const snap = await ref.get();
+    if (!snap.exists || normId((snap.data() || {}).orgId) !== normId(orgId)) {
+      res.status(404).json({ ok: false, error: "not_found" });
+      return;
+    }
+    await ref.set(
+      {
+        tssPayerStatus: body.status,
+        tssPayerStatusUpdatedAt: isoNow(),
+        tssPayerStatusUpdatedBy: String(caller.uid || ""),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    res.status(200).json({ ok: true, customerId: body.customerId, status: body.status });
+  },
+  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
+);
+
 export const formsCustomerCreate_http = secureHandler(
   async (req, res) => {
     const body = FormsCustomerCreateBody.parse(req.body ?? {});
@@ -105,6 +140,10 @@ export const formsCustomerCreate_http = secureHandler(
       caseManagerId: cmName && low(cmName) === low(callerName) ? String(caller.uid || "") : null,
       secondaryCaseManagerName: body.secondaryCaseManagerName || null,
       status: "active",
+      // TSS payer status rides along when the intake gate already decided it.
+      ...(body.medicaid && body.medicaid !== "not_sure"
+        ? { tssPayerStatus: body.medicaid === "yes" ? "payer" : "nonpayer" }
+        : {}),
     };
     const { ids } = await upsertCustomers(input as any, caller);
     const customerId = ids[0];

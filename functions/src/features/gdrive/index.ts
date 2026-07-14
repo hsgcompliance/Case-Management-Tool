@@ -21,4 +21,5 @@ export {
   setCustomerWorkbookVariant,
   getWorkbookData,
   appendCustomerWorkbookRow,
+  deleteCustomerWorkbookRow,
 } from "./workbookHttp";

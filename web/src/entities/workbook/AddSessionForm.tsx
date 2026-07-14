@@ -18,6 +18,7 @@ import { db } from "@lib/firebase";
 import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
 import { toast } from "@lib/toast";
 import type { User } from "firebase/auth";
+import type { TCaseNoteAction, TGenerateCaseNoteSuggestionReq } from "@hdb/contracts";
 import {
   buildProgressNoteValues,
   staffInitials,
@@ -105,6 +106,178 @@ function todayISO() {
 function driveHeaders() {
   const token = getGoogleDriveAccessToken();
   return token ? { "x-drive-access-token": token } : undefined;
+}
+
+const CASE_NOTE_ACTIONS: Array<{ value: TCaseNoteAction; label: string }> = [
+  { value: "improve", label: "Improve" },
+  { value: "grammar_only", label: "Grammar Only" },
+  { value: "shorten", label: "Make Shorter" },
+  { value: "compliance_review", label: "Compliance Review" },
+  { value: "interview_draft", label: "Interview Draft" },
+];
+
+type InterviewFields = NonNullable<TGenerateCaseNoteSuggestionReq["interviewFields"]>;
+const EMPTY_INTERVIEW: InterviewFields = { clientResponse: "", caseManagerAction: "", barrier: "", progress: "", nextStep: "" };
+
+function sessionDurationMinutes(startTime: string, endTime: string): number | null {
+  if (!startTime || !endTime) return null;
+  const [sh, sm] = startTime.split(":").map(Number);
+  const [eh, em] = endTime.split(":").map(Number);
+  if (![sh, sm, eh, em].every(Number.isFinite)) return null;
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins < 0) mins += 24 * 60;
+  return mins;
+}
+
+function CaseNoteAssist({
+  customerId,
+  draft,
+  type,
+  startTime,
+  endTime,
+  disabled,
+  onAccept,
+}: {
+  customerId: string;
+  draft: string;
+  type: string;
+  startTime: string;
+  endTime: string;
+  disabled: boolean;
+  onAccept: (text: string) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [action, setAction] = React.useState<TCaseNoteAction>("improve");
+  const [fields, setFields] = React.useState<InterviewFields>(EMPTY_INTERVIEW);
+  const [suggestion, setSuggestion] = React.useState("");
+  const [requestId, setRequestId] = React.useState<string | null>(null);
+  const [missing, setMissing] = React.useState<string[]>([]);
+  const [tips, setTips] = React.useState<string[]>([]);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const interview = action === "interview_draft";
+  const clearResult = () => { setSuggestion(""); setMissing([]); setTips([]); setError(null); };
+  React.useEffect(() => { clearResult(); }, [draft, customerId]);
+
+  const recordDecision = async (accepted: boolean) => {
+    if (!requestId) return;
+    try { await (api as any).postWith("recordCaseNoteSuggestionDecision", { requestId, accepted }); } catch { /* audit is best-effort from UI */ }
+  };
+
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const resp = (await (api as any).postWith("generateCaseNoteSuggestion", {
+        customerId,
+        sessionId: null,
+        mode: interview ? "interview" : "freeform",
+        action,
+        program: null,
+        serviceType: null,
+        contactType: type,
+        visitLengthMinutes: sessionDurationMinutes(startTime, endTime),
+        draft: interview ? null : draft,
+        clientLabel: "client",
+        staffLabel: "case manager",
+        interviewFields: interview ? fields : null,
+      })) as Record<string, unknown>;
+      if (!resp?.ok) {
+        setError(String(resp?.message || resp?.error || "Could not generate a suggestion."));
+        return;
+      }
+      if (requestId) void recordDecision(false);
+      setSuggestion(String(resp.suggestion || ""));
+      setRequestId(String(resp.requestId || ""));
+      setMissing(Array.isArray(resp.missingOrUnclear) ? resp.missingOrUnclear.map(String) : []);
+      setTips(Array.isArray(resp.complianceSuggestions) ? resp.complianceSuggestions.map(String) : []);
+    } catch (e: unknown) {
+      const body = (e as { meta?: { response?: { message?: string; error?: string } } })?.meta?.response;
+      setError(String(body?.message || body?.error || (e as Error)?.message || "Could not generate a suggestion."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+        disabled={disabled}
+        onClick={() => { setOpen(true); if (!draft.trim()) setAction("interview_draft"); }}
+      >
+        AI Case Note Assistant <span className="font-normal">Beta</span>
+      </button>
+    );
+  }
+
+  const hasInput = interview
+    ? Object.values(fields).some((v) => String(v ?? "").trim())
+    : !!draft.trim();
+
+  return (
+    <section className="rounded-lg border border-indigo-200 bg-white p-3 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold text-indigo-900">AI Case Note Assistant <span className="font-normal text-indigo-600">Beta</span></div>
+          <p className="mt-0.5 text-[11px] text-slate-500">Review suggestions before accepting.</p>
+        </div>
+        <button type="button" className="text-xs text-slate-500" onClick={() => { void recordDecision(false); setOpen(false); }}>
+          Dismiss
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {CASE_NOTE_ACTIONS.map((item) => (
+          <button
+            type="button"
+            key={item.value}
+            onClick={() => { setAction(item.value); clearResult(); }}
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${action === item.value ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-200 text-slate-600"}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {interview ? (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {([
+            ["clientResponse", "Client quote / response"],
+            ["caseManagerAction", "Case manager action"],
+            ["barrier", "Barrier or need"],
+            ["progress", "Progress or update"],
+            ["nextStep", "Next step"],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="field block">
+              <span className="label text-xs">{label}</span>
+              <textarea className="input w-full min-h-[48px] text-sm" value={fields[key] ?? ""} onChange={(e) => setFields((cur) => ({ ...cur, [key]: e.target.value }))} />
+            </label>
+          ))}
+        </div>
+      ) : null}
+      {!suggestion ? (
+        <button type="button" className="btn btn-sm btn-primary w-full" onClick={() => void generate()} disabled={disabled || busy || !hasInput}>
+          {busy ? "Generating..." : "Generate Suggested Revision"}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <div className="whitespace-pre-wrap rounded-lg border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-slate-800">{suggestion}</div>
+          {missing.length ? <div className="text-xs text-amber-700">Missing or unclear: {missing.join(", ")}</div> : null}
+          {tips.length ? <div className="text-xs text-slate-500">Suggestions: {tips.join(", ")}</div> : null}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { void recordDecision(false); setSuggestion(""); }}>
+              Keep Original
+            </button>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => { void recordDecision(true); onAccept(suggestion); setOpen(false); }}>
+              Accept Suggestion
+            </button>
+          </div>
+        </div>
+      )}
+      {error ? <div className="text-xs text-red-600">{error}</div> : null}
+    </section>
+  );
 }
 
 export type GoalOption = { n: number; label: string };
@@ -313,6 +486,16 @@ export function AddSessionForm({
           onChange={(e) => setNote(e.target.value)}
         />
       </label>
+
+      <CaseNoteAssist
+        customerId={customerId}
+        draft={note}
+        type={type}
+        startTime={startTime}
+        endTime={endTime}
+        disabled={saving}
+        onAccept={setNote}
+      />
 
       {/* Link to goals — tap to reference plan goals in this note ("Goal #1, #3"). */}
       {goals.length > 0 ? (

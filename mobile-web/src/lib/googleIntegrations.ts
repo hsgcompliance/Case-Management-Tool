@@ -69,6 +69,24 @@ export const GoogleIntegrations = {
   }) =>
     callFunction<{ ok: boolean; error?: string; rowKey?: string }>("appendCustomerWorkbookRow", body),
 
+  deleteWorkbookRow: (body: {
+    customerId: string;
+    entityId: string;
+    rowKey: string;
+    expectedValues: Record<string, string>;
+    deleteCalendarEvent?: boolean;
+    rowFingerprint?: { date?: string; startTime?: string; endTime?: string; summary?: string };
+  }) =>
+    callFunction<{
+      ok: boolean;
+      error?: string;
+      rowKey?: string;
+      activityDeleted?: boolean;
+      calendarDeleted?: boolean;
+      calendarNotFound?: boolean;
+      calendarSkippedReason?: string;
+    }>("deleteCustomerWorkbookRow", body),
+
   // Read-only native extraction of the customer's linked TSS workbook (goals,
   // progress notes, …). Fails closed (ok:false) when Drive isn't connected or no
   // workbook is linked, so callers fall back to the open-in-Sheets link.
@@ -175,4 +193,3 @@ export type WorkbookCandidatesResponse = {
   items?: WorkbookCandidate[];
   error?: string;
 };
-

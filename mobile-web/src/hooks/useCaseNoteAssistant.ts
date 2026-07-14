@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp } from "@hdb/contracts";
+import type { TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TGenerateSmartGoalSuggestionReq, TGenerateSmartGoalSuggestionResp } from "@hdb/contracts";
 import { callFunction } from "@/lib/functionsApi";
 
 export type CaseNoteBetaConfig = { enabled: boolean; allowedWorkbookVariants: string[]; defaultClientLabel: string; defaultStaffLabel: string };
@@ -18,6 +18,9 @@ export function useCaseNoteAssistantConfig() {
 }
 export function useGenerateCaseNoteSuggestion() {
   return useMutation({ mutationFn: (body: TGenerateCaseNoteSuggestionReq) => callFunction("generateCaseNoteSuggestion", body) as Promise<TGenerateCaseNoteSuggestionResp> });
+}
+export function useGenerateSmartGoalSuggestion() {
+  return useMutation({ mutationFn: (body: TGenerateSmartGoalSuggestionReq) => callFunction("generateSmartGoalSuggestion", body) as Promise<TGenerateSmartGoalSuggestionResp> });
 }
 export async function recordCaseNoteSuggestionDecision(requestId: string, accepted: boolean) {
   await callFunction("recordCaseNoteSuggestionDecision", { requestId, accepted });

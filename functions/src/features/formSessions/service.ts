@@ -565,6 +565,9 @@ export type FormsCustomerDetail = {
   otherContacts: Array<{ name: string | null; role: string | null }>;
   linkedSubmissions: FormsLinkedSubmission[];
   household: FormsHouseholdObject;
+  /** Customer Drive folder (read order: customerDrive → meta.driveFolderId → meta.driveFolders[0]). */
+  driveFolderUrl: string | null;
+  tssPayerStatus: string | null;
 };
 
 export async function getCustomerDetailForForms(orgId: string, customerId: string): Promise<FormsCustomerDetail | null> {
@@ -658,6 +661,14 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
     otherContacts,
     linkedSubmissions,
     household,
+    driveFolderUrl: (() => {
+      const folderId =
+        sTrim(r?.customerDrive?.folderId) ||
+        sTrim(r?.meta?.driveFolderId) ||
+        sTrim(r?.meta?.driveFolders?.[0]?.id);
+      return sTrim(r?.customerDrive?.folderUrl) || (folderId ? `https://drive.google.com/drive/folders/${folderId}` : null);
+    })(),
+    tssPayerStatus: sTrim(r?.tssPayerStatus) || null,
   };
 }
 

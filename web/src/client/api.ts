@@ -376,6 +376,12 @@ export const endpointsLoose = {
   copyCustomerWorkbookFromTemplate:         { method: 'POST', path: 'copyCustomerWorkbookFromTemplate' },
   getWorkbookData:                          { method: 'GET',  path: 'getWorkbookData' },
   appendCustomerWorkbookRow:                { method: 'POST', path: 'appendCustomerWorkbookRow' },
+  deleteCustomerWorkbookRow:                { method: 'POST', path: 'deleteCustomerWorkbookRow' },
+
+  // AI recommendation helpers
+  generateCaseNoteSuggestion:               { method: 'POST', path: 'generateCaseNoteSuggestion' },
+  recordCaseNoteSuggestionDecision:         { method: 'POST', path: 'recordCaseNoteSuggestionDecision' },
+  generateSmartGoalSuggestion:              { method: 'POST', path: 'generateSmartGoalSuggestion' },
 
 
 } as const satisfies Record<string, EndpointDef>;

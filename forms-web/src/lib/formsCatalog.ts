@@ -55,6 +55,7 @@ export const FORMS: FormDef[] = [
   { id: "260347030470043", title: "Self-Declaration of Zero Income", category: "other", submissions: 7 },
   { id: "260346243018046", title: "Self-Declaration of Zero Assets", category: "other", submissions: 1 },
   { id: "251613294244151", title: "Initiate Landlord Verification Process", category: "other", submissions: 0 },
+  { id: "260345071136045", title: "Referral to TSS (Payer)", category: "other", submissions: 4 },
 ];
 
 /** The staff web app (customer documents + Google Drive folders live there). */
@@ -79,6 +80,16 @@ export type IntakeFlowStep = {
    * doc); this step prompts create/link when no customer is active yet.
    */
   customerSetup?: boolean;
+  /** Section header rendered above this step in the list ("Basic intake" / "Full intake"). */
+  section?: string;
+  /**
+   * Payer/non-payer gate: the step opens with a full-page choice that decides
+   * which TSS form to embed. The choice also presets the customer-folder build
+   * variant and is pushed onto the customer doc (tssPayerStatus).
+   */
+  tssGate?: { payerFormId: string; nonpayerFormId: string };
+  /** Show an "Open customer folder" button (Drive pointer from the customer doc). */
+  customerFolderLink?: boolean;
 };
 
 /**
@@ -88,7 +99,7 @@ export type IntakeFlowStep = {
  * Reorder / edit freely — this array is the single source of truth.
  */
 export const INTAKE_FLOW: IntakeFlowStep[] = [
-  { formId: "260346853938064" }, // Self-Declaration of Citizenship Status
+  { formId: "260346853938064", section: "Basic intake" }, // Self-Declaration of Citizenship Status
   { formId: "251076068294057" }, // HRDC Release of Information
   { formId: "251106052302034" }, // Program Disclosure Form
   {
@@ -97,12 +108,14 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   { formId: "251106237751148" }, // Customer Self-Declarations
   {
-    formId: "260346156157053", // TSS Non-Payer Source & Sliding Fee Acknowledgement
-    title: "TSS Acknowledgement (payer OR non-payer)",
-    note: "Payer or non-payer — never both. Only complete this Non-Payer form for TSS non-payers; payer agreements are handled outside Jotform.",
+    formId: "260346156157053", // key/progress id; the gate decides which form embeds
+    title: "TSS Form (payer / non-payer)",
+    note: "Choose payer or non-payer first — the matching form loads, the choice presets the customer folder build, and it's saved onto the customer record.",
+    tssGate: { payerFormId: "260345071136045", nonpayerFormId: "260346156157053" },
   },
   {
     title: "Caseworthy: create client / update assessments",
+    section: "Full intake",
     note: "Open Caseworthy and create the client, or update the existing client's assessments.",
     links: [{ href: "https://cw.caseworthy.net/hrdc09_prod.ecm", label: "Open Caseworthy" }],
   },
@@ -122,46 +135,50 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   {
     title: "Collect documents",
-    note: "File every collected/completed form in the CUSTOMER'S Google Drive folder. The template folders below hold blank income/asset file forms — paper alternatives to the Jotform self-declarations.",
+    note: "File everything in the CUSTOMER'S Google Drive folder. Zero income/assets? Use the Jotform self-declarations below, or a blank file-form template from the Drive folders.",
+    customerFolderLink: true,
     checklist: [
       "Photo ID for ALL household members",
-      "Income documents",
-      "Asset documents",
+      "Income documents (or zero-income self-declaration)",
+      "Asset documents (or zero-assets self-declaration)",
       "Copy of eviction notice (if applicable)",
     ],
     links: [
+      { href: "https://form.jotform.com/260347030470043", label: "Self-Dec: Zero Income (Jotform)" },
+      { href: "https://form.jotform.com/260346243018046", label: "Self-Dec: Zero Assets (Jotform)" },
+      { href: "https://drive.google.com/drive/folders/1VEr-0FOR85ssTezafSbvo4YWxvYk016q", label: "Income file form templates (Drive)" },
+      { href: "https://drive.google.com/drive/folders/1VF1Q3DbZxHjunU_jrTBU5F5CO2CbdMxm", label: "Asset file form templates (Drive)" },
       { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
-      { href: "https://drive.google.com/drive/folders/1VEr-0FOR85ssTezafSbvo4YWxvYk016q", label: "Income file form templates (Drive)" },
-      { href: "https://drive.google.com/drive/folders/1VF1Q3DbZxHjunU_jrTBU5F5CO2CbdMxm", label: "Asset file form templates (Drive)" },
     ],
   },
   {
-    formId: "260347030470043", // Self-Declaration of Zero Income
-    optional: true,
-    note: "Only if the household reports zero income. Paper alternative: use an income file form template from Drive and file the completed copy in the customer's folder.",
-    links: [
-      { href: "https://drive.google.com/drive/folders/1VEr-0FOR85ssTezafSbvo4YWxvYk016q", label: "Income file form templates (Drive)" },
-    ],
-  },
-  {
-    formId: "260346243018046", // Self-Declaration of Zero Assets
-    optional: true,
-    note: "Only if the household reports zero assets. Paper alternative: use an asset file form template from Drive and file the completed copy in the customer's folder.",
-    links: [
-      { href: "https://drive.google.com/drive/folders/1VF1Q3DbZxHjunU_jrTBU5F5CO2CbdMxm", label: "Asset file form templates (Drive)" },
-    ],
+    title: "Complete workbook and budget",
+    note: "Fill out the customer's TSS workbook and budget.",
+    links: [{ href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" }],
   },
   { formId: "251001226310030", title: "Eligibility Determination Request" },
   {
     formId: "251613294244151", // Initiate Landlord Verification Process
     title: "Create Landlord Verification prefill",
     note: "Initiates the prefilled Landlord Verification Form that gets sent to the landlord.",
+    links: [
+      { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
+    ],
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
   {
     title: "Memorandum of Understanding",
-    note: "No Jotform for the MOU yet — generate and sign it per program process, then file it in the customer's Drive folder.",
+    note: "Send the MOU for signature, then file the signed copy in the customer's Drive folder.",
+    links: [{ href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" }],
   },
+];
+
+/** Reference links pinned at the bottom of the intake flow page. */
+export const INTAKE_RESOURCES: { href: string; label: string }[] = [
+  { href: "https://drive.google.com/file/d/1WY57mEu6-RW9Ry2bpTJWYsYmWwyYDZNT/view", label: "HQS Inspection form (PDF)" },
+  { href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" },
+  { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
+  { href: "https://www.jotform.com/boards/251318461516050", label: "Intake board (Jotform)" },
 ];
 
 export function formsByCategory(category: FormCategory): FormDef[] {

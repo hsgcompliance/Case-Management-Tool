@@ -10,6 +10,7 @@ import { useDriveIntegration } from "@/hooks/useCalendarIntegration";
 import { useSessionSync } from "@/hooks/useSessionSync";
 import { useCreateActivity } from "@/hooks/useCreateActivity";
 import { useEditActivity, useDeleteActivity, type SessionEditFields } from "@/hooks/useEditActivity";
+import { useCaseNoteAssistantConfig, useGenerateSmartGoalSuggestion } from "@/hooks/useCaseNoteAssistant";
 import { SyncChip, SyncButton } from "@/components/SyncControls";
 import { CustomerFolderSection } from "@/components/CustomerFolderSection";
 import { WorkbookLinkSection } from "@/components/WorkbookLinkSection";
@@ -1204,6 +1205,15 @@ function cellText(row: TssNS.TssExtractedRow, fieldId: string): string {
   return v == null ? "" : String(v).trim();
 }
 
+function rowExpectedValues(row: TssNS.TssExtractedRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [fieldId, cell] of Object.entries(row.values ?? {})) {
+    const value = String(cell?.displayValue ?? cell?.value ?? "").trim();
+    if (value) out[fieldId] = value;
+  }
+  return out;
+}
+
 function findEntity(
   extract: TssNS.TssWorkbookExtract,
   entityId: string,
@@ -1220,7 +1230,12 @@ function goalStatusColor(status: string): string {
   }
 }
 
-function GoalCard({ row, n, onEdit }: { row: TssNS.TssExtractedRow; n: number; onEdit?: () => void }) {
+function GoalCard({ row, n, onEdit, onDelete }: {
+  row: TssNS.TssExtractedRow;
+  n: number;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
   const goal = cellText(row, "goalSmart");
   const objective = cellText(row, "objective");
   const status = cellText(row, "status");
@@ -1253,11 +1268,18 @@ function GoalCard({ row, n, onEdit }: { row: TssNS.TssExtractedRow; n: number; o
           {tier && <span><span className="text-slate-400">Tier:</span> {tier}</span>}
         </div>
       )}
-      {onEdit && (
-        <div className="mt-2.5 flex justify-end">
-          <button type="button" onClick={onEdit} className="text-xs font-semibold text-indigo-600 active:text-indigo-800">
+      {(onEdit || onDelete) && (
+        <div className="mt-2.5 flex justify-end gap-3">
+          {onDelete && (
+            <button type="button" onClick={onDelete} className="text-xs font-semibold text-red-600 active:text-red-800">
+              Delete
+            </button>
+          )}
+          {onEdit && (
+            <button type="button" onClick={onEdit} className="text-xs font-semibold text-indigo-600 active:text-indigo-800">
             Edit
-          </button>
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1275,6 +1297,58 @@ function goalFieldOptions(field: TssNS.TssSmartHeaderConfig): string[] {
   if (!id) return [];
   const list = (tss.TSS_DROPDOWN_LISTS as Record<string, { values?: string[] }>)[id];
   return Array.isArray(list?.values) ? list!.values : [];
+}
+
+const AI_GOAL_FIELD_IDS = ["goalSmart", "objective", "interventionTask", "goalCompletionCriteria"] as const;
+
+function SmartGoalAssist({
+  customerId,
+  disabled,
+  onGenerated,
+}: {
+  customerId: string;
+  disabled: boolean;
+  onGenerated: (goal: Record<string, string>, missingInfo: string[]) => void;
+}) {
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useGenerateSmartGoalSuggestion();
+
+  async function generate() {
+    if (!description.trim()) return;
+    setError(null);
+    try {
+      const resp = await mutation.mutateAsync({ customerId, description: description.trim(), clientLabel: "client", staffLabel: "case manager" });
+      onGenerated(resp.goal, resp.missingInfo ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not generate the goal.");
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-bold text-indigo-900">SMART Goal Assistant <span className="font-medium text-indigo-600">Beta</span></p>
+      </div>
+      <textarea
+        rows={2}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        disabled={disabled || mutation.isPending}
+        placeholder="Describe the goal in 1-2 sentences."
+        className="w-full rounded-xl border border-indigo-100 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400"
+      />
+      <button
+        type="button"
+        onClick={() => void generate()}
+        disabled={disabled || mutation.isPending || !description.trim()}
+        className="w-full rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white active:bg-indigo-700 disabled:opacity-50"
+      >
+        {mutation.isPending ? "Generating..." : "Generate Recommendation"}
+      </button>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </section>
+  );
 }
 
 function GoalEditSheet({
@@ -1302,9 +1376,25 @@ function GoalEditSheet({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const aiConfig = useCaseNoteAssistantConfig();
+  const [aiNotes, setAiNotes] = useState<string[]>([]);
 
   const setField = (id: string, v: string) => setValues((cur) => ({ ...cur, [id]: v }));
   const missingRequired = GOAL_FIELDS.some((f) => f.required && !String(values[f.id] || "").trim());
+  const aiEnabled = aiConfig.data?.enabled === true;
+
+  function applyGenerated(goal: Record<string, string>, missingInfo: string[]) {
+    setValues((cur) => {
+      const next = { ...cur };
+      for (const id of AI_GOAL_FIELD_IDS) {
+        const v = String(goal[id] ?? "").trim();
+        if (v) next[id] = v;
+      }
+      if (!String(next.status ?? "").trim()) next.status = "Open";
+      return next;
+    });
+    setAiNotes(missingInfo);
+  }
 
   async function save() {
     if (missingRequired) { setError("Fill in the required fields."); return; }
@@ -1347,6 +1437,16 @@ function GoalEditSheet({
               </svg>
             </button>
           </div>
+
+          {aiEnabled && !isEdit && (
+            <SmartGoalAssist customerId={customerId} disabled={saving} onGenerated={applyGenerated} />
+          )}
+
+          {aiNotes.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <span className="font-semibold">Missing info:</span> {aiNotes.join(", ")}
+            </div>
+          )}
 
           {GOAL_FIELDS.map((f) => {
             const label = f.display?.label ?? f.expected;
@@ -1391,7 +1491,7 @@ function GoalEditSheet({
   );
 }
 
-function NoteCard({ row }: { row: TssNS.TssExtractedRow }) {
+function NoteCard({ row, onDelete }: { row: TssNS.TssExtractedRow; onDelete?: () => void }) {
   const date = cellText(row, "progressDate");
   const summary = cellText(row, "summary");
   const response = cellText(row, "clientResponseProgress");
@@ -1411,6 +1511,11 @@ function NoteCard({ row }: { row: TssNS.TssExtractedRow }) {
         {time && <span className="text-xs text-slate-400">{time}</span>}
         {tier && <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">{tier}</span>}
         {staff && <span className="ml-auto text-xs text-slate-400">{staff}</span>}
+        {onDelete && (
+          <button type="button" onClick={onDelete} className="ml-auto text-xs font-semibold text-red-600 active:text-red-800">
+            Delete
+          </button>
+        )}
       </div>
       {summary && <p className="text-sm text-slate-700 leading-snug whitespace-pre-wrap">{summary}</p>}
       {response && (
@@ -1470,6 +1575,9 @@ function PlanTab({ customer }: { customer: Customer }) {
 
   // Goal add/edit sheet. { row: null } = add; { row } = edit that goal in place.
   const [goalEdit, setGoalEdit] = useState<{ row: TssNS.TssExtractedRow | null } | null>(null);
+  const [deletingRowKey, setDeletingRowKey] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ row: TssNS.TssExtractedRow; entityId: "goals" | "progressNotes" } | null>(null);
+  const [deleteCalendarEvent, setDeleteCalendarEvent] = useState(false);
 
   const handleConnect = async () => {
     const res = await drive.connectViaPopup();
@@ -1536,8 +1644,50 @@ function PlanTab({ customer }: { customer: Customer }) {
   const notes = findEntity(data.extract, "progressNotes");
   const goalRows = goals?.rows ?? [];
   const canEditGoals = drive.connected;
+  const canDeleteRows = drive.connected;
   const openLabel = link?.name || data.extract.spreadsheetName || "Open workbook";
   const openUrl = link?.url || `https://docs.google.com/spreadsheets/d/${data.extract.spreadsheetId}/edit`;
+
+  function requestDeleteWorkbookRow(row: TssNS.TssExtractedRow, entityId: "goals" | "progressNotes") {
+    setDeleteCalendarEvent(false);
+    setPendingDelete({ row, entityId });
+  }
+
+  async function confirmDeleteWorkbookRow() {
+    if (!pendingDelete) return;
+    const { row, entityId } = pendingDelete;
+    const label = entityId === "goals" ? "goal" : "progress note";
+    setDeletingRowKey(row.rowKey);
+    try {
+      const resp = await GoogleIntegrations.deleteWorkbookRow({
+        customerId: customer.id,
+        entityId,
+        rowKey: row.rowKey,
+        expectedValues: rowExpectedValues(row),
+        ...(entityId === "progressNotes"
+          ? {
+              deleteCalendarEvent,
+              rowFingerprint: {
+                date: cellText(row, "progressDate"),
+                startTime: cellText(row, "startTime"),
+                endTime: cellText(row, "endTime"),
+                summary: cellText(row, "summary"),
+              },
+            }
+          : {}),
+      });
+      if (!resp.ok) throw new Error(resp.error || `Could not delete the ${label}.`);
+      setPendingDelete(null);
+      void wb.refetch();
+    } catch (e) {
+      const message = e instanceof Error && /row_out_of_sync|row_fingerprint_required/.test(e.message)
+        ? "The workbook changed since this screen loaded. Open the workbook and make this change manually so the wrong row is not deleted."
+        : e instanceof Error ? e.message : `Could not delete the ${label}.`;
+      window.alert(message);
+    } finally {
+      setDeletingRowKey(null);
+    }
+  }
 
   return (
     <div className="p-4 flex flex-col gap-5">
@@ -1582,13 +1732,70 @@ function PlanTab({ customer }: { customer: Customer }) {
                 row={r}
                 n={i + 1}
                 onEdit={canEditGoals ? () => setGoalEdit({ row: r }) : undefined}
+                onDelete={canDeleteRows ? () => requestDeleteWorkbookRow(r, "goals") : undefined}
               />
             ))}
           </div>
         )}
       </section>
 
-      <PlanSection title="Progress Notes" entity={notes} renderRow={(r) => <NoteCard row={r} />} />
+      {deletingRowKey && (
+        <p className="text-xs text-slate-400">Deleting row {deletingRowKey.replace("row-", "")}...</p>
+      )}
+
+      <PlanSection
+        title="Progress Notes"
+        entity={notes}
+        renderRow={(r) => (
+          <NoteCard
+            row={r}
+            onDelete={canDeleteRows ? () => requestDeleteWorkbookRow(r, "progressNotes") : undefined}
+          />
+        )}
+      />
+      {pendingDelete && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setPendingDelete(null)} />
+          <div className="fixed bottom-0 inset-x-0 z-50 bg-white rounded-t-2xl shadow-2xl pb-safe-bottom">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 rounded-full bg-slate-200" /></div>
+            <div className="px-5 pt-2 pb-6 space-y-3">
+              <h2 className="text-lg font-bold text-slate-900">Are you sure?</h2>
+              <p className="text-sm text-slate-600">
+                This will clear the {pendingDelete.entityId === "goals" ? "goal" : "progress note"} cells only if the workbook still matches this screen.
+                If it changed, deletion will stop and you will need to update the workbook manually.
+              </p>
+              {pendingDelete.entityId === "progressNotes" && (
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={deleteCalendarEvent}
+                    onChange={(e) => setDeleteCalendarEvent(e.target.checked)}
+                  />
+                  Delete linked calendar event if one exists
+                </label>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete(null)}
+                  disabled={!!deletingRowKey}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-600 active:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDeleteWorkbookRow()}
+                  disabled={!!deletingRowKey}
+                  className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white active:bg-red-700 disabled:opacity-50"
+                >
+                  {deletingRowKey ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

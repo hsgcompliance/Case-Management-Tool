@@ -42,6 +42,8 @@ export type CustomerDetail = {
   otherContacts: Array<{ name: string | null; role: string | null }>;
   linkedSubmissions: LinkedSubmission[];
   household: HouseholdObject;
+  driveFolderUrl: string | null;
+  tssPayerStatus: string | null;
 };
 
 // Cache per customer id so flipping tabs / re-opening forms doesn't refetch.

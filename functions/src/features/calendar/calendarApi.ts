@@ -22,6 +22,10 @@ export type CalendarEventResult =
   | { ok: true; eventId: string }
   | { ok: false; error: string; code: string };
 
+export type CalendarDeleteResult =
+  | { ok: true; eventId: string; notFound?: boolean }
+  | { ok: false; error: string; code: string };
+
 export async function createCalendarEvent(
   uid: string,
   event: CalendarEventInput,
@@ -105,6 +109,70 @@ export async function createCalendarEvent(
     const status = err?.code ?? err?.response?.status;
     if (status === 401 || status === 403) {
       // Mark as needs_reconnect in private store and public meta
+      await patchToken(uid, "googleCalendar", {
+        status: "needs_reconnect",
+        updatedAt: Date.now(),
+        errorMessage: String(err?.message ?? err),
+      });
+      const record = await readToken(uid, "googleCalendar");
+      if (record) {
+        await writePublicMeta(uid, "googleCalendar", {
+          ...tokenToPublicMeta(record),
+          connected: false,
+          permissionStatus: "needs_reconnect",
+        });
+      }
+      return { ok: false, error: "Token expired or revoked", code: "calendar_needs_reconnect" };
+    }
+
+    const msg = err?.errors?.[0]?.message ?? err?.message ?? String(err);
+    if (String(msg).includes("SERVICE_DISABLED")) {
+      return { ok: false, error: "Google Calendar API is not enabled", code: "calendar_api_disabled" };
+    }
+
+    return { ok: false, error: msg, code: "unknown" };
+  }
+}
+
+export async function deleteCalendarEvent(
+  uid: string,
+  eventId: string,
+): Promise<CalendarDeleteResult> {
+  const cleanEventId = String(eventId || "").trim();
+  if (!cleanEventId) return { ok: true, eventId: "", notFound: true };
+
+  const authResult = await buildOAuthClient(uid, "googleCalendar");
+  if (!authResult.ok) {
+    const code =
+      authResult.code === "not_connected"
+        ? "calendar_not_connected"
+        : "calendar_needs_reconnect";
+    return { ok: false, error: authResult.code, code };
+  }
+
+  try {
+    const { google } = await import("googleapis");
+    const calendar = google.calendar({ version: "v3", auth: authResult.auth });
+    await calendar.events.delete({
+      calendarId: "primary",
+      eventId: cleanEventId,
+    });
+
+    const record = await readToken(uid, "googleCalendar");
+    if (record) {
+      const meta = tokenToPublicMeta(record);
+      await writePublicMeta(uid, "googleCalendar", { ...meta, lastSyncAt: isoNow() });
+    }
+
+    return { ok: true, eventId: cleanEventId };
+  } catch (err: any) {
+    const status = err?.code ?? err?.response?.status;
+    if (status === 404 || status === 410) {
+      return { ok: true, eventId: cleanEventId, notFound: true };
+    }
+    logger.warn("Calendar event delete failed", { uid, eventId: cleanEventId, err: String(err) });
+
+    if (status === 401 || status === 403) {
       await patchToken(uid, "googleCalendar", {
         status: "needs_reconnect",
         updatedAt: Date.now(),
