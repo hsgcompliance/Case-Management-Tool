@@ -11,6 +11,9 @@ import { useSessionSync } from "@/hooks/useSessionSync";
 import { useCreateActivity } from "@/hooks/useCreateActivity";
 import { useEditActivity, useDeleteActivity, type SessionEditFields } from "@/hooks/useEditActivity";
 import { useCaseNoteAssistantConfig, useGenerateSmartGoalSuggestion } from "@/hooks/useCaseNoteAssistant";
+import { useUserPrefs } from "@/hooks/useUserPrefs";
+import { CaseNoteAssistant } from "@/components/CaseNoteAssistant";
+import { sessionDurationMinutes } from "@/lib/sessionDuration";
 import { SyncChip, SyncButton } from "@/components/SyncControls";
 import { CustomerFolderSection } from "@/components/CustomerFolderSection";
 import { WorkbookLinkSection } from "@/components/WorkbookLinkSection";
@@ -268,6 +271,7 @@ function DraftRow({
 function SessionEditSheet({
   session,
   use24h,
+  assistant,
   onClose,
   onSave,
   onDelete,
@@ -276,6 +280,8 @@ function SessionEditSheet({
 }: {
   session: TCmActivity;
   use24h: boolean;
+  /** Non-null when the AI case-note assistant is eligible for this customer. */
+  assistant: { clientLabel: string; staffLabel: string } | null;
   onClose: () => void;
   onSave: (fields: SessionEditFields, updateWorkbook: boolean) => void;
   onDelete: () => void;
@@ -363,6 +369,19 @@ function SessionEditSheet({
             <textarea rows={4} value={note} onChange={(e) => setNote(e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 resize-none" />
           </div>
+
+          {/* AI case-note assistant — same gating as the Log Session form. */}
+          {assistant && (
+            <CaseNoteAssistant
+              customerId={session.customerId}
+              draft={note}
+              visitLengthMinutes={sessionDurationMinutes(startTime, endTime)}
+              contactType={type === "in-person" ? "in person" : type === "phone" ? "phone" : type === "other" ? "on behalf of the customer" : type === "data-entry" ? "data entry (on behalf of the customer)" : null}
+              clientLabel={assistant.clientLabel}
+              staffLabel={assistant.staffLabel}
+              onAccept={setNote}
+            />
+          )}
 
           {/* Optional workbook re-push (append-only → appends a corrected row) */}
           {wasWorkbookSynced && (
@@ -1025,6 +1044,23 @@ function SessionsTab({ customer, user }: { customer: Customer; user: User | null
   const editActivity = useEditActivity();
   const deleteActivity = useDeleteActivity();
 
+  // AI case-note assistant eligibility — mirrors the Log Session form: org
+  // config enabled + personal opt-in + linked workbook whose variant is in the
+  // org allowlist.
+  const aiConfig = useCaseNoteAssistantConfig();
+  const { prefs } = useUserPrefs(user?.uid);
+  const normVariant = (v: unknown) => String(v ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  const wb = (customer as Customer & { customerDrive?: { linkedWorkbooks?: { tss?: Record<string, unknown> } } }).customerDrive?.linkedWorkbooks?.tss;
+  const workbookVariant = normVariant(wb?.variant ?? wb?.workbookVariant ?? wb?.detectedVariant ?? "");
+  const allowedVariants = (aiConfig.data?.allowedWorkbookVariants ?? ["payer"]).map(normVariant);
+  const assistant =
+    aiConfig.data?.enabled === true && prefs.allowAiAssistance && customerHasWorkbook && !!workbookVariant && allowedVariants.includes(workbookVariant)
+      ? {
+          clientLabel: aiConfig.data?.defaultClientLabel ?? "client",
+          staffLabel: aiConfig.data?.defaultStaffLabel ?? "case manager",
+        }
+      : null;
+
   const [editing, setEditing] = useState<TCmActivity | null>(null);
   const [syncingDraftId, setSyncingDraftId] = useState<string | null>(null);
 
@@ -1089,6 +1125,7 @@ function SessionsTab({ customer, user }: { customer: Customer; user: User | null
         <SessionEditSheet
           session={editing}
           use24h={false}
+          assistant={assistant}
           onClose={() => setEditing(null)}
           onSave={handleSaveEdit}
           onDelete={handleDelete}
@@ -1471,7 +1508,8 @@ function GoalEditSheet({
             </button>
           </div>
 
-          {aiEnabled && !isEdit && (
+          {/* Available for edits too — regenerating overwrites the AI-mapped fields. */}
+          {aiEnabled && (
             <SmartGoalAssist customerId={customerId} disabled={saving} onGenerated={applyGenerated} />
           )}
 

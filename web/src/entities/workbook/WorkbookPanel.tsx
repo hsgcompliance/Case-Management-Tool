@@ -176,21 +176,40 @@ function apiIssueOf(resp: unknown, fallback: string): WorkbookLinkIssue {
   };
 }
 
+function friendlyTemplateError(code: string | undefined): string {
+  const c = String(code || "");
+  if (c === "tss_template_not_configured") {
+    return "No TSS workbook template is configured for your org yet — add one under Admin → Org Config → Google Drive.";
+  }
+  if (/^tss_template_(payer|nonpayer)_missing$/.test(c)) {
+    return `The ${c.includes("nonpayer") ? "non-payer" : "payer"} template file isn't configured — set it under Admin → Org Config → Google Drive.`;
+  }
+  if (c === "customer_folder_missing") {
+    return "This customer has no linked Drive folder — link or build the folder first.";
+  }
+  return c || "Failed to create workbook from template";
+}
+
 /**
  * "Create from TSS template" — copies the org's configured TSS workbook template
- * (payer / non-payer variant) into the customer's folder and links it. Shown only
- * when a folder is linked and the org has a usable tss_workbook template.
+ * (payer / non-payer variant) into the customer's folder and links it. Shown
+ * whenever a folder is linked and no workbook exists; the backend resolves the
+ * org's tss_workbook template authoritatively.
  */
 function WorkbookTemplateCreate({
   customerId,
   enrollmentId,
   hasVariants,
+  templateReady = true,
   onLinked,
   onAuthIssue,
 }: {
   customerId: string;
   enrollmentId?: string;
   hasVariants: boolean;
+  /** Client-side template resolution result. False only adds a configure hint —
+   *  the button still works because the backend resolves the template itself. */
+  templateReady?: boolean;
   onLinked: () => void;
   onAuthIssue?: (issue: WorkbookLinkIssue) => void;
 }) {
@@ -222,11 +241,11 @@ function WorkbookTemplateCreate({
         onLinked();
       } else {
         const issue = apiIssueOf(resp, "Failed to create workbook from template");
-        if (!surfaceAuthIssue(issue)) setError(issue.error || "Failed to create workbook from template");
+        if (!surfaceAuthIssue(issue)) setError(friendlyTemplateError(issue.error));
       }
     } catch (e: unknown) {
       const issue = apiIssueOf(e, String((e as Error)?.message || "Failed to create workbook from template"));
-      if (!surfaceAuthIssue(issue)) setError(issue.error || "Failed to create workbook from template");
+      if (!surfaceAuthIssue(issue)) setError(friendlyTemplateError(issue.error));
     } finally {
       setBusy(false);
     }
@@ -254,6 +273,12 @@ function WorkbookTemplateCreate({
         </button>
       </div>
       {error ? <div className="text-xs text-red-600">{error}</div> : null}
+      {!templateReady ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+          No TSS workbook template found in the org Drive config — set one under Admin → Org Config → Google Drive
+          (template key <code>tss_workbook</code>) if creating fails.
+        </div>
+      ) : null}
       <div className="text-[11px] text-slate-400">
         Future App Script library work should add convert-to-payer and convert-to-non-payer actions for existing workbooks.
       </div>
@@ -571,11 +596,12 @@ export function WorkbookPanel({
           />
         ) : null}
 
-        {!isViewer && folderId && tssTemplateReady ? (
+        {!isViewer && folderId ? (
           <WorkbookTemplateCreate
             customerId={customerId}
             enrollmentId={enrollmentId}
             hasVariants={tssTemplateHasVariants}
+            templateReady={tssTemplateReady}
             onLinked={invalidateCustomer}
             onAuthIssue={setAuthIssue}
           />

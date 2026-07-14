@@ -479,7 +479,11 @@ export async function copyWorkbookFromTemplate(args: {
 
   // Resolve the source template file id from org config (authoritative).
   const config = await getOrgGDriveConfig(orgId);
-  const template = (config.templates || []).find((t) => t.key === TSS_WORKBOOK_TEMPLATE_KEY);
+  // Match by legacy key OR explicit role, mirroring the web's resolution — an
+  // admin-authored template with a custom key but role "tssWorkbook" still works.
+  const template = (config.templates || []).find(
+    (t) => t.key === TSS_WORKBOOK_TEMPLATE_KEY || t.role === "tssWorkbook",
+  );
   if (!template) throw Object.assign(new Error("tss_template_not_configured"), { code: 400 });
   const variantId = template.variants
     ? String((variant === "payer" ? template.variants.payer : template.variants.nonpayer) || "").trim()
