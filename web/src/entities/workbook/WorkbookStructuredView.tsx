@@ -8,10 +8,13 @@
 // the lean extract (fieldId → cell) by fieldId — the extract carries data only.
 
 import React from "react";
+import api from "@client/api";
 import { useWorkbookData } from "@hooks/useWorkbookData";
 import { useResolvedTssConfig } from "@hooks/useTssConfig";
 import { useGoogleIntegrationConnect } from "@hooks/useGoogleIntegrations";
 import { DriveAuthBanner } from "@entities/gdrive/DriveAuthBanner";
+import { getGoogleDriveAccessToken } from "@lib/googleDriveAccessToken";
+import { toast } from "@lib/toast";
 import { AddRowForm } from "./AddRowForm";
 import { AddSessionForm, type GoalOption } from "./AddSessionForm";
 import { GoalForm } from "./GoalForm";
@@ -21,6 +24,20 @@ import type { tss as TssNS } from "@hdb/contracts";
 
 // The companion mobile app (same data, same pushes) — linked from the header.
 const MOBILE_APP_URL = "https://housing-db-mobile.web.app";
+
+function driveHeaders() {
+  const token = getGoogleDriveAccessToken();
+  return token ? { "x-drive-access-token": token } : undefined;
+}
+
+function rowExpectedValues(row: TssNS.TssExtractedRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [fieldId, cell] of Object.entries(row.values ?? {})) {
+    const value = String(cell?.displayValue ?? cell?.value ?? "").trim();
+    if (value) out[fieldId] = value;
+  }
+  return out;
+}
 
 // ── Status pill ────────────────────────────────────────────────────────────────
 
@@ -136,6 +153,12 @@ function EntityBlock({
   const [adding, setAdding] = React.useState(false);
   // Goals only: edit an extracted row in place (mobile GoalEditSheet parity).
   const [editingGoalRow, setEditingGoalRow] = React.useState<TssNS.TssExtractedRow | null>(null);
+  const [deletingRowKey, setDeletingRowKey] = React.useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = React.useState<{
+    row: TssNS.TssExtractedRow;
+    fingerprint?: { date?: string; startTime?: string; endTime?: string; summary?: string };
+  } | null>(null);
+  const [deleteCalendarEvent, setDeleteCalendarEvent] = React.useState(false);
 
   // Goals and progress notes get dedicated forms that mirror the mobile app's
   // Add Goal / Log Session workflows; other writable tables keep the generic form.
@@ -149,6 +172,53 @@ function EntityBlock({
     cfgEntity.renderKind === "dataTable" &&
     cfgEntity.direction !== "worksheetToApp" &&
     (entity.status === "extracted" || entity.status === "empty");
+
+  const requestDeleteRow = (
+    row: TssNS.TssExtractedRow,
+    fingerprint?: { date?: string; startTime?: string; endTime?: string; summary?: string },
+  ) => {
+    setDeleteCalendarEvent(false);
+    setPendingDelete({ row, fingerprint });
+  };
+
+  const confirmDeleteRow = async () => {
+    if (!cfgEntity || !pendingDelete) return;
+    const label = isGoals ? "goal" : isNotes ? "progress note" : "row";
+    const { row, fingerprint } = pendingDelete;
+
+    setDeletingRowKey(row.rowKey);
+    try {
+      const resp = (await (api as any).postWith(
+        "deleteCustomerWorkbookRow",
+        {
+          customerId,
+          entityId: cfgEntity.id,
+          rowKey: row.rowKey,
+          expectedValues: rowExpectedValues(row),
+          ...(isNotes ? { deleteCalendarEvent, rowFingerprint: fingerprint ?? {} } : {}),
+        },
+        driveHeaders(),
+      )) as Record<string, unknown>;
+      if (!resp?.ok) {
+        const manual = resp?.manualActionRequired
+          ? "The workbook changed since this page loaded. Open the workbook and make this change manually so the wrong row is not deleted."
+          : String(resp?.error || `Could not delete the ${label}.`);
+        toast(manual, { type: "error" });
+        return;
+      }
+      toast(isGoals ? "Goal deleted." : isNotes ? "Progress note deleted." : "Row deleted.", { type: "success" });
+      setPendingDelete(null);
+      onSaved();
+    } catch (e: unknown) {
+      const body = (e as { meta?: { response?: { error?: string } } })?.meta?.response;
+      const manual = (body as { manualActionRequired?: boolean } | undefined)?.manualActionRequired
+        ? "The workbook changed since this page loaded. Open the workbook and make this change manually so the wrong row is not deleted."
+        : String(body?.error || (e as Error)?.message || `Could not delete the ${label}.`);
+      toast(manual, { type: "error" });
+    } finally {
+      setDeletingRowKey(null);
+    }
+  };
 
   let body: React.ReactNode;
 
@@ -173,9 +243,13 @@ function EntityBlock({
         ? <KeyValueCard entity={entity} cfgEntity={cfgEntity} />
         : entity.renderKind === "dataTable"
           ? (entity.section === "notes"
-              ? <NotesList entity={entity} cfgEntity={cfgEntity} />
+              ? <NotesList entity={entity} cfgEntity={cfgEntity} onDeleteRow={canAdd ? requestDeleteRow : undefined} />
               : isGoals
-                ? <GoalsList entity={entity} onEditRow={canAdd ? (row) => { setEditingGoalRow(row); setAdding(false); } : undefined} />
+                ? <GoalsList
+                    entity={entity}
+                    onEditRow={canAdd ? (row) => { setEditingGoalRow(row); setAdding(false); } : undefined}
+                    onDeleteRow={canAdd ? requestDeleteRow : undefined}
+                  />
                 : <DataTable entity={entity} cfgEntity={cfgEntity} />)
           : <StatusNote tone="slate">Open the Sheet view to see this section.</StatusNote>;
       break;
@@ -198,6 +272,38 @@ function EntityBlock({
         ) : null}
       </div>
       {body}
+      {deletingRowKey ? (
+        <div className="text-[11px] text-slate-400">Deleting row {deletingRowKey.replace("row-", "")}...</div>
+      ) : null}
+      {pendingDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-lg border border-red-200 bg-white p-4 text-sm text-slate-900 shadow-xl">
+            <div className="font-semibold text-red-900">Are you sure?</div>
+            <p className="mt-1 text-xs text-slate-600">
+              This will clear the {isGoals ? "goal" : isNotes ? "progress note" : "row"} cells only if the workbook still matches the row shown here.
+              If it changed, deletion will stop and you will need to update the workbook manually.
+            </p>
+            {isNotes ? (
+              <label className="mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={deleteCalendarEvent}
+                  onChange={(e) => setDeleteCalendarEvent(e.target.checked)}
+                />
+                Delete the linked calendar event if one exists
+              </label>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPendingDelete(null)} disabled={!!deletingRowKey}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-sm bg-red-600 text-white hover:bg-red-700" onClick={() => void confirmDeleteRow()} disabled={!!deletingRowKey}>
+                {deletingRowKey ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {canAdd && adding && cfgEntity ? (
         isNotes ? (
           <AddSessionForm

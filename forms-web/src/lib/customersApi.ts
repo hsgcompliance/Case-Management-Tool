@@ -51,6 +51,11 @@ export function createCustomer(body: CreateCustomerBody): Promise<CreateCustomer
   return postAuthed<CreateCustomerResp>("formsCustomerCreate", body);
 }
 
+/** Persist the intake TSS payer/non-payer gate selection onto the customer doc. */
+export function setCustomerTssStatus(customerId: string, status: "payer" | "nonpayer"): Promise<void> {
+  return postAuthed("formsCustomerSetTssStatus", { customerId, status });
+}
+
 export function filterCustomers(list: FormsCustomer[], q: string, limit = 12): FormsCustomer[] {
   const ql = q.trim().toLowerCase();
   if (!ql) return list.slice(0, limit);

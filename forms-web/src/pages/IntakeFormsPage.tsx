@@ -1,6 +1,6 @@
 import { FormsCategoryView } from "@/components/FormsCategoryView";
 import { useCatalog } from "@/hooks/useCatalog";
-import { INTAKE_FLOW } from "@/lib/formsCatalog";
+import { INTAKE_FLOW, INTAKE_RESOURCES } from "@/lib/formsCatalog";
 
 export default function IntakeFormsPage() {
   // Full catalog: flow steps reference forms outside the "intake" category
@@ -17,6 +17,7 @@ export default function IntakeFormsPage() {
       flowSteps={INTAKE_FLOW}
       catalog={catalog}
       webhooksSidebar
+      resources={INTAKE_RESOURCES}
     />
   );
 }

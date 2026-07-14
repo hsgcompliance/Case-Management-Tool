@@ -21,10 +21,12 @@ function goalStatusClasses(status: string): string {
 export function GoalsList({
   entity,
   onEditRow,
+  onDeleteRow,
 }: {
   entity: TssNS.TssExtractedEntity;
   /** When provided, each card shows an Edit action. */
   onEditRow?: (row: TssNS.TssExtractedRow) => void;
+  onDeleteRow?: (row: TssNS.TssExtractedRow) => void;
 }) {
   const rows = entity.rows ?? [];
 
@@ -62,8 +64,18 @@ export function GoalsList({
                 {tier ? <span><span className="text-slate-400">Tier:</span> {tier}</span> : null}
               </div>
             ) : null}
-            {onEditRow ? (
-              <div className="mt-2 flex justify-end">
+            {onEditRow || onDeleteRow ? (
+              <div className="mt-2 flex justify-end gap-2">
+                {onDeleteRow ? (
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    onClick={() => onDeleteRow(row)}
+                  >
+                    Delete
+                  </button>
+                ) : null}
+                {onEditRow ? (
                 <button
                   type="button"
                   className="rounded-md px-2 py-0.5 text-xs font-medium text-sky-600 hover:bg-sky-50"
@@ -71,6 +83,7 @@ export function GoalsList({
                 >
                   Edit
                 </button>
+                ) : null}
               </div>
             ) : null}
           </div>

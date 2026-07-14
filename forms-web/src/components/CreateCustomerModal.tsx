@@ -45,7 +45,14 @@ function Input({
   );
 }
 
-export function CreateCustomerModal({ onClose }: { onClose: () => void }) {
+export function CreateCustomerModal({
+  onClose,
+  /** Preselect the Medicaid/TSS-payer variant (e.g. from the intake TSS gate). */
+  presetMedicaid,
+}: {
+  onClose: () => void;
+  presetMedicaid?: "yes" | "no";
+}) {
   const { user } = useAuth();
   const { setCustomer } = useCurrentCustomer();
 
@@ -55,7 +62,7 @@ export function CreateCustomerModal({ onClose }: { onClose: () => void }) {
   const [cwId, setCwId] = useState("");
   const [cm, setCm] = useState(user?.displayName ?? "");
   const [cm2, setCm2] = useState("");
-  const [medicaid, setMedicaid] = useState<"not_sure" | "yes" | "no">("not_sure");
+  const [medicaid, setMedicaid] = useState<"not_sure" | "yes" | "no">(presetMedicaid ?? "not_sure");
   const [buildDrive, setBuildDrive] = useState(true);
 
   const [all, setAll] = useState<FormsCustomer[] | null>(null);

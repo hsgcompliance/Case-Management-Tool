@@ -673,7 +673,7 @@ export async function extractWorkbook(args: {
   const entities: TssNS.TssExtractedEntity[] = [];
   const topWarnings: TssNS.TssExtractionWarning[] = [];
 
-  for (const [entityKey, entity] of Object.entries(cfg.entities)) {
+  for (const [entityKey, entity] of Object.entries(cfg.entities) as Array<[string, TssNS.TssDisplayEntityConfig]>) {
     const base = {
       entityId: entity.id,
       renderKind: entity.renderKind,
@@ -762,6 +762,10 @@ export class WorkbookEntityNotWritableError extends Error {
   constructor(msg = "entity_not_writable") { super(msg); }
 }
 
+export class WorkbookRowOutOfSyncError extends Error {
+  constructor(msg = "row_out_of_sync") { super(msg); }
+}
+
 /**
  * Write a row to a dataTable entity. Strict per-user server OAuth so the write is
  * attributed to the signed-in user. Three modes:
@@ -801,7 +805,7 @@ export async function appendWorkbookRow(args: {
   const override = orgConfig.worksheetConfig ?? null;
   const cfg = tss.resolveTssWorksheetConfig(override);
 
-  const entity = Object.values(cfg.entities).find((e) => e.id === entityId);
+  const entity = (Object.values(cfg.entities) as TssNS.TssDisplayEntityConfig[]).find((e) => e.id === entityId);
   if (!entity) throw new WorkbookEntityNotWritableError("entity_not_found");
   if (entity.renderKind !== "dataTable" || entity.direction === "worksheetToApp") {
     throw new WorkbookEntityNotWritableError();
@@ -927,6 +931,125 @@ export async function appendWorkbookRow(args: {
   }
 
   return { rowKey: `row-${targetRow + 1}`, spreadsheetId };
+}
+
+/**
+ * Clear one extracted dataTable row by `rowKey`, after verifying the current
+ * sheet cells still match what the user saw. This deliberately clears mapped
+ * cells instead of deleting the physical sheet row, so stored workbookRowKey
+ * values do not shift underneath other cmActivities records.
+ */
+export async function deleteWorkbookRow(args: {
+  customerId: string;
+  uid: string;
+  orgId: string;
+  entityId: string;
+  rowKey: string;
+  expectedValues: Record<string, string>;
+  caller?: Record<string, unknown>;
+}): Promise<{ rowKey: string; spreadsheetId: string }> {
+  const { customerId, uid, orgId, entityId } = args;
+  const m = /^row-(\d+)$/.exec(String(args.rowKey || ""));
+  if (!m) throw new WorkbookEntityNotWritableError("invalid_row_key");
+  const targetRow = Number(m[1]) - 1;
+
+  const snap = await admin.firestore().collection("customers").doc(customerId).get();
+  const customer = snap.exists ? (snap.data() as Record<string, any>) : null;
+  if (customer && args.caller && !canAccessDoc(args.caller as any, customer)) {
+    throw Object.assign(new Error("forbidden"), { code: 403 });
+  }
+  const spreadsheetId = String(customer?.customerDrive?.linkedWorkbooks?.tss?.spreadsheetId || "").trim();
+  if (!spreadsheetId) throw new WorkbookNotLinkedError();
+
+  const orgConfig = await getOrgGDriveConfig(orgId);
+  const override = orgConfig.worksheetConfig ?? null;
+  const cfg = tss.resolveTssWorksheetConfig(override);
+
+  const entity = (Object.values(cfg.entities) as TssNS.TssDisplayEntityConfig[]).find((e) => e.id === entityId);
+  if (!entity) throw new WorkbookEntityNotWritableError("entity_not_found");
+  if (entity.renderKind !== "dataTable" || entity.direction === "worksheetToApp") {
+    throw new WorkbookEntityNotWritableError();
+  }
+
+  const sheetsApi = await getWorkbookSheetsClient({ userUid: uid, requiredScopes: [SHEETS_SCOPE] });
+  const meta = await sheetsApi.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(title,sheetId)",
+  });
+  const sheets: SheetMeta[] = (meta.data?.sheets ?? [])
+    .map((s: any) => ({ title: String(s?.properties?.title ?? ""), sheetId: Number(s?.properties?.sheetId ?? 0) }))
+    .filter((s: SheetMeta) => s.title);
+  const variant = tss.resolveWorkbookVariant(override, detectVariant(cfg, sheets));
+
+  const range = effectiveRange(entity, variant);
+  const fields = entity.fields ?? [];
+  if (!range || !fields.length) throw new WorkbookEntityNotWritableError("entity_has_no_table");
+
+  const sheetTitle = resolveSheetTitle(cfg, range.sheetId, sheets);
+  if (!sheetTitle) throw new WorkbookEntityNotWritableError("sheet_not_found");
+
+  const grid = await readSheetGrid(sheetsApi, spreadsheetId, sheetTitle);
+  let colMap: Map<string, number>;
+  let start: number;
+  if (entity.section === "notes") {
+    const headerRows = findHeaderRows(grid, range, fields);
+    const lastHeader = headerRows.length
+      ? headerRows[headerRows.length - 1]
+      : resolveTableLayout(grid, range, fields, entity.id)?.headerRow ?? -1;
+    if (lastHeader < 0) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
+    colMap = buildColMapForRow(grid, lastHeader, fields);
+    start = lastHeader + 1;
+  } else {
+    const layout = resolveTableLayout(grid, range, fields, entity.id);
+    if (!layout || !layout.colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
+    colMap = layout.colMap;
+    start = dataStartRow(range, layout.headerRow);
+  }
+  if (!colMap.size) throw new WorkbookEntityNotWritableError("table_layout_unresolved");
+
+  const nextAnchorId = range.dataEnd?.nextAnchorText ? tss.smartHeaderId(range.dataEnd.nextAnchorText) : null;
+  let anchorRow = -1;
+  for (let r = start; r < MAX_SCAN_ROWS; r++) {
+    if (nextAnchorId && (grid[r] ?? []).some((c) => {
+      const id = tss.smartHeaderId(c);
+      return id === nextAnchorId || id.startsWith(`${nextAnchorId}_`);
+    })) { anchorRow = r; break; }
+  }
+
+  if (targetRow < start || (anchorRow >= 0 && targetRow >= anchorRow) || targetRow >= MAX_SCAN_ROWS) {
+    throw new WorkbookEntityNotWritableError("row_out_of_range");
+  }
+
+  const comparable = Object.entries(args.expectedValues ?? {})
+    .map(([fieldId, value]) => [fieldId, String(value ?? "").trim()] as const)
+    .filter(([fieldId, value]) => value.length > 0 && colMap.has(fieldId));
+  if (!comparable.length) throw new WorkbookRowOutOfSyncError("row_fingerprint_required");
+
+  for (const [fieldId, expectedValue] of comparable) {
+    const col = colMap.get(fieldId)!;
+    const currentValue = gridCell(grid, targetRow, col);
+    if (currentValue !== expectedValue) {
+      throw new WorkbookRowOutOfSyncError();
+    }
+  }
+
+  const clearableFields = fields.filter((field) => {
+    if (field.dataType === "computed") return false;
+    if (field.write?.enabled === false) return false;
+    return colMap.has(field.id);
+  });
+  const ranges = clearableFields.map((field) => {
+    const col = colMap.get(field.id)!;
+    return `${quoteTitle(sheetTitle)}!${idxToCol(col)}${targetRow + 1}`;
+  });
+  if (!ranges.length) throw new WorkbookEntityNotWritableError("no_clearable_cells");
+
+  await sheetsApi.spreadsheets.values.batchClear({
+    spreadsheetId,
+    requestBody: { ranges },
+  });
+
+  return { rowKey: args.rowKey, spreadsheetId };
 }
 
 export { ScopeMissingError };

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { FormDef, IntakeFlowStep } from "@/lib/formsCatalog";
+import { setCustomerTssStatus } from "@/lib/customersApi";
+import { getCustomerDetail } from "@/lib/customerDetailApi";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { JotformEmbed } from "./JotformEmbed";
 import { SendToCustomerModal } from "./SendToCustomerModal";
@@ -11,10 +13,14 @@ import { ReferencePanel } from "./ReferencePanel";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
 
+type TssVariant = "payer" | "nonpayer";
+
 type FlowProgress = {
   done: Record<string, boolean>;
   /** stepKey → checked checklist item indexes */
   checks: Record<string, number[]>;
+  /** TSS gate selection — also presets the folder build + customer doc push. */
+  tssVariant?: TssVariant;
 };
 
 const EMPTY_PROGRESS: FlowProgress = { done: {}, checks: {} };
@@ -24,7 +30,11 @@ function loadProgress(key: string): FlowProgress {
     const raw = localStorage.getItem(key);
     if (!raw) return EMPTY_PROGRESS;
     const p = JSON.parse(raw) as Partial<FlowProgress>;
-    return { done: p.done ?? {}, checks: p.checks ?? {} };
+    return {
+      done: p.done ?? {},
+      checks: p.checks ?? {},
+      ...(p.tssVariant === "payer" || p.tssVariant === "nonpayer" ? { tssVariant: p.tssVariant } : {}),
+    };
   } catch {
     return EMPTY_PROGRESS;
   }
@@ -55,6 +65,8 @@ export function FormsCategoryView({
   catalog,
   /** Intake: persistent right-hand Webhooks sidebar (structured + raw). */
   webhooksSidebar = false,
+  /** Reference links pinned at the bottom of the flow list. */
+  resources,
 }: {
   heading: string;
   description?: string;
@@ -65,6 +77,7 @@ export function FormsCategoryView({
   flowSteps?: IntakeFlowStep[];
   catalog?: FormDef[];
   webhooksSidebar?: boolean;
+  resources?: { href: string; label: string }[];
 }) {
   const { customer } = useCurrentCustomer();
   const [view, setView] = useState<View>({ kind: "list" });
@@ -103,6 +116,7 @@ export function FormsCategoryView({
         const merged: FlowProgress = {
           done: { ...anon.done, ...next.done },
           checks: { ...anon.checks, ...next.checks },
+          ...(next.tssVariant ?? anon.tssVariant ? { tssVariant: next.tssVariant ?? anon.tssVariant } : {}),
         };
         try {
           localStorage.setItem(storageKey, JSON.stringify(merged));
@@ -167,6 +181,36 @@ export function FormsCategoryView({
   const resolveHref = (href: string): string =>
     customer ? href.replace("{customerId}", customer.id) : href.replace(/\/\{customerId\}/, "");
 
+  // Customer Drive folder URL (from the customer doc) for "Open customer folder" buttons.
+  const [folderUrl, setFolderUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (!customer) {
+      setFolderUrl(null);
+      return;
+    }
+    getCustomerDetail(customer.id).then((d) => {
+      if (alive) setFolderUrl(d?.driveFolderUrl ?? null);
+    });
+    return () => { alive = false; };
+  }, [customer]);
+
+  // TSS gate selection: persist locally, and push onto the customer doc as soon
+  // as one exists (covers select-after-link AND select-before-link via merge).
+  const tssVariant = progress.tssVariant ?? null;
+  const tssPushed = useRef(new Set<string>());
+  useEffect(() => {
+    if (!customer || !tssVariant) return;
+    const key = `${customer.id}:${tssVariant}`;
+    if (tssPushed.current.has(key)) return;
+    tssPushed.current.add(key);
+    setCustomerTssStatus(customer.id, tssVariant).catch(() => tssPushed.current.delete(key));
+  }, [customer, tssVariant]);
+
+  const chooseTssVariant = (v: TssVariant) => {
+    updateProgress((p) => ({ ...p, tssVariant: v }));
+  };
+
   // Persisted across list and open views so context (card spend, current
   // customer) stays visible while a form is being filled in the iframe.
   const persistentContext = (
@@ -176,7 +220,13 @@ export function FormsCategoryView({
     </>
   );
 
-  const createModal = createOpen ? <CreateCustomerModal onClose={() => setCreateOpen(false)} /> : null;
+  const createModal = createOpen ? (
+    <CreateCustomerModal
+      onClose={() => setCreateOpen(false)}
+      // The TSS gate choice presets the folder build variant (payer ↔ Medicaid yes).
+      presetMedicaid={tssVariant ? (tssVariant === "payer" ? "yes" : "no") : undefined}
+    />
+  ) : null;
 
   // The Webhooks sidebar sits OUTSIDE the view switch so it persists (and keeps
   // its data/scroll) across the list, step, and form views of the flow.
@@ -289,8 +339,26 @@ export function FormsCategoryView({
             </div>
           )
         ) : null}
-        {step.checklist?.length || step.links?.length ? (
+        {step.checklist?.length || step.links?.length || step.customerFolderLink ? (
           <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+            {step.customerFolderLink ? (
+              folderUrl ? (
+                <a
+                  href={folderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                >
+                  Open customer folder (Drive) ↗
+                </a>
+              ) : (
+                <div className="text-xs text-slate-400">
+                  {customer
+                    ? "No Drive folder linked to this customer yet — build it at the customer-setup step."
+                    : "Link a customer to get a direct button to their Drive folder."}
+                </div>
+              )
+            ) : null}
             {step.checklist?.length ? (
               <ul className="space-y-1.5">
                 {step.checklist.map((item, i) => {
@@ -328,12 +396,66 @@ export function FormsCategoryView({
             ) : null}
           </div>
         ) : null}
-        {step.form ? (
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-            <div className="min-w-0 flex-1">
-              <JotformEmbed formId={step.form.id} title={step.title} onSubmitted={handleSubmitted} />
+        {step.tssGate && !tssVariant ? (
+          // Full-page gate: payer vs non-payer decides which form loads (and
+          // presets the folder build + customer doc payer status).
+          <div className="rounded-xl border border-indigo-200 bg-white px-6 py-10 text-center">
+            <div className="text-base font-semibold text-slate-900">Is this customer a TSS payer or non-payer?</div>
+            <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+              Your selection loads the matching form, presets the customer folder build, and is saved onto the
+              customer record.
+            </p>
+            <div className="mx-auto mt-5 flex max-w-md flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => chooseTssVariant("payer")}
+                className="flex-1 rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-5 text-sm font-bold text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
+              >
+                Payer
+                <span className="mt-1 block text-[11px] font-medium text-indigo-400">Medicaid / payer source</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => chooseTssVariant("nonpayer")}
+                className="flex-1 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-5 text-sm font-bold text-slate-700 hover:border-slate-400 hover:bg-slate-100"
+              >
+                Non-payer
+                <span className="mt-1 block text-[11px] font-medium text-slate-400">Sliding fee acknowledgement</span>
+              </button>
             </div>
-            {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
+          </div>
+        ) : step.tssGate || step.form ? (
+          <div className="space-y-2">
+            {step.tssGate && tssVariant ? (
+              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                <span className="font-semibold text-slate-700">
+                  TSS variant: <span className={tssVariant === "payer" ? "text-indigo-600" : "text-slate-600"}>{tssVariant === "payer" ? "Payer" : "Non-payer"}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => chooseTssVariant(tssVariant === "payer" ? "nonpayer" : "payer")}
+                  className="font-semibold text-indigo-600 hover:text-indigo-500"
+                >
+                  Switch to {tssVariant === "payer" ? "Non-payer" : "Payer"}
+                </button>
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+              <div className="min-w-0 flex-1">
+                <JotformEmbed
+                  formId={
+                    step.tssGate
+                      ? tssVariant === "payer"
+                        ? step.tssGate.payerFormId
+                        : step.tssGate.nonpayerFormId
+                      : step.form!.id
+                  }
+                  title={step.title}
+                  onSubmitted={handleSubmitted}
+                />
+              </div>
+              {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
+            </div>
           </div>
         ) : (
           <button
@@ -421,14 +543,18 @@ export function FormsCategoryView({
           </div>
           <div className="space-y-1.5">
             {steps.map((s, i) => (
-              <StepRow
-                key={s.key}
-                step={s}
-                index={i}
-                done={!!progress.done[s.key]}
-                onOpen={() => setView({ kind: "step", idx: i })}
-                onSend={setSendForm}
-              />
+              <div key={s.key} className="space-y-1.5">
+                {s.section ? (
+                  <div className="pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{s.section}</div>
+                ) : null}
+                <StepRow
+                  step={s}
+                  index={i}
+                  done={!!progress.done[s.key]}
+                  onOpen={() => setView({ kind: "step", idx: i })}
+                  onSend={setSendForm}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -446,6 +572,25 @@ export function FormsCategoryView({
       ) : steps.length === 0 && forms.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
           No forms in this category yet.
+        </div>
+      ) : null}
+
+      {resources?.length ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-slate-700">Resources</h3>
+          <div className="flex flex-wrap gap-2">
+            {resources.map((r) => (
+              <a
+                key={r.href}
+                href={r.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+              >
+                {r.label} ↗
+              </a>
+            ))}
+          </div>
         </div>
       ) : null}
 

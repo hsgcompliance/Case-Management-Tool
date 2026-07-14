@@ -16,9 +16,11 @@ import type { tss as TssNS } from "@hdb/contracts";
 export function NotesList({
   entity,
   cfgEntity,
+  onDeleteRow,
 }: {
   entity: TssNS.TssExtractedEntity;
   cfgEntity: TssNS.TssDisplayEntityConfig | undefined;
+  onDeleteRow?: (row: TssNS.TssExtractedRow, fingerprint: { date?: string; startTime?: string; endTime?: string; summary?: string }) => void;
 }) {
   const fields = cfgEntity?.fields ?? [];
   const byId = (pred: (f: TssNS.TssSmartHeaderConfig) => boolean) => fields.find(pred)?.id;
@@ -67,15 +69,28 @@ export function NotesList({
         const tier = cellText(row, tierId);
         const summary = cellText(row, summaryId);
         const response = cellText(row, responseId);
+        const startTime = cellText(row, "startTime");
+        const endTime = cellText(row, "endTime");
         return (
           <div key={row.rowKey} className="rounded-lg border border-slate-200 bg-white p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-slate-900">{date || "—"}</div>
-              {tier ? (
-                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-                  {tier}
-                </span>
-              ) : null}
+              <div className="flex items-center gap-2">
+                {tier ? (
+                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                    {tier}
+                  </span>
+                ) : null}
+                {onDeleteRow ? (
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    onClick={() => onDeleteRow(row, { date, startTime, endTime, summary })}
+                  >
+                    Delete
+                  </button>
+                ) : null}
+              </div>
             </div>
             {summary ? (
               <p className="mt-1.5 whitespace-pre-wrap text-sm text-slate-700">{summary}</p>

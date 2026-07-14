@@ -5,7 +5,9 @@
 
 import { z } from "zod";
 import { secureHandler, requireOrg } from "../../core";
+import admin from "../../core/admin";
 import { GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_STATE_SECRET } from "../../core/env";
+import { deleteCalendarEvent } from "../calendar/calendarApi";
 import {
   attachWorkbookByUrl,
   listFolderCandidates,
@@ -18,9 +20,11 @@ import { ScopeMissingError } from "./service";
 import {
   extractWorkbook,
   appendWorkbookRow,
+  deleteWorkbookRow,
   WorkbookNotLinkedError,
   WorkbookNotConnectedError,
   WorkbookEntityNotWritableError,
+  WorkbookRowOutOfSyncError,
 } from "./workbookExtractor";
 
 function buildScopeErrorResponse(err: ScopeMissingError) {
@@ -370,6 +374,168 @@ export const appendCustomerWorkbookRow = secureHandler(
 // only customerId — the spreadsheet id is resolved from the customer record and
 // the config is resolved server-side. Fails closed: not connected / missing scope
 // returns a structured error so the UI falls back to the iframe / open-sheet path.
+
+const DeleteRowBody = z.object({
+  customerId: z.string().min(1),
+  entityId: z.string().min(1),
+  rowKey: z.string().regex(/^row-\d+$/),
+  deleteCalendarEvent: z.boolean().optional(),
+  rowFingerprint: z.object({
+    date: z.string().optional(),
+    startTime: z.string().optional(),
+    endTime: z.string().optional(),
+    summary: z.string().optional(),
+  }).optional(),
+  expectedValues: z.record(z.string(), z.string()).optional(),
+});
+
+function cleanText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function activityMatchesFingerprint(activity: Record<string, any>, fingerprint?: {
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  summary?: string;
+}): boolean {
+  if (!fingerprint) return true;
+  const date = cleanText(fingerprint.date);
+  const startTime = cleanText(fingerprint.startTime);
+  const endTime = cleanText(fingerprint.endTime);
+  const summary = cleanText(fingerprint.summary);
+  if (date && cleanText(activity.date) !== date) return false;
+  if (startTime && cleanText(activity.startTime) !== startTime) return false;
+  if (endTime && cleanText(activity.endTime) !== endTime) return false;
+  if (summary) {
+    const note = cleanText(activity.note);
+    const type = cleanText(activity.type);
+    if (note && !summary.includes(note)) return false;
+    if (type === "phone" && !/phone/i.test(summary)) return false;
+    if (type === "in-person" && !/in person/i.test(summary)) return false;
+    if (type === "data-entry" && !/data entry/i.test(summary)) return false;
+    if (type === "other" && !/on behalf of/i.test(summary)) return false;
+  }
+  return true;
+}
+
+async function findMatchingProgressActivity(args: {
+  customerId: string;
+  rowKey: string;
+  uid: string;
+  fingerprint?: { date?: string; startTime?: string; endTime?: string; summary?: string };
+}): Promise<{ id: string; data: Record<string, any> } | null> {
+  const snap = await admin.firestore()
+    .collection("cmActivities")
+    .where("workbookRowKey", "==", args.rowKey)
+    .limit(10)
+    .get();
+
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data() as Record<string, any>;
+    if (cleanText(data.customerId) !== args.customerId) continue;
+    if (cleanText(data.caseManagerId) !== args.uid) continue;
+    if (data.workbookSynced !== true) continue;
+    if (!activityMatchesFingerprint(data, args.fingerprint)) continue;
+    return { id: docSnap.id, data };
+  }
+  return null;
+}
+
+export const deleteCustomerWorkbookRow = secureHandler(
+  async (req, res) => {
+    const caller = (req as any).user;
+    const uid = String(caller?.uid || "");
+    const orgId = requireOrg(caller);
+
+    try {
+      const body = DeleteRowBody.parse(req.body ?? {});
+      const activity = body.entityId === "progressNotes"
+        ? await findMatchingProgressActivity({
+            customerId: body.customerId,
+            rowKey: body.rowKey,
+            uid,
+            fingerprint: body.rowFingerprint,
+          })
+        : null;
+
+      const result = await deleteWorkbookRow({
+        customerId: body.customerId,
+        uid,
+        orgId,
+        entityId: body.entityId,
+        rowKey: body.rowKey,
+        expectedValues: body.expectedValues ?? {},
+        caller,
+      });
+
+      let calendarDeleted = false;
+      let calendarNotFound = false;
+      let calendarSkippedReason: string | undefined;
+      if (body.entityId === "progressNotes" && body.deleteCalendarEvent) {
+        const eventId = cleanText(activity?.data?.calendarEventId);
+        if (eventId) {
+          const cal = await deleteCalendarEvent(uid, eventId);
+          if (!cal.ok) {
+            res.status(cal.code === "calendar_not_connected" ? 400 : 502).json(cal);
+            return;
+          }
+          calendarDeleted = true;
+          calendarNotFound = cal.notFound === true;
+        } else {
+          calendarSkippedReason = activity ? "no_calendar_event_id" : "no_matching_activity";
+        }
+      }
+
+      let activityDeleted = false;
+      if (activity) {
+        await admin.firestore().collection("cmActivities").doc(activity.id).delete();
+        activityDeleted = true;
+      }
+
+      res.json({
+        ok: true,
+        ...result,
+        activityDeleted,
+        calendarDeleted,
+        calendarNotFound,
+        ...(calendarSkippedReason ? { calendarSkippedReason } : {}),
+      });
+    } catch (err: any) {
+      if (err instanceof ScopeMissingError) { res.status(403).json(buildScopeErrorResponse(err)); return; }
+      if (err instanceof WorkbookNotConnectedError || String(err?.message) === "google_not_connected") {
+        res.status(409).json({ ok: false, error: "google_not_connected", category: "not_connected", reconnectService: "googleDrive" });
+        return;
+      }
+      if (err instanceof WorkbookNotLinkedError || String(err?.message) === "workbook_not_linked") {
+        res.status(404).json({ ok: false, error: "workbook_not_linked" });
+        return;
+      }
+      if (err instanceof WorkbookEntityNotWritableError) {
+        res.status(422).json({ ok: false, error: String(err?.message || "entity_not_writable") });
+        return;
+      }
+      if (err instanceof WorkbookRowOutOfSyncError) {
+        res.status(409).json({
+          ok: false,
+          error: String(err?.message || "row_out_of_sync"),
+          manualActionRequired: true,
+          message: "The workbook row no longer matches what was loaded. Open the workbook and make the change manually.",
+        });
+        return;
+      }
+      const isZod = err?.name === "ZodError";
+      res.status(isZod ? 400 : 500).json({ ok: false, error: isZod ? "invalid_request" : String(err?.message || "workbook_delete_failed") });
+    }
+  },
+  {
+    auth: "user",
+    methods: ["POST", "OPTIONS"],
+    secrets: SECRETS,
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+);
 
 export const getWorkbookData = secureHandler(
   async (req, res) => {
