@@ -71,7 +71,6 @@ export const FORMS: FormDef[] = [
   // Low-volume forms pulled in because the intake flow references them:
   { id: "260347030470043", title: "Self-Declaration of Zero Income", category: "other", submissions: 7 },
   { id: "260346243018046", title: "Self-Declaration of Zero Assets", category: "other", submissions: 1 },
-  { id: "251613294244151", title: "Initiate Landlord Verification Process", category: "other", submissions: 0 },
   // Doubles as the TSS payer variant in the intake tssGate (referenced by id).
   { id: "260345071136045", title: "Referral to TSS", category: "referral", submissions: 4 },
 ];
@@ -176,14 +175,23 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   { formId: "251001226310030", title: "Eligibility Determination Request" },
   {
-    formId: "251613294244151", // Initiate Landlord Verification Process
     title: "Create Landlord Verification prefill",
-    note: "Initiates the prefilled Landlord Verification Form that gets sent to the landlord.",
+    note: "Use the Landlord Verification prefill page directly. The old Initiate Landlord Verification Process form is not reliable enough for this workflow.",
     links: [
       { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
     ],
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
+  {
+    title: "Link intake submissions to customer",
+    note: "Open the Submissions tab and confirm each completed intake submission is linked to the current customer. This uses the canonical customer linked-submissions store.",
+    checklist: [
+      "Open the Submissions tab",
+      "Link each matching intake submission to the current customer",
+      "Confirm linked submissions appear in the customer details header",
+    ],
+    links: [{ href: "/staff/submissions", label: "Open Submissions tab" }],
+  },
   {
     title: "Memorandum of Understanding",
     note: "Send the MOU for signature, then file the signed copy in the customer's Drive folder.",
