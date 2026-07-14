@@ -1,4 +1,4 @@
-import { Routes, Route, Link, Navigate } from "react-router-dom";
+import { Routes, Route, Link } from "react-router-dom";
 import CheckoutPage from "@/pages/CheckoutPage";
 import StatusPage from "@/pages/StatusPage";
 import CustomerPrefillPage from "@/pages/CustomerPrefillPage";
@@ -10,6 +10,8 @@ import StaffHomePage from "@/pages/StaffHomePage";
 import PurchasesPage from "@/pages/PurchasesPage";
 import CheckoutLandingPage from "@/pages/CheckoutLandingPage";
 import ReturnLandingPage from "@/pages/ReturnLandingPage";
+import StaffLandingPage from "@/pages/StaffLandingPage";
+import ReferralsPage from "@/pages/ReferralsPage";
 import IntakeFormsPage from "@/pages/IntakeFormsPage";
 import AllFormsPage from "@/pages/AllFormsPage";
 import WebhookEventsPage from "@/pages/WebhookEventsPage";
@@ -53,8 +55,9 @@ export default function App() {
           </AuthGuard>
         }
       >
-        <Route index element={<Navigate to="purchases" replace />} />
+        <Route index element={<StaffLandingPage />} />
         <Route path="purchases" element={<PurchasesPage />} />
+        <Route path="referrals" element={<ReferralsPage />} />
         {/* Direct-link landing pages (bookmarkable). */}
         <Route path="checkout" element={<CheckoutLandingPage />} />
         <Route path="return" element={<ReturnLandingPage />} />

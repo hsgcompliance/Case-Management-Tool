@@ -12,6 +12,7 @@ import { SubmitNotifications } from "./SubmitNotifications";
 // need them.
 const PRIMARY_TABS = [
   { to: "/staff/purchases", label: "Purchases" },
+  { to: "/staff/referrals", label: "Referrals" },
   { to: "/staff/intake", label: "Intake forms" },
 ];
 
@@ -48,10 +49,10 @@ export function StaffLayout() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-screen-2xl px-4">
           <div className="flex items-center justify-between py-3">
-            <div>
+            <NavLink to="/staff" end className="block" title="Staff home — quick links">
               <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">HDB Forms</div>
               <div className="text-sm font-bold text-slate-900">Staff workspace</div>
-            </div>
+            </NavLink>
             <div className="flex items-center gap-3">
               <SubmitNotifications />
               <span className="hidden text-xs text-slate-500 sm:inline">{user?.email}</span>
@@ -67,7 +68,9 @@ export function StaffLayout() {
           <div className="pb-3">
             <CustomerSearchBar />
           </div>
-          <nav className="-mb-px flex items-center gap-1 overflow-x-auto">
+          {/* No overflow-x-auto here: it would clip the ☰ dropdown (overflow-x
+              forces vertical clipping too). The few tabs fit without scrolling. */}
+          <nav className="-mb-px flex flex-wrap items-center gap-1">
             {tabs.map((t) => (
               <NavLink
                 key={t.to}

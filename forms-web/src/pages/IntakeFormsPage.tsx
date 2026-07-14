@@ -1,8 +1,11 @@
+import { useSearchParams } from "react-router-dom";
 import { FormsCategoryView } from "@/components/FormsCategoryView";
 import { useCatalog } from "@/hooks/useCatalog";
 import { INTAKE_FLOW, INTAKE_RESOURCES } from "@/lib/formsCatalog";
 
 export default function IntakeFormsPage() {
+  // ?start=… (e.g. from a completed referral) jumps into the first open step.
+  const [params] = useSearchParams();
   // Full catalog: flow steps reference forms outside the "intake" category
   // (citizenship, TSS, landlord verification, zero income/assets).
   const catalog = useCatalog();
@@ -18,6 +21,7 @@ export default function IntakeFormsPage() {
       catalog={catalog}
       webhooksSidebar
       resources={INTAKE_RESOURCES}
+      autoStart={params.has("start")}
     />
   );
 }
