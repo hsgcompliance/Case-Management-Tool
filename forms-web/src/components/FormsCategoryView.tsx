@@ -67,6 +67,8 @@ export function FormsCategoryView({
   webhooksSidebar = false,
   /** Reference links pinned at the bottom of the flow list. */
   resources,
+  /** Jump straight into the first unfinished flow step on mount (e.g. after a referral). */
+  autoStart = false,
 }: {
   heading: string;
   description?: string;
@@ -78,6 +80,7 @@ export function FormsCategoryView({
   catalog?: FormDef[];
   webhooksSidebar?: boolean;
   resources?: { href: string; label: string }[];
+  autoStart?: boolean;
 }) {
   const { customer } = useCurrentCustomer();
   const [view, setView] = useState<View>({ kind: "list" });
@@ -163,6 +166,16 @@ export function FormsCategoryView({
 
   const doneCount = steps.filter((s) => progress.done[s.key]).length;
   const firstOpen = steps.findIndex((s) => !progress.done[s.key]);
+
+  // Arriving via a "start intake" link (e.g. a completed referral) jumps
+  // straight into the first unfinished step. Once per mount.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStart && !autoStarted.current && steps.length) {
+      autoStarted.current = true;
+      setView({ kind: "step", idx: Math.max(0, firstOpen) });
+    }
+  }, [autoStart, steps.length, firstOpen]);
 
   const step = view.kind === "step" ? steps[view.idx] : null;
   const stepKey = step?.key ?? null;
