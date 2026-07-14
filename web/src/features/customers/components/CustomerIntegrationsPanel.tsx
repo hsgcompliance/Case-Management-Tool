@@ -812,7 +812,7 @@ function GDriveBlock({ customerId }: { customerId: string }) {
           {diagRunning ? "…" : "Diagnose"}
         </button>
       )}
-      {firstFolder && !hasLinkedWorkbook && tssTemplateReady ? (
+      {firstFolder && !hasLinkedWorkbook ? (
         <button
           type="button"
           className="btn btn-xs btn-primary"
@@ -1251,22 +1251,26 @@ function GDriveBlock({ customerId }: { customerId: string }) {
                       Link an existing TSS sheet or build one from the configured template.
                     </div>
                   </div>
-                  {tssTemplateReady ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-primary"
-                        disabled={workbookBusy}
-                        onClick={() => {
-                          if (tssTemplateHasVariants) setShowWorkbookVariantDialog(true);
-                          else void buildWorkbookFromTemplate();
-                        }}
-                      >
-                        {workbookBusy ? "Creating..." : "Create new workbook from template"}
-                      </button>
-                    </div>
-                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-primary"
+                      disabled={workbookBusy}
+                      onClick={() => {
+                        if (tssTemplateHasVariants) setShowWorkbookVariantDialog(true);
+                        else void buildWorkbookFromTemplate();
+                      }}
+                    >
+                      {workbookBusy ? "Creating..." : "Create new workbook from template"}
+                    </button>
+                  </div>
                 </div>
+                {!tssTemplateReady ? (
+                  <div className="text-[11px] text-amber-800">
+                    No TSS template found in the org Drive config — configure one under Admin → Org Config → Google
+                    Drive (key <code>tss_workbook</code>) if creating fails.
+                  </div>
+                ) : null}
 
                 <div className="flex items-center gap-2 text-xs">
                   <span className="font-medium text-amber-900">Workbook type</span>

@@ -226,7 +226,8 @@ export function GoalForm({
     <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-3 space-y-3">
       <div className="text-xs font-semibold text-slate-700">{isEdit ? "Edit goal" : "New goal"}</div>
 
-      {aiEnabled && !isEdit ? (
+      {/* Available for edits too — regenerating overwrites the AI-mapped fields. */}
+      {aiEnabled ? (
         <SmartGoalAssist customerId={customerId} disabled={saving} onGenerated={applyGenerated} />
       ) : null}
 
