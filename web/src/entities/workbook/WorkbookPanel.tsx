@@ -445,6 +445,17 @@ export function WorkbookPanel({
               [model.firstName, model.lastName].filter(Boolean).join(" ").trim() ||
               undefined
             }
+            suggestedIdentity={{
+              clientName:
+                String((model.name as string) || "").trim() ||
+                [model.firstName, model.lastName].filter(Boolean).join(" ").trim() ||
+                undefined,
+              dob: String((model.dob as string) || "").trim() || undefined,
+              hmisCwId:
+                String((model.cwId as string) || "").trim() ||
+                String((model.hmisId as string) || "").trim() ||
+                undefined,
+            }}
             onOpenSheet={() => setWorkbookView("sheet")}
           />
         ) : (

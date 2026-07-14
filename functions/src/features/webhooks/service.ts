@@ -289,7 +289,7 @@ export async function upsertFormRegistry(formId: string, kind: string): Promise<
 /** Admin override of a form's catalog metadata (creates the doc if needed). */
 export async function updateFormRegistry(
   formId: string,
-  patch: { title?: string; category?: string; customerSendable?: boolean }
+  patch: { title?: string; category?: string; customerSendable?: boolean; notifyOnSubmit?: boolean }
 ): Promise<void> {
   if (!isValidFormId(formId)) {
     const e = new Error("invalid_form_id") as Error & { code: number };
@@ -300,6 +300,7 @@ export async function updateFormRegistry(
   if (typeof patch.title === "string") update.title = patch.title.slice(0, 200);
   if (patch.category && VALID_CATEGORIES.has(patch.category)) update.category = patch.category;
   if (typeof patch.customerSendable === "boolean") update.customerSendable = patch.customerSendable;
+  if (typeof patch.notifyOnSubmit === "boolean") update.notifyOnSubmit = patch.notifyOnSubmit;
   await db.collection(REGISTRY).doc(formId).set(update, { merge: true });
 }
 
@@ -308,6 +309,7 @@ export type FormsRegistryItem = {
   category: string;
   title: string;
   customerSendable: boolean;
+  notifyOnSubmit: boolean;
   adminEdited: boolean;
   submissionCount: number;
   lastKind: string | null;
@@ -322,6 +324,7 @@ export async function listFormsRegistry(): Promise<FormsRegistryItem[]> {
       category: String(r.category || "other"),
       title: String(r.title || ""),
       customerSendable: !!r.customerSendable,
+      notifyOnSubmit: !!r.notifyOnSubmit,
       adminEdited: !!r.adminEdited,
       submissionCount: Number(r.submissionCount || 0) || 0,
       lastKind: (r.lastKind as string | null) ?? null,

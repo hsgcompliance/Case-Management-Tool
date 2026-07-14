@@ -10,6 +10,8 @@ export type FormDef = {
   category: FormCategory;
   submissions: number;
   customerSendable?: boolean;
+  /** Surface new submissions of this form in the header notification bell. */
+  notifyOnSubmit?: boolean;
 };
 
 export const FORMS: FormDef[] = [
@@ -39,7 +41,7 @@ export const FORMS: FormDef[] = [
 
   // ── Other (high-volume) ─────────────────────────────────────────────────
   { id: "253485149991067", title: "TSS Client Session Timer", category: "other", submissions: 272 },
-  { id: "250646887611061", title: "Landlord Verification Form", category: "other", submissions: 89 },
+  { id: "250646887611061", title: "Landlord Verification Form", category: "other", submissions: 89, notifyOnSubmit: true },
   { id: "251054570555051", title: "SOAR Reporting Tool", category: "other", submissions: 85 },
   { id: "251858892830167", title: "Community-Based Care Coordination (CBCC) Enrollment", category: "other", submissions: 65 },
   { id: "260567136431051", title: "Customer Appeal Form", category: "other", submissions: 53 },
@@ -203,6 +205,7 @@ export function mergeWithRegistry(
     category: string;
     title?: string;
     customerSendable?: boolean;
+    notifyOnSubmit?: boolean;
     adminEdited?: boolean;
     submissionCount: number;
   }>
@@ -221,6 +224,8 @@ export function mergeWithRegistry(
         base.title = r.title;
       }
       if (typeof r.customerSendable === "boolean") base.customerSendable = r.customerSendable;
+      // Only an admin edit can override the hardcoded notify default.
+      if (r.adminEdited && typeof r.notifyOnSubmit === "boolean") base.notifyOnSubmit = r.notifyOnSubmit;
     } else {
       byId.set(r.formId, {
         id: r.formId,
@@ -228,6 +233,7 @@ export function mergeWithRegistry(
         category,
         submissions: r.submissionCount || 0,
         customerSendable: !!r.customerSendable,
+        notifyOnSubmit: !!r.notifyOnSubmit,
       });
     }
   }

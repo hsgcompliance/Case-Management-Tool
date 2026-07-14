@@ -8,6 +8,8 @@ import RenderFormPage from "@/pages/RenderFormPage";
 import LoginPage from "@/pages/LoginPage";
 import StaffHomePage from "@/pages/StaffHomePage";
 import PurchasesPage from "@/pages/PurchasesPage";
+import CheckoutLandingPage from "@/pages/CheckoutLandingPage";
+import ReturnLandingPage from "@/pages/ReturnLandingPage";
 import IntakeFormsPage from "@/pages/IntakeFormsPage";
 import AllFormsPage from "@/pages/AllFormsPage";
 import WebhookEventsPage from "@/pages/WebhookEventsPage";
@@ -53,6 +55,9 @@ export default function App() {
       >
         <Route index element={<Navigate to="purchases" replace />} />
         <Route path="purchases" element={<PurchasesPage />} />
+        {/* Direct-link landing pages (bookmarkable). */}
+        <Route path="checkout" element={<CheckoutLandingPage />} />
+        <Route path="return" element={<ReturnLandingPage />} />
         <Route path="intake" element={<IntakeFormsPage />} />
         <Route path="forms" element={<AllFormsPage />} />
         <Route path="submissions" element={<SubmissionManagerPage />} />

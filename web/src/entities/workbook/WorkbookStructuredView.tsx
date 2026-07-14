@@ -631,6 +631,7 @@ export function WorkbookStructuredView({
           cfgEntity={cfgById.get(entity.entityId)}
           customerId={customerId}
           customerName={customerName}
+          suggestedIdentity={suggestedIdentity}
           config={config}
           goalsForLinking={goalsForLinking}
           onSaved={() => void dataQ.refetch()}
