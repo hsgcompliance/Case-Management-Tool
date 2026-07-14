@@ -9,6 +9,7 @@ export const FORMS_MIME   = "application/vnd.google-apps.form";
 export const PDF_MIME     = "application/pdf";
 
 export type MimeCategory = "folder" | "sheets" | "docs" | "slides" | "forms" | "pdf" | "file";
+export type ExternalService = "drive" | "sheets" | "jotform" | "external";
 
 export function getMimeCategory(mime?: string): MimeCategory {
   switch (mime) {
@@ -69,6 +70,56 @@ export function FileTypeIcon({
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" style={{ color: "#94a3b8" }}>
       <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h4a1 1 0 100-2H7z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+export function externalServiceFromUrl(url?: string): ExternalService {
+  const value = String(url || "").toLowerCase();
+  if (value.includes("docs.google.com/spreadsheets")) return "sheets";
+  if (value.includes("drive.google.com")) return "drive";
+  if (value.includes("jotform.com")) return "jotform";
+  return "external";
+}
+
+export function ExternalServiceIcon({
+  service,
+  href,
+  className = "h-4 w-4 shrink-0",
+}: {
+  service?: ExternalService;
+  href?: string;
+  className?: string;
+}) {
+  const resolved = service || externalServiceFromUrl(href);
+
+  if (resolved === "drive") {
+    return (
+      <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M7.1 3.5h5.8l4.6 8H11.7z" fill="#fbbc04" />
+        <path d="M2.5 11.5 7.1 3.5l4.6 8-2.9 5z" fill="#34a853" />
+        <path d="M8.8 16.5h8.7l-2.9-5H5.9z" fill="#4285f4" />
+      </svg>
+    );
+  }
+
+  if (resolved === "sheets") {
+    return <FileTypeIcon mime={SHEETS_MIME} className={className} />;
+  }
+
+  if (resolved === "jotform") {
+    return (
+      <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <rect x="3" y="2" width="14" height="16" rx="4" fill="#ff6100" />
+        <path d="M10.4 5.2h3v7.3c0 2-1.3 3.3-3.5 3.3-1.5 0-2.6-.6-3.3-1.6l2-1.7c.3.4.6.6 1.1.6.4 0 .7-.3.7-.8z" fill="white" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M8 5H5.5A2.5 2.5 0 0 0 3 7.5v7A2.5 2.5 0 0 0 5.5 17h7A2.5 2.5 0 0 0 15 14.5V12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M11 3h6v6M10 10l7-7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

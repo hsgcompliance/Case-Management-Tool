@@ -12,6 +12,7 @@ import { INTAKE_FLOW, formById } from "@/lib/formsCatalog";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
+import { ExternalServiceIcon } from "./ui";
 
 // Super-simple create/link customer flow for intake. Name + DOB + CWID + case
 // managers (dropdowns from the org user list; caller preselected as primary).
@@ -308,7 +309,10 @@ export function CreateCustomerModal({
                 {created.drive.workbookLinked ? " (TSS workbook linked)" : ""}.{" "}
                 {created.drive.folderUrl ? (
                   <a href={created.drive.folderUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-indigo-600 hover:text-indigo-500">
-                    Open folder ↗
+                    <span className="inline-flex items-center gap-1.5">
+                      <ExternalServiceIcon href={created.drive.folderUrl} />
+                      Open folder
+                    </span>
                   </a>
                 ) : null}
               </div>

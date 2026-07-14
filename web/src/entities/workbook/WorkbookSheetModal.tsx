@@ -15,6 +15,7 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { Rnd } from "react-rnd";
+import { ExternalServiceIcon } from "@entities/gdrive/FileTypeIcon";
 
 function buildEmbedUrl(spreadsheetId: string, gid?: string | number | null): string {
   const base = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
@@ -127,7 +128,8 @@ export function WorkbookSheetModal({
           rel="noreferrer"
           className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
         >
-          Open ↗
+          <ExternalServiceIcon service="sheets" />
+          Open
         </a>
         <button
           type="button"

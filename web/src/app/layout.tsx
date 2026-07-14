@@ -6,7 +6,14 @@ import { Topbar } from "@app/layout/Topbar";
 import GlobalPending from "@app/layout/GlobalPending";
 import { Shell } from "./shell";
 
-export const metadata = { title: "Case Managment Dashboard" };
+export const metadata = {
+  title: "Case Management Dashboard",
+  icons: {
+    icon: "/hdb-web-icon.svg",
+    shortcut: "/hdb-web-icon.svg",
+    apple: "/hdb-web-icon.svg",
+  },
+};
 
 // Origins the app talks to on every session — warming DNS+TLS here saves
 // serial round trips before the first Firestore/API byte on slow connections.

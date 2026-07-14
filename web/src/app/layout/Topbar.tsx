@@ -33,6 +33,8 @@ export function Topbar() {
   const pathname = usePathname() || "";
   const [themeBusy, setThemeBusy] = React.useState(false);
   const [currentThemeMode, setCurrentThemeMode] = React.useState<ThemeMode>("system");
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const mobileMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   const topRole = String(profile?.topRole || profile?.role || "").toLowerCase();
   const isActive = profile?.active !== false;
@@ -49,6 +51,25 @@ export function Topbar() {
   const showNav = !loading && ((!!user && (isApproved || isAdmin)) || pathname === "/");
 
   const EMU = shouldUseEmulators();
+  const visibleNav = React.useMemo(
+    () => (isViewer ? nav.filter((n) => n.to === "/customers" || n.to === "/budget" || n.to === "/programs") : nav),
+    [isViewer],
+  );
+
+  React.useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  React.useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [mobileMenuOpen]);
 
   React.useEffect(() => {
     const profileMode = String(
@@ -102,14 +123,15 @@ export function Topbar() {
 
   return (
     <header className="topbar" data-tour="topbar">
-      <div className="topbar-inner gap-4" data-tour="topbar-inner">
+      <div className="topbar-inner gap-2 sm:gap-4" data-tour="topbar-inner">
         <div className="flex items-center gap-3 min-w-0" data-tour="topbar-brand">
           <Link
             href="/"
             className="truncate font-semibold text-slate-900 dark:text-slate-100"
             data-tour="topbar-home"
           >
-            Case Management Dashboard
+            <span className="hidden sm:inline">Case Management Dashboard</span>
+            <span className="sm:hidden">HDB</span>
           </Link>
           {EMU ? (
             <span className="text-[11px] px-2 py-0.5 rounded-full border bg-amber-50 text-amber-800 border-amber-200" data-tour="topbar-emu-badge">
@@ -120,7 +142,7 @@ export function Topbar() {
 
         {showNav ? (
           <nav aria-label="Primary" className="hidden md:flex items-center gap-1" data-tour="topbar-nav">
-            {(isViewer ? nav.filter((n) => n.to === "/customers" || n.to === "/budget" || n.to === "/programs") : nav).map((n) => {
+            {visibleNav.map((n) => {
               const active = isRouteActive(pathname, n.to);
               return (
                 <Link
@@ -146,6 +168,68 @@ export function Topbar() {
         )}
 
         <div className="flex items-center gap-2" data-tour="topbar-actions">
+          {showNav ? (
+            <div className="relative md:hidden" ref={mobileMenuRef}>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                aria-haspopup="menu"
+                aria-expanded={mobileMenuOpen}
+                aria-controls="topbar-mobile-menu"
+                onClick={() => setMobileMenuOpen((open) => !open)}
+              >
+                <span aria-hidden className="text-sm leading-none">☰</span>
+                <span>Menu</span>
+              </button>
+              {mobileMenuOpen ? (
+                <div
+                  id="topbar-mobile-menu"
+                  role="menu"
+                  className="absolute right-0 z-[310] mt-2 w-56 rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {visibleNav.map((n) => {
+                    const active = isRouteActive(pathname, n.to);
+                    return (
+                      <Link
+                        key={n.to}
+                        href={n.to}
+                        role="menuitem"
+                        className={[
+                          "block px-3 py-2 text-sm font-medium no-underline",
+                          active
+                            ? "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300"
+                            : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800",
+                        ].join(" ")}
+                      >
+                        {n.label}
+                      </Link>
+                    );
+                  })}
+                  {isDev || isAdmin ? <div className="my-1 border-t border-slate-100 dark:border-slate-800" /> : null}
+                  {isDev ? (
+                    <>
+                      <Link href="/dev/secret-games" role="menuitem" className="block px-3 py-2 text-sm font-medium text-slate-700 no-underline hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">
+                        Dev: Secret Games
+                      </Link>
+                      <Link href="/dev/functions" role="menuitem" className="block px-3 py-2 text-sm font-medium text-slate-700 no-underline hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">
+                        Dev: Endpoints
+                      </Link>
+                    </>
+                  ) : null}
+                  {isAdmin ? (
+                    <>
+                      <Link href="/admin/users" role="menuitem" className="block px-3 py-2 text-sm font-medium text-amber-700 no-underline hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-slate-800">
+                        Admin: Manage Users
+                      </Link>
+                      <Link href="/admin/org-config" role="menuitem" className="block px-3 py-2 text-sm font-medium text-amber-700 no-underline hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-slate-800">
+                        Admin: Org Configuration
+                      </Link>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <button
             className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             onClick={toggleTheme}
@@ -153,7 +237,12 @@ export function Topbar() {
             title={`Switch theme (current: ${currentThemeMode})`}
             data-tour="topbar-theme-toggle"
           >
-            {currentThemeMode === "dark" ? "Dark" : currentThemeMode === "light" ? "Light" : "System"}
+            <span className="hidden sm:inline">
+              {currentThemeMode === "dark" ? "Dark" : currentThemeMode === "light" ? "Light" : "System"}
+            </span>
+            <span className="sm:hidden" aria-hidden>
+              {currentThemeMode === "dark" ? "D" : currentThemeMode === "light" ? "L" : "S"}
+            </span>
           </button>
           {user ? (
             <MyProfileDropdown />

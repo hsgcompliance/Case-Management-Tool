@@ -48,14 +48,14 @@ export function StaffLayout() {
     <div className="min-h-full bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-screen-2xl px-4">
-          <div className="flex items-center justify-between py-3">
-            <NavLink to="/staff" end className="block" title="Staff home — quick links">
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <NavLink to="/staff" end className="block min-w-0 no-underline" title="Staff home — quick links">
               <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">HDB Forms</div>
               <div className="text-sm font-bold text-slate-900">Staff workspace</div>
             </NavLink>
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <SubmitNotifications />
-              <span className="hidden text-xs text-slate-500 sm:inline">{user?.email}</span>
+              <span className="hidden max-w-[14rem] truncate text-xs text-slate-500 sm:inline">{user?.email}</span>
               <button
                 type="button"
                 onClick={() => void signOut(auth)}
@@ -70,14 +70,14 @@ export function StaffLayout() {
           </div>
           {/* No overflow-x-auto here: it would clip the ☰ dropdown (overflow-x
               forces vertical clipping too). The few tabs fit without scrolling. */}
-          <nav className="-mb-px flex flex-wrap items-center gap-1">
+          <nav aria-label="Staff sections" className="-mb-px flex flex-wrap items-center gap-1">
             {tabs.map((t) => (
               <NavLink
                 key={t.to}
                 to={t.to}
                 className={({ isActive }) =>
                   [
-                    "whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition",
+                    "whitespace-nowrap border-b-2 px-2.5 py-2 text-sm font-medium transition sm:px-3",
                     isActive
                       ? "border-indigo-500 text-indigo-600"
                       : "border-transparent text-slate-500 hover:text-slate-700",
@@ -94,7 +94,7 @@ export function StaffLayout() {
                 onClick={() => setMenuOpen((v) => !v)}
                 title="More tools (submissions, webhooks, activity)"
                 className={[
-                  "flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition",
+                  "flex items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2 text-sm font-medium transition sm:px-3",
                   activeMenuTab
                     ? "border-indigo-500 text-indigo-600"
                     : "border-transparent text-slate-500 hover:text-slate-700",
