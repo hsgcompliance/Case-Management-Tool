@@ -5,6 +5,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { CustomerSearchBar } from "./CustomerSearchBar";
+import { SubmitNotifications } from "./SubmitNotifications";
 
 // Primary tabs are the day-to-day surfaces. The power-user views (All forms,
 // Submissions, Webhooks, Activity) live behind the ☰ menu — most staff never
@@ -52,6 +53,7 @@ export function StaffLayout() {
               <div className="text-sm font-bold text-slate-900">Staff workspace</div>
             </div>
             <div className="flex items-center gap-3">
+              <SubmitNotifications />
               <span className="hidden text-xs text-slate-500 sm:inline">{user?.email}</span>
               <button
                 type="button"

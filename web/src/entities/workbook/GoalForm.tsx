@@ -203,6 +203,13 @@ export function GoalForm({
         setError(String(resp?.error || "Could not save the goal."));
         return;
       }
+      if (!isEdit) {
+        void (api as any).postWith(
+          "patchCustomerWorkbookScaffold",
+          { customerId, planDate: "today" },
+          driveHeaders(),
+        ).catch(() => null);
+      }
       toast(isEdit ? "Goal updated." : "Goal added to the sheet.", { type: "success" });
       onSaved();
     } catch (e: unknown) {

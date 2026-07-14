@@ -49,16 +49,21 @@ function AdminFormRow({ form, onSaved }: { form: FormDef; onSaved: () => void })
   const [title, setTitle] = useState(form.title);
   const [category, setCategory] = useState<FormCategory>(form.category);
   const [sendable, setSendable] = useState(!!form.customerSendable);
+  const [notify, setNotify] = useState(!!form.notifyOnSubmit);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const dirty = title !== form.title || category !== form.category || sendable !== !!form.customerSendable;
+  const dirty =
+    title !== form.title ||
+    category !== form.category ||
+    sendable !== !!form.customerSendable ||
+    notify !== !!form.notifyOnSubmit;
 
   const save = async () => {
     setSaving(true);
     setErr(null);
     try {
-      await updateForm(form.id, { title: title.trim(), category, customerSendable: sendable });
+      await updateForm(form.id, { title: title.trim(), category, customerSendable: sendable, notifyOnSubmit: notify });
       onSaved();
     } catch (e: unknown) {
       setErr((e as Error)?.message || "Save failed (admin only).");
@@ -86,6 +91,10 @@ function AdminFormRow({ form, onSaved }: { form: FormDef; onSaved: () => void })
         <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
           <input type="checkbox" checked={sendable} onChange={(e) => setSendable(e.target.checked)} />
           Send to customer
+        </label>
+        <label className="inline-flex items-center gap-1.5 text-xs text-slate-600" title="Show new submissions in the header notification bell (last 7 days)">
+          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+          Notify on submit
         </label>
         <button
           type="button"

@@ -5,6 +5,7 @@ export type FormsRegistryItem = {
   category: string;
   title: string;
   customerSendable: boolean;
+  notifyOnSubmit?: boolean;
   adminEdited: boolean;
   submissionCount: number;
   lastKind: string | null;
@@ -23,7 +24,7 @@ export function listFormsRegistry(force = false): Promise<FormsRegistryItem[]> {
 
 export async function updateForm(
   formId: string,
-  patch: { title?: string; category?: string; customerSendable?: boolean }
+  patch: { title?: string; category?: string; customerSendable?: boolean; notifyOnSubmit?: boolean }
 ): Promise<void> {
   await postAuthed("formsRegistryUpdate", { formId, ...patch });
   cache = null; // bust so the next load reflects the edit

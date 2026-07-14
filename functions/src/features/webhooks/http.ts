@@ -121,6 +121,7 @@ export const formsRegistryUpdate_http = secureHandler(
       title: typeof body.title === "string" ? body.title : undefined,
       category: typeof body.category === "string" ? body.category : undefined,
       customerSendable: typeof body.customerSendable === "boolean" ? body.customerSendable : undefined,
+      notifyOnSubmit: typeof body.notifyOnSubmit === "boolean" ? body.notifyOnSubmit : undefined,
     });
     res.status(200).json({ ok: true, formId });
   },
