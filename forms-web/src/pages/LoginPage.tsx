@@ -11,6 +11,7 @@ import {
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 import { FormShell } from "@/components/ui";
+import StaffLandingPage from "@/pages/StaffLandingPage";
 
 // Only auto-trigger Google sign-in once per browser session (prevents loops).
 const AUTO_KEY = "hdb:forms:auto-signin-tried";
@@ -129,6 +130,7 @@ export default function LoginPage() {
   const connecting = busyGoogle;
 
   return (
+    <>
     <FormShell title="Staff sign-in" subtitle="Form-submission access for case managers">
       <div className="space-y-3">
         {error ? (
@@ -200,6 +202,13 @@ export default function LoginPage() {
         </div>
       </div>
     </FormShell>
+
+    {/* Quick links live on the sign-in page too — no sign-in needed for the
+        new-tab links; signing in unlocks the embedded "Open" experiences. */}
+    <div className="mx-auto max-w-4xl px-4 pb-12">
+      <StaffLandingPage />
+    </div>
+    </>
   );
 }
 

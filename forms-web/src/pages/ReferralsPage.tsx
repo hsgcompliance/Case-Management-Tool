@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useCatalog } from "@/hooks/useCatalog";
 import { JotformEmbed } from "@/components/JotformEmbed";
 import type { FormDef } from "@/lib/formsCatalog";
@@ -35,6 +35,20 @@ export default function ReferralsPage() {
       ...referral.filter((f) => !pinned.has(f.id)),
     ];
   }, [catalog]);
+
+  // ?open=formId (landing page "Open") auto-opens that referral embedded.
+  const [params] = useSearchParams();
+  const openParam = params.get("open");
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (openParam && !autoOpened.current && forms.length) {
+      const f = forms.find((x) => x.id === openParam);
+      if (f) {
+        autoOpened.current = true;
+        setSelected(f);
+      }
+    }
+  }, [openParam, forms]);
 
   const selectedId = selected?.id ?? null;
   const pipesToIntake = !!selectedId && PIPE_TO_INTAKE.has(selectedId);

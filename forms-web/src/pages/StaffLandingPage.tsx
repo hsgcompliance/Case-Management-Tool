@@ -1,14 +1,17 @@
 import { Link } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 
-// Staff landing page (/staff) — sleek quick-link cards, no iframes.
-// Forms: the really common referrals + checkout. Resources: portals + apps.
+// Quick-links landing — sleek cards, no iframes. Rendered authed at /staff
+// (inside StaffLayout) AND public at /. Signed-in users get "Open" (embedded,
+// internal route) plus "New tab"; signed-out visitors get new-tab links only.
 
 type Card = {
   label: string;
   description: string;
+  /** External URL (Jotform/portal) — always available, opens a new tab. */
   href: string;
-  /** Internal router link instead of a new tab. */
-  internal?: boolean;
+  /** Authed-only internal route that opens the embedded experience. */
+  internalHref?: string;
 };
 
 const FORM_CARDS: Card[] = [
@@ -16,22 +19,25 @@ const FORM_CARDS: Card[] = [
     label: "Referral to Rental Assistance",
     description: "Refer a household experiencing homelessness to rental assistance.",
     href: "https://form.jotform.com/251346523348053",
+    internalHref: "/staff/referrals?open=251346523348053",
   },
   {
     label: "Bridging Home Referral",
     description: "Refer a household to the Bridging Home program.",
     href: "https://form.jotform.com/253555227407155",
+    internalHref: "/staff/referrals?open=253555227407155",
   },
   {
     label: "Referral to Homelessness Prevention Screening",
     description: "Screen a household at risk of losing housing (eviction prevention).",
     href: "https://form.jotform.com/250021786346152",
+    internalHref: "/staff/referrals?open=250021786346152",
   },
   {
     label: "Credit Card Checkout",
     description: "Check out a card with live monthly spend context.",
-    href: "/staff/checkout",
-    internal: true,
+    href: "https://form.jotform.com/251590902397160",
+    internalHref: "/staff/checkout",
   },
 ];
 
@@ -63,26 +69,55 @@ const RESOURCE_CARDS: Card[] = [
   },
 ];
 
-function CardLink({ card }: { card: Card }) {
-  const inner = (
+function CardItem({ card, authed }: { card: Card; authed: boolean }) {
+  const showBoth = authed && !!card.internalHref;
+  const cls =
+    "group flex flex-col rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-sm";
+
+  const body = (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-700">{card.label}</span>
-        <span className="shrink-0 text-slate-300 group-hover:text-indigo-400">{card.internal ? "→" : "↗"}</span>
-      </div>
-      <p className="mt-1 text-xs leading-relaxed text-slate-500">{card.description}</p>
+      <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-700">{card.label}</span>
+      <p className="mt-1 flex-1 text-xs leading-relaxed text-slate-500">{card.description}</p>
     </>
   );
-  const cls =
-    "group block rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-sm";
-  return card.internal ? (
-    <Link to={card.href} className={cls}>{inner}</Link>
-  ) : (
-    <a href={card.href} target="_blank" rel="noopener noreferrer" className={cls}>{inner}</a>
+
+  if (!showBoth) {
+    // Signed out (or no internal experience): the whole card opens a new tab.
+    return (
+      <a href={card.href} target="_blank" rel="noopener noreferrer" className={cls}>
+        <div className="flex items-center justify-between gap-2">
+          {body}
+          <span className="shrink-0 self-start text-slate-300 group-hover:text-indigo-400">↗</span>
+        </div>
+      </a>
+    );
+  }
+
+  // Signed in: card opens the embedded experience; a small chip opens the raw
+  // form in a new tab instead.
+  return (
+    <div className={`${cls} relative`}>
+      <Link to={card.internalHref!} className="flex min-h-full flex-col pr-16">
+        {body}
+        <span className="mt-2 text-xs font-semibold text-indigo-600">Open →</span>
+      </Link>
+      <a
+        href={card.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open the live form in a new tab"
+        className="absolute right-3 top-3 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-50"
+      >
+        New tab ↗
+      </a>
+    </div>
   );
 }
 
 export default function StaffLandingPage() {
+  const { user } = useAuth();
+  const authed = !!user;
+
   return (
     <div className="space-y-6">
       <div>
@@ -93,14 +128,14 @@ export default function StaffLandingPage() {
       <section className="space-y-2">
         <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Forms</h3>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          {FORM_CARDS.map((c) => <CardLink key={c.href} card={c} />)}
+          {FORM_CARDS.map((c) => <CardItem key={c.href} card={c} authed={authed} />)}
         </div>
       </section>
 
       <section className="space-y-2">
         <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Resources</h3>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          {RESOURCE_CARDS.map((c) => <CardLink key={c.href} card={c} />)}
+          {RESOURCE_CARDS.map((c) => <CardItem key={c.href} card={c} authed={authed} />)}
         </div>
       </section>
     </div>
