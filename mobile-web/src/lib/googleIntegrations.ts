@@ -67,7 +67,7 @@ export const GoogleIntegrations = {
     mode?: "append" | "insert" | "update";
     rowKey?: string;
   }) =>
-    callFunction<{ ok: boolean; error?: string; rowKey?: string }>("appendCustomerWorkbookRow", body),
+    callFunction<{ ok: boolean; error?: string; rowKey?: string; duplicate?: boolean }>("appendCustomerWorkbookRow", body),
 
   deleteWorkbookRow: (body: {
     customerId: string;

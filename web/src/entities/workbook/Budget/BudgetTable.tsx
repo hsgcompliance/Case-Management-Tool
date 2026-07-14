@@ -17,7 +17,8 @@ type BudgetSection = {
   rollsInto?: string;
 };
 type BudgetSummary = { id: string; label: string; rowKey: string; amount?: BudgetCell };
-type BudgetPayload = { sections?: BudgetSection[]; summaryRows?: BudgetSummary[] };
+type BudgetSnapshot = { sheetTitle: string; dateLabel?: string; sections?: BudgetSection[]; summaryRows?: BudgetSummary[] };
+type BudgetPayload = { sheetTitle?: string; dateLabel?: string; sections?: BudgetSection[]; summaryRows?: BudgetSummary[]; snapshots?: BudgetSnapshot[] };
 
 function driveHeaders() {
   const token = getGoogleDriveAccessToken();
@@ -73,12 +74,23 @@ export function BudgetTable({
   onSaved: () => void;
 }) {
   const budget = (entity.budget ?? {}) as BudgetPayload;
-  const sections = budget.sections ?? [];
-  const summaryRows = budget.summaryRows ?? [];
+  const snapshots = budget.snapshots?.length
+    ? budget.snapshots
+    : [{ sheetTitle: budget.sheetTitle || "Budget", dateLabel: budget.dateLabel, sections: budget.sections, summaryRows: budget.summaryRows }];
+  const [selectedSheetTitle, setSelectedSheetTitle] = React.useState(budget.sheetTitle || snapshots[0]?.sheetTitle || "Budget");
+  const selectedSnapshot = snapshots.find((snapshot) => snapshot.sheetTitle === selectedSheetTitle) ?? snapshots[0];
+  const sections = selectedSnapshot?.sections ?? [];
+  const summaryRows = selectedSnapshot?.summaryRows ?? [];
   const editableItems = React.useMemo(() => flattenItems(sections), [sections]);
   const [open, setOpen] = React.useState(false);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [values, setValues] = React.useState<Record<string, string>>({});
+  const [budgetDate, setBudgetDate] = React.useState(() => new Date().toISOString().slice(0, 10));
+
+  React.useEffect(() => {
+    if (budget.sheetTitle) setSelectedSheetTitle(budget.sheetTitle);
+  }, [budget.sheetTitle]);
 
   React.useEffect(() => {
     const next: Record<string, string> = {};
@@ -86,15 +98,17 @@ export function BudgetTable({
     setValues(next);
   }, [editableItems]);
 
+  const changedItems = () => editableItems
+    .map((item) => ({
+      rowKey: item.rowKey,
+      amount: String(values[item.rowKey] ?? "").trim(),
+      expectedLabel: item.label,
+      original: displayAmount(item.amount),
+    }))
+    .filter((item) => item.amount !== item.original);
+
   const save = async () => {
-    const changed = editableItems
-      .map((item) => ({
-        rowKey: item.rowKey,
-        amount: String(values[item.rowKey] ?? "").trim(),
-        expectedLabel: item.label,
-        original: displayAmount(item.amount),
-      }))
-      .filter((item) => item.amount !== item.original);
+    const changed = changedItems();
     if (!changed.length) {
       setOpen(false);
       return;
@@ -104,7 +118,7 @@ export function BudgetTable({
     try {
       const resp = (await (api as any).postWith(
         "patchCustomerWorkbookBudget",
-        { customerId, items: changed.map(({ rowKey, amount, expectedLabel }) => ({ rowKey, amount, expectedLabel })) },
+        { customerId, sheetTitle: selectedSnapshot?.sheetTitle, items: changed.map(({ rowKey, amount, expectedLabel }) => ({ rowKey, amount, expectedLabel })) },
         driveHeaders(),
       )) as Record<string, unknown>;
       if (!resp?.ok) {
@@ -125,13 +139,76 @@ export function BudgetTable({
     }
   };
 
+  const createBudget = async () => {
+    setSaving(true);
+    try {
+      const items = editableItems.map((item) => ({
+        rowKey: item.rowKey,
+        amount: String(values[item.rowKey] ?? "").trim(),
+        expectedLabel: item.label,
+      }));
+      const resp = (await (api as any).postWith(
+        "createCustomerWorkbookBudget",
+        { customerId, budgetDate, sourceSheetTitle: selectedSnapshot?.sheetTitle, items },
+        driveHeaders(),
+      )) as Record<string, unknown>;
+      if (!resp?.ok) {
+        toast(String(resp?.error || "Could not create budget."), { type: "error" });
+        return;
+      }
+      toast(`Created ${String(resp.sheetTitle || "new budget")}.`, { type: "success" });
+      setCreateOpen(false);
+      setOpen(false);
+      onSaved();
+    } catch (e: unknown) {
+      const body = (e as { meta?: { response?: { error?: string; manualActionRequired?: boolean } } })?.meta?.response;
+      const msg = body?.manualActionRequired
+        ? "The source budget changed since this page loaded. Open the workbook and make this change manually."
+        : String(body?.error || (e as Error)?.message || "Could not create budget.");
+      toast(msg, { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const compareSnapshots = snapshots.slice(-2);
+  const compareRows = Array.from(new Set(compareSnapshots.flatMap((snapshot) => (snapshot.summaryRows ?? []).map((row) => row.id))))
+    .map((id) => ({
+      id,
+      label: compareSnapshots.find((snapshot) => (snapshot.summaryRows ?? []).some((row) => row.id === id))?.summaryRows?.find((row) => row.id === id)?.label ?? id,
+      values: compareSnapshots.map((snapshot) => displayAmount((snapshot.summaryRows ?? []).find((row) => row.id === id)?.amount)),
+    }));
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="font-semibold">Budget tab</span>
+          <select className="input h-8 min-w-48 text-xs" value={selectedSnapshot?.sheetTitle ?? ""} onChange={(e) => setSelectedSheetTitle(e.currentTarget.value)}>
+            {snapshots.map((snapshot) => (
+              <option key={snapshot.sheetTitle} value={snapshot.sheetTitle}>{snapshot.sheetTitle}</option>
+            ))}
+          </select>
+        </div>
         <button type="button" className="btn btn-sm" onClick={() => setOpen(true)} disabled={!editableItems.length}>
           Edit budget
         </button>
       </div>
+      {compareRows.length && compareSnapshots.length > 1 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Budget Comparison</div>
+          <div className="grid grid-cols-[1fr_8rem_8rem] gap-3 text-xs font-semibold text-slate-500">
+            <span>Metric</span>
+            {compareSnapshots.map((snapshot) => <span key={snapshot.sheetTitle} className="truncate text-right" title={snapshot.sheetTitle}>{snapshot.dateLabel || snapshot.sheetTitle}</span>)}
+          </div>
+          {compareRows.map((row) => (
+            <div key={row.id} className="grid grid-cols-[1fr_8rem_8rem] gap-3 border-t border-slate-100 py-1 text-sm">
+              <span className="text-slate-700">{row.label}</span>
+              {row.values.map((value, idx) => <span key={`${row.id}-${idx}`} className="text-right font-medium text-slate-900">{value || "-"}</span>)}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {sections.map((section) => <SectionView key={section.id} section={section} />)}
       </div>
@@ -166,9 +243,32 @@ export function BudgetTable({
               ))}
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 px-4 py-3">
+              <button type="button" className="btn btn-ghost btn-sm mr-auto" onClick={() => setCreateOpen(true)} disabled={saving}>
+                New dated budget
+              </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(false)} disabled={saving}>Cancel</button>
               <button type="button" className="btn btn-sm" onClick={() => void save()} disabled={saving}>
                 {saving ? "Saving..." : "Save budget"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {createOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="text-sm font-semibold text-slate-900">Create dated budget</div>
+            <p className="mt-1 text-xs text-slate-600">
+              This copies {selectedSnapshot?.sheetTitle || "the selected budget"} to a new tab named Budget yyyy.mm.dd, then writes the amounts shown here.
+            </p>
+            <label className="mt-3 block text-xs font-medium text-slate-600">
+              Budget date
+              <input type="date" className="input mt-1 w-full text-sm" value={budgetDate} onChange={(e) => setBudgetDate(e.currentTarget.value)} />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCreateOpen(false)} disabled={saving}>Cancel</button>
+              <button type="button" className="btn btn-sm" onClick={() => void createBudget()} disabled={saving || !budgetDate}>
+                {saving ? "Creating..." : "Create budget"}
               </button>
             </div>
           </div>

@@ -274,9 +274,12 @@ export function LogActivityPage() {
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
 
+  // Time required (default ON, per-user setting) — a session needs a start time.
+  const timeMissing = prefs.requireSessionTime && !startTime;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting || !customer || !user) return;
+    if (submitting || !customer || !user || timeMissing) return;
     setSubmitting(true);
 
     const destination = preCustomerId ? `/customers/${preCustomerId}` : "/";
@@ -365,7 +368,11 @@ export function LogActivityPage() {
           workbookError = {
             message: resp.error === "workbook_not_linked"
               ? "No workbook is linked to this customer yet."
-              : `Couldn't push to the workbook (${resp.error ?? "error"}).`,
+              : resp.error === "workbook_not_found"
+                ? "The linked workbook could not be found — it may have been moved or deleted."
+                : resp.error === "workbook_access_denied"
+                  ? "Your Google account doesn't have access to the linked workbook."
+                  : `Couldn't push to the workbook (${resp.error ?? "error"}).`,
             showSettings: linkable,
           };
         } else {
@@ -496,6 +503,12 @@ export function LogActivityPage() {
             step={prefs.timeInterval}
             use24h={prefs.timeFormat === "24h"}
           />
+          {timeMissing && (
+            <p className="mt-2 text-xs text-amber-600 flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              A start time is required to save this session.
+            </p>
+          )}
         </div>
 
         {/* Note */}
@@ -676,7 +689,7 @@ export function LogActivityPage() {
 
         <button
           type="submit"
-          disabled={!customer || submitting}
+          disabled={!customer || submitting || timeMissing}
           className="w-full rounded-xl bg-indigo-600 px-4 py-4 text-base font-semibold text-white shadow-sm active:bg-indigo-700 disabled:opacity-40 transition-colors"
         >
           {submitting ? "Saving…" : online ? "Save Session" : "Save offline"}

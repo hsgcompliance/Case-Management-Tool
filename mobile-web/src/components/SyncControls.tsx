@@ -3,13 +3,17 @@
 // language so CMs don't have to learn "calendar vs workbook vs offline" — it's
 // just green = synced, yellow = needs sync, tap to sync.
 
-export type SyncChipKind = "synced" | "pending" | "offline" | "syncing";
+// "notsynced" is the workbook-flag-only variant used on rows where we can't
+// cheaply know whether the customer even has a linked workbook (feed, home) —
+// neutral styling so it reads as status, not as an urgent to-do.
+export type SyncChipKind = "synced" | "pending" | "offline" | "syncing" | "notsynced";
 
 const CHIP_STYLES: Record<SyncChipKind, string> = {
   synced: "bg-emerald-100 text-emerald-700",
   pending: "bg-amber-100 text-amber-700",
   offline: "bg-amber-100 text-amber-700",
   syncing: "bg-sky-100 text-sky-700",
+  notsynced: "bg-slate-100 text-slate-500",
 };
 
 const CHIP_LABELS: Record<SyncChipKind, string> = {
@@ -17,6 +21,7 @@ const CHIP_LABELS: Record<SyncChipKind, string> = {
   pending: "Needs sync",
   offline: "Offline",
   syncing: "Syncing…",
+  notsynced: "Not synced",
 };
 
 export function SyncChip({ kind, className = "" }: { kind: SyncChipKind; className?: string }) {
@@ -26,7 +31,7 @@ export function SyncChip({ kind, className = "" }: { kind: SyncChipKind; classNa
     >
       <span
         className={`h-1.5 w-1.5 rounded-full ${
-          kind === "synced" ? "bg-emerald-500" : kind === "syncing" ? "bg-sky-500 animate-pulse" : "bg-amber-500"
+          kind === "synced" ? "bg-emerald-500" : kind === "syncing" ? "bg-sky-500 animate-pulse" : kind === "notsynced" ? "bg-slate-400" : "bg-amber-500"
         }`}
       />
       {CHIP_LABELS[kind]}

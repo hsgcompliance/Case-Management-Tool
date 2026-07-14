@@ -283,7 +283,7 @@ export const AiControlMain: DashboardToolDefinition<AiControlFilterState, AiCont
                     <div className="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
                       {(usersQuery.data ?? []).map((user) => {
                         const override = caseNoteConfig.userQuotaOverrides?.[user.uid] ?? {};
-                        const personalOptIn = user.extras?.settings?.allowAiAssistance === true;
+                        const personalOptIn = user.extras?.settings?.allowAiAssistance !== false;
                         const row = usageByUid.get(user.uid);
                         return (
                           <div key={user.uid} className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_90px_90px_110px_130px_130px] lg:items-center">
