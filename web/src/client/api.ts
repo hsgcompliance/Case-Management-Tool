@@ -623,7 +623,9 @@ export function createApi({
   base = BASE,
   getIdToken = async () => (auth.currentUser ? auth.currentUser.getIdToken() : null),
   getAppCheckToken = async () => (appCheck ? getAppCheckTokenMod(appCheck) : null),
-  timeoutMs = 15000,
+  // 25s: the 512MiB googleapis functions (gdrive/workbook) cold-start in
+  // 10-20s; a 15s abort was cutting off legitimate first requests after deploys.
+  timeoutMs = 25000,
   retries = 2,
   backoffMs = 300,
   getCacheTtlMs,
@@ -873,7 +875,12 @@ export function createApi({
       const work = (async (): Promise<any> => {
         const exec = async (): Promise<any> => {
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), effTimeout);
+          // Abort WITH a reason — otherwise the surfaced error is the useless
+          // "signal is aborted without reason" instead of naming the timeout.
+          const timer = setTimeout(
+            () => controller.abort(new DOMException(`timeout after ${effTimeout}ms`, "TimeoutError")),
+            effTimeout,
+          );
 
           try {
             const resp = await fetch(url.toString(), { ...init, signal: controller.signal });
@@ -967,13 +974,28 @@ export function createApi({
             if (ck && ttl > 0) cache.set(ck, { exp: Date.now() + ttl, data });
             return data;
           } catch (e: any) {
-            const timedOut = e?.name === 'AbortError' || e?.message === 'timeout';
+            const timedOut = e?.name === 'AbortError' || e?.name === 'TimeoutError' || e?.message === 'timeout';
             const canRetry = timedOut && attempt < effRetries && (method === 'GET' || !!idempotencyKey);
 
             if (canRetry) {
               attempt++;
               await new Promise(r => setTimeout(r, Math.round(effBackoff * 2 ** (attempt - 1) * (0.5 + Math.random()))));
               return exec();
+            }
+
+            // A timeout can surface as a readonly DOMException — rethrow as a
+            // plain Error with an actionable message (endpoint + duration).
+            if (timedOut) {
+              const err: any = new Error(`Request timed out after ${Math.round(effTimeout / 1000)}s (${name})`);
+              err.name = 'TimeoutError';
+              err.meta = {
+                name,
+                status: -1,
+                durationMs: Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt)),
+                request: { query, body },
+                response: { error: 'timeout' },
+              };
+              throw err;
             }
 
             if (!e.meta) {
