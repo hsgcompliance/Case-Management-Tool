@@ -367,17 +367,15 @@ export async function patchOrgGDriveConfig(args: {
     ...(nextWorksheetConfig ? { worksheetConfig: nextWorksheetConfig } : {}),
   };
 
-  await ref.set(
-    {
-      value: {
-        ...currentValue,
-        gdrive: nextDrive,
-      },
-      updatedAt: isoNow(),
-      updatedBy: String((caller as any)?.uid || "").trim() || null,
-    },
-    { merge: true }
-  );
+  // Field-path update REPLACES value.gdrive wholesale. The previous
+  // set(..., { merge: true }) deep-merged the gdrive map, so anything the admin
+  // removed (a template, a cleared folder root, emptied build settings) was
+  // silently resurrected from the stored copy on the next read.
+  await ref.update({
+    "value.gdrive": nextDrive,
+    updatedAt: isoNow(),
+    updatedBy: String((caller as any)?.uid || "").trim() || null,
+  });
 
   return {
     orgId,

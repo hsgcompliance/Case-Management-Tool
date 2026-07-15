@@ -188,7 +188,7 @@ function TemplateForm({
       ? "Add at least one variant file (payer or non-payer)."
       : null;
   const keyError =
-    !isEdit && draft.key && existingKeys.has(draft.key)
+    draft.key && existingKeys.has(draft.key)
       ? "A template with this key already exists."
       : null;
   const canSave = !aliasError && !fileError && !variantError && !keyError;
@@ -512,18 +512,27 @@ export default function GDriveConfigPanel() {
   const [editingTemplateKey, setEditingTemplateKey] = React.useState<string | null>(null);
   const [templateDraft, setTemplateDraft] = React.useState<TemplateDraft>(blankTemplateDraft);
 
-  React.useEffect(() => {
-    if (savedConfig) setDraft(configToDraft(savedConfig));
-  }, [savedConfig]);
-
   const isDirty = React.useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(configToDraft(savedConfig)),
     [draft, savedConfig],
   );
 
+  // Hydrate the draft from the server config — but never clobber in-progress
+  // edits: a background refetch (window focus, invalidation) while the admin is
+  // mid-edit used to silently reset the whole form.
+  const isDirtyRef = React.useRef(false);
+  React.useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
+  React.useEffect(() => {
+    if (!savedConfig) return;
+    if (isDirtyRef.current || addingTemplate || editingTemplateKey) return;
+    setDraft(configToDraft(savedConfig));
+  }, [savedConfig, addingTemplate, editingTemplateKey]);
+
+  // Duplicate-key validation set — excludes the template being edited so an
+  // unchanged key isn't flagged, but renaming onto another template's key is.
   const existingKeys = React.useMemo(
-    () => new Set(draft.templates.map((t) => t.key)),
-    [draft.templates],
+    () => new Set(draft.templates.map((t) => t.key).filter((k) => k !== editingTemplateKey)),
+    [draft.templates, editingTemplateKey],
   );
 
   // ── Template actions ──
@@ -568,13 +577,31 @@ export default function GDriveConfigPanel() {
       ...(hasVariants ? { variants: { payer, nonpayer } } : {}),
       ...(templateDraft.isTssWorkbook ? { role: TSS_WORKBOOK_ROLE } : {}),
     };
+    // Only one template can be the TSS workbook — flagging this one un-flags
+    // the rest (the backend links whichever it finds first, so two flagged
+    // templates would be ambiguous).
+    const stripOtherTssRoles = (t: TGDriveTemplate): TGDriveTemplate => {
+      if (resolved.role !== TSS_WORKBOOK_ROLE || t.role !== TSS_WORKBOOK_ROLE) return t;
+      const { role: _role, ...rest } = t;
+      return rest;
+    };
     if (editingTemplateKey) {
       setDraft((d) => ({
         ...d,
-        templates: d.templates.map((t) => (t.key === editingTemplateKey ? resolved : t)),
+        templates: d.templates.map((t) => (t.key === editingTemplateKey ? resolved : stripOtherTssRoles(t))),
+        // Renaming the key must follow through to the build-defaults list, or
+        // the checked-by-default state silently detaches.
+        buildSettings: resolved.key !== editingTemplateKey
+          ? {
+              ...d.buildSettings,
+              defaultTemplateKeys: (d.buildSettings.defaultTemplateKeys ?? []).map((k) =>
+                k === editingTemplateKey ? resolved.key : k,
+              ),
+            }
+          : d.buildSettings,
       }));
     } else {
-      setDraft((d) => ({ ...d, templates: [...d.templates, resolved] }));
+      setDraft((d) => ({ ...d, templates: [...d.templates.map(stripOtherTssRoles), resolved] }));
     }
     cancelTemplateForm();
   };
@@ -605,28 +632,47 @@ export default function GDriveConfigPanel() {
 
   const handleSave = async () => {
     try {
-      const activeId = parseDriveId(draft.folderIndex.activeParent);
-      const exitedId = parseDriveId(draft.folderIndex.exitedParent);
-      const sheetId = parseDriveId(draft.folderIndex.sheet);
+      // Always send the folder-index fields: an emptied input means "clear this
+      // root" (null), not "leave whatever was stored". Inputs with text that
+      // doesn't parse to a Drive ID are rejected client-side before we save.
+      const refs = {
+        activeParent: draft.folderIndex.activeParent.trim(),
+        exitedParent: draft.folderIndex.exitedParent.trim(),
+        customerIndexSheet: draft.folderIndex.sheet.trim(),
+      };
+      for (const [field, value] of Object.entries(refs)) {
+        if (value && !parseDriveId(value)) {
+          toast(`Could not extract a Drive ID from the ${field === "customerIndexSheet" ? "index sheet" : field.replace("Parent", " parent")} value.`, { type: "error" });
+          return;
+        }
+      }
 
-      await patch.mutateAsync({
-        ...(draft.folderIndex.activeParent.trim()
-          ? { activeParent: activeId ? draft.folderIndex.activeParent.trim() : null }
-          : {}),
-        ...(draft.folderIndex.exitedParent.trim()
-          ? { exitedParent: exitedId ? draft.folderIndex.exitedParent.trim() : null }
-          : {}),
-        ...(draft.folderIndex.sheet.trim()
-          ? { customerIndexSheet: sheetId ? draft.folderIndex.sheet.trim() : null }
-          : {}),
+      const resp = (await patch.mutateAsync({
+        activeParent: refs.activeParent || null,
+        exitedParent: refs.exitedParent || null,
+        customerIndexSheet: refs.customerIndexSheet || null,
         templates: draft.templates,
         buildSettings: draft.buildSettings,
         // TODO (future agent): add `worksheetConfig: <sparse TssOrgConfigOverride>`
         // here once the override editor section exists. Send `null` to clear an
         // org back to the contracts baseline. Validate with
-        // tss.TssOrgConfigOverrideSchema.safeParse() before including it.
-      } as any);
-      toast("Drive configuration saved.", { type: "success" });
+        // tss.TssOrgConfigOverrideSchema.safeParse() before including it. NOTE:
+        // GDriveConfigPatchBody must gain a `worksheetConfig` field first — the
+        // endpoint's zod parse strips unknown keys.
+      } as any)) as { ok?: boolean; config?: TGDriveOrgConfig } | undefined;
+
+      // Verify the round-trip instead of trusting it: the TSS-workbook flag
+      // silently failing to persist is exactly the bug that hid the
+      // create-from-template button, so check the server's echo of the config.
+      const isTss = (t: TGDriveTemplate) => t.role === TSS_WORKBOOK_ROLE || t.key === "tss_workbook";
+      const wantedTss = draft.templates.some(isTss);
+      const persistedTss = !!resp?.config?.templates?.some(isTss);
+      if (resp?.config) setDraft(configToDraft(resp.config));
+      if (wantedTss && !persistedTss) {
+        toast("Saved, but the TSS-workbook flag did NOT persist — the config API is likely running an old build and needs a redeploy.", { type: "warning" });
+      } else {
+        toast("Drive configuration saved.", { type: "success" });
+      }
     } catch (e: any) {
       toast(e?.message || "Save failed.", { type: "error" });
     }
@@ -744,6 +790,17 @@ export default function GDriveConfigPanel() {
             </button>
           )}
         </div>
+
+        {/* Workbook features (create-from-template, auto-link on build, AI
+            variant gating) all key off the TSS role — make its absence loud. */}
+        {draft.templates.length > 0 &&
+          !draft.templates.some((t) => t.role === TSS_WORKBOOK_ROLE || t.key === "tss_workbook") && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            No template is marked as the TSS workbook, so “Create workbook from template” and build-time
+            auto-linking won’t work. Edit your TSS template and check <strong>“This is the TSS workbook”</strong>,
+            then Save. If the checkbox doesn’t stick after saving, the config API needs a redeploy.
+          </div>
+        )}
 
         {/* Template list */}
         {draft.templates.length > 0 && (
