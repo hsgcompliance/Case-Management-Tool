@@ -1,8 +1,13 @@
-// web/next.config.ts
-
-// is "/__api/:path*" the correct path?
-import type { NextConfig } from "next";
+// web/next.config.mjs
+//
+// NOTE: keep this file .mjs, not .ts — firebase-tools' Next.js detection only
+// recognizes next.config.js/.mjs. With .ts, detection falls back to a 60s
+// `npm list` probe that times out under load and aborts hosting deploys with
+// "Unable to detect the web framework".
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const useEmu =
   ["true", "1", "yes", "on"].includes(
@@ -33,7 +38,8 @@ const isStaticExport =
     String(process.env.STATIC_EXPORT ?? "").toLowerCase()
   );
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   turbopack: { root: path.join(__dirname, "..") },
   reactStrictMode: true,
   ...(isStaticExport ? { output: "export", images: { unoptimized: true } } : {}),
