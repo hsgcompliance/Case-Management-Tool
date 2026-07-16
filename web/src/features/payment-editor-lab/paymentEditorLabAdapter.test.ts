@@ -251,4 +251,15 @@ describe("paymentEditorLabAdapter", () => {
       },
     ]);
   });
+
+  it("plans rent cert checkbox changes", () => {
+    const row = baseRow({ rentCertDue: false });
+    const plan = buildPaymentEditorSavePlan(createPaymentEditorBaseline([row]), [
+      { ...row, rentCertDue: true },
+    ]);
+
+    expect(plan.rentCertPatches).toEqual([
+      { enrollmentId: "enr_1", paymentId: "pay_rent", status: "due" },
+    ]);
+  });
 });

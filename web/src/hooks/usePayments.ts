@@ -407,7 +407,7 @@ function toProjectionInput(payment: TPayment): TPaymentProjectionInput | null {
   const dueDate = String(payment?.dueDate || (payment as Record<string, unknown>)?.date || "").trim();
   const amount = Number(payment?.amount || 0);
 
-  if (!lineItemId || !dueDate || !Number.isFinite(amount) || amount === 0) return null;
+  if (!lineItemId || !dueDate || !Number.isFinite(amount) || amount < 0) return null;
 
   return {
     ...payment,
@@ -575,6 +575,23 @@ function findCachedPayment(
   return null;
 }
 
+function findCachedPaymentCustomerId(
+  qc: ReturnType<typeof useQueryClient>,
+  enrollmentId: string,
+  paymentId: string,
+): string {
+  for (const [, data] of qc.getQueriesData({ queryKey: qk.payments.root })) {
+    if (!Array.isArray(data)) continue;
+    const row = data.find((item) => {
+      const value = item as Record<string, any> | null;
+      return String(value?.enrollmentId || "") === enrollmentId && String(value?.payment?.id || "") === paymentId;
+    }) as Record<string, any> | undefined;
+    const customerId = String(row?.enrollment?.customerId || "").trim();
+    if (customerId) return customerId;
+  }
+  return "";
+}
+
 function dueDateFromPaymentId(paymentId: string): string {
   const match = String(paymentId || "").match(/(?:^|_)(\d{4}-\d{2}-\d{2})(?:_|$)/);
   return match?.[1] || "";
@@ -653,6 +670,62 @@ function paymentMutationPatches(
   }
 
   return patches;
+}
+
+function optimisticLedgerPatches(
+  qc: ReturnType<typeof useQueryClient>,
+  args: { enrollmentId: string; paymentId: string; reverse: boolean; payment: TPayment | null; queueItem?: Record<string, any> | null },
+) {
+  const { enrollmentId, paymentId, reverse, payment, queueItem } = args;
+  const customerId = String(queueItem?.customerId || findCachedPaymentCustomerId(qc, enrollmentId, paymentId)).trim();
+  const grantId = String(queueItem?.grantId || "").trim();
+  const ledgerKeys = qc
+    .getQueriesData({ queryKey: qk.ledger.root })
+    .filter(([key, data]) => {
+      if (!Array.isArray(key) || key[1] !== "list" || !Array.isArray(data)) return false;
+      const filters = key[2] && typeof key[2] === "object" ? key[2] as Record<string, unknown> : {};
+      if (filters.customerId && String(filters.customerId) !== customerId) return false;
+      if (filters.enrollmentId && String(filters.enrollmentId) !== enrollmentId) return false;
+      if (filters.grantId && grantId && String(filters.grantId) !== grantId) return false;
+      return true;
+    })
+    .map(([key]) => key as unknown[]);
+  if (!ledgerKeys.length) return [];
+
+  const amount = Number(payment?.amount || queueItem?.amount || 0);
+  const dueDate = toISO10(payment?.dueDate || (payment as Record<string, unknown> | null)?.date || queueItem?.dueDate);
+  const optimisticId = `optimistic_payment_${enrollmentId}_${paymentId}`;
+  const entry = {
+    id: optimisticId,
+    source: "enrollment",
+    amount,
+    amountCents: Math.round(amount * 100),
+    enrollmentId,
+    paymentId,
+    customerId: customerId || null,
+    grantId: grantId || null,
+    lineItemId: String(payment?.lineItemId || queueItem?.lineItemId || "").trim() || null,
+    dueDate: dueDate || null,
+    date: dueDate || null,
+    month: dueDate ? dueDate.slice(0, 7) : null,
+    origin: { app: "hdb", baseId: paymentId, paymentQueueId: queueItem?.id || null, paymentQueueSource: "projection" },
+    labels: ["optimistic"],
+  };
+
+  return [{
+    key: ledgerKeys,
+    update: (prev: unknown) => {
+      if (!Array.isArray(prev)) return prev;
+      const withoutOptimistic = prev.filter((row) => String((row as any)?.id || "") !== optimisticId);
+      if (reverse) {
+        return withoutOptimistic.filter((row) => {
+          const origin = (row as any)?.origin || {};
+          return !(String((row as any)?.enrollmentId || "") === enrollmentId && String((row as any)?.paymentId || origin.baseId || "") === paymentId && Number((row as any)?.amountCents || 0) > 0);
+        });
+      }
+      return [entry, ...withoutOptimistic];
+    },
+  }];
 }
 
 function buildProjectionPayload(
@@ -775,7 +848,7 @@ export function usePaymentsSpend() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
-    queryKeys: [qk.paymentQueue.root, qk.ledger.root],
+    queryKeys: [],
     optimisticPatches: (args, queryClient) => {
       const body = args?.body;
       const enrollmentId = String(body?.enrollmentId || "").trim();
@@ -783,6 +856,7 @@ export function usePaymentsSpend() {
       if (!enrollmentId || !paymentId) return [];
       const reverse = body?.reverse === true;
       const nowIso = new Date().toISOString();
+      const payment = findCachedPayment(queryClient, enrollmentId, paymentId);
 
       const patches = paymentMutationPatches(queryClient, {
         enrollmentId,
@@ -809,17 +883,20 @@ export function usePaymentsSpend() {
             String(item?.paymentId || "").trim() === paymentId,
         );
         patches.push(...optimisticPostPaymentQueuePatches(queryClient, queueItem));
+        patches.push(...optimisticLedgerPatches(queryClient, { enrollmentId, paymentId, reverse, payment, queueItem }));
+      } else {
+        patches.push(...optimisticLedgerPatches(queryClient, { enrollmentId, paymentId, reverse, payment }));
       }
 
       return patches;
     },
     mutationFn: (args: { body: PaymentsSpendReq; idemKey?: string }) =>
       Payments.spend(args.body, args.idemKey) as Promise<PaymentsSpendResp>,
-    onSuccess: async (_res, vars) => {
+    onSuccess: (_res, vars) => {
       // Invalidate grant budget — spend.ts updates lineItems.spent transactionally
       // but the React grant cache won't refresh otherwise.
-      await invalidateFromEnrollment(qc, enrollmentIdOf(vars.body));
-      await Promise.all([
+      void invalidateFromEnrollment(qc, enrollmentIdOf(vars.body));
+      void Promise.all([
         qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
         qc.invalidateQueries({ queryKey: qk.ledger.root }),
         qc.invalidateQueries({ queryKey: qk.grants.root }),
@@ -902,8 +979,8 @@ export function usePaymentRentCert() {
       });
     },
     mutationFn: (body: ReqOf<"paymentsRentCertSet">) => Payments.setRentCert(normalizeRentCertBodyForRequest(body, qc)),
-    onSuccess: async (_result, body) => {
-      await Promise.all([
+    onSuccess: (_result, body) => {
+      void Promise.all([
         qc.invalidateQueries({ queryKey: qk.tasks.root }),
         qc.invalidateQueries({ queryKey: qk.inbox.root }),
         qc.invalidateQueries({ queryKey: qk.enrollments.continuum(String(body.enrollmentId)) }),
@@ -1166,8 +1243,8 @@ export function usePaymentsProjectionsAdjust() {
       // 3) Optional future recalc
       if (options.recalcFuture) {
         const recalc = input.recalcFutureInput;
-        if (!recalc || !Number.isFinite(Number(recalc.newMonthlyAmount)) || Number(recalc.newMonthlyAmount) <= 0) {
-          throw new Error("recalcFutureInput.newMonthlyAmount is required when recalc future is enabled");
+        if (!recalc || !Number.isFinite(Number(recalc.newMonthlyAmount)) || Number(recalc.newMonthlyAmount) < 0) {
+          throw new Error("recalcFutureInput.newMonthlyAmount must be 0 or greater when recalc future is enabled");
         }
         await Payments.recalcFuture({
           enrollmentId,
@@ -1190,16 +1267,14 @@ export function usePaymentsProjectionsAdjust() {
       }
 
       // 4) Grant-level recompute options
-      if (options.updateGrantBudgets) {
-        await Payments.updateGrantBudget({
+      if (options.recalcGrantProjected) {
+        await Payments.recalcGrantProjected({
           grantId,
           activeOnly: options.activeOnly,
           source: 1,
         });
-      }
-
-      if (options.recalcGrantProjected) {
-        await Payments.recalcGrantProjected({
+      } else if (options.updateGrantBudgets) {
+        await Payments.updateGrantBudget({
           grantId,
           activeOnly: options.activeOnly,
           source: 1,
@@ -1212,8 +1287,8 @@ export function usePaymentsProjectionsAdjust() {
         grantId,
       };
     },
-    onSuccess: async (context) => {
-      await Promise.all([
+    onSuccess: (context) => {
+      void Promise.all([
         invalidateEnrollmentContext(qc, context),
         qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
         qc.invalidateQueries({ queryKey: qk.ledger.root }),

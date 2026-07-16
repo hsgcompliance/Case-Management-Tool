@@ -79,6 +79,7 @@ export type PaymentEditorSavePlan = {
     patch: { hmisComplete: boolean; caseworthyComplete: boolean; status?: string | null };
   }>;
   spendPosts: Array<{ enrollmentId: string; paymentId: string; note?: string; vendor?: string }>;
+  rentCertPatches: Array<{ enrollmentId: string; paymentId: string; status: "notDue" | "due" }>;
   projectionAdjustments: Array<PaymentsProjectionsAdjustInput>;
   paidAdjustments: Array<PaymentsProjectionsAdjustInput>;
   paidDeletes: Array<PaymentsProjectionsAdjustInput>;
@@ -291,7 +292,7 @@ export function buildPaymentEditorRows(args: {
         amount: normalizeText(payment.amount),
         vendor: normalizeText(payment.vendor),
         notes: displayNotes(payment.note || payment.comment),
-        rentCertDue: Boolean(payment.rentCertDue || asRecord(payment.meta).rentCertDue),
+        rentCertDue: Boolean(asRecord(payment.rentCert).dueDate || payment.rentCertDue || asRecord(payment.meta).rentCertDue),
         complianceStatus: complianceStatus(payment),
         paidStatus: paid ? "invoice-submitted" : "projected",
         originalPaidStatus: paid ? "invoice-submitted" : "projected",
@@ -426,6 +427,7 @@ export function buildPaymentEditorSavePlan(
   const validationErrors: string[] = [];
   const compliancePatches: PaymentEditorSavePlan["compliancePatches"] = [];
   const spendPosts: PaymentEditorSavePlan["spendPosts"] = [];
+  const rentCertPatches: PaymentEditorSavePlan["rentCertPatches"] = [];
   const projectionByEnrollment = new Map<string, NonNullable<PaymentsProjectionsAdjustInput["projectionAdjustment"]>>();
   const paidAdjustments: PaymentEditorSavePlan["paidAdjustments"] = [];
   const paidDeletes: PaymentEditorSavePlan["paidDeletes"] = [];
@@ -451,7 +453,9 @@ export function buildPaymentEditorSavePlan(
     if (!row.dueDate) validationErrors.push(`${row.id}: due date is required.`);
     if (!row.typeKey) validationErrors.push(`${row.id}: type is required.`);
     if (!row.lineItemId) validationErrors.push(`${row.id}: line item is required.`);
-    if (amountNumber(row.amount) <= 0) validationErrors.push(`${row.id}: amount must be greater than 0.`);
+    if (row.amount === "" || !Number.isFinite(Number(row.amount)) || amountNumber(row.amount) < 0) {
+      validationErrors.push(`${row.id}: amount must be 0 or greater.`);
+    }
 
     if (!before) {
       const add = toProjectionAddition(row);
@@ -464,6 +468,14 @@ export function buildPaymentEditorSavePlan(
         enrollmentId: row.enrollmentId,
         paymentId: row.sourcePaymentId,
         patch: compliancePatchFromStatus(row.complianceStatus),
+      });
+    }
+
+    if (before.rentCertDue !== row.rentCertDue && row.sourcePaymentId) {
+      rentCertPatches.push({
+        enrollmentId: row.enrollmentId,
+        paymentId: row.sourcePaymentId,
+        status: row.rentCertDue ? "due" : "notDue",
       });
     }
 
@@ -535,6 +547,7 @@ export function buildPaymentEditorSavePlan(
     validationErrors,
     compliancePatches,
     spendPosts,
+    rentCertPatches,
     projectionAdjustments,
     paidAdjustments,
     paidDeletes,

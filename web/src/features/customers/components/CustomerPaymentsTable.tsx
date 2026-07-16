@@ -25,8 +25,6 @@ type Props = {
     nextValue: boolean,
   ) => void | Promise<void>;
   onSetRentCert?: (row: CustomerPaymentRow, status: RentCertToggleValue) => void | Promise<void>;
-  busyPaid?: boolean;
-  busyCompliance?: boolean;
 };
 
 function paymentDate(p: unknown): string {
@@ -46,13 +44,15 @@ export default function CustomerPaymentsTable({
   onTogglePaid,
   onToggleCompliance,
   onSetRentCert,
-  busyPaid = false,
-  busyCompliance = false,
 }: Props) {
   const [paidOverrides, setPaidOverrides] = React.useState<Record<string, boolean | undefined>>({});
   const [complianceOverrides, setComplianceOverrides] = React.useState<
     Record<string, { hmisComplete?: boolean; caseworthyComplete?: boolean }>
   >({});
+  const [rentCertOverrides, setRentCertOverrides] = React.useState<Record<string, RentCertToggleValue | undefined>>({});
+  const [pendingPaid, setPendingPaid] = React.useState<Record<string, boolean>>({});
+  const [pendingCompliance, setPendingCompliance] = React.useState<Record<string, boolean>>({});
+  const [pendingRentCert, setPendingRentCert] = React.useState<Record<string, boolean>>({});
 
   React.useEffect(() => {
     // Clear optimistic overlays once canonical props catch up.
@@ -89,7 +89,21 @@ export default function CustomerPaymentsTable({
       }
       return changed ? next : prev;
     });
-  }, [rows]);
+    setRentCertOverrides((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of rows) {
+        const p: any = row.payment || {};
+        const key = `${row.enrollmentId}:${String(p.id || "")}`;
+        const canonical = rentCertStatuses?.[key] ?? "notDue";
+        if (Object.prototype.hasOwnProperty.call(next, key) && next[key] === canonical) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [rows, rentCertStatuses]);
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -150,17 +164,22 @@ export default function CustomerPaymentsTable({
                       <input
                         type="checkbox"
                         checked={optimisticPaid}
-                        disabled={!onTogglePaid || busyPaid}
+                        disabled={!onTogglePaid || !!pendingPaid[key]}
                         onChange={(e) => {
                           const nextPaid = e.currentTarget.checked;
                           setPaidOverrides((prev) => ({ ...prev, [key]: nextPaid }));
-                          Promise.resolve(onTogglePaid?.(row, nextPaid)).catch(() => {
-                            setPaidOverrides((prev) => {
+                          setPendingPaid((prev) => ({ ...prev, [key]: true }));
+                          Promise.resolve(onTogglePaid?.(row, nextPaid))
+                            .catch(() => setPaidOverrides((prev) => {
                               const next = { ...prev };
                               delete next[key];
                               return next;
-                            });
-                          });
+                            }))
+                            .finally(() => setPendingPaid((prev) => {
+                              const next = { ...prev };
+                              delete next[key];
+                              return next;
+                            }));
                         }}
                       />
                       <span>{optimisticPaid ? "yes" : "no"}</span>
@@ -172,13 +191,15 @@ export default function CustomerPaymentsTable({
                         <input
                           type="checkbox"
                           checked={optimisticHmis}
-                          disabled={!onToggleCompliance || busyCompliance}
+                          disabled={!onToggleCompliance || !!pendingCompliance[`${key}:hmisComplete`]}
                           onChange={(e) => {
                             const nextValue = e.currentTarget.checked;
                             setComplianceOverrides((prev) => ({
                               ...prev,
                               [key]: { ...(prev[key] || {}), hmisComplete: nextValue },
                             }));
+                            const pendingKey = `${key}:hmisComplete`;
+                            setPendingCompliance((prev) => ({ ...prev, [pendingKey]: true }));
                             Promise.resolve(onToggleCompliance?.(row, "hmisComplete", nextValue)).catch(() => {
                               setComplianceOverrides((prev) => {
                                 const base = { ...(prev[key] || {}) };
@@ -188,7 +209,11 @@ export default function CustomerPaymentsTable({
                                 else delete next[key];
                                 return next;
                               });
-                            });
+                            }).finally(() => setPendingCompliance((prev) => {
+                              const next = { ...prev };
+                              delete next[pendingKey];
+                              return next;
+                            }));
                           }}
                         />
                         <span>HMIS</span>
@@ -197,13 +222,15 @@ export default function CustomerPaymentsTable({
                         <input
                           type="checkbox"
                           checked={optimisticCw}
-                          disabled={!onToggleCompliance || busyCompliance}
+                          disabled={!onToggleCompliance || !!pendingCompliance[`${key}:caseworthyComplete`]}
                           onChange={(e) => {
                             const nextValue = e.currentTarget.checked;
                             setComplianceOverrides((prev) => ({
                               ...prev,
                               [key]: { ...(prev[key] || {}), caseworthyComplete: nextValue },
                             }));
+                            const pendingKey = `${key}:caseworthyComplete`;
+                            setPendingCompliance((prev) => ({ ...prev, [pendingKey]: true }));
                             Promise.resolve(onToggleCompliance?.(row, "caseworthyComplete", nextValue)).catch(() => {
                               setComplianceOverrides((prev) => {
                                 const base = { ...(prev[key] || {}) };
@@ -213,7 +240,11 @@ export default function CustomerPaymentsTable({
                                 else delete next[key];
                                 return next;
                               });
-                            });
+                            }).finally(() => setPendingCompliance((prev) => {
+                              const next = { ...prev };
+                              delete next[pendingKey];
+                              return next;
+                            }));
                           }}
                         />
                         <span>CW</span>
@@ -222,10 +253,24 @@ export default function CustomerPaymentsTable({
                   </td>
                   <td className="px-3 py-2">
                     <RentCertToggle
-                      value={rentCertStatuses?.[key] ?? "notDue"}
-                      disabled={!onSetRentCert}
+                      value={rentCertOverrides[key] ?? rentCertStatuses?.[key] ?? "notDue"}
+                      disabled={!onSetRentCert || !!pendingRentCert[key]}
                       title="Rent cert due date is the month prior to the payment date."
-                      onChange={(next) => void onSetRentCert?.(row, next)}
+                      onChange={(next) => {
+                        setRentCertOverrides((prev) => ({ ...prev, [key]: next }));
+                        setPendingRentCert((prev) => ({ ...prev, [key]: true }));
+                        Promise.resolve(onSetRentCert?.(row, next))
+                          .catch(() => setRentCertOverrides((prev) => {
+                            const updated = { ...prev };
+                            delete updated[key];
+                            return updated;
+                          }))
+                          .finally(() => setPendingRentCert((prev) => {
+                            const updated = { ...prev };
+                            delete updated[key];
+                            return updated;
+                          }));
+                      }}
                     />
                   </td>
                   <td className="px-3 py-2 text-base font-semibold leading-snug text-slate-900">
