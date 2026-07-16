@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listWebhookEventDetails, type WebhookEventDetail } from "@/lib/webhookDetailsApi";
 import { getSubmissionLinks, linkSubmission, type SubmissionLink } from "@/lib/submissionLinksApi";
-import { extractHousehold, type ExtractedValue } from "@/lib/householdExtract";
+import { extractHousehold, type ExtractedValue, type HouseholdMember, type SlotValue } from "@/lib/householdExtract";
 import { formById } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { matchName, type NameMatch } from "@/lib/nameMatch";
 
 // Right-hand "Webhooks" sidebar for the intake flow. Two tabs:
-//   Structured — household info assembled live from every form submitted so far
-//                (all values copy-pastable, with source form provenance).
+//   Structured — ONE continuously-merged household model built across every
+//                form submitted this session (never per-form snapshots):
+//                Household + Housing groups, then a card per member with
+//                their own demographic / income / asset groups. Values from
+//                the document-based forms (Eligibility / Rent Determination)
+//                carry a ✓ doc badge and outrank self-declared answers.
 //   Raw        — expandable flattened webhooks per completed form.
 // Collapsible to a thin rail; persists across list/step views (it's mounted at
 // the FormsCategoryView layout level). Exact-name-matching submissions are
@@ -51,11 +55,25 @@ function MatchDot({ match }: { match: NameMatch }) {
   return <span title={title} className={`inline-block h-2 w-2 shrink-0 rounded-full ${cls}`} />;
 }
 
+function DocBadge() {
+  return (
+    <span
+      title="Document-verified (Eligibility / Rent Determination)"
+      className="inline-flex shrink-0 items-center rounded bg-emerald-100 px-1 text-[9px] font-bold uppercase text-emerald-700"
+    >
+      ✓ doc
+    </span>
+  );
+}
+
 function ValueRow({ label, found }: { label: string; found: ExtractedValue | null }) {
   return (
     <div className="border-b border-slate-100 py-1.5 last:border-0">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-wide text-slate-400">{label}</span>
+        <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-slate-400">
+          {label}
+          {found?.verified ? <DocBadge /> : null}
+        </span>
         {found ? <CopyButton text={found.value} small /> : null}
       </div>
       {found ? (
@@ -66,6 +84,138 @@ function ValueRow({ label, found }: { label: string; found: ExtractedValue | nul
       ) : (
         <div className="text-sm text-slate-300">—</div>
       )}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{children}</span>
+  );
+}
+
+/** A group of slot rows (Household / Housing). */
+function SlotGroup({ title, rows }: { title: string; rows: SlotValue[] }) {
+  return (
+    <div>
+      <SectionTitle>{title}</SectionTitle>
+      {rows.map((s) => (
+        <ValueRow key={s.key} label={s.label} found={s.found} />
+      ))}
+    </div>
+  );
+}
+
+/** Copy chip for one name part: [First ⧉]-style. */
+function NameCopy({ label, text }: { label: string; text: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      type="button"
+      title={`Copy ${label.toLowerCase()} name: ${text}`}
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        }).catch(() => {});
+      }}
+      className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:border-indigo-300 hover:text-indigo-600"
+    >
+      {label} {copied ? "✓" : "⧉"}
+    </button>
+  );
+}
+
+/** Compact labelled value inside a member card group. */
+function MiniRow({ label, found, suffix }: { label: string; found: ExtractedValue | null; suffix?: string }) {
+  if (!found) return null;
+  return (
+    <div className="flex items-start justify-between gap-2 py-0.5">
+      <div className="min-w-0">
+        <span className="text-[10px] uppercase tracking-wide text-slate-400">{label} </span>
+        {found.verified ? <DocBadge /> : null}
+        <div className="whitespace-pre-wrap break-words text-xs font-medium text-slate-800" title={found.sourceFormTitle}>
+          {found.value}
+          {suffix ? <span className="font-normal text-slate-400"> {suffix}</span> : null}
+        </div>
+      </div>
+      <CopyButton text={found.value} small />
+    </div>
+  );
+}
+
+function MemberGroupTitle({ children }: { children: ReactNode }) {
+  return <div className="mt-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-300">{children}</div>;
+}
+
+/** One household member: name copies + demographic / contact / income / asset groups. */
+function MemberCard({ m }: { m: HouseholdMember }) {
+  const hasDemo = m.dob || m.gender || m.citizenship || m.disabling || m.disabilityTypes;
+  return (
+    <div className={`rounded-lg border p-2 ${m.isHoH ? "border-indigo-200 bg-indigo-50/40" : "border-slate-200"}`}>
+      <div className="flex items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900" title={m.nameProv.sourceFormTitle}>
+          {m.name.full}
+        </span>
+        {m.isHoH ? (
+          <span className="shrink-0 rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">HoH</span>
+        ) : null}
+        {m.relationship && !/^self$/i.test(m.relationship.value) ? (
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+            {m.relationship.value}
+          </span>
+        ) : null}
+      </div>
+
+      {/* First / Last / Full — each separately copyable */}
+      <div className="mt-1 flex flex-wrap gap-1">
+        <NameCopy label="First" text={m.name.first} />
+        <NameCopy label="Last" text={m.name.last} />
+        <NameCopy label="Full" text={m.name.full} />
+      </div>
+
+      {hasDemo ? (
+        <>
+          <MemberGroupTitle>Demographics</MemberGroupTitle>
+          <MiniRow label="DOB" found={m.dob} suffix={m.age != null ? `· age ${m.age}` : undefined} />
+          <MiniRow label="Gender" found={m.gender} />
+          <MiniRow label="Citizenship" found={m.citizenship} />
+          <MiniRow label="Disabling condition" found={m.disabling} />
+          <MiniRow label="Disability types" found={m.disabilityTypes} />
+        </>
+      ) : null}
+
+      {m.phone || m.email ? (
+        <>
+          <MemberGroupTitle>Contact</MemberGroupTitle>
+          <MiniRow label="Phone" found={m.phone} />
+          <MiniRow label="Email" found={m.email} />
+        </>
+      ) : null}
+
+      {m.incomes.length ? (
+        <>
+          <MemberGroupTitle>Income</MemberGroupTitle>
+          {m.incomes.map((inc) => (
+            <MiniRow
+              key={inc.source.value.toLowerCase()}
+              label="Source"
+              found={inc.source}
+              suffix={inc.amountMonthly ? `— ${inc.amountMonthly.value}/mo` : undefined}
+            />
+          ))}
+        </>
+      ) : null}
+
+      {m.assets.length ? (
+        <>
+          <MemberGroupTitle>Assets / accounts</MemberGroupTitle>
+          {m.assets.map((a) => (
+            <MiniRow key={a.value.toLowerCase()} label="Account" found={a} />
+          ))}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -229,11 +379,33 @@ export function WebhooksSidebar({
 
   const copyAll = () => {
     const lines: string[] = [];
-    for (const s of household.slots) if (s.found) lines.push(`${s.label}: ${s.found.value}`);
-    if (household.hhSize) lines.push(`Household size: ${household.hhSize.value}`);
-    if (household.adults) lines.push(`Adults: ${household.adults.value}`);
-    if (household.children) lines.push(`Children: ${household.children.value}`);
-    if (household.members.length) lines.push(`Members: ${household.members.map((m) => m.value).join("; ")}`);
+    const pushSlots = (title: string, rows: SlotValue[]) => {
+      const found = rows.filter((s) => s.found);
+      if (!found.length) return;
+      lines.push(title);
+      for (const s of found) lines.push(`  ${s.label}: ${s.found!.value}${s.found!.verified ? " [doc-verified]" : ""}`);
+    };
+    pushSlots("Household", household.household);
+    pushSlots("Housing", household.housing);
+    if (household.members.length) {
+      lines.push("Members");
+      for (const m of household.members) {
+        const bits = [
+          m.isHoH ? "HoH" : null,
+          m.relationship?.value ?? null,
+          m.dob ? `DOB ${m.dob.value}${m.age != null ? ` (${m.age})` : ""}` : null,
+          m.gender?.value ?? null,
+          m.disabling ? `Disabling: ${m.disabling.value}${m.disabilityTypes ? ` (${m.disabilityTypes.value})` : ""}` : null,
+          m.phone?.value ?? null,
+          m.email?.value ?? null,
+        ].filter(Boolean);
+        lines.push(`  - ${m.name.full}${bits.length ? ` — ${bits.join(" · ")}` : ""}`);
+        for (const inc of m.incomes) {
+          lines.push(`      Income: ${inc.source.value}${inc.amountMonthly ? ` ${inc.amountMonthly.value}/mo` : ""}${inc.source.verified ? " [doc-verified]" : ""}`);
+        }
+        for (const a of m.assets) lines.push(`      Asset: ${a.value}${a.verified ? " [doc-verified]" : ""}`);
+      }
+    }
     navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
   };
 
@@ -244,18 +416,41 @@ export function WebhooksSidebar({
   // we ultimately want to persist (normalized values + ids, not raw payloads).
   const exportSession = () => {
     const val = (v: ExtractedValue | null) =>
-      v ? { value: v.value, sourceFormId: v.sourceFormId, sourceFormTitle: v.sourceFormTitle, receivedAtISO: v.receivedAtISO } : null;
+      v
+        ? {
+            value: v.value,
+            sourceFormId: v.sourceFormId,
+            sourceFormTitle: v.sourceFormTitle,
+            receivedAtISO: v.receivedAtISO,
+            verified: v.verified,
+          }
+        : null;
+    const slotObj = (rows: SlotValue[]) => Object.fromEntries(rows.map((s) => [s.key, val(s.found)]));
     const data = {
       kind: "hdb-intake-webhooks-session",
       exportedAtISO: new Date().toISOString(),
       sessionStartISO,
       customer: customer ? { id: customer.id, name: customer.name, cwId: customer.cwId } : null,
       normalized: {
-        slots: household.slots.map((s) => ({ key: s.key, label: s.label, found: val(s.found) })),
-        members: household.members.map((m) => val(m)),
-        hhSize: val(household.hhSize),
-        adults: val(household.adults),
-        children: val(household.children),
+        household: slotObj(household.household),
+        housing: slotObj(household.housing),
+        headOfHousehold: slotObj(household.slots),
+        members: household.members.map((m) => ({
+          name: m.name, // { full, first, last }
+          isHoH: m.isHoH,
+          demographics: {
+            relationship: val(m.relationship),
+            dob: val(m.dob),
+            age: m.age,
+            gender: val(m.gender),
+            citizenship: val(m.citizenship),
+            disabling: val(m.disabling),
+            disabilityTypes: val(m.disabilityTypes),
+          },
+          contact: { phone: val(m.phone), email: val(m.email) },
+          income: m.incomes.map((i) => ({ source: val(i.source), amountMonthly: val(i.amountMonthly) })),
+          assets: m.assets.map((a) => val(a)),
+        })),
       },
       unmatched: household.unmatched,
       submissions: household.trace.map((t) => ({
@@ -365,9 +560,7 @@ export function WebhooksSidebar({
           ) : tab === "structured" ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  Head of household
-                </span>
+                <SectionTitle>Household model</SectionTitle>
                 <button
                   type="button"
                   onClick={copyAll}
@@ -376,41 +569,21 @@ export function WebhooksSidebar({
                   Copy all
                 </button>
               </div>
-              <div>
-                {household.slots.map((s) => (
-                  <ValueRow key={s.key} label={s.label} found={s.found} />
-                ))}
-              </div>
+
+              <SlotGroup title="Household" rows={household.household} />
+              <SlotGroup title="Housing" rows={household.housing} />
 
               <div>
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Household</span>
-                <ValueRow label="Household size" found={household.hhSize} />
-                <ValueRow label="Adults" found={household.adults} />
-                <ValueRow label="Children" found={household.children} />
-                <div className="py-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] uppercase tracking-wide text-slate-400">Members</span>
-                    {household.members.length ? (
-                      <CopyButton text={household.members.map((m) => m.value).join("\n")} small />
-                    ) : null}
+                <SectionTitle>Members ({household.members.length})</SectionTitle>
+                {household.members.length ? (
+                  <div className="mt-1.5 space-y-2">
+                    {household.members.map((m) => (
+                      <MemberCard key={m.name.full.toLowerCase()} m={m} />
+                    ))}
                   </div>
-                  {household.members.length ? (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {household.members.map((m) => (
-                        <span
-                          key={m.value.toLowerCase()}
-                          title={m.sourceFormTitle}
-                          className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700"
-                        >
-                          {m.value}
-                          <CopyButton text={m.value} small />
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-300">—</div>
-                  )}
-                </div>
+                ) : (
+                  <div className="text-sm text-slate-300">—</div>
+                )}
               </div>
 
               <div className="border-t border-slate-100 pt-2">
@@ -444,8 +617,11 @@ export function WebhooksSidebar({
               </div>
 
               <p className="text-[10px] leading-relaxed text-slate-300">
-                Built live from forms submitted this session (since {shortTime(sessionStartISO) || "start"}).
-                Newest answer wins; unmatched fields land above for troubleshooting.
+                One household model, merged continuously from every form this session (since{" "}
+                {shortTime(sessionStartISO) || "start"}). Everything through the workbook step is self-declared;{" "}
+                <span className="font-semibold text-emerald-500">✓ doc</span> values come from the Eligibility /
+                Rent Determination forms (paystubs, bank statements) and outrank self-declared answers.
+                Unmatched fields land above for mapping troubleshooting.
               </p>
             </div>
           ) : (
