@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { loadCustomers, type FormsCustomer } from "@/lib/customersApi";
+import type { FormsCustomer } from "@/lib/customersApi";
 import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
+import { listIntakeSessions, onIntakeSessionsChange, sessionCustomer } from "@/lib/intakeSessions";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { formatDob } from "@/lib/format";
 
@@ -10,7 +11,9 @@ import { formatDob } from "@/lib/format";
 //   • Household tab — a first-pass NORMALIZED HOUSEHOLD object: the canonical fields
 //     plus the customer's linked Jotform submissions organized by form.
 // Details read CurrentCustomer context, so they persist across every iframe form
-// view. With `nav` on (Intake), ◀ ▶ step through the loaded customer index.
+// view. With `nav` on (Intake), ◀ ▶ step through MY ACTIVE INTAKE customers only
+// (the local intake-sessions registry), NOT the full customer index. Other users'
+// active intakes would need a backend projection — future enhancement.
 //
 // Editability + true multi-member family linking + per-form field normalization are
 // the noted fine-tuning steps layered on top of this shape.
@@ -125,16 +128,22 @@ function HouseholdTab({ detail, loading }: { detail: CustomerDetail | null; load
 
 export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
   const { customer, setCustomer } = useCurrentCustomer();
-  const [all, setAll] = useState<FormsCustomer[] | null>(null);
+  const [navList, setNavList] = useState<FormsCustomer[] | null>(null);
   const [tab, setTab] = useState<"customer" | "household">("customer");
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Nav steps through my active intake customers (local sessions registry).
   useEffect(() => {
     if (!nav) return;
-    let alive = true;
-    loadCustomers().then((rows) => { if (alive) setAll(rows); });
-    return () => { alive = false; };
+    const refresh = () =>
+      setNavList(
+        listIntakeSessions()
+          .map(sessionCustomer)
+          .filter((c): c is FormsCustomer => !!c)
+      );
+    refresh();
+    return onIntakeSessionsChange(refresh);
   }, [nav]);
 
   useEffect(() => {
@@ -148,15 +157,15 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
   }, [customer?.id]);
 
   const index = useMemo(() => {
-    if (!nav || !all || !customer) return -1;
-    return all.findIndex((c) => c.id === customer.id);
-  }, [nav, all, customer]);
+    if (!nav || !navList || !customer) return -1;
+    return navList.findIndex((c) => c.id === customer.id);
+  }, [nav, navList, customer]);
 
   const canPrev = nav && index > 0;
-  const canNext = nav && index >= 0 && all != null && index < all.length - 1;
+  const canNext = nav && index >= 0 && navList != null && index < navList.length - 1;
   const step = (delta: number) => {
-    if (!all || index < 0) return;
-    const next = all[index + delta];
+    if (!navList || index < 0) return;
+    const next = navList[index + delta];
     if (next) setCustomer(next);
   };
 
@@ -188,8 +197,12 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
             {customer.name}
             {customer.cwId ? <span className="font-normal text-slate-400"> · {customer.cwId}</span> : null}
           </div>
-          {nav && index >= 0 && all ? (
-            <div className="text-[10px] text-slate-400">{index + 1} of {all.length}</div>
+          {nav && navList ? (
+            <div className="text-[10px] text-slate-400">
+              {index >= 0
+                ? `${index + 1} of ${navList.length} active intake${navList.length === 1 ? "" : "s"}`
+                : "not in your active intakes"}
+            </div>
           ) : null}
         </div>
         <button

@@ -18,6 +18,19 @@ export type UnmatchedField = {
   sourceFormTitle: string;
 };
 
+/** One raw field with the normalizer keys that consumed it (empty = unmatched). */
+export type EventTraceField = { label: string; value: string; consumedBy: string[] };
+
+/** Per-submission raw→normalized mapping trace (drives the sidebar export). */
+export type EventTrace = {
+  formId: string;
+  formTitle: string;
+  submissionId: string;
+  submitterName: string;
+  receivedAtISO: string | null;
+  fields: EventTraceField[];
+};
+
 export type HouseholdInfo = {
   /** Ordered head-of-household slots (label → newest value, if any). */
   slots: { key: string; label: string; found: ExtractedValue | null }[];
@@ -28,6 +41,8 @@ export type HouseholdInfo = {
   children: ExtractedValue | null;
   /** Fields no matcher consumed — the troubleshooting list for tuning the regexes. */
   unmatched: UnmatchedField[];
+  /** Newest-first per-submission trace: every raw field + what it normalized into. */
+  trace: EventTrace[];
 };
 
 type SlotDef = {
@@ -120,6 +135,7 @@ export function extractHousehold(
   let adults: ExtractedValue | null = null;
   let children: ExtractedValue | null = null;
   const unmatched = new Map<string, UnmatchedField>(); // key: label::value
+  const trace: EventTrace[] = [];
 
   // Oldest → newest so later submissions overwrite earlier answers.
   const ordered = [...events].sort((a, b) =>
@@ -132,23 +148,35 @@ export function extractHousehold(
       sourceFormTitle: formTitleById(ev.formId),
       receivedAtISO: ev.receivedAtISO,
     };
+    const evTrace: EventTrace = {
+      formId: ev.formId,
+      formTitle: src.sourceFormTitle,
+      submissionId: ev.submissionId,
+      submitterName: ev.submitterName,
+      receivedAtISO: ev.receivedAtISO,
+      fields: [],
+    };
+    trace.push(evTrace);
     for (const f of ev.fields) {
       const label = f.label;
       const value = f.value.trim();
       if (!value) continue;
       let consumed = false;
+      const consumedBy: string[] = [];
 
       for (const def of SLOT_DEFS) {
         if (!def.match.test(label)) continue;
         if (def.exclude?.test(label)) continue;
         if (def.valueOk && !def.valueOk(value)) continue;
         consumed = true;
+        consumedBy.push(def.key);
         const candidate: ExtractedValue = { value, ...src };
         if (newer(found.get(def.key) ?? null, candidate)) found.set(def.key, candidate);
       }
 
       if (MEMBER_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
         consumed = true;
+        consumedBy.push("members");
         // Multi-member answers come through as newline or "·"-separated lists.
         for (const part of value.split(/\n|·/)) {
           const name = part.replace(/^[^:]*:\s*/, "").trim();
@@ -162,14 +190,17 @@ export function extractHousehold(
       const numeric = /^\d{1,2}$/.test(value);
       if (HH_SIZE_MATCH.test(label) && numeric) {
         consumed = true;
+        consumedBy.push("hhSize");
         if (newer(hhSize, { value, ...src })) hhSize = { value, ...src };
       }
       if (ADULTS_MATCH.test(label) && numeric) {
         consumed = true;
+        consumedBy.push("adults");
         if (newer(adults, { value, ...src })) adults = { value, ...src };
       }
       if (CHILDREN_MATCH.test(label) && numeric) {
         consumed = true;
+        consumedBy.push("children");
         if (newer(children, { value, ...src })) children = { value, ...src };
       }
 
@@ -179,6 +210,7 @@ export function extractHousehold(
           unmatched.set(k, { label, value, sourceFormTitle: src.sourceFormTitle });
         }
       }
+      evTrace.fields.push({ label, value, consumedBy });
     }
   }
 
@@ -198,5 +230,13 @@ export function extractHousehold(
     }
   }
 
-  return { slots, members: [...members.values()], hhSize, adults, children, unmatched: [...unmatched.values()] };
+  return {
+    slots,
+    members: [...members.values()],
+    hhSize,
+    adults,
+    children,
+    unmatched: [...unmatched.values()],
+    trace: [...trace].reverse(), // newest first for the export
+  };
 }
