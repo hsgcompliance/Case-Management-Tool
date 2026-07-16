@@ -20,7 +20,47 @@ import { matchName, type NameMatch } from "@/lib/nameMatch";
 
 const COLLAPSE_KEY = "hdb:forms:webhooks-sidebar-collapsed";
 const SESSION_KEY = "hdb:forms:webhooks-session-start";
+const ANCHOR_KEY = "hdb:forms:webhooks-anchor";
+const INCLUDE_KEY = "hdb:forms:webhooks-include";
+const EXCLUDE_KEY = "hdb:forms:webhooks-exclude";
 const POLL_MS = 20_000;
+
+// ── concurrent-intake guard ─────────────────────────────────────────────────
+// Two staff running intakes at once share the org-wide webhook stream, so the
+// household model must be ANCHORED to one identity: the linked customer, a
+// manual pick, or the first named form of the session (usually the citizenship
+// self-dec). Only events where some name-ish field fuzzy-matches the anchor
+// join the model; the rest are listed as excluded with one-click overrides.
+
+/** Name-carrying labels that describe OTHER people — never anchor evidence. */
+const OTHER_PEOPLE_LABEL =
+  /landlord|employer|referr|designated|counselor|staff|agency|case ?manager|contact person|business|company/i;
+
+/** Best fuzzy match between the anchor and ANY name-ish field on the event. */
+function eventAnchorMatch(ev: WebhookEventDetail, anchor: string): NameMatch {
+  let best: NameMatch = matchName(ev.submitterName, anchor);
+  if (best === "exact") return best;
+  for (const f of ev.fields) {
+    if (!/name/i.test(f.label) || OTHER_PEOPLE_LABEL.test(f.label)) continue;
+    const m = matchName(f.value, anchor);
+    if (m === "exact") return "exact";
+    if (m === "partial" && best === "none") best = "partial";
+  }
+  return best;
+}
+
+function loadSessionSet(key: string): Set<string> {
+  try {
+    const arr = JSON.parse(sessionStorage.getItem(key) || "[]") as string[];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSessionSet(key: string, set: Set<string>): void {
+  try { sessionStorage.setItem(key, JSON.stringify([...set])); } catch { /* ignore */ }
+}
 
 function shortTime(iso: string | null): string {
   if (!iso) return "";
@@ -258,10 +298,34 @@ export function WebhooksSidebar({
       return new Date().toISOString();
     }
   });
+  // Anchor overrides (all session-scoped; wiped by "New session").
+  const [manualAnchor, setManualAnchor] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(ANCHOR_KEY); } catch { return null; }
+  });
+  const [manualInc, setManualInc] = useState<Set<string>>(() => loadSessionSet(INCLUDE_KEY));
+  const [manualExc, setManualExc] = useState<Set<string>>(() => loadSessionSet(EXCLUDE_KEY));
+  const [showExcluded, setShowExcluded] = useState(false);
+
+  const setAnchorManually = (name: string | null) => {
+    try {
+      if (name) sessionStorage.setItem(ANCHOR_KEY, name);
+      else sessionStorage.removeItem(ANCHOR_KEY);
+    } catch { /* ignore */ }
+    setManualAnchor(name);
+  };
+
   const resetSession = () => {
     const now = new Date().toISOString();
-    try { sessionStorage.setItem(SESSION_KEY, now); } catch { /* ignore */ }
+    try {
+      sessionStorage.setItem(SESSION_KEY, now);
+      sessionStorage.removeItem(ANCHOR_KEY);
+      sessionStorage.removeItem(INCLUDE_KEY);
+      sessionStorage.removeItem(EXCLUDE_KEY);
+    } catch { /* ignore */ }
     setSessionStartISO(now);
+    setManualAnchor(null);
+    setManualInc(new Set());
+    setManualExc(new Set());
   };
 
   const formIdsKey = formIds.join(",");
@@ -327,6 +391,57 @@ export function WebhooksSidebar({
       });
   }, [events, customer, links, sessionStartISO]);
 
+  // The model anchor: linked customer > manual pick > first named form this
+  // session. rows are newest-first, so the chronological first is the last row.
+  const firstNamed = useMemo(
+    () => [...rows].reverse().find((r) => r.ev.submitterName.trim()),
+    [rows]
+  );
+  const anchor = customer?.name ?? manualAnchor ?? firstNamed?.ev.submitterName ?? null;
+  const anchorSource = customer
+    ? "current customer"
+    : manualAnchor
+      ? "manual pick"
+      : firstNamed
+        ? "first form this session"
+        : null;
+
+  // Partition: an event joins the household model when a name-ish field fuzzy-
+  // matches the anchor (or staff manually included it). Everything stays
+  // visible in Raw; excluded events are listed for one-click override.
+  const anchored = useMemo(() => {
+    return rows.map((r) => {
+      const anchorMatch: NameMatch | null = anchor ? eventAnchorMatch(r.ev, anchor) : null;
+      const inModel = !anchor
+        ? true
+        : manualExc.has(r.ev.id)
+          ? false
+          : manualInc.has(r.ev.id)
+            ? true
+            : anchorMatch !== "none";
+      return { ...r, anchorMatch, inModel };
+    });
+  }, [rows, anchor, manualInc, manualExc]);
+  const modelRows = useMemo(() => anchored.filter((r) => r.inModel), [anchored]);
+  const excludedRows = useMemo(() => anchored.filter((r) => !r.inModel), [anchored]);
+
+  const toggleInModel = (evId: string, currentlyIn: boolean) => {
+    setManualInc((cur) => {
+      const next = new Set(cur);
+      if (currentlyIn) next.delete(evId);
+      else next.add(evId);
+      saveSessionSet(INCLUDE_KEY, next);
+      return next;
+    });
+    setManualExc((cur) => {
+      const next = new Set(cur);
+      if (currentlyIn) next.add(evId);
+      else next.delete(evId);
+      saveSessionSet(EXCLUDE_KEY, next);
+      return next;
+    });
+  };
+
   const doLink = useCallback(
     async (ev: WebhookEventDetail) => {
       if (!customer) return;
@@ -370,11 +485,11 @@ export function WebhooksSidebar({
     }
   }, [rows, customer, links, doLink]);
 
-  // Structured extraction from everything submitted this session (the session
-  // watermark is the scope — match dots stay purely informational).
+  // Structured extraction from the ANCHORED events only — concurrent intakes
+  // by other staff stay out of this household model.
   const household = useMemo(
-    () => extractHousehold(rows.map((r) => r.ev), (id) => formById(id)?.title || `Form ${id}`),
-    [rows]
+    () => extractHousehold(modelRows.map((r) => r.ev), (id) => formById(id)?.title || `Form ${id}`),
+    [modelRows]
   );
 
   const copyAll = () => {
@@ -431,6 +546,7 @@ export function WebhooksSidebar({
       exportedAtISO: new Date().toISOString(),
       sessionStartISO,
       customer: customer ? { id: customer.id, name: customer.name, cwId: customer.cwId } : null,
+      anchor: anchor ? { name: anchor, source: anchorSource } : null,
       normalized: {
         household: slotObj(household.household),
         housing: slotObj(household.housing),
@@ -462,6 +578,16 @@ export function WebhooksSidebar({
         linkedCustomers: links[t.formId]?.[t.submissionId]?.customers ?? [],
         // Raw fields as displayed, each tagged with the normalized slot(s) it fed.
         fields: t.fields,
+      })),
+      // Session events that did NOT match the anchor (other people's intakes).
+      excludedSubmissions: excludedRows.map((r) => ({
+        formId: r.ev.formId,
+        formTitle: formById(r.ev.formId)?.title || `Form ${r.ev.formId}`,
+        submissionId: r.ev.submissionId,
+        submitterName: r.ev.submitterName,
+        receivedAtISO: r.ev.receivedAtISO,
+        anchorMatch: r.anchorMatch,
+        fields: r.ev.fields,
       })),
     };
     const who = (customer?.name || "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -570,6 +696,73 @@ export function WebhooksSidebar({
                 </button>
               </div>
 
+              {anchor ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-600">
+                  Anchored to <b className="text-slate-800">{anchor}</b>{" "}
+                  <span className="text-slate-400">· {anchorSource}</span>
+                  {manualAnchor && !customer ? (
+                    <button
+                      type="button"
+                      onClick={() => setAnchorManually(null)}
+                      title="Clear the manual anchor"
+                      className="ml-1 font-semibold text-slate-400 hover:text-rose-600"
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                  {excludedRows.length ? (
+                    <>
+                      {" "}·{" "}
+                      <button
+                        type="button"
+                        onClick={() => setShowExcluded((v) => !v)}
+                        className="font-semibold text-amber-600 hover:text-amber-700"
+                      >
+                        {excludedRows.length} other submission{excludedRows.length === 1 ? "" : "s"} excluded ▾
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {showExcluded && excludedRows.length ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                    Not in this household model
+                  </div>
+                  {excludedRows.map((r) => (
+                    <div key={r.ev.id} className="flex items-center gap-2 border-b border-amber-100 py-1.5 last:border-0">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-semibold text-slate-800">
+                          {r.ev.submitterName || "(no name)"}
+                        </span>
+                        <span className="block truncate text-[10px] text-slate-400">
+                          {formById(r.ev.formId)?.title || `Form ${r.ev.formId}`} · {shortTime(r.ev.receivedAtISO)}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleInModel(r.ev.id, false)}
+                        title="Include this submission in the household model anyway"
+                        className="shrink-0 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 hover:bg-amber-100"
+                      >
+                        Include
+                      </button>
+                      {!customer && r.ev.submitterName ? (
+                        <button
+                          type="button"
+                          onClick={() => setAnchorManually(r.ev.submitterName)}
+                          title="Rebuild the model around this person instead"
+                          className="shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:bg-slate-100"
+                        >
+                          Anchor
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               <SlotGroup title="Household" rows={household.household} />
               <SlotGroup title="Housing" rows={household.housing} />
 
@@ -617,11 +810,12 @@ export function WebhooksSidebar({
               </div>
 
               <p className="text-[10px] leading-relaxed text-slate-300">
-                One household model, merged continuously from every form this session (since{" "}
-                {shortTime(sessionStartISO) || "start"}). Everything through the workbook step is self-declared;{" "}
-                <span className="font-semibold text-emerald-500">✓ doc</span> values come from the Eligibility /
-                Rent Determination forms (paystubs, bank statements) and outrank self-declared answers.
-                Unmatched fields land above for mapping troubleshooting.
+                One household model, merged continuously from the forms this session (since{" "}
+                {shortTime(sessionStartISO) || "start"}) that name-match the anchor — concurrent intakes by other
+                staff are excluded automatically (override above or in Raw). Everything through the workbook step
+                is self-declared; <span className="font-semibold text-emerald-500">✓ doc</span> values come from
+                the Eligibility / Rent Determination forms (paystubs, bank statements) and outrank self-declared
+                answers. Unmatched fields land above for mapping troubleshooting.
               </p>
             </div>
           ) : (
@@ -632,10 +826,10 @@ export function WebhooksSidebar({
                   the intake forms.
                 </div>
               ) : (
-                rows.map(({ ev, match, link, linkedToCurrent }) => {
+                anchored.map(({ ev, match, link, linkedToCurrent, inModel }) => {
                   const isOpen = expanded.has(ev.id);
                   return (
-                    <div key={ev.id} className="rounded-lg border border-slate-200">
+                    <div key={ev.id} className={`rounded-lg border ${inModel ? "border-slate-200" : "border-amber-200 bg-amber-50/40"}`}>
                       <button
                         type="button"
                         onClick={() =>
@@ -655,6 +849,7 @@ export function WebhooksSidebar({
                           </span>
                           <span className="block truncate text-[10px] text-slate-400">
                             {ev.submitterName || "(no name)"} · {shortTime(ev.receivedAtISO)}
+                            {!inModel ? " · ✕ not in model" : ""}
                             {linkedToCurrent ? " · ✓ linked" : link?.customers.length ? ` · linked: ${link.customers.map((c) => c.customerName).join(", ")}` : ""}
                           </span>
                         </span>
@@ -662,6 +857,19 @@ export function WebhooksSidebar({
                       </button>
                       {isOpen ? (
                         <div className="border-t border-slate-100 px-2.5 py-2">
+                          {anchor ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleInModel(ev.id, inModel)}
+                              className={`mb-2 w-full rounded-md border px-2 py-1 text-[11px] font-semibold ${
+                                inModel
+                                  ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                                  : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              }`}
+                            >
+                              {inModel ? "Remove from household model" : "Include in household model"}
+                            </button>
+                          ) : null}
                           {customer && !linkedToCurrent ? (
                             <button
                               type="button"
