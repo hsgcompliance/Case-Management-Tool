@@ -14,3 +14,7 @@ export {
   formsCustomerSetTssStatus_http as formsCustomerSetTssStatus,
   formsUsersList_http as formsUsersList,
 } from "./customerCreate";
+export {
+  formsEnrollmentsList_http as formsEnrollmentsList,
+  formsRentCertApply_http as formsRentCertApply,
+} from "./rentCert";

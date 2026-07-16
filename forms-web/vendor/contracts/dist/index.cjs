@@ -1409,7 +1409,7 @@ var PaymentsGenerateProjectionsBody = import_zod2.z.object({
 });
 var PaymentsRecalculateFutureSingleReq = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
-  newMonthlyAmount: import_zod2.z.coerce.number().positive(),
+  newMonthlyAmount: import_zod2.z.coerce.number().nonnegative(),
   projectionIds: import_zod2.z.array(import_zod2.z.string().min(1)).max(2e3).optional(),
   lineItemId: import_zod2.z.string().min(1).optional(),
   effectiveFrom: ISO10ish.optional(),
@@ -1418,7 +1418,7 @@ var PaymentsRecalculateFutureSingleReq = import_zod2.z.object({
 });
 var PaymentsRecalculateFutureGrantReq = import_zod2.z.object({
   grantId: import_zod2.z.string().min(1),
-  newMonthlyAmount: import_zod2.z.coerce.number().positive(),
+  newMonthlyAmount: import_zod2.z.coerce.number().nonnegative(),
   lineItemId: import_zod2.z.string().min(1).optional(),
   effectiveFrom: ISO10ish.optional(),
   // inclusive
@@ -1483,10 +1483,10 @@ var PaymentProjectionInput = import_zod2.z.object({
       path: ["dueDate"]
     });
   }
-  if (!Number.isFinite(Number(v.amount)) || Number(v.amount) <= 0) {
+  if (!Number.isFinite(Number(v.amount)) || Number(v.amount) < 0) {
     ctx.addIssue({
       code: import_zod2.z.ZodIssueCode.custom,
-      message: "amount must be a positive number",
+      message: "amount must be a non-negative number",
       path: ["amount"]
     });
   }

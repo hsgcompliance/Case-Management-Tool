@@ -171,7 +171,7 @@ var PaymentsGenerateProjectionsBody = z.object({
 });
 var PaymentsRecalculateFutureSingleReq = z.object({
   enrollmentId: z.string().min(1),
-  newMonthlyAmount: z.coerce.number().positive(),
+  newMonthlyAmount: z.coerce.number().nonnegative(),
   projectionIds: z.array(z.string().min(1)).max(2e3).optional(),
   lineItemId: z.string().min(1).optional(),
   effectiveFrom: ISO10ish.optional(),
@@ -180,7 +180,7 @@ var PaymentsRecalculateFutureSingleReq = z.object({
 });
 var PaymentsRecalculateFutureGrantReq = z.object({
   grantId: z.string().min(1),
-  newMonthlyAmount: z.coerce.number().positive(),
+  newMonthlyAmount: z.coerce.number().nonnegative(),
   lineItemId: z.string().min(1).optional(),
   effectiveFrom: ISO10ish.optional(),
   // inclusive
@@ -245,10 +245,10 @@ var PaymentProjectionInput = z.object({
       path: ["dueDate"]
     });
   }
-  if (!Number.isFinite(Number(v.amount)) || Number(v.amount) <= 0) {
+  if (!Number.isFinite(Number(v.amount)) || Number(v.amount) < 0) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "amount must be a positive number",
+      message: "amount must be a non-negative number",
       path: ["amount"]
     });
   }

@@ -28,23 +28,23 @@ import {
   PaymentsUpsertProjectionsBody,
   type TPaymentsUpsertProjectionsBody,
 } from './schemas';
-/** POST /paymentsUpsertProjections */
-export async function paymentsUpsertProjectionsHandler(req: Request, res: Response) {
-  const parsed = PaymentsUpsertProjectionsBody.safeParse(req.body ?? {});
-  if (!parsed.success) return res.status(400).json({ok: false, error: parsed.error.message});
+/**
+ * Shared transaction core: replace an enrollment's projected payment schedule
+ * and adjust the grant budget's projected totals accordingly.
+ *
+ * `buildNext(oldPayments, enrollment)` produces the FULL desired payments array
+ * inside the transaction (replace-mode callers ignore `oldPayments`; append-mode
+ * callers — e.g. the forms rent-cert apply — merge new rows into it). The array
+ * then flows through the same normalize/id/rent-cert-carry pipeline as always.
+ */
+export async function runEnrollmentProjectionsUpsert(
+  user: any,
+  enrollmentId: string,
+  buildNext: (oldPayments: any[], enrollment: any) => any[],
+) {
+  const uid = requireUid(user);
 
-  const user: any = (req as any)?.user || {};
-  let uid = '';
-  try {
-    uid = requireUid(user);
-  } catch (e: any) {
-    return res.status(401).json({ok: false, error: e?.message || 'auth_required'});
-  }
-
-  const {enrollmentId, payments} = parsed.data as TPaymentsUpsertProjectionsBody;
-
-  try {
-    const result = await db.runTransaction(async (trx) => {
+  return db.runTransaction(async (trx) => {
       const eRef = db.collection('customerEnrollments').doc(enrollmentId);
       const eSnap = await trx.get(eRef);
       if (!eSnap.exists) throw new Error('Enrollment not found');
@@ -62,8 +62,10 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
 
       const oldPayments: any[] = Array.isArray(e.payments) ? e.payments : [];
 
+      const nextPayments = buildNext(oldPayments, e);
+
       // Normalize subtype tagging BEFORE id assignment so subtype identity is explicit/stable.
-      const normalized = (payments || []).map(ensureMonthlySubtypeTag);
+      const normalized = (nextPayments || []).map(ensureMonthlySubtypeTag);
       const withIdsRaw = ensurePaymentIds(normalized, oldPayments);
 
       const withIds = carryRentCertState(withIdsRaw, oldPayments).map((p: any) => {
@@ -197,10 +199,26 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
         customerId: e.customerId ? String(e.customerId) : null,
         customerName: e.customerName ? String(e.customerName) : null,
       };
-    });
+  });
+  // paymentQueue projection sync is handled by the onEnrollmentPaymentsChange trigger.
+}
 
-    // paymentQueue projection sync is handled by the onEnrollmentPaymentsChange trigger.
+/** POST /paymentsUpsertProjections */
+export async function paymentsUpsertProjectionsHandler(req: Request, res: Response) {
+  const parsed = PaymentsUpsertProjectionsBody.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ok: false, error: parsed.error.message});
 
+  const user: any = (req as any)?.user || {};
+  try {
+    requireUid(user);
+  } catch (e: any) {
+    return res.status(401).json({ok: false, error: e?.message || 'auth_required'});
+  }
+
+  const {enrollmentId, payments} = parsed.data as TPaymentsUpsertProjectionsBody;
+
+  try {
+    const result = await runEnrollmentProjectionsUpsert(user, enrollmentId, () => payments || []);
     return res.status(200).json({ok: true, ...result});
   } catch (err: any) {
     return res.status(500).json({ok: false, error: err?.message || String(err)});

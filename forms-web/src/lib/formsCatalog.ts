@@ -128,6 +128,11 @@ export type IntakeFlowStep = {
   /** Show the local missing-information fallback builder for incomplete intake data. */
   manualInfoBuilder?: boolean;
   /**
+   * Rent-cert smart schedule builder: parse the completed Rent Determination,
+   * select the billable enrollment(s), review the generated rows, apply.
+   */
+  rentCertBuilder?: boolean;
+  /**
    * Intake-type gate: the step opens with a full-page choice between the intake
    * paths (INTAKE_TYPES). Informational for now — persisted per session so the
    * flow can branch on it later.
@@ -231,6 +236,14 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     ],
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
+  {
+    title: "Build rent assistance payment schedule",
+    note:
+      "Turn the completed Rent Determination into a reviewed payment schedule: pick the enrollment(s) to bill, " +
+      "check the generated rows (deposit, prorated/arrears, monthly, utility allowance), then apply. Payments are " +
+      "created on the enrollment in order and flow into the payment queue automatically. Nothing is created until you apply.",
+    rentCertBuilder: true,
+  },
   {
     title: "Link intake submissions to customer",
     note: "Open the Submissions tab and confirm each completed intake submission is linked to the current customer. If linked submissions are missing key answers, use the builder below to capture the fallback intake facts.",
