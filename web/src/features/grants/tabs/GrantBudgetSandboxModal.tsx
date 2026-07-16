@@ -6,7 +6,7 @@ import { toApiError } from "@client/api";
 import { fmtMDY, safeISODate10, toISODate } from "@lib/date";
 import { toast } from "@lib/toast";
 import { useGrantBudgetManagerLoad, useSaveGrantBudgetManager } from "@hooks/useGrantBudgetManager";
-import { calculateRentCertDueDate, usePaymentRentCert } from "@hooks/usePayments";
+import { calculateRentCertDueDate, usePaymentRentCert, usePaymentsSpend, usePaymentsUpdateCompliance } from "@hooks/usePayments";
 import type { TGrantBudgetManagerRow } from "@types";
 
 type SortDirection = "asc" | "desc";
@@ -505,6 +505,8 @@ export function GrantBudgetSandboxModal({
   const managerQ = useGrantBudgetManagerLoad(managerGrantIds, { enabled: isOpen && managerMode });
   const saveManager = useSaveGrantBudgetManager();
   const rentCertMutation = usePaymentRentCert();
+  const spendMutation = usePaymentsSpend();
+  const complianceMutation = usePaymentsUpdateCompliance();
   const loadedRows = managerQ.data?.ok ? managerQ.data.rows : [];
   const activeSeed = useMemo<GrantBudgetSandboxSeedRow[]>(() => {
     if (!managerMode) return seed;
@@ -534,9 +536,10 @@ export function GrantBudgetSandboxModal({
   const [scale, setScale] = useState<SandboxScale>("compact");
   const [editingCell, setEditingCell] = useState<{ rowId: string; field: EditableField; value: string } | null>(null);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [saveMode, setSaveMode] = useState<"preview" | "applyOpen" | "applyAll">("preview");
+  const [saveMode, setSaveMode] = useState<"preview" | "applyOpen" | "applyAll">("applyOpen");
   const [saveResult, setSaveResult] = useState<Awaited<ReturnType<typeof saveManager.mutateAsync>> | null>(null);
   const [refreshingAfterSave, setRefreshingAfterSave] = useState(false);
+  const [pendingRentCertRowId, setPendingRentCertRowId] = useState<string | null>(null);
 
   // Reset only on the closed -> open transition. resetScenario's identity
   // changes whenever fresh data loads, and re-running this effect mid-session
@@ -558,7 +561,7 @@ export function GrantBudgetSandboxModal({
     setScale("compact");
     setEditingCell(null);
     setSelectedRowId(null);
-    setSaveMode("preview");
+    setSaveMode("applyOpen");
     setSaveResult(null);
     setRefreshingAfterSave(false);
     resetScenario();
@@ -595,6 +598,50 @@ export function GrantBudgetSandboxModal({
     ? `/budget/pipeline/${encodeURIComponent(budgetPipelineRefs[0]?.id || "")}`
     : "/budget/pipeline";
   const selectedRow = useMemo(() => rows.find((row) => row.sandboxId === selectedRowId) ?? null, [rows, selectedRowId]);
+  const selectedRowBusy = spendMutation.isPending || complianceMutation.isPending;
+  const refreshManagerRows = useCallback(async (keepSelectedId?: string | null) => {
+    const refreshed = await managerQ.refetch();
+    if (refreshed.data?.ok) {
+      replaceScenario(seedFromManagerRows(refreshed.data.rows));
+      setSelectedRowId(keepSelectedId || null);
+    }
+  }, [managerQ, replaceScenario]);
+
+  const markSelectedPaid = useCallback(async (row: SandboxRow) => {
+    const enrollmentId = String(row.enrollmentId || "").trim();
+    const paymentId = String(row.paymentId || "").trim();
+    if (!enrollmentId || !paymentId) {
+      toast("This standalone projection is not linked to an enrollment payment. Link it to a payment schedule before marking it paid.", { type: "warning" });
+      return;
+    }
+    try {
+      await spendMutation.mutateAsync({ body: { enrollmentId, paymentId, reverse: false, forceSync: false } });
+      toast("Payment marked paid. Ledger and spend mirrors are syncing.", { type: "success" });
+      void refreshManagerRows(row.sandboxId);
+    } catch (error) {
+      toast(toApiError(error).error || "Failed to mark payment paid.", { type: "error" });
+    }
+  }, [refreshManagerRows, spendMutation]);
+
+  const markSelectedDataEntryComplete = useCallback(async (row: SandboxRow) => {
+    const enrollmentId = String(row.enrollmentId || "").trim();
+    const paymentId = String(row.paymentId || "").trim();
+    if (!enrollmentId || !paymentId) {
+      toast("This row is not linked to an enrollment payment, so payment compliance cannot be updated here.", { type: "warning" });
+      return;
+    }
+    try {
+      await complianceMutation.mutateAsync({
+        enrollmentId,
+        paymentId,
+        patch: { hmisComplete: true, caseworthyComplete: true, status: "data-entry-complete" },
+      });
+      toast("Data entry marked complete.", { type: "success" });
+      void refreshManagerRows(row.sandboxId);
+    } catch (error) {
+      toast(toApiError(error).error || "Failed to update payment compliance.", { type: "error" });
+    }
+  }, [complianceMutation, refreshManagerRows]);
   const updateRentCert = useCallback(async (row: SandboxRow) => {
     const enrollmentId = String(row.enrollmentId || "").trim();
     const paymentId = String(row.paymentId || "").trim();
@@ -610,13 +657,18 @@ export function GrantBudgetSandboxModal({
       toast("Enter a valid YYYY-MM-DD rent-cert date.", { type: "error" });
       return;
     }
+    const previousDueDate = row.rentCertDueOn || "";
+    updateRow(row.sandboxId, { rentCertDueOn: dueDate || "" });
+    setPendingRentCertRowId(row.sandboxId);
     try {
       await rentCertMutation.mutateAsync({ enrollmentId, paymentId, dueDate });
-      updateRow(row.sandboxId, { rentCertDueOn: dueDate || "" });
-      await managerQ.refetch();
+      void managerQ.refetch();
       toast(dueDate ? "Rent cert updated." : "Rent cert cleared.", { type: "success" });
     } catch (error) {
+      updateRow(row.sandboxId, { rentCertDueOn: previousDueDate });
       toast(toApiError(error).error || "Failed to update rent cert.", { type: "error" });
+    } finally {
+      setPendingRentCertRowId(null);
     }
   }, [managerQ, rentCertMutation, updateRow]);
 
@@ -1284,7 +1336,7 @@ export function GrantBudgetSandboxModal({
                     <td className={`w-44 border-b border-slate-100 ${scaleConfig.cell}`}>{renderEditableCell(row, "lineItemId", lineItem?.label || "Unassigned")}</td>
                     <td className={`w-28 border-b border-slate-100 text-slate-600 ${scaleConfig.cell}`}>
                       {row.enrollmentId && row.paymentId ? (
-                        <button type="button" className="rounded px-1 text-left hover:bg-sky-50 hover:text-sky-700" disabled={rentCertMutation.isPending} onClick={(event) => { event.stopPropagation(); void updateRentCert(row); }}>
+                        <button type="button" className="rounded px-1 text-left hover:bg-sky-50 hover:text-sky-700" disabled={pendingRentCertRowId === row.sandboxId} onClick={(event) => { event.stopPropagation(); void updateRentCert(row); }}>
                           {row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "+ Add"}
                         </button>
                       ) : row.rentCertDueOn ? fmtMDY(row.rentCertDueOn) : "—"}
@@ -1323,7 +1375,7 @@ export function GrantBudgetSandboxModal({
         {selectedRow ? (
           <div
             data-sandbox-actionbar
-            className="fixed bottom-5 left-1/2 z-[1550] flex -translate-x-1/2 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-xl"
+            className="fixed bottom-5 left-1/2 z-[1550] flex max-w-[94vw] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-xl"
             onMouseDown={(e) => e.stopPropagation()}
           >
             {selectedRow.customerId && onOpenCustomer ? (
@@ -1338,8 +1390,29 @@ export function GrantBudgetSandboxModal({
               <div className="max-w-[260px] truncate font-semibold text-slate-800">{selectedRow.customerLabel || "Selected row"}</div>
             )}
             <div className="text-xs text-slate-400">{selectedRow.date ? fmtMDY(selectedRow.date) : "No date"}</div>
+            {!readOnly && canSave && sourceStatusValue(selectedRow.statusLabel) === "projected" ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={selectedRowBusy}
+                title={selectedRow.enrollmentId && selectedRow.paymentId ? "Post through the linked enrollment payment" : "Standalone projections must first be linked to an enrollment payment"}
+                onClick={() => void markSelectedPaid(selectedRow)}
+              >
+                {spendMutation.isPending ? "Posting..." : "Mark Paid"}
+              </button>
+            ) : null}
+            {!readOnly && canSave && selectedRow.enrollmentId && selectedRow.paymentId ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={selectedRowBusy}
+                onClick={() => void markSelectedDataEntryComplete(selectedRow)}
+              >
+                {complianceMutation.isPending ? "Updating..." : "Data Entry Complete"}
+              </button>
+            ) : null}
             {!readOnly ? (
-              <>
+              <div className="flex items-center gap-2 border-l border-slate-200 pl-2">
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -1353,13 +1426,13 @@ export function GrantBudgetSandboxModal({
                 ) : (
                   <button type="button" className="btn btn-ghost btn-sm text-red-600" onClick={() => removeRow(selectedRow.sandboxId)}>Remove</button>
                 )}
-              </>
+              </div>
             ) : null}
             {selectedRow.sourceId && onOpenPayment ? (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpenPayment(selectedRow.sourceId)}>Open Payment</button>
             ) : null}
             {selectedRow.enrollmentId && selectedRow.paymentId ? (
-              <button type="button" className="btn btn-secondary btn-sm" disabled={rentCertMutation.isPending} onClick={() => void updateRentCert(selectedRow)}>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={pendingRentCertRowId === selectedRow.sandboxId} onClick={() => void updateRentCert(selectedRow)}>
                 {selectedRow.rentCertDueOn ? "Update Rent Cert" : "Add Rent Cert"}
               </button>
             ) : null}

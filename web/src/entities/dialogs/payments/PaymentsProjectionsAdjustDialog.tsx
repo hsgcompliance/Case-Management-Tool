@@ -6,7 +6,7 @@ import LineItemSelect from "@entities/selectors/LineItemSelect";
 import type { TPayment } from "@types";
 import type { PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
 import { calculateRentCertDueDate, usePaymentRentCert } from "@hooks/usePayments";
-import { RentCertToggle, rentCertToggleValue } from "./RentCertToggle";
+import { RentCertToggle, rentCertToggleValue, type RentCertToggleValue } from "./RentCertToggle";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10, todayISO } from "@lib/date";
 import { isISO } from "@features/customers/components/paymentScheduleUtils";
@@ -43,7 +43,7 @@ type Props = {
   rentCertDueDates?: Record<string, string | undefined>;
   busy?: boolean;
   onCancel: () => void;
-  onApply: (payload: PaymentsProjectionsAdjustInput) => void;
+  onApply: (payload: PaymentsProjectionsAdjustInput) => Promise<void> | void;
 };
 
 function iso10(value: unknown): string {
@@ -107,6 +107,8 @@ export default function PaymentsProjectionsAdjustDialog({
   const [futureMonthlyAmount, setFutureMonthlyAmount] = React.useState("");
   const [futureEffectiveFrom, setFutureEffectiveFrom] = React.useState("");
   const [futureLineItemId, setFutureLineItemId] = React.useState("");
+  const [rentCertOverrides, setRentCertOverrides] = React.useState<Record<string, RentCertToggleValue>>({});
+  const [pendingRentCertIds, setPendingRentCertIds] = React.useState<Record<string, boolean>>({});
   const rentCertMutation = usePaymentRentCert();
 
   React.useEffect(() => {
@@ -133,6 +135,8 @@ export default function PaymentsProjectionsAdjustDialog({
     setFutureMonthlyAmount("");
     setFutureEffectiveFrom("");
     setFutureLineItemId("");
+    setRentCertOverrides({});
+    setPendingRentCertIds({});
   }, [open, enrollments, initialEnrollmentId]);
 
   const selectedEnrollment = React.useMemo(
@@ -332,8 +336,8 @@ export default function PaymentsProjectionsAdjustDialog({
 
   const applyBulkFutureAmount = () => {
     const amt = Number(bulkFutureAmount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setError("Bulk amount must be greater than 0.");
+    if (!Number.isFinite(amt) || amt < 0) {
+      setError("Bulk amount must be 0 or greater.");
       return;
     }
     setError(null);
@@ -469,7 +473,7 @@ export default function PaymentsProjectionsAdjustDialog({
     setError(null);
   };
 
-  const submit = () => {
+  const submit = async () => {
     setError(null);
 
     if (!selectedEnrollment?.id) {
@@ -580,8 +584,8 @@ export default function PaymentsProjectionsAdjustDialog({
       .filter((r): r is { paymentId: string; amount?: number; dueDate?: string; lineItemId?: string } => !!r);
 
     for (const edit of edits) {
-      if (edit.amount != null && (!Number.isFinite(edit.amount) || edit.amount <= 0)) {
-        setError("Adjusted unpaid amounts must be greater than 0.");
+      if (edit.amount != null && (!Number.isFinite(edit.amount) || edit.amount < 0)) {
+        setError("Adjusted unpaid amounts must be 0 or greater.");
         return;
       }
       if (edit.dueDate && !isISO(edit.dueDate)) {
@@ -602,8 +606,8 @@ export default function PaymentsProjectionsAdjustDialog({
       }));
 
     for (const row of additions) {
-      if (!Number.isFinite(row.amount) || row.amount === 0) {
-        setError("Each added row must have a non-zero amount.");
+      if (!Number.isFinite(row.amount)) {
+        setError("Each added row must have a valid amount.");
         return;
       }
       if (!isISO(row.dueDate)) {
@@ -627,8 +631,8 @@ export default function PaymentsProjectionsAdjustDialog({
 
     if (recalcFuture) {
       const monthly = Number(futureMonthlyAmount);
-      if (!Number.isFinite(monthly) || monthly <= 0) {
-        setError("Future recalc requires monthly amount > 0.");
+      if (!Number.isFinite(monthly) || monthly < 0) {
+        setError("Future recalc requires a monthly amount of 0 or greater.");
         return;
       }
       if (futureEffectiveFrom && !isISO(futureEffectiveFrom)) {
@@ -647,7 +651,11 @@ export default function PaymentsProjectionsAdjustDialog({
       return;
     }
 
-    onApply(payload);
+    try {
+      await onApply(payload);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to apply payment schedule changes.");
+    }
   };
 
   return (
@@ -663,7 +671,7 @@ export default function PaymentsProjectionsAdjustDialog({
           </div>
           <div className="flex items-center gap-2">
             <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
-            <button className="btn btn-sm" onClick={submit} disabled={busy}>{busy ? "Applying..." : "Apply Changes"}</button>
+            <button className="btn btn-sm" onClick={() => void submit()} disabled={busy}>{busy ? "Applying..." : "Apply Changes"}</button>
           </div>
         </div>
       }
@@ -840,15 +848,30 @@ export default function PaymentsProjectionsAdjustDialog({
                       </td>
                       <td className="px-3 py-2">
                         <RentCertToggle
-                          value={rentCertToggleValue((p as TPayment)?.rentCert)}
-                          disabled={deleted || rentCertMutation.isPending}
+                          value={rentCertOverrides[id] ?? rentCertToggleValue((p as TPayment)?.rentCert)}
+                          disabled={deleted || !!pendingRentCertIds[id]}
                           title={`Due ${calculateRentCertDueDate(currentDueDate) || "n/a"} (month prior to ${currentDueDate || "payment date"})`}
-                          onChange={(next) => void rentCertMutation.mutateAsync({
-                            enrollmentId: selectedEnrollment?.id || "",
-                            paymentId: id,
-                            status: next,
-                            dueDate: calculateRentCertDueDate(currentDueDate),
-                          }).catch(() => setError("Failed to update rent cert."))}
+                          onChange={(next) => {
+                            setRentCertOverrides((prev) => ({ ...prev, [id]: next }));
+                            setPendingRentCertIds((prev) => ({ ...prev, [id]: true }));
+                            void rentCertMutation.mutateAsync({
+                              enrollmentId: selectedEnrollment?.id || "",
+                              paymentId: id,
+                              status: next,
+                              dueDate: calculateRentCertDueDate(currentDueDate),
+                            }).catch(() => {
+                              setRentCertOverrides((prev) => {
+                                const updated = { ...prev };
+                                delete updated[id];
+                                return updated;
+                              });
+                              setError("Failed to update rent cert.");
+                            }).finally(() => setPendingRentCertIds((prev) => {
+                              const updated = { ...prev };
+                              delete updated[id];
+                              return updated;
+                            }));
+                          }}
                         />
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -964,8 +987,8 @@ export default function PaymentsProjectionsAdjustDialog({
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-2 text-xs font-medium text-slate-700">Options</div>
+        <details className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-slate-700">Advanced options</summary>
           <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={replaceUnpaid} onChange={(e) => setReplaceUnpaid(e.currentTarget.checked)} />Preserve untouched unpaid rows</label>
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={updateGrantBudgets} onChange={(e) => setUpdateGrantBudgets(e.currentTarget.checked)} />Update grant budgets</label>
@@ -989,14 +1012,7 @@ export default function PaymentsProjectionsAdjustDialog({
               />
             </div>
           ) : null}
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">
-          <div className="font-medium text-slate-800">Preview</div>
-          <div className="mt-1">Schedule total: <b>{fmtCurrencyUSD(preview.baseTotal)}</b> {"->"} <b>{fmtCurrencyUSD(preview.nextTotal)}</b></div>
-          <div>Net delta: <b>{fmtCurrencyUSD(preview.netDelta)}</b></div>
-          <div>Edited paid rows: <b>{preview.paidEditCount}</b> | Edited unpaid rows: <b>{preview.unpaidEditCount}</b> | Deleted rows: <b>{preview.paidDeleteCount + preview.unpaidDeleteCount}</b> | Added rows: <b>{preview.addedCount}</b></div>
-        </div>
+        </details>
       </div>
     </Modal>
   );

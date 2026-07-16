@@ -605,6 +605,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       }
     } catch (e: unknown) {
       toast(toApiError(e).error || "Failed to update paid state.", { type: "error" });
+      throw e;
     }
   };
 
@@ -629,6 +630,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       });
     } catch (e: unknown) {
       toast(toApiError(e).error || "Failed to update compliance.", { type: "error" });
+      throw e;
     }
   };
 
@@ -643,6 +645,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       toast(status === "notDue" ? "Rent cert cleared." : "Rent cert updated.", { type: "success" });
     } catch (error) {
       toast(toApiError(error).error || "Failed to update rent cert.", { type: "error" });
+      throw error;
     }
   };
 
@@ -666,7 +669,9 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       await adjustMutation.mutateAsync(payload);
       setAdjustOpen(false);
     } catch (e: unknown) {
-      setError(toApiError(e).error || "Failed to apply payment/projection adjustments.");
+      const message = toApiError(e).error || "Failed to apply payment/projection adjustments.";
+      setError(message);
+      throw new Error(message);
     }
   };
 
@@ -1004,8 +1009,6 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           onTogglePaid={togglePaidInline}
           onToggleCompliance={toggleComplianceInline}
           onSetRentCert={setRentCert}
-          busyPaid={spend.isPending}
-          busyCompliance={compliance.isPending}
           onManage={selectRow}
           onAdjustSchedule={(row, key) => {
             selectRow(row, key);
@@ -1065,7 +1068,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
         paymentIssues={rowIssues}
         rentCertDueDates={rentCertStateByPaymentKey.dueDates}
         onCancel={() => setAdjustOpen(false)}
-        onApply={(payload) => void applyAdjustments(payload)}
+        onApply={applyAdjustments}
       />
         </>
       )}

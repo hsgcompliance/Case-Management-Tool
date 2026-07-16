@@ -314,6 +314,13 @@ export default function PaymentEditorLabPage({
   const lineItemDialogRow = sheet.rows.find((row) => row.id === lineItemDialogRowId) || null;
   const lineItemOptions = enrollmentLineItemOptions(enrollmentOptions, lineItemDialogRow);
   const loading = (!hasFixedCustomer && customersQ.isLoading) || enrollmentsQ.isLoading || grantsQ.isLoading;
+  const loadError = customersQ.isError
+    ? "Customers could not be loaded. Retry the page before editing payments."
+    : enrollmentsQ.isError
+      ? "Customer enrollments could not be loaded. Retry before editing payments."
+      : grantsQ.isError
+        ? "Grant budgets could not be loaded. Retry before editing payments."
+        : "";
 
   const patchType = React.useCallback(
     (row: PaymentEditorRow, typeKey: PaymentEditorTypeKey | "") => {
@@ -387,7 +394,7 @@ export default function PaymentEditorLabPage({
     });
   }, [sheet]);
 
-  const validationMessage = localMessage || sheet.saveError || sheet.plan.validationErrors[0] || "";
+  const validationMessage = localMessage || sheet.saveError || loadError || sheet.plan.validationErrors[0] || "";
 
   return (
     <div className={embedded ? "text-slate-900 dark:text-slate-100" : "min-h-screen bg-slate-100 px-4 py-5 text-slate-900 dark:bg-slate-950 dark:text-slate-100"}>
@@ -408,7 +415,7 @@ export default function PaymentEditorLabPage({
           ) : (
             <div>
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Sheet Payment Editor</div>
-              <div className="text-xs text-slate-500">Dev-backed sheet surface for this customer. Legacy payment tools are still available in Legacy View.</div>
+              <div className="text-xs text-slate-500">Edit schedules, payment status, compliance, and rent certs in one table.</div>
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
@@ -556,7 +563,7 @@ export default function PaymentEditorLabPage({
               <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] uppercase text-slate-600 dark:bg-slate-900 dark:text-slate-300">
                 <tr>
                   <th className="w-16 border border-slate-300 px-2 py-1.5 dark:border-slate-800">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-center">
                       <input
                         type="checkbox"
                         checked={allVisibleSelected}
@@ -573,9 +580,6 @@ export default function PaymentEditorLabPage({
                         }}
                         aria-label="Select rows"
                       />
-                      <button type="button" className="flex h-6 w-6 items-center justify-center rounded border border-slate-300 bg-white text-sm font-semibold leading-none hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800" onClick={addRow} aria-label="Add row">
-                        +
-                      </button>
                     </div>
                   </th>
                   <th className="w-32 border border-slate-300 px-2 py-1.5 dark:border-slate-800">Due Date</th>
@@ -601,7 +605,7 @@ export default function PaymentEditorLabPage({
                 ) : visibleRows.length ? (
                   visibleRows.map((row) => {
                     const changed = sheet.changedIds.has(row.id);
-                    const invalid = !row.dueDate || !row.typeKey || !row.lineItemId || amountNumber(row.amount) <= 0;
+                    const invalid = !row.dueDate || !row.typeKey || !row.lineItemId || row.amount === "" || !Number.isFinite(Number(row.amount)) || amountNumber(row.amount) < 0;
                     const rowLineItems = enrollmentLineItemOptions(enrollmentOptions, row);
                     const enrollmentLabel = enrollmentOptions.find((option) => option.id === row.enrollmentId)?.label || row.enrollmentId;
                     return (
@@ -721,7 +725,7 @@ export default function PaymentEditorLabPage({
           </div>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1fr_420px]">
+        {!embedded ? <div className="grid gap-3 lg:grid-cols-[1fr_420px]">
           <div className="rounded-md border border-slate-200 bg-white p-2.5 text-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="font-medium">Save Boundary</div>
             <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
@@ -763,7 +767,11 @@ export default function PaymentEditorLabPage({
               </div>
             </div>
           </div>
-        </div>
+        </div> : sheet.lastSave ? (
+          <div className="text-right text-[11px] text-slate-500">
+            Saved {sheet.lastSave.changedCount} row{sheet.lastSave.changedCount === 1 ? "" : "s"} at {todayTimeLabel(sheet.lastSave.savedAt)}.
+          </div>
+        ) : null}
       </div>
 
       {lineItemDialogRow ? (

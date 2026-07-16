@@ -13,6 +13,7 @@ import {
   usePaymentsProjectionsAdjust,
   usePaymentsSpend,
   usePaymentsUpdateCompliance,
+  usePaymentRentCert,
 } from "@hooks/usePayments";
 
 type SaveResult = {
@@ -35,6 +36,7 @@ export function usePaymentEditorSheetSave(sourceRows: PaymentEditorRow[], resetK
   const projectionsAdjust = usePaymentsProjectionsAdjust();
   const spend = usePaymentsSpend();
   const updateCompliance = usePaymentsUpdateCompliance();
+  const updateRentCert = usePaymentRentCert();
 
   const [rows, setRows] = React.useState<PaymentEditorRow[]>(() => cloneRows(sourceRows));
   const [baseline, setBaseline] = React.useState<PaymentEditorBaseline>(() =>
@@ -43,6 +45,8 @@ export function usePaymentEditorSheetSave(sourceRows: PaymentEditorRow[], resetK
   const [secondsUntilSave, setSecondsUntilSave] = React.useState(30);
   const [lastSave, setLastSave] = React.useState<SaveResult | null>(null);
   const [saveError, setSaveError] = React.useState<string>("");
+  const [saving, setSaving] = React.useState(false);
+  const savingRef = React.useRef(false);
 
   const sourceRowsRef = React.useRef(sourceRows);
   const sourceIdentity = React.useMemo(() => baselineKey(sourceRows), [sourceRows]);
@@ -58,7 +62,7 @@ export function usePaymentEditorSheetSave(sourceRows: PaymentEditorRow[], resetK
   const dirty = changedIds.size > 0;
   const plan = React.useMemo(() => buildPaymentEditorSavePlan(baseline, rows), [baseline, rows]);
 
-  const busy = projectionsAdjust.isPending || spend.isPending || updateCompliance.isPending;
+  const busy = saving || projectionsAdjust.isPending || spend.isPending || updateCompliance.isPending || updateRentCert.isPending;
 
   const resetToSourceRows = React.useCallback(() => {
     const nextRows = cloneRows(sourceRowsRef.current);
@@ -105,7 +109,9 @@ export function usePaymentEditorSheetSave(sourceRows: PaymentEditorRow[], resetK
   }, [baseline]);
 
   const saveNow = React.useCallback(async () => {
-    const nextPlan = buildPaymentEditorSavePlan(baseline, rows);
+    if (savingRef.current) return null;
+    const rowsToSave = cloneRows(rows);
+    const nextPlan = buildPaymentEditorSavePlan(baseline, rowsToSave);
     if (!nextPlan.changedRowIds.size) return null;
     if (nextPlan.validationErrors.length) {
       const message = nextPlan.validationErrors.join(" ");
@@ -113,44 +119,56 @@ export function usePaymentEditorSheetSave(sourceRows: PaymentEditorRow[], resetK
       throw new Error(message);
     }
 
-    for (const patch of nextPlan.compliancePatches) {
-      await updateCompliance.mutateAsync({
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await Promise.all(nextPlan.compliancePatches.map((patch) => updateCompliance.mutateAsync({
         enrollmentId: patch.enrollmentId,
         paymentId: patch.paymentId,
         patch: patch.patch,
-      });
-    }
+      })));
 
-    for (const post of nextPlan.spendPosts) {
-      await spend.mutateAsync({
+      await Promise.all(nextPlan.rentCertPatches.map((patch) => updateRentCert.mutateAsync(patch)));
+
+      for (const post of nextPlan.spendPosts) {
+        await spend.mutateAsync({
         body: {
           enrollmentId: post.enrollmentId,
           paymentId: post.paymentId,
           reverse: false,
+          forceSync: false,
         },
       });
-    }
+      }
 
-    for (const adjustment of nextPlan.projectionAdjustments) {
-      await projectionsAdjust.mutateAsync(adjustment);
-    }
+      for (const adjustment of nextPlan.projectionAdjustments) {
+        await projectionsAdjust.mutateAsync(adjustment);
+      }
 
-    for (const adjustment of nextPlan.paidAdjustments) {
-      await projectionsAdjust.mutateAsync(adjustment);
-    }
+      for (const adjustment of nextPlan.paidAdjustments) {
+        await projectionsAdjust.mutateAsync(adjustment);
+      }
 
-    for (const deleteInput of nextPlan.paidDeletes) {
-      await projectionsAdjust.mutateAsync(deleteInput);
-    }
+      for (const deleteInput of nextPlan.paidDeletes) {
+        await projectionsAdjust.mutateAsync(deleteInput);
+      }
 
-    const nextBaseline = createPaymentEditorBaseline(rows);
-    const result = { savedAt: new Date().toISOString(), changedCount: nextPlan.changedRowIds.size };
-    setBaseline(nextBaseline);
-    setLastSave(result);
-    setSecondsUntilSave(30);
-    setSaveError("");
-    return result;
-  }, [baseline, projectionsAdjust, rows, spend, updateCompliance]);
+      const nextBaseline = createPaymentEditorBaseline(rowsToSave);
+      const result = { savedAt: new Date().toISOString(), changedCount: nextPlan.changedRowIds.size };
+      setBaseline(nextBaseline);
+      setLastSave(result);
+      setSecondsUntilSave(30);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Payment sheet save failed.";
+      setSaveError(message);
+      throw error;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [baseline, projectionsAdjust, rows, spend, updateCompliance, updateRentCert]);
 
   React.useEffect(() => {
     if (!dirty || busy) {
