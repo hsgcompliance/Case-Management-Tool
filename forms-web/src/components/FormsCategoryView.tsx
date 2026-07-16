@@ -11,6 +11,7 @@ import { WebhooksSidebar } from "./WebhooksSidebar";
 import { CreditCardCards } from "./CreditCardCards";
 import { CustomerDetailsHeader } from "./CustomerDetailsHeader";
 import { MissingIntakeInfoBuilder } from "./MissingIntakeInfoBuilder";
+import { RentCertScheduleBuilder } from "./RentCertScheduleBuilder";
 import { ReferencePanel } from "./ReferencePanel";
 import { ExternalServiceIcon } from "./ui";
 
@@ -461,6 +462,7 @@ export function FormsCategoryView({
           </div>
         ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
+        {step.rentCertBuilder ? <RentCertScheduleBuilder /> : null}
         {step.intakeTypeGate ? (
           intakeType ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">

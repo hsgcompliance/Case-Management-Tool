@@ -16,7 +16,7 @@ import { createFormSession, resolveFormSession, completeFormSession, listFormSes
 import { summarizeCreditCards } from "../creditCards/service";
 
 /** Resolve target org for org-scoped ops (mirrors jotform/http getTargetOrg). */
-function getTargetOrg(req: any, src: any): string {
+export function getTargetOrg(req: any, src: any): string {
   const caller = req.user || {};
   const callerOrg = orgIdFromClaims(caller);
   if (callerOrg) return callerOrg;
