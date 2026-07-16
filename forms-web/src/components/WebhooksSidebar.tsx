@@ -237,6 +237,51 @@ export function WebhooksSidebar({
     navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
   };
 
+  // Full-session export: the NORMALIZED household picture next to every RAW
+  // submitted field, with the normalizer key(s) each field mapped to (or none).
+  // Form/submission ids ride along so the session can be rebuilt from Jotform.
+  // This is today's mapping-debug tool AND the shape of the household package
+  // we ultimately want to persist (normalized values + ids, not raw payloads).
+  const exportSession = () => {
+    const val = (v: ExtractedValue | null) =>
+      v ? { value: v.value, sourceFormId: v.sourceFormId, sourceFormTitle: v.sourceFormTitle, receivedAtISO: v.receivedAtISO } : null;
+    const data = {
+      kind: "hdb-intake-webhooks-session",
+      exportedAtISO: new Date().toISOString(),
+      sessionStartISO,
+      customer: customer ? { id: customer.id, name: customer.name, cwId: customer.cwId } : null,
+      normalized: {
+        slots: household.slots.map((s) => ({ key: s.key, label: s.label, found: val(s.found) })),
+        members: household.members.map((m) => val(m)),
+        hhSize: val(household.hhSize),
+        adults: val(household.adults),
+        children: val(household.children),
+      },
+      unmatched: household.unmatched,
+      submissions: household.trace.map((t) => ({
+        formId: t.formId,
+        formTitle: t.formTitle,
+        submissionId: t.submissionId,
+        submitterName: t.submitterName,
+        receivedAtISO: t.receivedAtISO,
+        linkedCustomers: links[t.formId]?.[t.submissionId]?.customers ?? [],
+        // Raw fields as displayed, each tagged with the normalized slot(s) it fed.
+        fields: t.fields,
+      })),
+    };
+    const who = (customer?.name || "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `intake-webhooks-${who}-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   if (collapsed) {
     return (
       <button
@@ -263,6 +308,15 @@ export function WebhooksSidebar({
             {loading ? <span className="text-[10px] text-slate-300">refreshing…</span> : null}
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={exportSession}
+              disabled={!rows.length}
+              title="Export this session as JSON — normalized values, raw fields with their mappings, and form/submission ids"
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-indigo-600 disabled:opacity-40"
+            >
+              Export ⭳
+            </button>
             <button
               type="button"
               onClick={resetSession}

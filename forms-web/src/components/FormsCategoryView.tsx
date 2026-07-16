@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { FormDef, IntakeFlowStep } from "@/lib/formsCatalog";
+import { INTAKE_TYPES, intakeTypeLabel, type FormDef, type IntakeFlowStep, type IntakeTypeId } from "@/lib/formsCatalog";
+import { removeIntakeSession, upsertIntakeSession } from "@/lib/intakeSessions";
 import { setCustomerTssStatus } from "@/lib/customersApi";
 import { getCustomerDetail } from "@/lib/customerDetailApi";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
@@ -23,9 +24,13 @@ type FlowProgress = {
   checks: Record<string, number[]>;
   /** TSS gate selection — also presets the folder build + customer doc push. */
   tssVariant?: TssVariant;
+  /** Intake-type gate selection (step 1) — informational for now. */
+  intakeType?: IntakeTypeId;
 };
 
 const EMPTY_PROGRESS: FlowProgress = { done: {}, checks: {} };
+
+const INTAKE_TYPE_IDS = new Set<string>(INTAKE_TYPES.map((t) => t.id));
 
 function loadProgress(key: string): FlowProgress {
   try {
@@ -36,6 +41,7 @@ function loadProgress(key: string): FlowProgress {
       done: p.done ?? {},
       checks: p.checks ?? {},
       ...(p.tssVariant === "payer" || p.tssVariant === "nonpayer" ? { tssVariant: p.tssVariant } : {}),
+      ...(p.intakeType && INTAKE_TYPE_IDS.has(p.intakeType) ? { intakeType: p.intakeType } : {}),
     };
   } catch {
     return EMPTY_PROGRESS;
@@ -122,6 +128,7 @@ export function FormsCategoryView({
           done: { ...anon.done, ...next.done },
           checks: { ...anon.checks, ...next.checks },
           ...(next.tssVariant ?? anon.tssVariant ? { tssVariant: next.tssVariant ?? anon.tssVariant } : {}),
+          ...(next.intakeType ?? anon.intakeType ? { intakeType: next.intakeType ?? anon.intakeType } : {}),
         };
         try {
           localStorage.setItem(storageKey, JSON.stringify(merged));
@@ -129,6 +136,8 @@ export function FormsCategoryView({
         } catch {
           /* ignore */
         }
+        // The anonymous session just merged into this customer's bucket.
+        removeIntakeSession(null);
         setProgressState(merged);
         return;
       }
@@ -168,6 +177,29 @@ export function FormsCategoryView({
 
   const doneCount = steps.filter((s) => progress.done[s.key]).length;
   const firstOpen = steps.findIndex((s) => !progress.done[s.key]);
+
+  // Keep the local "active intake sessions" registry (bell dropdown + intake
+  // customer nav) in sync with this flow's progress. Only sessions with actual
+  // progress register — merely opening the tab doesn't.
+  useEffect(() => {
+    if (!steps.length) return;
+    const hasProgress =
+      Object.values(progress.done).some(Boolean) ||
+      Object.values(progress.checks).some((c) => c.length > 0) ||
+      !!progress.tssVariant ||
+      !!progress.intakeType;
+    if (!hasProgress) return;
+    upsertIntakeSession({
+      customerId: customer?.id ?? null,
+      customerName: customer?.name ?? null,
+      cwId: customer?.cwId ?? null,
+      dob: customer?.dob ?? null,
+      caseManagerName: customer?.caseManagerName ?? null,
+      intakeType: progress.intakeType ?? null,
+      doneCount,
+      totalSteps: steps.length,
+    });
+  }, [progress, customer, steps.length, doneCount]);
 
   // Arriving via a "start intake" link (e.g. a completed referral) jumps
   // straight into the first unfinished step. Once per mount.
@@ -224,6 +256,13 @@ export function FormsCategoryView({
 
   const chooseTssVariant = (v: TssVariant) => {
     updateProgress((p) => ({ ...p, tssVariant: v }));
+  };
+
+  // Intake-type gate (step 1): persisted per session; informational for now,
+  // the flow will branch on it later.
+  const intakeType = progress.intakeType ?? null;
+  const chooseIntakeType = (v: IntakeTypeId, stepKey: string) => {
+    updateProgress((p) => ({ ...p, intakeType: v, done: { ...p.done, [stepKey]: true } }));
   };
 
   // Persisted across list and open views so context (card spend, current
@@ -422,7 +461,60 @@ export function FormsCategoryView({
           </div>
         ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
-        {step.tssGate && !tssVariant ? (
+        {step.intakeTypeGate ? (
+          intakeType ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-800">
+                  Intake type: <span className="text-indigo-600">{intakeTypeLabel(intakeType)}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (next) setView({ kind: "step", idx: idx + 1 });
+                    else setView({ kind: "list" });
+                  }}
+                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                >
+                  Continue →
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {INTAKE_TYPES.filter((t) => t.id !== intakeType).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => chooseIntakeType(t.id, step.key)}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:border-indigo-300 hover:text-indigo-600"
+                  >
+                    Switch to {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-indigo-200 bg-white px-6 py-10 text-center">
+              <div className="text-base font-semibold text-slate-900">Which intake is this?</div>
+              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+                Every path runs the same steps for now — the choice is saved with this intake session so the flow
+                can branch on it later.
+              </p>
+              <div className="mx-auto mt-5 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
+                {INTAKE_TYPES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => chooseIntakeType(t.id, step.key)}
+                    className="rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-5 text-sm font-bold text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
+                  >
+                    {t.label}
+                    <span className="mt-1 block text-[11px] font-medium text-indigo-400">{t.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        ) : step.tssGate && !tssVariant ? (
           // Full-page gate: payer vs non-payer decides which form loads (and
           // presets the folder build + customer doc payer status).
           <div className="rounded-xl border border-indigo-200 bg-white px-6 py-10 text-center">
@@ -543,6 +635,7 @@ export function FormsCategoryView({
               Flow steps
               <span className="ml-2 text-xs font-medium text-slate-400">
                 {doneCount} of {steps.length} complete{customer ? ` · ${customer.name}` : " · no customer selected"}
+                {intakeType ? ` · ${intakeTypeLabel(intakeType)}` : ""}
               </span>
             </h3>
             <div className="flex items-center gap-2">
@@ -552,6 +645,7 @@ export function FormsCategoryView({
                   onClick={() => {
                     if (window.confirm("Reset intake flow progress" + (customer ? ` for ${customer.name}` : "") + "?")) {
                       updateProgress(() => EMPTY_PROGRESS);
+                      removeIntakeSession(customer?.id ?? null);
                     }
                   }}
                   className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50"

@@ -78,6 +78,24 @@ export const FORMS: FormDef[] = [
 /** The staff web app (customer documents + Google Drive folders live there). */
 export const WEB_APP_BASE = "https://housing-db-v2.web.app";
 
+/**
+ * Intake paths (step 1 of the flow). Today the choice is informational — every
+ * path runs the same steps — but it's persisted per session so flow-path
+ * differences can branch on it later.
+ */
+export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "path-housing" | "tss-deposit-fee";
+
+export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] = [
+  { id: "eviction-prevention", label: "Eviction Prevention Intake", hint: "Assessment is a spreadsheet, not a form" },
+  { id: "hud-rental", label: "HUD Rental Intake", hint: "Requires Coordinated Entry Assessment in HMIS" },
+  { id: "path-housing", label: "PATH Housing Intake", hint: "Requires HMIS entry" },
+  { id: "tss-deposit-fee", label: "TSS Deposit & Application Fee Only", hint: "Deposit / application fee assistance only" },
+];
+
+export function intakeTypeLabel(id: string | null | undefined): string {
+  return INTAKE_TYPES.find((t) => t.id === id)?.label ?? "";
+}
+
 export type IntakeFlowStep = {
   /** Jotform id → embedded form step. Omit for a task-only step. */
   formId?: string;
@@ -109,6 +127,12 @@ export type IntakeFlowStep = {
   customerFolderLink?: boolean;
   /** Show the local missing-information fallback builder for incomplete intake data. */
   manualInfoBuilder?: boolean;
+  /**
+   * Intake-type gate: the step opens with a full-page choice between the intake
+   * paths (INTAKE_TYPES). Informational for now — persisted per session so the
+   * flow can branch on it later.
+   */
+  intakeTypeGate?: boolean;
 };
 
 /**
@@ -118,7 +142,13 @@ export type IntakeFlowStep = {
  * Reorder / edit freely — this array is the single source of truth.
  */
 export const INTAKE_FLOW: IntakeFlowStep[] = [
-  { formId: "260346853938064", section: "Basic intake" }, // Self-Declaration of Citizenship Status
+  {
+    title: "Choose intake type",
+    section: "Basic intake",
+    intakeTypeGate: true,
+    note: "Pick the intake path. Every path runs the same steps for now — flow differences per type are coming.",
+  },
+  { formId: "260346853938064" }, // Self-Declaration of Citizenship Status
   { formId: "251076068294057" }, // HRDC Release of Information
   { formId: "251106052302034" }, // Program Disclosure Form
   {
@@ -150,7 +180,21 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   {
     formId: "251471204342143", // MT Homelessness Prevention Assessment (HMIS)
     title: "HMIS / Homelessness Prevention Assessment",
-    note: "Complete the assessment in HMIS when applicable; otherwise use this MT Homelessness Prevention Assessment form.",
+    note:
+      "HUD Rental intake: complete the REQUIRED Coordinated Entry Assessment in HMIS (ServicePoint link below). " +
+      "PATH intake also requires an HMIS entry. " +
+      "Eviction Prevention: the assessment is NOT a form — use the Eviction Prevention Assessment spreadsheet below. " +
+      "Otherwise use this MT Homelessness Prevention Assessment form.",
+    links: [
+      {
+        href: "https://wscs.wellsky.com/montana/com.bowmansystems.sp5.core.ServicePoint/index.html",
+        label: "HMIS (ServicePoint) — Coordinated Entry",
+      },
+      {
+        href: "https://docs.google.com/spreadsheets/d/15oqPBUXZ450AsgSCQ8s5HmNWNMP5Vv9R/edit?rtpof=true",
+        label: "Eviction Prevention Assessment (spreadsheet)",
+      },
+    ],
   },
   {
     title: "Collect documents",
@@ -172,8 +216,11 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   {
     title: "Complete workbook and budget",
-    note: "Fill out the customer's TSS workbook and budget.",
-    links: [{ href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" }],
+    note: "Fill out the customer's TSS workbook and budget — the customer's page in the web app links both directly.",
+    links: [
+      { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
+      { href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" },
+    ],
   },
   { formId: "251001226310030", title: "Eligibility Determination Request" },
   {
