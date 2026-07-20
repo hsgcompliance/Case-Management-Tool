@@ -17,11 +17,15 @@ import { usePaymentRentCert, usePaymentsProjectionsAdjust } from "@hooks/usePaym
 import { SortableHeader, sortRows, useTableSort } from "@hooks/useTableSort";
 import type { ReqOf } from "@types";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
+import { assistanceUsage, linkedEnrollmentIds } from "./rentalAssistanceModel";
 
 export type RentalAssistanceFilterState = {
   status: "active" | "inactive" | "all";
   query: string;
   caseManagerId: string;
+  grantIds: string[];
+  rentCert: "all" | "due" | "missing";
+  maxRemaining: "all" | "threeOrLess" | "exhausted";
 };
 
 type RentalAssistanceRow = {
@@ -64,6 +68,8 @@ type CaseManagerOption = {
   id: string;
   label: string;
 };
+
+type GrantOption = { id: string; label: string };
 
 const RENTAL_ASSISTANCE_TAG = "rental-assistance";
 const RENTAL_PAYMENT_TYPES = new Set(["monthly", "rent", "prorated", "arrears"]);
@@ -154,57 +160,6 @@ function unpaidAfter(payments: RentalPaymentRef[], cutoffDate: string) {
   return payments.filter((payment) => !payment.paid && payment.dueDate > cutoffDate);
 }
 
-function monthDiffInclusive(fromMonth: string, toMonth: string): number | null {
-  if (!/^\d{4}-\d{2}$/.test(fromMonth) || !/^\d{4}-\d{2}$/.test(toMonth)) return null;
-  const [fy, fm] = fromMonth.split("-").map(Number);
-  const [ty, tm] = toMonth.split("-").map(Number);
-  return Math.max(0, (ty - fy) * 12 + (tm - fm) + 1);
-}
-
-function addMonthsToMonthKey(monthKey: string, delta: number) {
-  if (!/^\d{4}-\d{2}$/.test(monthKey)) return "";
-  const [year, month] = monthKey.split("-").map(Number);
-  const date = new Date(year, month - 1 + delta, 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function lastDayOfMonthISO(monthKey: string) {
-  if (!/^\d{4}-\d{2}$/.test(monthKey)) return "";
-  const [year, month] = monthKey.split("-").map(Number);
-  const date = new Date(year, month, 0);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function assistanceAnchorMonth(startDate: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return "";
-  const baseMonth = monthKeyFromISODate(startDate);
-  const day = Number(startDate.slice(8, 10));
-  return day >= 15 ? addMonthsToMonthKey(baseMonth, 1) : baseMonth;
-}
-
-function monthsOfAssistanceToToday(startDate: string) {
-  const anchorMonth = assistanceAnchorMonth(startDate);
-  const todayMonth = monthKeyFromISODate(todayISO());
-  if (!anchorMonth || !todayMonth) return null;
-  return monthDiffInclusive(anchorMonth, todayMonth);
-}
-
-function maxRemainingAfterToday(startDate: string, maxMonths: number | null) {
-  if (!maxMonths) return null;
-  const anchorMonth = assistanceAnchorMonth(startDate);
-  const lastCompletedMonth = addMonthsToMonthKey(monthKeyFromISODate(todayISO()), -1);
-  if (!anchorMonth || !lastCompletedMonth) return null;
-  const usedMonths = anchorMonth > lastCompletedMonth ? 0 : monthDiffInclusive(anchorMonth, lastCompletedMonth) ?? 0;
-  return Math.max(0, maxMonths - usedMonths);
-}
-
-function hardCutoffFromAssistanceStart(startDate: string, maxMonths: number | null) {
-  if (!maxMonths) return "";
-  const anchorMonth = assistanceAnchorMonth(startDate);
-  if (!anchorMonth) return "";
-  return lastDayOfMonthISO(addMonthsToMonthKey(anchorMonth, maxMonths - 1));
-}
-
 function maxMonthsFrom(grant: Record<string, unknown> | undefined, enrollment: Record<string, unknown>) {
   return (
     parseGrantMaxAssistanceMonths(enrollment.maxAssistanceMonthsAtEnrollment) ??
@@ -265,6 +220,23 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
 
   const status = rentalAssistanceStatus(filterState);
 
+  const grantOptions = React.useMemo<GrantOption[]>(() => (
+    (grants as Array<Record<string, unknown>>)
+      .filter((grant) => hasRentalAssistanceTag(grant))
+      .map((grant) => ({ id: String(grant.id || ""), label: String(grant.name || grant.id || "Unnamed grant") }))
+      .filter((grant) => grant.id)
+      .sort((a, b) => a.label.localeCompare(b.label))
+  ), [grants]);
+
+  const continuumIdsByEnrollment = React.useMemo(
+    () => linkedEnrollmentIds(enrollments as Array<Record<string, unknown>>),
+    [enrollments],
+  );
+
+  const enrollmentById = React.useMemo(() => new Map(
+    (enrollments as Array<Record<string, unknown>>).map((enrollment) => [String(enrollment.id || ""), enrollment]),
+  ), [enrollments]);
+
   const rows = React.useMemo<RentalAssistanceRow[]>(() => {
     const query = filterState.query.trim().toLowerCase();
     const output: RentalAssistanceRow[] = [];
@@ -274,6 +246,8 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
       const grantId = String(enrollment.grantId || "").trim();
       const grant = grantsById.get(grantId);
       if (!hasRentalAssistanceTag(grant)) continue;
+      const selectedGrantIds = Array.isArray(filterState.grantIds) ? filterState.grantIds : [];
+      if (selectedGrantIds.length && !selectedGrantIds.includes(grantId)) continue;
 
       const payments = Array.isArray(enrollment.payments)
         ? enrollment.payments.filter((raw): raw is Record<string, unknown> => !!raw && typeof raw === "object" && !Array.isArray(raw))
@@ -321,13 +295,28 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
           ? assistancePayments.find((payment) => payment.id === nextRentCertEvent.paymentId)
           : assistancePayments.find((payment) => payment.dueDate === nextRentCertEvent?.targetPaymentDate)) || null;
       const nextRentCertDue = String(nextRentCertEvent?.dueDate || nextRentCertPayment?.rentCert?.dueDate || "");
-      const assistanceStartDate = paymentDates[0] || "";
       const maxAssistanceMonths = maxMonthsFrom(grant, enrollment);
-      const monthsOfAssistance = assistanceStartDate ? monthsOfAssistanceToToday(assistanceStartDate) : null;
-      const maxAssistanceCutoffDate = assistanceStartDate
-        ? hardCutoffFromAssistanceStart(assistanceStartDate, maxAssistanceMonths)
-        : "";
-      const remaining = assistanceStartDate ? maxRemainingAfterToday(assistanceStartDate, maxAssistanceMonths) : null;
+      const continuumPayments = (continuumIdsByEnrollment.get(String(enrollment.id || "")) || [])
+        .flatMap((id) => {
+          const linked = enrollmentById.get(id);
+          return Array.isArray(linked?.payments) ? linked.payments : [];
+        })
+        .filter((payment): payment is Record<string, unknown> => !!payment && typeof payment === "object" && !Array.isArray(payment))
+        .filter((payment) => payment.void !== true && paymentAmount(payment) > 0 && paymentIsRentalAssistance(payment))
+        .map(toRentalPaymentRef)
+        .filter((payment): payment is RentalPaymentRef => payment !== null);
+      const usage = assistanceUsage(continuumPayments, maxAssistanceMonths, todayISO());
+      const assistanceStartDate = usage.startDate || paymentDates[0] || "";
+      const monthsOfAssistance = usage.monthsUsed || (assistanceStartDate ? 0 : null);
+      const maxAssistanceCutoffDate = usage.cutoff;
+      const remaining = usage.remaining;
+
+      const rentCertFilter = filterState.rentCert || "all";
+      if (rentCertFilter === "due" && !nextRentCertDue) continue;
+      if (rentCertFilter === "missing" && nextRentCertDue) continue;
+      const remainingFilter = filterState.maxRemaining || "all";
+      if (remainingFilter === "exhausted" && remaining !== 0) continue;
+      if (remainingFilter === "threeOrLess" && (remaining == null || remaining > 3)) continue;
 
       const searchText = `${customerName} ${caseManagerName} ${grantName}`.toLowerCase();
       if (query && !searchText.includes(query)) continue;
@@ -363,9 +352,14 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
     customerNameById,
     enrollments,
     filterState.caseManagerId,
+    filterState.grantIds,
+    filterState.maxRemaining,
     filterState.query,
+    filterState.rentCert,
     grantNameById,
     grantsById,
+    continuumIdsByEnrollment,
+    enrollmentById,
     month,
     status,
   ]);
@@ -373,6 +367,7 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
   return {
     rows,
     caseManagerOptions,
+    grantOptions,
     sharedDataLoading,
     sharedDataError,
     isTruncated,
@@ -383,8 +378,9 @@ export const RentalAssistanceTopbar: DashboardToolDefinition<RentalAssistanceFil
   value,
   onChange,
 }) => {
-  const { rows, caseManagerOptions } = useRentalAssistanceRows(value);
+  const { rows, caseManagerOptions, grantOptions } = useRentalAssistanceRows(value);
   const selectedStatus = rentalAssistanceStatus(value);
+  const selectedGrantIds = Array.isArray(value.grantIds) ? value.grantIds : [];
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white text-xs">
@@ -412,6 +408,41 @@ export const RentalAssistanceTopbar: DashboardToolDefinition<RentalAssistanceFil
         {caseManagerOptions.map((cm) => (
           <option key={cm.id} value={cm.id}>{cm.label}</option>
         ))}
+      </select>
+      <details className="relative">
+        <summary className="input cursor-pointer list-none whitespace-nowrap">
+          {selectedGrantIds.length ? `${selectedGrantIds.length} grant${selectedGrantIds.length === 1 ? "" : "s"}` : "All Grants"}
+        </summary>
+        <div className="absolute left-0 z-30 mt-1 max-h-72 min-w-72 overflow-auto rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+          <button type="button" className="mb-1 w-full rounded px-2 py-1 text-left text-xs text-sky-700 hover:bg-sky-50" onClick={() => onChange({ ...value, grantIds: [] })}>
+            Select all grants
+          </button>
+          {grantOptions.map((grant) => (
+            <label key={grant.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-slate-50">
+              <input
+                type="checkbox"
+                checked={selectedGrantIds.includes(grant.id)}
+                onChange={() => onChange({
+                  ...value,
+                  grantIds: selectedGrantIds.includes(grant.id)
+                    ? selectedGrantIds.filter((id) => id !== grant.id)
+                    : [...selectedGrantIds, grant.id],
+                })}
+              />
+              <span>{grant.label}</span>
+            </label>
+          ))}
+        </div>
+      </details>
+      <select className="input" value={value.rentCert || "all"} onChange={(e) => onChange({ ...value, rentCert: e.currentTarget.value as RentalAssistanceFilterState["rentCert"] })} aria-label="Rent certification filter">
+        <option value="all">All Rent Certs</option>
+        <option value="due">Upcoming Rent Cert</option>
+        <option value="missing">No Upcoming Rent Cert</option>
+      </select>
+      <select className="input" value={value.maxRemaining || "all"} onChange={(e) => onChange({ ...value, maxRemaining: e.currentTarget.value as RentalAssistanceFilterState["maxRemaining"] })} aria-label="Maximum assistance remaining filter">
+        <option value="all">Any Assistance Limit</option>
+        <option value="threeOrLess">3 Months or Less</option>
+        <option value="exhausted">Limit Exhausted</option>
       </select>
       <input
         className="input w-56"
