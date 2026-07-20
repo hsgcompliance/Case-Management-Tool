@@ -81,7 +81,7 @@ const MATCHERS: Matcher[] = [
   { key: "programName", match: /^program name/i },
   {
     key: "payee",
-    match: /^(landlord|property owner|property management|management company|payee|vendor)( name)?$/i,
+    match: /^(landlord|property owner|property management|management company|payee|vendor).*name|^(landlord|property owner|property management|management company|payee|vendor)$/i,
   },
   { key: "effectiveDate", match: /^effective date/i },
   { key: "expirationDate", match: /^expiration date/i },

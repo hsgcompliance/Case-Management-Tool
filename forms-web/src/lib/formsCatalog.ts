@@ -109,6 +109,8 @@ export type IntakeFlowStep = {
   links?: { href: string; label: string }[];
   /** Optional steps don't block "all steps complete". */
   optional?: boolean;
+  /** Informational/builder step: navigation is allowed without a manual completion mark. */
+  noCompletionRequired?: boolean;
   /**
    * The step where the customer record gets created. Intake usually STARTS
    * without an existing customer (ROIs/disclosures → Caseworthy → customer
@@ -243,6 +245,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
       "check the generated rows (deposit, prorated/arrears, monthly, utility allowance), then apply. Payments are " +
       "created on the enrollment in order and flow into the payment queue automatically. Nothing is created until you apply.",
     rentCertBuilder: true,
+    noCompletionRequired: true,
   },
   {
     title: "Link intake submissions to customer",
@@ -254,6 +257,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     ],
     links: [{ href: "/staff/submissions", label: "Open Submissions tab" }],
     manualInfoBuilder: true,
+    noCompletionRequired: true,
   },
   {
     title: "Memorandum of Understanding",

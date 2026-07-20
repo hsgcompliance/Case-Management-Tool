@@ -4,6 +4,7 @@ import { getSubmissionLinks, type SubmissionLink } from "@/lib/submissionLinksAp
 import { getSubmissionLabel } from "@/lib/submissionLabel";
 import { AnswerView } from "@/components/AnswerView";
 import { CustomerLinkButton } from "@/components/CustomerLinkButton";
+import { useSearchParams } from "react-router-dom";
 
 function fmtDate(v: unknown): string {
   if (!v) return "";
@@ -52,6 +53,8 @@ function FormPicker({ forms, value, onChange }: { forms: JfForm[]; value: JfForm
 }
 
 export default function SubmissionManagerPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedFormId = searchParams.get("formId")?.trim() || "";
   const [forms, setForms] = useState<JfForm[]>([]);
   const [windowDays, setWindowDays] = useState(30);
   const [form, setForm] = useState<JfForm | null>(null);
@@ -68,6 +71,25 @@ export default function SubmissionManagerPage() {
     setLoadingForms(true);
     listForms(windowDays).then(setForms).catch((e: unknown) => setError((e as Error)?.message || "Failed to load forms.")).finally(() => setLoadingForms(false));
   }, [windowDays]);
+
+  useEffect(() => {
+    if (!requestedFormId || loadingForms) return;
+    const requested = forms.find((item) => item.id === requestedFormId);
+    if (requested) {
+      setForm((current) => current?.id === requested.id ? current : requested);
+      return;
+    }
+    // The default month window can omit older forms. Expand once so a direct
+    // form link remains dependable without adding a separate page/API.
+    if (windowDays !== 730) setWindowDays(730);
+  }, [forms, loadingForms, requestedFormId, windowDays]);
+
+  const chooseForm = (next: JfForm) => {
+    setForm(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("formId", next.id);
+    setSearchParams(params, { replace: true });
+  };
 
   useEffect(() => {
     if (!form) return;
@@ -113,7 +135,7 @@ export default function SubmissionManagerPage() {
         <div className="text-sm text-slate-400">Loading forms…</div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <FormPicker forms={forms} value={form} onChange={setForm} />
+          <FormPicker forms={forms} value={form} onChange={chooseForm} />
           <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs">
             {([{ d: 30, l: "Month" }, { d: 365, l: "Year" }, { d: 730, l: "2yr" }] as const).map((o) => (
               <button

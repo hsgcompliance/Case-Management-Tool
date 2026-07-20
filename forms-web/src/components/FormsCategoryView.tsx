@@ -322,17 +322,23 @@ export function FormsCategoryView({
           <span className="text-xs font-semibold text-slate-500">
             Step {idx + 1} of {steps.length}
           </span>
-          <button
-            type="button"
-            onClick={() => setDone(step.key, !isDone)}
-            className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
-              isDone
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            {isDone ? "✓ Completed" : "Mark complete"}
-          </button>
+          {step.noCompletionRequired ? (
+            <span className="rounded-md bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-500">
+              No completion mark required
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setDone(step.key, !isDone)}
+              className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
+                isDone
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {isDone ? "✓ Completed" : "Mark complete"}
+            </button>
+          )}
         </div>
         {next ? (
           <button

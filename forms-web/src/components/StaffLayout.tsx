@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { CustomerSearchBar } from "./CustomerSearchBar";
 import { SubmitNotifications } from "./SubmitNotifications";
+import { RENT_DETERMINATION_FORM_ID } from "@/lib/rentCertExtract";
 
 // Primary tabs are the day-to-day surfaces. The power-user views (All forms,
 // Submissions, Webhooks, Activity) live behind the ☰ menu — most staff never
@@ -54,6 +55,13 @@ export function StaffLayout() {
               <div className="text-sm font-bold text-slate-900">Staff workspace</div>
             </NavLink>
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <NavLink
+                to={`/staff/submissions?formId=${RENT_DETERMINATION_FORM_ID}`}
+                className="whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white no-underline hover:bg-indigo-500"
+                title="Open Submission Manager with Rent Determination & Unit Eligibility selected"
+              >
+                + New Rent Cert
+              </NavLink>
               <SubmitNotifications />
               <span className="hidden max-w-[14rem] truncate text-xs text-slate-500 sm:inline">{user?.email}</span>
               <button

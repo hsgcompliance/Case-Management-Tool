@@ -19,10 +19,12 @@ import {
   applyRentCertSchedule,
   listEnrollmentsForCustomer,
   type FormsEnrollment,
+  type FormsProgram,
   type RentCertApplyRow,
   type RentCertRowResult,
 } from "@/lib/rentCertApi";
 import { matchName } from "@/lib/nameMatch";
+import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
 
 // Rent Cert Smart Schedule Builder — parse a completed Rent Determination
 // submission, let staff SELECT the billable enrollment(s) (no auto-creation,
@@ -34,6 +36,7 @@ const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDi
 
 type RowState = DraftRow & {
   enrollmentId: string | null;
+  grantId: string | null;
   lineItemId: string | null;
 };
 
@@ -49,6 +52,19 @@ function defaultLineItem(e: FormsEnrollment): string | null {
 
 export function RentCertScheduleBuilder() {
   const { customer } = useCurrentCustomer();
+  const [customerDetail, setCustomerDetail] = useState<CustomerDetail | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!customer) {
+      setCustomerDetail(null);
+      return;
+    }
+    getCustomerDetail(customer.id).then((detail) => {
+      if (alive) setCustomerDetail(detail);
+    });
+    return () => { alive = false; };
+  }, [customer]);
 
   // ── source submission (webhook events for the Rent Determination form) ──
   const [events, setEvents] = useState<WebhookEventDetail[]>([]);
@@ -97,8 +113,10 @@ export function RentCertScheduleBuilder() {
 
   // ── enrollments (staff selection = the decision) ──
   const [enrollments, setEnrollments] = useState<FormsEnrollment[]>([]);
+  const [programs, setPrograms] = useState<FormsProgram[]>([]);
   const [enrollmentsLoading, setEnrollmentsLoading] = useState(false);
   const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<string[]>([]);
+  const [selectedGrantId, setSelectedGrantId] = useState<string | null>(null);
   const [lineItemByEnrollment, setLineItemByEnrollment] = useState<Record<string, string>>({});
 
   const loadEnrollments = useCallback(() => {
@@ -109,14 +127,19 @@ export function RentCertScheduleBuilder() {
     }
     setEnrollmentsLoading(true);
     listEnrollmentsForCustomer(customer.id)
-      .then((items) => {
+      .then(({ enrollments: items, programs: availablePrograms }) => {
         setEnrollments(items);
+        setPrograms(availablePrograms);
         // Preselect a single active billable enrollment; otherwise make staff choose.
         const activeBillable = items.filter((e) => e.active && e.billable);
         setSelectedEnrollmentIds((cur) => {
           const still = cur.filter((id) => items.some((e) => e.id === id));
           if (still.length) return still;
-          return activeBillable.length === 1 ? [activeBillable[0].id] : [];
+          if (activeBillable.length === 1) {
+            setSelectedGrantId(activeBillable[0].grantId);
+            return [activeBillable[0].id];
+          }
+          return [];
         });
         setLineItemByEnrollment((cur) => {
           const next = { ...cur };
@@ -137,9 +160,22 @@ export function RentCertScheduleBuilder() {
     [selectedEnrollmentIds, enrollments],
   );
   const primaryEnrollment = selectedEnrollments[0] ?? null;
+  const selectedProgram = programs.find((program) => program.grantId === selectedGrantId) ?? null;
+  const selectedProgramLineItem = selectedProgram?.lineItems.find((item) => !item.locked) ?? null;
+
+  useEffect(() => {
+    if (selectedGrantId || !cert.programName || !programs.length) return;
+    const program = programs.find((item) => item.grantName === cert.programName);
+    if (!program) return;
+    setSelectedGrantId(program.grantId);
+    const enrollment = enrollments.find((item) => item.grantId === program.grantId);
+    if (enrollment) setSelectedEnrollmentIds([enrollment.id]);
+  }, [cert.programName, enrollments, programs, selectedGrantId]);
 
   const toggleEnrollment = (id: string) => {
     setSelectedEnrollmentIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+    const enrollment = enrollments.find((item) => item.id === id);
+    if (enrollment) setSelectedGrantId(enrollment.grantId);
     setResults(null);
   };
 
@@ -155,6 +191,10 @@ export function RentCertScheduleBuilder() {
   const generate = () => {
     const g = generateSchedule(cert);
     const enrollmentId = primaryEnrollment?.id ?? null;
+    const grantId = primaryEnrollment?.grantId ?? selectedProgram?.grantId ?? null;
+    const defaultLineItemId = enrollmentId
+      ? lineItemByEnrollment[enrollmentId] || null
+      : selectedProgramLineItem?.id ?? null;
     setGenWarnings(g.warnings);
     setRows(
       g.rows.map((r) => {
@@ -162,7 +202,8 @@ export function RentCertScheduleBuilder() {
         return {
           ...r,
           enrollmentId,
-          lineItemId: enrollmentId ? lineItemByEnrollment[enrollmentId] || null : null,
+          grantId,
+          lineItemId: defaultLineItemId,
           // Conflicting rows start EXCLUDED — staff resolves during preview.
           include: r.include && !conflict,
           warnings: conflict ? [...r.warnings, describeConflict(conflict)] : r.warnings,
@@ -191,19 +232,20 @@ export function RentCertScheduleBuilder() {
   const includedRows = (annotatedRows ?? []).filter((r) => r.include);
   const includedTotal = includedRows.reduce((s, r) => s + (Number.isFinite(r.amount) ? r.amount : 0), 0);
   const blockers = includedRows.filter(
-    (r) => !r.enrollmentId || !r.lineItemId || !r.dueDate || !(r.amount > 0) || (r.conflict && !r.conflict.sameSource),
+    (r) => (!r.enrollmentId && !r.grantId) || !r.lineItemId || !r.dueDate || !(r.amount > 0) || (r.conflict && !r.conflict.sameSource),
   );
 
   const apply = async () => {
     if (!customer || !submissionId || !annotatedRows) return;
     const payload: RentCertApplyRow[] = includedRows.map((r) => ({
-      enrollmentId: r.enrollmentId!,
+      ...(r.enrollmentId ? { enrollmentId: r.enrollmentId } : { grantId: r.grantId! }),
       lineItemId: r.lineItemId!,
       type: r.type,
       ...(r.type === "monthly" ? { sub: r.sub ?? "rent" } : {}),
       amount: r.amount,
       dueDate: r.dueDate,
       label: r.label,
+      ...(cert.payee ? { vendor: cert.payee } : {}),
     }));
     if (!payload.length) return;
     setApplying(true);
@@ -215,6 +257,7 @@ export function RentCertScheduleBuilder() {
         formId: RENT_DETERMINATION_FORM_ID,
         certification: {
           programName: cert.programName,
+          payee: cert.payee,
           effectiveDate: cert.effectiveDate,
           expirationDate: cert.expirationDate,
           reason: cert.reason,
@@ -278,13 +321,24 @@ export function RentCertScheduleBuilder() {
   );
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-white px-4 py-4">
-      <div>
-        <h3 className="text-sm font-semibold text-slate-900">Rent cert payment schedule builder</h3>
-        <p className="text-xs text-slate-500">
+    <div className="space-y-4 rounded-2xl border-2 border-indigo-300 bg-white px-4 py-4 shadow-sm">
+      <div className="rounded-xl bg-indigo-600 px-4 py-3 text-white">
+        <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-indigo-100">Primary action</div>
+        <h3 className="mt-0.5 text-lg font-bold">Assistance request &amp; payment schedule</h3>
+        <p className="mt-1 text-sm text-indigo-100">
           Parse the completed Rent Determination, pick the enrollment(s) to bill, review the generated rows, then
           apply — payments are created on the enrollment and flow into the payment queue in order.
         </p>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Household confirmation</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+          <div><span className="text-slate-400">Head of household</span><div className="font-semibold text-slate-800">{customerDetail?.household.headOfHousehold || customer.name}</div></div>
+          <div><span className="text-slate-400">CWID</span><div className="font-semibold text-slate-800">{customerDetail?.cwId || customer.cwId || "—"}</div></div>
+          <div><span className="text-slate-400">Household members</span><div className="font-semibold text-slate-800">{customerDetail?.household.memberCount ?? "—"}</div></div>
+          <div><span className="text-slate-400">Case manager</span><div className="font-semibold text-slate-800">{customerDetail?.caseManagerName || customer.caseManagerName || "—"}</div></div>
+        </div>
       </div>
 
       {/* 1 · Source submission */}
@@ -317,13 +371,33 @@ export function RentCertScheduleBuilder() {
 
       {/* 2 · Certification fields (editable) */}
       <div className="space-y-2">
-        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">2 · Certification fields</div>
+        <div className="text-xs font-bold uppercase tracking-wider text-indigo-600">2 · Assistance defaults</div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <label className="text-xs text-slate-600">
-            Program name
-            <input
+            Grant / program
+            <select
               value={cert.programName ?? ""}
-              onChange={(e) => setCertField("programName", e.target.value || null)}
+              onChange={(e) => {
+                const name = e.currentTarget.value || null;
+                setCertField("programName", name);
+                const program = programs.find((item) => item.grantName === name) ?? null;
+                const enrollment = enrollments.find((item) => item.grantId === program?.grantId) ?? null;
+                setSelectedGrantId(program?.grantId ?? null);
+                setSelectedEnrollmentIds(enrollment ? [enrollment.id] : []);
+              }}
+              className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
+            >
+              <option value="">— select funded program —</option>
+              {cert.programName && !programs.some((item) => item.grantName === cert.programName) ? <option value={cert.programName}>{cert.programName}</option> : null}
+              {programs.map((item) => <option key={item.grantId} value={item.grantName}>{item.grantName}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-slate-600">
+            Payee / vendor
+            <input
+              value={cert.payee ?? ""}
+              placeholder="Landlord name"
+              onChange={(e) => setCertField("payee", e.currentTarget.value || null)}
               className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
             />
           </label>
@@ -376,11 +450,11 @@ export function RentCertScheduleBuilder() {
             </select>
           </label>
           <label className="text-xs text-slate-600">
-            Monthly housing cost
+            Monthly housing cost (reference)
             <div className="mt-0.5">{numInput(cert.monthlyHousingCost, (v) => setCertField("monthlyHousingCost", v))}</div>
           </label>
           <label className="text-xs text-slate-600">
-            HRDC payment
+            Rent amount (HRDC payment)
             <div className="mt-0.5">{numInput(cert.hrdcPayment, (v) => setCertField("hrdcPayment", v))}</div>
           </label>
           <label className="text-xs text-slate-600">
@@ -388,7 +462,7 @@ export function RentCertScheduleBuilder() {
             <div className="mt-0.5">{numInput(cert.depositAmount, (v) => setCertField("depositAmount", v))}</div>
           </label>
           <label className="text-xs text-slate-600">
-            Prorated rent / arrears
+            Arrears / prorated rent amount
             <div className="mt-0.5">{numInput(cert.proratedOrArrears, (v) => setCertField("proratedOrArrears", v))}</div>
           </label>
           <label className="text-xs text-slate-600">
@@ -440,8 +514,8 @@ export function RentCertScheduleBuilder() {
           </div>
         ) : (
           <div className="text-xs text-amber-700">
-            No enrollments found for {customer.name} — enroll them in a grant in the web app first. Enrollments are
-            never created from here.
+            No enrollment exists yet. Choose a Grant / program above; Apply will create the enrollment first and then
+            build its payment schedule in the same action.
           </div>
         )}
         {selectedEnrollments.map((e) => (
@@ -476,14 +550,14 @@ export function RentCertScheduleBuilder() {
           <button
             type="button"
             onClick={generate}
-            disabled={!primaryEnrollment}
+            disabled={!primaryEnrollment && !selectedProgram}
             className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
           >
             {rows ? "Regenerate schedule" : "Generate schedule"}
           </button>
         </div>
-        {!primaryEnrollment ? (
-          <div className="text-xs text-slate-400">Select at least one billable enrollment to generate.</div>
+        {!primaryEnrollment && !selectedProgram ? (
+          <div className="text-xs text-slate-400">Choose a funded Grant / program to generate.</div>
         ) : null}
 
         {genWarnings.length ? (
