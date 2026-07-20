@@ -187,6 +187,7 @@ const ApplyRow = z.object({
   amount: z.number().positive(),
   dueDate: z.string().regex(ISO10),
   label: z.string().trim().max(120).optional(),
+  vendor: z.string().trim().max(200).optional(),
 });
 
 const FormsRentCertApplyBody = z.object({
@@ -278,6 +279,7 @@ export const formsRentCertApply_http = secureHandler(
               paid: false,
               paidFromGrant: false,
               note,
+              ...(row.vendor ? {vendor: row.vendor} : {}),
             };
             accepted.push(payment);
             groupResults.push({ index, enrollmentId, status: "created" });

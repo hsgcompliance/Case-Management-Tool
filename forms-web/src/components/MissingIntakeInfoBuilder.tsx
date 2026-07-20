@@ -366,7 +366,10 @@ export function MissingIntakeInfoBuilder() {
               <input
                 type="checkbox"
                 checked={draft.docs[item] === true}
-                onChange={(e) => setDraft((prev) => ({ ...prev, docs: { ...prev.docs, [item]: e.currentTarget.checked } }))}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  setDraft((prev) => ({ ...prev, docs: { ...prev.docs, [item]: checked } }));
+                }}
                 className="h-4 w-4 rounded border-slate-300 text-indigo-600"
               />
               <span>{item}</span>
