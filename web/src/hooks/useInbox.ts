@@ -55,6 +55,26 @@ export function useMyInbox(
   });
 }
 
+type InboxTasksDueListResp = RespOf<"inboxTasksDueList">;
+
+export function useMyTasksDue(month?: string, opts?: { enabled?: boolean; staleTime?: number }) {
+  const enabled = opts?.enabled ?? true;
+  return useQuery<InboxTasksDueListResp, Error, InboxItem[]>({
+    ...RQ_DEFAULTS,
+    enabled,
+    queryKey: qk.inbox.due(month),
+    queryFn: () => Inbox.tasksDueList(month ? { month } : undefined),
+    select: (resp) => {
+      const top = (resp as { items?: unknown }).items;
+      if (Array.isArray(top)) return top as InboxItem[];
+      const nested = (resp as { data?: { items?: unknown } }).data?.items;
+      if (Array.isArray(nested)) return nested as InboxItem[];
+      return [];
+    },
+    staleTime: opts?.staleTime ?? INBOX_LIST_STALE_MS,
+  });
+}
+
 type InboxWorkloadResp = RespOf<"inboxWorkloadList">;
 type InboxWorkloadItem = InboxWorkloadResp extends { items: Array<infer I> } ? I : InboxItem;
 

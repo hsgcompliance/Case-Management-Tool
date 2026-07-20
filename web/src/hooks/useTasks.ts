@@ -167,7 +167,7 @@ function applyOptimisticInboxStatusPatch(
     const root = String(key[0] || "");
     const scope = String(key[1] || "");
     if (root !== "inbox") continue;
-    if (scope !== "my" && scope !== "workload") continue;
+    if (scope !== "my" && scope !== "workload" && scope !== "due") continue;
 
     const statusFilter = queryStatusFilter(key as readonly unknown[]);
     const patched = patchCollectionByStatus(data, match, nextStatus, statusFilter, nowIso);

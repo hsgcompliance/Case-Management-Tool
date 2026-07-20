@@ -7,6 +7,7 @@ import {
   newBulkWriter,
 } from "../../core";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 import {
   onDocumentCreated,
   onDocumentUpdated,
@@ -164,6 +165,40 @@ async function syncCustomerCaseManagerToEnrollments(
   if (writes) {
     await batch.commit();
   }
+}
+
+async function syncCustomerCmFieldsToUserTasks(
+  customerId: string,
+  before: any,
+  after: any
+) {
+  if (!customerId) return;
+
+  const nextCmUid = String(after?.caseManagerId || "").trim() || null;
+  const prevCmUid = String(before?.caseManagerId || "").trim() || null;
+  const nextSecondaryCmUid = String(after?.secondaryCaseManagerId || "").trim() || null;
+  const prevSecondaryCmUid = String(before?.secondaryCaseManagerId || "").trim() || null;
+
+  if (nextCmUid === prevCmUid && nextSecondaryCmUid === prevSecondaryCmUid) return;
+
+  const snap = await db.collection("userTasks").where("clientId", "==", customerId).get();
+  if (snap.empty) return;
+
+  const batch = db.batch();
+  let writes = 0;
+  snap.forEach((doc) => {
+    const row = doc.data() || {};
+    const patch: Record<string, unknown> = {};
+    if (String((row as any).cmUid || "").trim() !== (nextCmUid || "")) patch.cmUid = nextCmUid;
+    if (String((row as any).secondaryCmUid || "").trim() !== (nextSecondaryCmUid || "")) {
+      patch.secondaryCmUid = nextSecondaryCmUid;
+    }
+    if (!Object.keys(patch).length) return;
+    batch.set(doc.ref, patch, { merge: true });
+    writes += 1;
+  });
+
+  if (writes) await batch.commit();
 }
 
 async function syncCustomerSnapshotsToOperationalRecords(
@@ -380,6 +415,10 @@ export const onCustomerUpdate = onDocumentUpdated(
       await syncCustomerCaseManagerToEnrollments(String(e.params.id || ""), before, after);
     }
 
+    if (changedKeys.includes("caseManagerId") || changedKeys.includes("secondaryCaseManagerId")) {
+      await syncCustomerCmFieldsToUserTasks(String(e.params.id || ""), before, after);
+    }
+
     if (
       changedKeys.includes("caseManagerId") ||
       changedKeys.includes("caseManagerName") ||
@@ -402,35 +441,43 @@ async function cascadeCustomerInactiveToEnrollments(customerId: string) {
   if (!customerId) return;
 
   // --- READ FIRST ---
-  let snap: FirebaseFirestore.QuerySnapshot;
+  let snaps: FirebaseFirestore.QuerySnapshot[];
   try {
-    snap = await db
-      .collection("customerEnrollments")
-      .where("customerId", "==", customerId)
-      .where("active", "==", true)
-      .get();
+    snaps = await Promise.all([
+      db.collection("customerEnrollments").where("customerId", "==", customerId).get(),
+      db.collection("customerEnrollments").where("clientId", "==", customerId).get(),
+    ]);
   } catch (e: any) {
     console.error(`[cascadeCustomerInactive] read failed for customer ${customerId}:`, e?.message || e);
     return;
   }
 
-  if (snap.empty) return;
+  const docs = Array.from(
+    new Map(snaps.flatMap((snap) => snap.docs).map((doc) => [doc.id, doc])).values(),
+  );
+  if (!docs.length) return;
 
   const now = isoNow();
   const batch = db.batch();
   const enrollmentIds: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string }> = [];
 
-  for (const doc of snap.docs) {
+  for (const doc of docs) {
     const data = doc.data() as any;
     // Skip enrollments already closed/deleted
     const status = String(data?.status || "").toLowerCase();
-    if (status === "closed" || status === "deleted") continue;
+    if (status === "closed" || status === "deleted" || data?.active === false) continue;
+    const closePreview = buildEnrollmentClosePreview({
+      payments: Array.isArray(data?.payments) ? data.payments : [],
+      fallbackDate: now.slice(0, 10),
+    });
 
     batch.set(
       doc.ref,
       {
         status: "closed",
         active: false,
+        endDate: closePreview.closeDate,
+        payments: closePreview.retainedPayments,
         closedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         system: { lastWriter: FN_CUSTOMER_UPDATE, lastWriteAt: FieldValue.serverTimestamp() },

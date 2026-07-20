@@ -2,6 +2,7 @@
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { db, RUNTIME, isoNow, normTok, toDateOnly, toMonthKey, uniqNorm, normId } from "../../core";
 import type { InboxItem } from "./schemas";
+import { resolveCustomerCmFields } from "./customerLookup";
 import {
   changedTopLevelKeys,
   debugTriggerEvent,
@@ -175,18 +176,13 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     const clientId = after.clientId || after.customerId || before.clientId || before.customerId || null;
     const grantId = after.grantId || before.grantId || null;
     const cmUid = after.caseManagerId || before.caseManagerId || null;
-    let customerName = cleanText(after.customerName) || cleanText(after.clientName) || null;
-    if (!customerName && clientId) {
-      const customerSnap = await db.collection("customers").doc(String(clientId)).get().catch(() => null);
-      const customerDoc = customerSnap?.exists ? (customerSnap.data() || {}) : {};
-      customerName =
-        cleanText((customerDoc as any).name) ||
-        [cleanText((customerDoc as any).firstName), cleanText((customerDoc as any).lastName)]
-          .filter(Boolean)
-          .join(" ")
-          .trim() ||
-        null;
-    }
+    // Always resolve the customer doc when we have a clientId — needed for
+    // secondaryCmUid (customer-level field, not present on the enrollment)
+    // even when the enrollment already carries a usable customerName.
+    const customerFields = clientId ? await resolveCustomerCmFields(String(clientId)) : null;
+    const secondaryCmUid = customerFields?.secondaryCmUid || null;
+    const customerName =
+      cleanText(after.customerName) || cleanText(after.clientName) || customerFields?.customerName || null;
     const grantName = cleanText(after.grantName) || null;
     const caseManagerName = cleanText(after.caseManagerName) || null;
     // Build a human-readable enrollment name. Fall back to "Grant · start date" when the
@@ -225,6 +221,7 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
         assignedToUid: null,
         assignedToGroup: "admin",
         cmUid,
+        secondaryCmUid,
         orgId,
         teamIds,
         notify: false,
@@ -245,14 +242,15 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     if ((before.caseManagerId || null) !== (after.caseManagerId || null)) {
       const qs = await db.collection("userTasks").where("enrollmentId", "==", eid).get();
       const batch = db.batch();
-      qs.forEach((doc) => batch.set(doc.ref, { cmUid, orgId, teamIds }, { merge: true }));
+      qs.forEach((doc) => batch.set(doc.ref, { cmUid, secondaryCmUid, orgId, teamIds }, { merge: true }));
       await batch.commit();
     }
 
-    // -------- taskSchedule: orphan cleanup only (task system deprecated) --------
-    // New task schedules are no longer built by onEnrollmentBuildTasks.
-    // Only clean up inbox items for tasks that were removed from the schedule,
-    // so stale userTasks docs drain naturally as enrollments are updated.
+    // -------- taskSchedule (rent-cert reminders) --------
+    // onEnrollmentBuildTasks (generic grant-defined tasks) is disabled, so the only
+    // current producer of taskSchedule entries is the rent-cert cadence
+    // (syncContinuumRentCertReminders) plus manual overrides — safe to project all
+    // of them into userTasks so they surface in the task-due notifications.
     const prevTasks: any[] = Array.isArray(before.taskSchedule) ? before.taskSchedule : [];
     const nextTasks: any[] = Array.isArray(after.taskSchedule) ? after.taskSchedule : [];
 
@@ -260,6 +258,40 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     const nextById = new Map(nextTasks.map((t) => [String(t?.id), t]));
 
     for (const [id] of prevById) if (!nextById.has(id)) await deleteInbox(UTID.task(eid, id));
+
+    for (const t of nextTasks) {
+      const taskId = String(t?.id || "");
+      if (!taskId) continue;
+      const due = iso10(t?.dueDate) || (t?.dueDate ? String(t.dueDate) : null);
+      const dueMonth = t?.dueMonth ? String(t.dueMonth) : ym(due);
+      await upsertInbox({
+        utid: UTID.task(eid, taskId),
+        source: "task",
+        status: t?.completed === true ? "done" : "open",
+        enrollmentId: eid,
+        clientId,
+        grantId,
+        sourcePath: `customerEnrollments/${eid}#taskSchedule:${taskId}`,
+        dueDate: due,
+        dueMonth,
+        createdAtISO: null,
+        assignedToUid: t?.assignedToUid || null,
+        assignedToGroup: t?.assignedToGroup || null,
+        cmUid,
+        secondaryCmUid,
+        orgId,
+        teamIds,
+        notify: t?.notify !== false,
+        title: cleanText(t?.title) || cleanText(t?.type) || "Task",
+        subtitle: cleanText(t?.notes) || (customerName || (clientId ? `Customer ${clientId}` : null)),
+        labels: ["rentCert"],
+        completedAtISO: t?.completedAt || null,
+        customerName,
+        grantName,
+        caseManagerName,
+        enrollmentName,
+      });
+    }
 
     // -------- PAYMENTS (actions & compliance) --------
     const prevPays: any[] = Array.isArray(before.payments) ? before.payments : [];
@@ -312,6 +344,7 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
         assignedToUid: null,
         assignedToGroup: "compliance",
         cmUid,
+        secondaryCmUid,
         orgId,
         teamIds,
         notify: typeof p?.notify === "boolean" ? !!p.notify : true,
@@ -349,6 +382,7 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
           assignedToUid: null,
           assignedToGroup: "compliance",
           cmUid,
+          secondaryCmUid,
           orgId,
           teamIds,
           notify: false,
@@ -388,6 +422,7 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
           assignedToUid: null,
           assignedToGroup: "compliance",
           cmUid,
+          secondaryCmUid,
           orgId,
           teamIds,
           notify: false,

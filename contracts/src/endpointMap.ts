@@ -864,6 +864,8 @@ import type {
   // list
   TInboxListMyQuery,
   TInboxListMyResp,
+  TInboxTasksDueListQuery,
+  TInboxTasksDueListResp,
   TInboxWorkloadListQuery,
   TInboxWorkloadListResp,
 
@@ -894,6 +896,8 @@ import type {
 
 export type InboxListMyQuery = TInboxListMyQuery;
 export type InboxListMyResp = TInboxListMyResp;
+export type InboxTasksDueListQuery = TInboxTasksDueListQuery;
+export type InboxTasksDueListResp = TInboxTasksDueListResp;
 export type InboxWorkloadListQuery = TInboxWorkloadListQuery;
 export type InboxWorkloadListResp = TInboxWorkloadListResp;
 export type InboxMetricsMyQuery = TInboxMetricsMyQuery;
@@ -1227,6 +1231,7 @@ export interface EndpointMap {
 
   // INBOX
   inboxListMy: { req: InboxListMyQuery; resp: InboxListMyResp };
+  inboxTasksDueList: { req: InboxTasksDueListQuery; resp: InboxTasksDueListResp };
   inboxWorkloadList: { req: InboxWorkloadListQuery; resp: InboxWorkloadListResp };
   inboxMetricsMy: { req: InboxMetricsMyQuery; resp: InboxMetricsMyResp };
   inboxSendInvite: { req: InboxSendInviteReq; resp: InboxEmailResp };

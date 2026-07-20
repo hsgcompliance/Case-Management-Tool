@@ -15,6 +15,7 @@ import {
   lastDayOfMonthISO,
   resolveCaseManagerUid,
 } from "./utils";
+import { resolveCustomerCmFields } from "../inbox/customerLookup";
 
 /* -------------------------------------------------------------------------- */
 /*                                FIRESTORE TRIGGERS                          */
@@ -473,6 +474,9 @@ export const onOtherTaskWrite = onDocumentWritten(
         ? "done"
         : "open";
 
+    const customerId = String(doc.customerId || "") || null;
+    const customerFields = customerId ? await resolveCustomerCmFields(customerId) : null;
+
     await ref.set(
       {
         utid,
@@ -482,13 +486,16 @@ export const onOtherTaskWrite = onDocumentWritten(
         teamIds: orgId ? [orgId] : [],
         sourcePath: `otherTasks/${id}`,
         sourceId: id,
+        clientId: customerId,
+        customerName: customerFields?.customerName || null,
         dueDate: due,
         dueMonth,
         assignedToUid,
         assignedToGroup,
         // Passthrough so CaseManagerLoadTool / other| resolution works
         assignedToUids,
-        cmUid: null,
+        cmUid: customerFields?.cmUid || null,
+        secondaryCmUid: customerFields?.secondaryCmUid || null,
         notify: typeof doc.notify === "boolean" ? doc.notify : true,
         title: String(doc.title || "Task"),
         note: doc.notes || null,

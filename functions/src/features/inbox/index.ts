@@ -2,6 +2,7 @@
 
 // HTTP handlers (callable via HTTPS)
 export {inboxListMy} from "./listMy";
+export {inboxTasksDueList} from "./tasksDue";
 export {inboxMetricsMy} from "./metricsMy";
 export {inboxSendInvite, inboxSendMonthlySummary} from "./emailer";
 export {inboxDigestPreview} from "./digestPreview";
