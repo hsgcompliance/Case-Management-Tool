@@ -14,6 +14,7 @@ import { MissingIntakeInfoBuilder } from "./MissingIntakeInfoBuilder";
 import { RentCertScheduleBuilder } from "./RentCertScheduleBuilder";
 import { ReferencePanel } from "./ReferencePanel";
 import { ExternalServiceIcon } from "./ui";
+import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
 
@@ -218,6 +219,7 @@ export function FormsCategoryView({
   // Bumped when the embed detects a submit → the Webhooks sidebar refetches
   // right away instead of waiting for its next poll tick.
   const [webhookRefresh, setWebhookRefresh] = useState(0);
+  const [webhookSnapshot, setWebhookSnapshot] = useState<IntakeWebhookSnapshot | null>(null);
 
   // Stable per-step callback: an inline arrow would re-run JotformEmbed's
   // message-listener effect every parent render and wipe its submitted state.
@@ -295,7 +297,7 @@ export function FormsCategoryView({
     webhooksSidebar ? (
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">{node}</div>
-        <WebhooksSidebar formIds={flowFormIds} refreshKey={webhookRefresh} />
+        <WebhooksSidebar formIds={flowFormIds} refreshKey={webhookRefresh} onSnapshot={setWebhookSnapshot} />
       </div>
     ) : (
       <>{node}</>
@@ -468,7 +470,7 @@ export function FormsCategoryView({
           </div>
         ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
-        {step.rentCertBuilder ? <RentCertScheduleBuilder /> : null}
+        {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} /> : null}
         {step.intakeTypeGate ? (
           intakeType ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
