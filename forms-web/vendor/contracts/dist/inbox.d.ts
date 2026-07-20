@@ -27,6 +27,7 @@ export declare const InboxDigestTypeSchema: z.ZodEnum<{
     rentalAssistance: "rentalAssistance";
     enrollments: "enrollments";
     caseload: "caseload";
+    grantPrograms: "grantPrograms";
     caseManagers: "caseManagers";
 }>;
 export type TInboxDigestType = z.infer<typeof InboxDigestTypeSchema>;
@@ -41,6 +42,7 @@ export declare const InboxDigestSubRecordSchema: z.ZodObject<{
         rentalAssistance: "rentalAssistance";
         enrollments: "enrollments";
         caseload: "caseload";
+        grantPrograms: "grantPrograms";
         caseManagers: "caseManagers";
     }> & z.core.$partial, z.ZodBoolean>;
     effective: z.ZodRecord<z.ZodEnum<{
@@ -48,8 +50,10 @@ export declare const InboxDigestSubRecordSchema: z.ZodObject<{
         rentalAssistance: "rentalAssistance";
         enrollments: "enrollments";
         caseload: "caseload";
+        grantPrograms: "grantPrograms";
         caseManagers: "caseManagers";
     }>, z.ZodBoolean>;
+    grantProgramIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export type TInboxDigestSubRecord = z.infer<typeof InboxDigestSubRecordSchema>;
 export declare const InboxItemSchema: z.ZodObject<{
@@ -184,6 +188,7 @@ export declare const InboxSendDigestNowBodySchema: z.ZodObject<{
         rentalAssistance: "rentalAssistance";
         enrollments: "enrollments";
         caseload: "caseload";
+        grantPrograms: "grantPrograms";
         caseManagers: "caseManagers";
     }>>>;
     months: z.ZodArray<z.ZodString>;
@@ -200,6 +205,7 @@ export declare const InboxScheduleDigestBodySchema: z.ZodObject<{
         rentalAssistance: "rentalAssistance";
         enrollments: "enrollments";
         caseload: "caseload";
+        grantPrograms: "grantPrograms";
         caseManagers: "caseManagers";
     }>>>;
     months: z.ZodArray<z.ZodString>;
@@ -267,11 +273,13 @@ export type TInboxDigestSubUpdateReq = {
     uid: string;
     digestType: TInboxDigestType;
     subscribed: boolean;
+    grantId?: string;
 };
 export type TInboxDigestSubUpdateResp = Ok<{
     uid: string;
     digestType: TInboxDigestType;
     subscribed: boolean;
+    grantId?: string;
 }>;
 export type TInboxDigestHtmlPreviewReq = {
     digestType?: TInboxDigestType;

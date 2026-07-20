@@ -32,6 +32,7 @@ import { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
 import { GrantAdminMenu } from "./GrantAdminMenu";
 import { getGrantFinancialVisibility, shouldRetainBudgetForGrantForm } from "./financialVisibility";
+import { GrantDigestSubscribeButton } from "./GrantDigestSubscribeButton";
 
 const num = (n: unknown, fallback = 0) => {
   const v = typeof n === "number" ? n : Number(n);
@@ -432,7 +433,6 @@ export default function GrantDetailModal({
   const [regenOpen, setRegenOpen] = useState(false);
   const [kindDialogOpen, setKindDialogOpen] = useState(false);
   const [pendingKind, setPendingKind] = useState<"grant" | "program" | null>(null);
-
   useEffect(() => {
     if (isCreate || !grant || editing) return;
     const next = deepClone(normalizeGrantForForm(grant));
@@ -707,7 +707,7 @@ export default function GrantDetailModal({
           m.financialConfig ??
           (nextKind === "program" ? DEFAULT_FINANCIAL_CONFIG.program : DEFAULT_FINANCIAL_CONFIG.grant),
       };
-      return shouldRetainBudgetForGrantForm(nextModel)
+      return shouldRetainBudgetForGrantForm(nextModel as Partial<Grant>)
         ? nextModel
         : { ...nextModel, budget: { total: 0, lineItems: [] } };
     });
@@ -730,11 +730,17 @@ export default function GrantDetailModal({
   const pageLabel = currentKind === "program" ? "Programs Page" : "Grants Page";
   const anyPinned = isPinned || isDashPinned;
 
-  const title = isCreate
+  const titleText = isCreate
     ? currentKind === "program" ? "New Program" : "New Grant"
     : editing
       ? `Edit: ${String(model.name || grant?.name || "(Unnamed)")}`
       : String(grant?.name || grant?.id || "Grant");
+  const title = !isCreate && fetchId ? (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="truncate">{titleText}</span>
+      <GrantDigestSubscribeButton grantId={fetchId} compact />
+    </div>
+  ) : titleText;
 
   const statusText = String(model?.status || grant?.status || "draft");
   const startText = String(model?.startDate || grant?.startDate || "");

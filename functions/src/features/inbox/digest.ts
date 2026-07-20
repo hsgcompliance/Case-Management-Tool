@@ -1,10 +1,10 @@
 import {onSchedule} from 'firebase-functions/v2/scheduler';
-import {authAdmin, db, isoNow, RUNTIME} from '../../core';
+import {authAdmin, db, isoNow, orgIdFromClaims, RUNTIME} from '../../core';
 import {monthKey} from './utils';
 import {isSubscribed, type DigestSubs} from './digestSubs';
 import {getDigestEnabledFlags} from './digestOrgConfig';
 
-type DigestType = 'caseload' | 'budget' | 'enrollments' | 'caseManagers' | 'rentalAssistance';
+type DigestType = 'caseload' | 'budget' | 'enrollments' | 'grantPrograms' | 'caseManagers' | 'rentalAssistance';
 
 type QueuedDigestJob = {
   digestType: DigestType;
@@ -12,6 +12,8 @@ type QueuedDigestJob = {
   email: string;
   recipientName: string;
   forUid?: string;
+  grantIds?: string[];
+  orgId?: string;
 };
 
 const DIGEST_WAVE_SIZE = 8;
@@ -55,6 +57,8 @@ async function enqueueAutoDigest(month: string, job: QueuedDigestJob, sendAt: st
           status: 'pending',
           cmUid: job.uid,
           forUid: job.forUid ?? null,
+          grantIds: job.grantIds ?? null,
+          orgId: job.orgId ?? null,
           targetEmail: job.email,
           recipientName: job.recipientName,
           months: [month],
@@ -107,6 +111,7 @@ export const sendMonthlyDigests = onSchedule(
         const name = u.displayName || u.email;
         const claims = (u.customClaims || {}) as Record<string, unknown>;
         const digestFlags = await getDigestEnabledFlags(claims);
+        const grantIds = Array.isArray(extras?.digestGrantProgramIds) ? extras.digestGrantProgramIds.map(String).filter(Boolean) : [];
 
         if (
           isCM &&
@@ -145,6 +150,10 @@ export const sendMonthlyDigests = onSchedule(
             recipientName: name,
             forUid: isCM && !isAdmin ? u.uid : undefined,
           });
+        }
+
+        if (grantIds.length && isSubscribed('grantPrograms', subs, roles, topRole) && digestFlags.grantPrograms !== false) {
+          jobs.push({digestType: 'grantPrograms', uid: u.uid, email: u.email, recipientName: name, grantIds, orgId: orgIdFromClaims(claims) || undefined});
         }
 
         if (

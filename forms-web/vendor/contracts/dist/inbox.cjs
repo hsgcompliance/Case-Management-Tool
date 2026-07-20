@@ -117,7 +117,7 @@ var InboxStatusEnum = import_zod2.z.enum(["open", "done"]);
 var InboxAssignedGroupEnum = import_zod2.z.enum(["admin", "casemanager", "compliance"]);
 var YYYY_MM = import_zod2.z.string().regex(/^\d{4}-\d{2}$/);
 var UrlOrHash = import_zod2.z.union([import_zod2.z.url(), import_zod2.z.literal("#")]);
-var InboxDigestTypeSchema = import_zod2.z.enum(["caseload", "budget", "enrollments", "caseManagers", "rentalAssistance"]);
+var InboxDigestTypeSchema = import_zod2.z.enum(["caseload", "budget", "enrollments", "grantPrograms", "caseManagers", "rentalAssistance"]);
 var InboxDigestSubRecordSchema = import_zod2.z.object({
   uid: import_zod2.z.string().min(1),
   email: import_zod2.z.email(),
@@ -125,7 +125,8 @@ var InboxDigestSubRecordSchema = import_zod2.z.object({
   roles: import_zod2.z.array(import_zod2.z.string()),
   topRole: import_zod2.z.string(),
   subs: import_zod2.z.partialRecord(InboxDigestTypeSchema, import_zod2.z.boolean()),
-  effective: import_zod2.z.record(InboxDigestTypeSchema, import_zod2.z.boolean())
+  effective: import_zod2.z.record(InboxDigestTypeSchema, import_zod2.z.boolean()),
+  grantProgramIds: import_zod2.z.array(import_zod2.z.string()).optional()
 });
 var IsoString = import_zod2.z.string().min(1);
 var InboxItemSchema = import_zod2.z.object({

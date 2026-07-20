@@ -10,6 +10,7 @@ import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItem
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import { todayISO, fmtMDY } from "@lib/date";
+import { GrantDigestSubscribeButton } from "@features/grants/GrantDigestSubscribeButton";
 import {
   findNextBudgetCycleStart,
   getBudgetAvailabilityState,
@@ -625,11 +626,12 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
           className="h-4 w-4 accent-sky-600"
           checked={selected}
           onChange={(event) => {
+            const nativeEvent = event.nativeEvent as MouseEvent;
             onSelectGesture?.(gid, {
               source: "checkbox",
-              shiftKey: event.nativeEvent.shiftKey,
-              ctrlKey: event.nativeEvent.ctrlKey,
-              metaKey: event.nativeEvent.metaKey,
+              shiftKey: nativeEvent.shiftKey,
+              ctrlKey: nativeEvent.ctrlKey,
+              metaKey: nativeEvent.metaKey,
             });
           }}
         />
@@ -797,16 +799,19 @@ export function BudgetCard({ grant, lineItemId, cardType = "standard", labelOver
             </>
           ) : null}
         </span>
-        <button
-          type="button"
-          className="btn btn-secondary btn-xs"
-          onClick={(event) => {
-            event.stopPropagation();
-            onManageBudget?.(gid);
-          }}
-        >
-          Budget Manager
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            className="btn btn-secondary btn-xs"
+            onClick={(event) => {
+              event.stopPropagation();
+              onManageBudget?.(gid);
+            }}
+          >
+            Budget Manager
+          </button>
+          <GrantDigestSubscribeButton grantId={gid} compact />
+        </div>
         <div className="hidden items-center gap-0.5">
           <button
             type="button"

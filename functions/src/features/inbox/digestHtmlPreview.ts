@@ -1,7 +1,7 @@
 // functions/src/features/inbox/digestHtmlPreview.ts
 // Returns the fully-rendered HTML for any digest type used by the admin preview.
 import {z} from 'zod';
-import {secureHandler, requireLevel} from '../../core';
+import {secureHandler, requireLevel, orgIdFromClaims, db} from '../../core';
 import {monthKey} from './utils';
 import {buildDigestData} from './digestCore';
 import {buildDigestHtml, buildDigestSubject} from './digestTemplate';
@@ -9,17 +9,20 @@ import {buildBudgetDigestData, buildBudgetDigestHtml} from './digestBudget';
 import {buildEnrollmentDigestData, buildEnrollmentDigestHtml} from './digestEnrollments';
 import {buildCaseManagerDigestData, buildCaseManagerDigestHtml} from './digestCaseManagers';
 import {buildRentalAssistanceDigestData, buildRentalAssistanceDigestHtml} from './digestRentalAssistance';
+import {buildGrantProgramDigestHtml} from './digestGrantPrograms';
 
 const QuerySchema = z.object({
-  digestType: z.enum(['caseload', 'budget', 'enrollments', 'caseManagers', 'rentalAssistance']).default('caseload'),
+  digestType: z.enum(['caseload', 'budget', 'enrollments', 'grantPrograms', 'caseManagers', 'rentalAssistance']).default('caseload'),
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   forUid: z.string().optional(),
+  grantIds: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
 export const inboxDigestHtmlPreview = secureHandler(
     async (req, res) => {
       const raw = req.method === 'GET' ? req.query : req.body;
-      const {digestType, month: rawMonth, forUid} = QuerySchema.parse(raw);
+      const {digestType, month: rawMonth, forUid, grantIds: rawGrantIds} = QuerySchema.parse(raw);
+      let grantIds = (Array.isArray(rawGrantIds) ? rawGrantIds : String(rawGrantIds || '').split(',')).filter(Boolean);
       const month = rawMonth || monthKey();
 
       const caller = (req as any).user;
@@ -54,6 +57,15 @@ export const inboxDigestHtmlPreview = secureHandler(
         const data = await buildCaseManagerDigestData({month, recipientName: 'Preview'});
         html = buildCaseManagerDigestHtml(data);
         subject = `Case Manager Digest - Preview (${data.rows.length} CMs)`;
+      } else if (digestType === 'grantPrograms') {
+        if (!grantIds.length) {
+          const extras = await db.collection('userExtras').doc(forUid || callerUid).get();
+          const stored = extras.exists ? extras.data()?.digestGrantProgramIds : [];
+          grantIds = Array.isArray(stored) ? stored.map(String).filter(Boolean) : [];
+        }
+        const built = await buildGrantProgramDigestHtml({month, grantIds, recipientName: 'Preview', orgId: orgIdFromClaims(caller) || undefined});
+        html = built.html;
+        subject = `Grant & Program Digest - Preview`;
       } else {
         requireLevel(caller, 'admin');
         const data = await buildRentalAssistanceDigestData({month, recipientName: 'Preview'});

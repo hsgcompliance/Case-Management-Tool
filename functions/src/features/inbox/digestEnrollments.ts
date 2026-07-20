@@ -30,13 +30,13 @@ type EnrollmentRow = {
   status: string;
 };
 
-type EnrollmentDigestData = {
+export type EnrollmentDigestData = {
   recipientName: string;
   month: string;
   active: EnrollmentRow[];
   newThisMonth: EnrollmentRow[];
   endingThisMonth: EnrollmentRow[];
-  endingNextMonth: EnrollmentRow[];
+  endingLastMonth: EnrollmentRow[];
   dashboardLink: string;
 };
 
@@ -78,16 +78,16 @@ export async function buildEnrollmentDigestData(opts: {
   forUid?: string;
   recipientName?: string;
   dashboardLink?: string;
+  grantIds?: string[];
 }): Promise<EnrollmentDigestData> {
-  const { month, forUid, recipientName = "Team", dashboardLink = DASHBOARD_LINK } = opts;
-  const nextMonth = monthAdd(month, 1);
-
-  const enrollments: Array<Record<string, unknown>> = (
+  const { month, forUid, recipientName = "Team", dashboardLink = DASHBOARD_LINK, grantIds } = opts;
+  const grantFilter = grantIds?.length ? new Set(grantIds) : null;
+  const allEnrollments: Array<Record<string, unknown>> = (
     await loadDigestEnrollments({
       caseManagerId: forUid,
-      activeOnly: true,
     })
   ).map((row) => ({ id: row.id, ...row.raw }));
+  const enrollments = allEnrollments.filter((row) => !grantFilter || grantFilter.has(String(row.grantId || '')));
 
   const customerIds = [
     ...new Set(
@@ -111,11 +111,11 @@ export async function buildEnrollmentDigestData(opts: {
     );
   }
 
-  const grantIds = [...new Set(enrollments.map((e) => String(e.grantId || "")).filter(Boolean))];
+  const lookupGrantIds = [...new Set(enrollments.map((e) => String(e.grantId || "")).filter(Boolean))];
   const grantMap = new Map<string, string>();
-  if (grantIds.length) {
+  if (lookupGrantIds.length) {
     await Promise.all(
-      chunks(grantIds, 30).map(async (chunk) => {
+      chunks(lookupGrantIds, 30).map(async (chunk) => {
         const snap = await db.collection("grants").where("__name__", "in", chunk).get();
         for (const doc of snap.docs) {
           const grant = doc.data() as Record<string, unknown>;
@@ -140,12 +140,12 @@ export async function buildEnrollmentDigestData(opts: {
     status: String(e.status || "active"),
   });
 
-  const active = enrollments.map(toRow).sort((a, b) => a.customerName.localeCompare(b.customerName));
+  const active = enrollments.filter((e) => e.active === true || ['active', 'open'].includes(String(e.status || '').toLowerCase())).map(toRow).sort((a, b) => a.customerName.localeCompare(b.customerName));
   const newThisMonth = active.filter((e) => e.startDate.startsWith(month));
-  const endingThisMonth = active.filter((e) => e.endDate.startsWith(month));
-  const endingNextMonth = active.filter((e) => e.endDate.startsWith(nextMonth));
+  const endingThisMonth = enrollments.map(toRow).filter((e) => e.endDate.startsWith(month));
+  const endingLastMonth = enrollments.map(toRow).filter((e) => e.endDate.startsWith(monthAdd(month, -1)));
 
-  return { recipientName, month, active, newThisMonth, endingThisMonth, endingNextMonth, dashboardLink };
+  return { recipientName, month, active, newThisMonth, endingThisMonth, endingLastMonth, dashboardLink };
 }
 
 function enrollmentTable(rows: EnrollmentRow[], showEnd = false): string {
@@ -180,7 +180,7 @@ function section(title: string, badge: string, badgeBg: string, badgeColor: stri
 }
 
 export function buildEnrollmentDigestHtml(data: EnrollmentDigestData): string {
-  const { recipientName, month, active, newThisMonth, endingThisMonth, endingNextMonth, dashboardLink } = data;
+  const { recipientName, month, active, newThisMonth, endingThisMonth, endingLastMonth, dashboardLink } = data;
   const label = monthLabel(month);
 
   return `<!DOCTYPE html>
@@ -200,7 +200,7 @@ export function buildEnrollmentDigestHtml(data: EnrollmentDigestData): string {
           <table cellpadding="0" cellspacing="0"><tr>
             <td style="padding-right:20px;text-align:center">
               <div style="font-size:22px;font-weight:700;color:${BRAND}">${active.length}</div>
-              <div style="font-size:11px;color:${MUTED}">Active</div>
+              <div style="font-size:11px;color:${MUTED}">Total Enrollments</div>
             </td>
             <td style="padding-right:20px;text-align:center">
               <div style="font-size:22px;font-weight:700;color:${GREEN_TEXT}">${newThisMonth.length}</div>
@@ -211,8 +211,8 @@ export function buildEnrollmentDigestHtml(data: EnrollmentDigestData): string {
               <div style="font-size:11px;color:${MUTED}">Ending This Month</div>
             </td>
             <td style="text-align:center">
-              <div style="font-size:22px;font-weight:700;color:${MUTED}">${endingNextMonth.length}</div>
-              <div style="font-size:11px;color:${MUTED}">Ending Next Month</div>
+              <div style="font-size:22px;font-weight:700;color:${MUTED}">${endingLastMonth.length}</div>
+              <div style="font-size:11px;color:${MUTED}">Ended Last Month</div>
             </td>
           </tr></table>
         </td></tr>
@@ -220,7 +220,7 @@ export function buildEnrollmentDigestHtml(data: EnrollmentDigestData): string {
         <tr><td style="background:${BG_PAGE};padding:20px 28px">
           ${newThisMonth.length ? section("New This Month", String(newThisMonth.length), GREEN_BG, GREEN_TEXT, enrollmentTable(newThisMonth)) : ""}
           ${endingThisMonth.length ? section("Ending This Month", String(endingThisMonth.length), AMBER_BG, AMBER_TEXT, enrollmentTable(endingThisMonth, true)) : ""}
-          ${endingNextMonth.length ? section("Ending Next Month", String(endingNextMonth.length), BLUE_BG, BLUE_TEXT, enrollmentTable(endingNextMonth, true)) : ""}
+          ${endingLastMonth.length ? section("Ended Last Month", String(endingLastMonth.length), BLUE_BG, BLUE_TEXT, enrollmentTable(endingLastMonth, true)) : ""}
           ${section("All Active Enrollments", String(active.length), BLUE_BG, BLUE_TEXT, enrollmentTable(active, true))}
         </td></tr>
 

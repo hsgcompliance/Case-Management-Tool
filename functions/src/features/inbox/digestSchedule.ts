@@ -15,11 +15,12 @@ import {buildAndSendBudgetDigest} from './digestBudget';
 import {buildAndSendEnrollmentDigest} from './digestEnrollments';
 import {buildAndSendCaseManagerDigest} from './digestCaseManagers';
 import {buildAndSendRentalAssistanceDigest} from './digestRentalAssistance';
+import {buildAndSendGrantProgramDigest} from './digestGrantPrograms';
 import {sendHtmlEmail} from './emailer';
 import {ScheduleDigestBody} from './schemas';
 import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
-type DigestType = 'caseload' | 'budget' | 'enrollments' | 'caseManagers' | 'rentalAssistance';
+type DigestType = 'caseload' | 'budget' | 'enrollments' | 'grantPrograms' | 'caseManagers' | 'rentalAssistance';
 
 const PROCESSING_LEASE_MINUTES = 30;
 const MAX_DIGESTS_PER_RUN = 12;
@@ -134,6 +135,8 @@ async function deliverScheduledDigest(_docId: string, row: Record<string, unknow
   const message = String(row.message || '').trim() || undefined;
   const forUid = String(row.forUid || '').trim() || undefined;
   const recipientName = storedName || userContact.displayName || to;
+  const grantIds = Array.isArray(row.grantIds) ? row.grantIds.map(String).filter(Boolean) : [];
+  const orgId = String(row.orgId || '').trim() || undefined;
 
   if (digestType === 'caseload' && combine && months.length > 1) {
     await sendCombinedCaseloadDigest({
@@ -166,6 +169,12 @@ async function deliverScheduledDigest(_docId: string, row: Record<string, unknow
 
     if (digestType === 'enrollments') {
       await buildAndSendEnrollmentDigest(to, {month, forUid, recipientName});
+      continue;
+    }
+
+    if (digestType === 'grantPrograms') {
+      if (!grantIds.length) throw new Error('missing_grant_ids');
+      await buildAndSendGrantProgramDigest(to, {month, grantIds, recipientName, orgId});
       continue;
     }
 

@@ -20,7 +20,7 @@ export interface DashboardToolDefinition<TFilterState = unknown, TSelection = un
    * If set, a "Subscribe" toggle button appears in the toolbar that calls
    * inboxDigestSubUpdate for the current user's own subscription to this digest type.
    */
-  digestType?: "caseload" | "budget" | "enrollments" | "caseManagers";
+  digestType?: "caseload" | "budget" | "enrollments" | "grantPrograms" | "caseManagers";
   createFilterState?: () => TFilterState;
   shouldRenderSidebar?: (ctx: {
     filterState: TFilterState;

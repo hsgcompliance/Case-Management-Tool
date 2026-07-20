@@ -12,7 +12,7 @@ import { BudgetDigestConfigEditor } from "@features/budget/BudgetDigestConfigEdi
 
 // Types
 
-type DigestType = "caseload" | "budget" | "enrollments" | "caseManagers" | "rentalAssistance";
+type DigestType = "caseload" | "budget" | "enrollments" | "grantPrograms" | "caseManagers" | "rentalAssistance";
 
 type DigestSubRecord = {
   uid: string;
@@ -22,6 +22,7 @@ type DigestSubRecord = {
   topRole: string;
   subs: Partial<Record<DigestType, boolean>>;
   effective: Record<DigestType, boolean>;
+  grantProgramIds?: string[];
 };
 
 type UserListItem = {
@@ -40,6 +41,7 @@ const DIGEST_DEFS: { type: DigestType; label: string; schedule: string }[] = [
   { type: "caseload",     label: "Caseload",      schedule: "1st of each month, 7 AM MT" },
   { type: "budget",       label: "Budget",         schedule: "1st of each month, 7 AM MT" },
   { type: "enrollments",  label: "Enrollments",    schedule: "1st of each month, 7 AM MT" },
+  { type: "grantPrograms", label: "Grant & Programs", schedule: "1st of each month, 7 AM MT" },
   { type: "caseManagers", label: "Case Managers",  schedule: "1st of each month, 7 AM MT" },
   { type: "rentalAssistance", label: "Rental Assistance", schedule: "1st of each month, 7 AM MT" },
 ];
@@ -476,7 +478,7 @@ export function EmailDigestMain() {
     if (sendBlockedReason) { toast(sendBlockedReason, { type: "error" }); return; }
     setSending(true);
     try {
-      const body: Parameters<typeof Inbox.sendDigestNow>[0] = { months: [month], digestType: activeTab };
+      const body: Parameters<typeof Inbox.sendDigestNow>[0] = { months: [month], digestType: activeTab, combine: false };
       if (forUid) body.cmUid = forUid;
       const resp = await Inbox.sendDigestNow(body);
       const { sent = 0, skipped = 0, failed = 0 } = resp || {};
@@ -556,13 +558,13 @@ export function EmailDigestMain() {
 
         {isAdmin && orgConfig && (
           <div className="flex shrink-0 items-center gap-2">
-            {activeTab === "budget" ? (
+            {activeTab === "budget" || activeTab === "grantPrograms" ? (
               <button
                 type="button"
                 onClick={() => setShowBudgetConfig(true)}
                 className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
               >
-                Budget Config
+                Digest Display Config
               </button>
             ) : null}
             <button
@@ -587,7 +589,7 @@ export function EmailDigestMain() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <div className="text-sm font-semibold text-slate-900">Budget Digest Settings</div>
+              <div className="text-sm font-semibold text-slate-900">Digest Display Settings</div>
               <button
                 type="button"
                 className="rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"

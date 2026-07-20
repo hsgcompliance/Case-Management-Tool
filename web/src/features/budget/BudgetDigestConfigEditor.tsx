@@ -4,6 +4,7 @@ import React from "react";
 import type { OrgDisplayConfig } from "@hooks/useOrgConfig";
 
 type DigestConfig = NonNullable<OrgDisplayConfig["budgetDisplay"]["digest"]>;
+type DetailConfig = Required<NonNullable<NonNullable<OrgDisplayConfig["grantProgramDigest"]>["details"]>>;
 
 const DEFAULT_DIGEST_CONFIG: Required<DigestConfig> = {
   showOverallSummary: true,
@@ -11,6 +12,15 @@ const DEFAULT_DIGEST_CONFIG: Required<DigestConfig> = {
   mainDisplayLevel: "grant",
   expandNestedRowsByDefault: false,
   groupChildrenUnderParentGrant: true,
+};
+
+const DEFAULT_DETAIL_CONFIG: DetailConfig = {
+  showDescription: true,
+  showEligibility: true,
+  showCodes: true,
+  showServices: true,
+  showDates: true,
+  showDuration: true,
 };
 
 function normalizeDigestConfig(config: OrgDisplayConfig | null | undefined): Required<DigestConfig> {
@@ -59,9 +69,11 @@ export function BudgetDigestConfigEditor({
   compact?: boolean;
 }) {
   const [draft, setDraft] = React.useState<Required<DigestConfig>>(() => normalizeDigestConfig(config));
+  const [details, setDetails] = React.useState<DetailConfig>(() => ({...DEFAULT_DETAIL_CONFIG, ...(config?.grantProgramDigest?.details ?? {})}));
 
   React.useEffect(() => {
     setDraft(normalizeDigestConfig(config));
+    setDetails({...DEFAULT_DETAIL_CONFIG, ...(config?.grantProgramDigest?.details ?? {})});
   }, [config]);
 
   const canSave = !!config && !saving;
@@ -78,6 +90,10 @@ export function BudgetDigestConfigEditor({
         ...config.budgetDisplay,
         digest: draft,
       },
+      grantProgramDigest: {
+        ...config.grantProgramDigest,
+        details,
+      },
     });
   };
 
@@ -85,9 +101,9 @@ export function BudgetDigestConfigEditor({
     <section className={compact ? "space-y-3" : "rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm"}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-slate-900">Budget Digest Configuration</h2>
+          <h2 className="text-base font-semibold text-slate-900">Digest Display Configuration</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-            Controls how grant totals, line items, and split goals appear in the Budget Digest.
+            Controls budget detail plus the descriptive grant/program information used by organization digests.
           </p>
         </div>
         <button
@@ -145,6 +161,23 @@ export function BudgetDigestConfigEditor({
           <option value="split">Split goal / cycle</option>
         </select>
       </label>
+
+      <div className="border-t border-slate-200 pt-4">
+        <h3 className="text-sm font-semibold text-slate-900">Grant &amp; Program Details</h3>
+        <p className="mt-1 text-xs leading-5 text-slate-500">Choose which descriptive fields appear for subscribed grants and programs in the combined digest.</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {([
+            ["showDescription", "Description", "Include the staff-facing grant or program description."],
+            ["showEligibility", "Eligibility", "Include configured eligibility criteria."],
+            ["showCodes", "Grant, program, and HMIS codes", "Include available grant, program/FE, HMIS, and contract codes."],
+            ["showServices", "Services provided", "Include the configured services offered by the grant or program."],
+            ["showDates", "Start and end dates", "Include the grant/program operating dates."],
+            ["showDuration", "Duration", "Include configured duration and maximum-length guidance."],
+          ] as const).map(([key, label, description]) => (
+            <ToggleRow key={key} label={label} description={description} checked={details[key]} onChange={(checked) => setDetails((current) => ({...current, [key]: checked}))} />
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
