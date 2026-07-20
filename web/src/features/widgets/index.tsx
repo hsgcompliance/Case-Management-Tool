@@ -1955,7 +1955,7 @@ export const DASHBOARD_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
     id: "case-manager-load",
     title: "Case Managers",
     defaultPinned: true,
-    createFilterState: () => ({ month: monthKeyOffsetDays(5), showLegacyCols: true } satisfies CaseManagerLoadFilterState),
+    createFilterState: () => ({ month: monthKeyOffsetDays(5), showLegacyCols: false } satisfies CaseManagerLoadFilterState),
     ToolTopbar: CaseManagerLoadTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Sidebar: CaseManagerLoadSidebar as AnyDashboardToolDefinition["Sidebar"],
     Main: CaseManagerLoadMain as AnyDashboardToolDefinition["Main"],
