@@ -1,10 +1,11 @@
 // functions/src/features/inbox/digestHttp.ts
-import {secureHandler, authAdmin, db, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN} from '../../core';
+import {secureHandler, authAdmin, db, orgIdFromClaims, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN} from '../../core';
 import {buildAndSendDigest} from './digestCore';
 import {buildAndSendBudgetDigest} from './digestBudget';
 import {buildAndSendEnrollmentDigest} from './digestEnrollments';
 import {buildAndSendCaseManagerDigest} from './digestCaseManagers';
 import {buildAndSendRentalAssistanceDigest} from './digestRentalAssistance';
+import {buildAndSendGrantProgramDigest} from './digestGrantPrograms';
 import {DigestSendNowBody} from './schemas';
 import {getDigestEnabledFlags} from './digestOrgConfig';
 import {isSubscribed, type DigestSubs} from './digestSubs';
@@ -25,6 +26,12 @@ async function getDigestSubs(uid: string): Promise<DigestSubs> {
   const snap = await db.collection('userExtras').doc(uid).get();
   if (!snap.exists) return {};
   return ((snap.data() as Record<string, unknown>)?.digestSubs || {}) as DigestSubs;
+}
+
+async function getDigestGrantIds(uid: string): Promise<string[]> {
+  const snap = await db.collection('userExtras').doc(uid).get();
+  const ids = snap.exists ? (snap.data() as Record<string, unknown>)?.digestGrantProgramIds : [];
+  return Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
 }
 
 export const inboxSendDigestNow = secureHandler(
@@ -48,6 +55,7 @@ export const inboxSendDigestNow = secureHandler(
           if (digestType === 'caseload') return isCM;
           if (digestType === 'budget') return isAdmin || isCompliance;
           if (digestType === 'enrollments') return isCM || isAdmin;
+          if (digestType === 'grantPrograms') return true;
           if (digestType === 'caseManagers') return isAdmin || isCompliance;
           if (digestType === 'rentalAssistance') return isAdmin || isCompliance;
           return false;
@@ -93,6 +101,13 @@ export const inboxSendDigestNow = secureHandler(
                 recipientName: name,
                 force,
               });
+            } else if (digestType === 'grantPrograms') {
+              const grantIds = await getDigestGrantIds(u.uid);
+              if (!grantIds.length) {
+                results.push({uid: u.uid, email: u.email, month, ok: true, skipped: true, error: 'no_grant_subscriptions'});
+                continue;
+              }
+              r = await buildAndSendGrantProgramDigest(u.email, {month, grantIds, recipientName: name, force, orgId: orgIdFromClaims(u.claims) || undefined});
             } else if (digestType === 'caseManagers') {
               r = await buildAndSendCaseManagerDigest(u.email, {month, recipientName: name, force});
             } else {

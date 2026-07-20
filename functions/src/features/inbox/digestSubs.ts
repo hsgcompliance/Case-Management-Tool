@@ -6,8 +6,8 @@ import {secureHandler, db, authAdmin, isoNow, requireLevel} from '../../core';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type DigestType = 'caseload' | 'budget' | 'enrollments' | 'caseManagers' | 'rentalAssistance';
-export const ALL_DIGEST_TYPES: DigestType[] = ['caseload', 'budget', 'enrollments', 'caseManagers', 'rentalAssistance'];
+export type DigestType = 'caseload' | 'budget' | 'enrollments' | 'grantPrograms' | 'caseManagers' | 'rentalAssistance';
+export const ALL_DIGEST_TYPES: DigestType[] = ['caseload', 'budget', 'enrollments', 'grantPrograms', 'caseManagers', 'rentalAssistance'];
 
 export type DigestSubs = Partial<Record<DigestType, boolean>>;
 
@@ -18,6 +18,7 @@ export type DigestSubRecord = {
   roles: string[];
   topRole: string;
   subs: DigestSubs;
+  grantProgramIds: string[];
 };
 
 // ── Default subscriptions ─────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ export function defaultSubFor(type: DigestType, roles: string[], topRole: string
     case 'caseload': return isCM;
     case 'budget': return isAdmin || isCompliance;
     case 'enrollments': return isCM || isAdmin;
+    case 'grantPrograms': return false;
     case 'caseManagers': return isAdmin || isCompliance;
     case 'rentalAssistance': return isAdmin || isCompliance;
   }
@@ -64,6 +66,8 @@ async function buildSubRecord(u: {
   const subs: DigestSubs = extrasSnap.exists ?
     ((extrasSnap.data() as any)?.digestSubs || {}) :
     {};
+  const grantProgramIds = extrasSnap.exists && Array.isArray((extrasSnap.data() as any)?.digestGrantProgramIds) ?
+    (extrasSnap.data() as any).digestGrantProgramIds.map(String).filter(Boolean) : [];
   return {
     uid: u.uid,
     email: u.email || '',
@@ -71,6 +75,7 @@ async function buildSubRecord(u: {
     roles,
     topRole,
     subs,
+    grantProgramIds,
   };
 }
 
@@ -78,7 +83,10 @@ async function buildSubRecord(u: {
 
 export const inboxDigestSubsGet = secureHandler(
     async (req, res) => {
-      const {users} = await authAdmin.listUsers();
+      const caller = (req as any).user;
+      const callerUid = String(caller?.uid || '');
+      const admin = ['admin', 'dev', 'org_dev'].includes(String(caller?.topRole || ''));
+      const users = admin ? (await authAdmin.listUsers()).users : [await authAdmin.getUser(callerUid)];
 
       // Filter to users who have at least one relevant role
       const relevant = users.filter((u) => {
@@ -109,20 +117,21 @@ export const inboxDigestSubsGet = secureHandler(
 
       res.status(200).json({ok: true, records: annotated});
     },
-    {auth: 'admin', methods: ['GET', 'OPTIONS']},
+    {auth: 'viewer', methods: ['GET', 'OPTIONS']},
 );
 
 // ── POST /inboxDigestSubUpdate ────────────────────────────────────────────────
 
 const SubUpdateBody = z.object({
   uid: z.string().min(1),
-  digestType: z.enum(['caseload', 'budget', 'enrollments', 'caseManagers', 'rentalAssistance']),
+  digestType: z.enum(['caseload', 'budget', 'enrollments', 'grantPrograms', 'caseManagers', 'rentalAssistance']),
   subscribed: z.boolean(),
+  grantId: z.string().min(1).optional(),
 });
 
 export const inboxDigestSubUpdate = secureHandler(
     async (req, res) => {
-      const {uid, digestType, subscribed} = SubUpdateBody.parse(req.body || {});
+      const {uid, digestType, subscribed, grantId} = SubUpdateBody.parse(req.body || {});
       const caller = (req as any).user;
       const callerUid = String(caller?.uid || '');
 
@@ -132,12 +141,20 @@ export const inboxDigestSubUpdate = secureHandler(
       }
 
       const ref = db.collection('userExtras').doc(uid);
-      await ref.set(
-          {digestSubs: {[digestType]: subscribed}, updatedAt: isoNow()},
-          {merge: true},
-      );
+      if (digestType === 'grantPrograms') {
+        if (!grantId) throw new Error('grantId_required');
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          const current = snap.exists && Array.isArray(snap.data()?.digestGrantProgramIds) ?
+            snap.data()!.digestGrantProgramIds.map(String) : [];
+          const next = subscribed ? Array.from(new Set([...current, grantId])) : current.filter((id: string) => id !== grantId);
+          tx.set(ref, {digestGrantProgramIds: next, digestSubs: {grantPrograms: next.length > 0}, updatedAt: isoNow()}, {merge: true});
+        });
+      } else {
+        await ref.set({digestSubs: {[digestType]: subscribed}, updatedAt: isoNow()}, {merge: true});
+      }
 
-      res.status(200).json({ok: true, uid, digestType, subscribed});
+      res.status(200).json({ok: true, uid, digestType, subscribed, ...(grantId ? {grantId} : {})});
     },
     {auth: 'user', methods: ['POST', 'OPTIONS']},
 );

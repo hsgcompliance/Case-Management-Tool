@@ -15,9 +15,9 @@ async function resolveImplicitOrgId(): Promise<string | null> {
   return String(snap.docs[0]?.id || "").trim() || null;
 }
 
-export async function getDigestEnabledFlags(
+export async function getDigestDisplayConfigValue(
   claimsOrOrgId?: Record<string, unknown> | string | null,
-): Promise<Partial<Record<DigestType, boolean>>> {
+): Promise<Record<string, unknown>> {
   const explicitOrgId =
     typeof claimsOrOrgId === "string"
       ? String(claimsOrOrgId || "").trim() || null
@@ -41,6 +41,13 @@ export async function getDigestEnabledFlags(
       ? (displayDoc.value as Record<string, unknown>)
       : {};
 
+  return value;
+}
+
+export async function getDigestEnabledFlags(
+  claimsOrOrgId?: Record<string, unknown> | string | null,
+): Promise<Partial<Record<DigestType, boolean>>> {
+  const value = await getDigestDisplayConfigValue(claimsOrOrgId);
   const digestsEnabled =
     typeof value.digestsEnabled === "object" && value.digestsEnabled && !Array.isArray(value.digestsEnabled)
       ? (value.digestsEnabled as Partial<Record<DigestType, boolean>>)

@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useCallback, useDeferredValue, useMemo, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { toast } from "@lib/toast";
+import { GrantDigestSubscribeButton } from "../GrantDigestSubscribeButton";
 import ActionMenu, { type ActionItem } from "@entities/ui/ActionMenu";
 import { useEnrollments } from "@hooks/useEnrollments";
 import { useGrantActivity } from "@hooks/useGrants";
@@ -648,7 +650,7 @@ function normalizeSplitGoalsForLineItem(lineItem: any, num: (n: unknown, fallbac
       projectedBalance: moneyFromCents(moneyCents(planned) - moneyCents(spent) - moneyCents(projected)),
     };
   });
-  const splitTotal = moneyFromCents(goals.reduce((sum, goal) => sum + moneyCents(goal.amount), 0));
+  const splitTotal = moneyFromCents(goals.reduce((sum: number, goal: {amount?: unknown}) => sum + moneyCents(goal.amount), 0));
   const variance = moneyFromCents(moneyCents(amount) - moneyCents(splitTotal));
   const needsWarning = mode !== "none" && goals.length > 0 && Math.abs(moneyCents(variance)) > 0;
   return {
@@ -1519,15 +1521,18 @@ export function BudgetActivityTab({
             Billing mode: line-item amounts are reference/category values for reporting. They are not grant budget caps.
           </div>
         )}
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => setSandboxOpen(true)}
-          disabled={!grantId}
-          title={grantId ? tip("Open the canonical Budget Manager for this grant.") : tip("Save the grant before opening Budget Manager.")}
-        >
-          Open Budget Manager
-        </button>
+        <div className="flex items-center gap-2">
+          <GrantDigestSubscribeButton grantId={grantId} />
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setSandboxOpen(true)}
+            disabled={!grantId}
+            title={grantId ? tip("Open the canonical Budget Manager for this grant.") : tip("Save the grant before opening Budget Manager.")}
+          >
+            Open Budget Manager
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5">

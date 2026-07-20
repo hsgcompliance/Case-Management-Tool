@@ -30,7 +30,7 @@ export type InboxAssignedGroup = z.infer<typeof InboxAssignedGroupEnum>;
 
 const YYYY_MM = z.string().regex(/^\d{4}-\d{2}$/);
 const UrlOrHash = z.union([z.url(), z.literal("#")]);
-export const InboxDigestTypeSchema = z.enum(["caseload", "budget", "enrollments", "caseManagers", "rentalAssistance"]);
+export const InboxDigestTypeSchema = z.enum(["caseload", "budget", "enrollments", "grantPrograms", "caseManagers", "rentalAssistance"]);
 export type TInboxDigestType = z.infer<typeof InboxDigestTypeSchema>;
 export const InboxDigestSubRecordSchema = z.object({
   uid: z.string().min(1),
@@ -40,6 +40,7 @@ export const InboxDigestSubRecordSchema = z.object({
   topRole: z.string(),
   subs: z.partialRecord(InboxDigestTypeSchema, z.boolean()),
   effective: z.record(InboxDigestTypeSchema, z.boolean()),
+  grantProgramIds: z.array(z.string()).optional(),
 });
 export type TInboxDigestSubRecord = z.infer<typeof InboxDigestSubRecordSchema>;
 
@@ -242,11 +243,13 @@ export type TInboxDigestSubUpdateReq = {
   uid: string;
   digestType: TInboxDigestType;
   subscribed: boolean;
+  grantId?: string;
 };
 export type TInboxDigestSubUpdateResp = Ok<{
   uid: string;
   digestType: TInboxDigestType;
   subscribed: boolean;
+  grantId?: string;
 }>;
 export type TInboxDigestHtmlPreviewReq = {
   digestType?: TInboxDigestType;

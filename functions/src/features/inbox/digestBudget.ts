@@ -65,7 +65,7 @@ type GrantBudgetRow = {
   }>;
 };
 
-type BudgetDigestData = {
+export type BudgetDigestData = {
   recipientName: string;
   month: string;
   grants: GrantBudgetRow[];
@@ -111,7 +111,9 @@ export function lineItemDisplayConfig(grant: Record<string, unknown>, lineItem: 
   const itemDisplay = (lineItem.display && typeof lineItem.display === "object" ? lineItem.display : {}) as Record<string, unknown>;
   const mainLevel = String(itemDisplay.mainDisplayLevel || grantDigest.mainDisplayLevel || "grant");
   return {
-    appearInDigest: itemDisplay.displayOnDigest === true || (itemDisplay.displayOnDigest === undefined && itemDisplay.appearInDigest === true),
+    appearInDigest: itemDisplay.displayOnDigest === true ||
+      (itemDisplay.displayOnDigest === undefined && itemDisplay.appearInDigest === true) ||
+      (itemDisplay.displayOnDigest === undefined && itemDisplay.appearInDigest === undefined && (mainLevel === "lineItem" || mainLevel === "split")),
     showLineItems: itemDisplay.showLineItemTotal !== false && (mainLevel === "lineItem" || mainLevel === "split" || itemDisplay.showLineItemTotal === true || itemDisplay.showSplitGoals === true),
     showSplitGoals: itemDisplay.showSplitGoals === true || mainLevel === "split",
     digestDisplayMode: ["currentCycle", "total", "both"].includes(String(itemDisplay.digestDisplayMode)) ? String(itemDisplay.digestDisplayMode) : "total",
@@ -142,8 +144,10 @@ export async function buildBudgetDigestData(opts: {
   month: string;
   recipientName?: string;
   dashboardLink?: string;
+  grantIds?: string[];
 }): Promise<BudgetDigestData> {
-  const { month, recipientName = "Team", dashboardLink = DASHBOARD_LINK } = opts;
+  const { month, recipientName = "Team", dashboardLink = DASHBOARD_LINK, grantIds } = opts;
+  const grantFilter = grantIds?.length ? new Set(grantIds) : null;
 
   const grantsSnap = await db
     .collection("grants")
@@ -154,6 +158,7 @@ export async function buildBudgetDigestData(opts: {
 
   for (const doc of grantsSnap.docs) {
     const g = doc.data() as Record<string, unknown>;
+    if (grantFilter && !grantFilter.has(doc.id)) continue;
     const capabilities = getGrantFinancialCapabilities(g);
     if (!capabilities.drawsDownBudget) continue; // budget digest is spend-down only
     if (!(g.pins as any)?.digest?.enabled) continue; // must have budget digest pin enabled
@@ -171,14 +176,19 @@ export async function buildBudgetDigestData(opts: {
     const digestDisplay = ((g.budget as any)?.digestDisplay ?? {}) as Record<string, unknown>;
     const mainLevel = String(digestDisplay.mainDisplayLevel || "grant");
     const showGrantTotals = digestDisplay.showGrantTotals !== false;
-    const showLineItems = mainLevel === "lineItem" || mainLevel === "split";
+    const hasExplicitItemSelection = (Array.isArray((g.budget as any)?.lineItems) ? (g.budget as any).lineItems : [])
+      .some((li: Record<string, unknown>) => lineItemDisplayConfig(g, li).appearInDigest);
+    const showLineItems = mainLevel === "lineItem" || mainLevel === "split" || hasExplicitItemSelection;
     const showSplitGoals = mainLevel === "split";
 
     // Skip grants with no budget configured
     if (!total) continue;
 
     const lineItems = (Array.isArray((g.budget as any)?.lineItems) ? (g.budget as any).lineItems : [])
-      .filter((li: Record<string, unknown>) => lineItemDisplayConfig(g, li).appearInDigest)
+      .filter((li: Record<string, unknown>) => {
+        const config = lineItemDisplayConfig(g, li);
+        return config.appearInDigest || (!hasExplicitItemSelection && (mainLevel === "lineItem" || mainLevel === "split"));
+      })
       .map((li: Record<string, unknown>) => {
         const liTotal = Number(li.amount || 0);
         const liSpent = Number(li.spent || 0);

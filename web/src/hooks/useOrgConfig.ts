@@ -92,6 +92,16 @@ export type OrgDisplayConfig = {
   };
   /** Per-digest-type enabled flag. Missing key = enabled. */
   digestsEnabled: Record<string, boolean>;
+  grantProgramDigest?: {
+    details?: {
+      showDescription?: boolean;
+      showEligibility?: boolean;
+      showCodes?: boolean;
+      showServices?: boolean;
+      showDates?: boolean;
+      showDuration?: boolean;
+    };
+  };
   /** System-level invoice tool presets set by admins, shown to all users. */
   spendingPresets?: SpendingPreset[];
   /** Secret-games admin configuration. */
@@ -140,6 +150,16 @@ const DEFAULT_CONFIG: OrgDisplayConfig = {
     },
   },
   digestsEnabled: {},
+  grantProgramDigest: {
+    details: {
+      showDescription: true,
+      showEligibility: true,
+      showCodes: true,
+      showServices: true,
+      showDates: true,
+      showDuration: true,
+    },
+  },
   programDisplay: {
     groups: [
       { key: "youth", label: "Youth", grantIds: [], populations: ["youth"] },
@@ -224,6 +244,14 @@ async function fetchOrgConfig(): Promise<OrgConfigQueryResult> {
       },
     },
     digestsEnabled: (value?.digestsEnabled as Record<string, boolean> | undefined) ?? {},
+    grantProgramDigest: {
+      ...DEFAULT_CONFIG.grantProgramDigest,
+      ...(value?.grantProgramDigest ?? {}),
+      details: {
+        ...DEFAULT_CONFIG.grantProgramDigest?.details,
+        ...(value?.grantProgramDigest?.details ?? {}),
+      },
+    },
     programDisplay: {
       groups: value?.programDisplay?.groups ?? DEFAULT_CONFIG.programDisplay.groups,
       items: value?.programDisplay?.items ?? {},

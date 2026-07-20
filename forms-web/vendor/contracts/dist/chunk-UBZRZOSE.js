@@ -42,7 +42,7 @@ var InboxStatusEnum = z.enum(["open", "done"]);
 var InboxAssignedGroupEnum = z.enum(["admin", "casemanager", "compliance"]);
 var YYYY_MM = z.string().regex(/^\d{4}-\d{2}$/);
 var UrlOrHash = z.union([z.url(), z.literal("#")]);
-var InboxDigestTypeSchema = z.enum(["caseload", "budget", "enrollments", "caseManagers", "rentalAssistance"]);
+var InboxDigestTypeSchema = z.enum(["caseload", "budget", "enrollments", "grantPrograms", "caseManagers", "rentalAssistance"]);
 var InboxDigestSubRecordSchema = z.object({
   uid: z.string().min(1),
   email: z.email(),
@@ -50,7 +50,8 @@ var InboxDigestSubRecordSchema = z.object({
   roles: z.array(z.string()),
   topRole: z.string(),
   subs: z.partialRecord(InboxDigestTypeSchema, z.boolean()),
-  effective: z.record(InboxDigestTypeSchema, z.boolean())
+  effective: z.record(InboxDigestTypeSchema, z.boolean()),
+  grantProgramIds: z.array(z.string()).optional()
 });
 var IsoString = z.string().min(1);
 var InboxItemSchema = z.object({
