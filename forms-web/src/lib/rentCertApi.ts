@@ -49,6 +49,7 @@ export type RentCertApplyRow = {
   amount: number;
   dueDate: string; // YYYY-MM-DD
   label?: string;
+  vendor?: string;
 };
 
 export type RentCertRowResult = {

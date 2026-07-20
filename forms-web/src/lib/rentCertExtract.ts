@@ -18,6 +18,7 @@ export const RENT_DETERMINATION_FORM_ID = "251916705430050";
 
 export type CertFields = {
   programName: string | null;
+  payee: string | null;
   effectiveDate: string | null; // YYYY-MM-DD
   expirationDate: string | null; // YYYY-MM-DD
   reason: string | null; // raw "Initial" | "Interim" | "Annual" | …
@@ -34,6 +35,7 @@ export type CertFields = {
 
 export const EMPTY_CERT: CertFields = {
   programName: null,
+  payee: null,
   effectiveDate: null,
   expirationDate: null,
   reason: null,
@@ -77,6 +79,10 @@ type Matcher = { key: keyof CertFields; match: RegExp; exclude?: RegExp };
 // and the canonical fields sit before any repeats in later sections).
 const MATCHERS: Matcher[] = [
   { key: "programName", match: /^program name/i },
+  {
+    key: "payee",
+    match: /^(landlord|property owner|property management|management company|payee|vendor)( name)?$/i,
+  },
   { key: "effectiveDate", match: /^effective date/i },
   { key: "expirationDate", match: /^expiration date/i },
   { key: "reason", match: /^reason for (this )?certification/i },

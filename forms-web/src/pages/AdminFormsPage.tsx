@@ -136,7 +136,10 @@ function AdminFormRow({ form, onSaved }: { form: FormDef; onSaved: () => void })
               <input
                 type="checkbox"
                 checked={flags[f.key]}
-                onChange={(e) => setFlags((cur) => ({ ...cur, [f.key]: e.target.checked }))}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  setFlags((cur) => ({ ...cur, [f.key]: checked }));
+                }}
                 className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600"
               />
               {f.label}
