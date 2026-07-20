@@ -92,6 +92,14 @@ function sourceIsEnrollmentOwned(row: any): boolean {
   return originSource === "projection";
 }
 
+function isPendingCharge(row: any): boolean {
+  const queueStatus = String(row?.queueStatus || "").trim().toLowerCase();
+  const status = String(row?.status || row?.rawStatus || "").trim().toLowerCase();
+  if (queueStatus === "posted" || row?.paid === true) return false;
+  if (["paid", "posted", "void", "voided", "cancelled", "canceled"].includes(status)) return false;
+  return queueStatus === "pending" || row?.paid === false || ["pending", "unpaid", "hold"].includes(status);
+}
+
 function patchIfChanged(
   patch: Record<string, unknown>,
   row: Record<string, unknown>,
@@ -112,7 +120,7 @@ async function syncCustomerCaseManagerToEnrollments(
   const nextCmName = String(after?.caseManagerName || "").trim() || null;
   const prevCmName = String(before?.caseManagerName || "").trim() || null;
 
-  if (!customerId || !nextCmId) return;
+  if (!customerId) return;
   if (nextCmId === prevCmId && nextCmName === prevCmName) return;
 
   const [clientSnap, customerSnap] = await Promise.all([
@@ -133,18 +141,11 @@ async function syncCustomerCaseManagerToEnrollments(
       if (!isActiveEnrollment(row)) return;
 
       const enrollmentCmId = String((row as any)?.caseManagerId || "").trim();
-      const inheritedPrev = !!prevCmId && enrollmentCmId === prevCmId;
-      if (enrollmentCmId && !inheritedPrev) return;
-
       const enrollmentCmName = String((row as any)?.caseManagerName || "").trim() || null;
       const patch: Record<string, unknown> = {};
 
       if (enrollmentCmId !== nextCmId) patch.caseManagerId = nextCmId;
-      if (
-        nextCmName &&
-        enrollmentCmName !== nextCmName &&
-        (!enrollmentCmId || inheritedPrev || enrollmentCmId === nextCmId)
-      ) {
+      if (enrollmentCmName !== nextCmName) {
         patch.caseManagerName = nextCmName;
       }
 
@@ -196,7 +197,9 @@ async function syncCustomerSnapshotsToOperationalRecords(
 
   queueSnap.forEach((doc) => {
     const row = doc.data() || {};
-    if (!sourceIsEnrollmentOwned(row)) return;
+    // Every unpaid/pending charge follows the customer's current CM, including
+    // manual, invoice, and credit-card queue rows (not only projections).
+    if (!isPendingCharge(row)) return;
     const patch: Record<string, unknown> = {};
     if (nameChanged) patchIfChanged(patch, row, "customer", nextName);
     if (cmChanged) {

@@ -646,7 +646,6 @@ export function useSetCustomerCaseManager() {
               ? {
                   ...prev,
                   ...rowPatch,
-                  caseManagerName: rowPatch.caseManagerName ?? prev.caseManagerName ?? null,
                 }
               : prev,
         };
@@ -669,7 +668,6 @@ export function useSetCustomerCaseManager() {
                 ? {
                     ...(c || {}),
                     ...rowPatch,
-                    caseManagerName: rowPatch.caseManagerName ?? c?.caseManagerName ?? null,
                   }
                 : c
             );

@@ -89,7 +89,7 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
     await setCaseManager.mutateAsync({
       id: customerId,
       caseManagerId: uid,
-      caseManagerName: null,
+      caseManagerName: uid ? userLabelById.get(uid) || null : null,
     });
   };
 
