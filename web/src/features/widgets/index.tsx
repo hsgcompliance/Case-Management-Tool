@@ -2006,6 +2006,7 @@ export const DASHBOARD_TOOL_DEFS: readonly AnyDashboardToolDefinition[] = [
       grantIds: [],
       rentCert: "all",
       maxRemaining: "all",
+      showEnded: false,
     } satisfies RentalAssistanceFilterState),
     ToolTopbar: RentalAssistanceTopbar as AnyDashboardToolDefinition["ToolTopbar"],
     Main: RentalAssistanceMain as AnyDashboardToolDefinition["Main"],

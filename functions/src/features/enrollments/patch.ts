@@ -12,6 +12,7 @@ import {
 import { EnrollmentsPatchBody, toArray } from "./schemas";
 import { deriveEnrollmentNames } from "./derive";
 import { summarize } from "../tasks/utils";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 
 const ALWAYS_IMMUTABLE = new Set([
   "id",
@@ -47,17 +48,6 @@ function err(message: string, code: number, meta?: Record<string, unknown>) {
   e.code = code;
   if (meta) e.meta = meta;
   return e;
-}
-
-function latestPaymentDueDate(payments: any[]): string | null {
-  let maxDue = "";
-  for (const p of Array.isArray(payments) ? payments : []) {
-    if ((p as any)?.void === true) continue;
-    const due = String((p as any)?.dueDate || (p as any)?.date || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) continue;
-    if (!maxDue || due > maxDue) maxDue = due;
-  }
-  return maxDue || null;
 }
 
 function closeFutureTasksAfterEndDate(schedule: any[], endDateISO: string, actor = "system") {
@@ -190,6 +180,8 @@ export const enrollmentsPatch = secureHandler(
           : (typeof existing.active === "boolean" ? Boolean(existing.active) : true);
       const closeLike = nextStatus === "closed" || nextStatus === "deleted" || nextDeleted || !nextActive;
       const explicitClose = nextStatus === "closed" || (!nextDeleted && !nextActive);
+      const existingClosed = String(existing.status || "").toLowerCase() === "closed" || existing.active === false;
+      const editingClosedDate = existingClosed && Object.prototype.hasOwnProperty.call(patch, "endDate") && !nextDeleted;
       const effectiveEndDate =
         String(
           ("endDate" in patch ? (patch as any).endDate : undefined) ??
@@ -197,24 +189,31 @@ export const enrollmentsPatch = secureHandler(
             ""
         ).slice(0, 10) || (closeLike ? toDateOnly(new Date()) : "");
       const cappedEffectiveEndDate = capEndDateToGrant(effectiveEndDate, grantEndDate);
+      const closePreview = buildEnrollmentClosePreview({
+        payments: Array.isArray(existing.payments) ? existing.payments : [],
+        requestedCloseDate: explicitClose || editingClosedDate ? effectiveEndDate : null,
+        fallbackDate: effectiveEndDate || toDateOnly(new Date()),
+      });
+      const lifecycleEndDate = explicitClose || editingClosedDate ? closePreview.closeDate : cappedEffectiveEndDate;
 
-      if (closeLike && cappedEffectiveEndDate) {
-        if (explicitClose) {
-          const lastPaymentDate = latestPaymentDueDate(Array.isArray(existing.payments) ? existing.payments : []);
-          if (lastPaymentDate && cappedEffectiveEndDate < lastPaymentDate) {
-            throw err(`close_date_before_last_payment (${cappedEffectiveEndDate} < ${lastPaymentDate})`, 400, {
+      if (closeLike && lifecycleEndDate) {
+        if (explicitClose || editingClosedDate) {
+          if (closePreview.paidAfterClose.length) {
+            throw err("close_date_before_last_paid_payment", 400, {
               id,
-              closeDate: cappedEffectiveEndDate,
-              lastPaymentDate,
+              closeDate: lifecycleEndDate,
+              lastPaidDate: closePreview.lastPaidDate,
             });
           }
+          data.endDate = lifecycleEndDate;
+          data.payments = closePreview.retainedPayments;
         }
-        if (!("endDate" in patch) && !existing.endDate) data.endDate = cappedEffectiveEndDate;
+        if (!("endDate" in patch) && !existing.endDate) data.endDate = lifecycleEndDate;
         const schedule = Array.isArray(existing.taskSchedule) ? existing.taskSchedule : [];
         const taskChange =
           nextStatus === "deleted" || nextDeleted
-            ? deleteFutureTasksAfterEndDate(schedule, cappedEffectiveEndDate)
-            : closeFutureTasksAfterEndDate(schedule, cappedEffectiveEndDate, String(user?.uid || "system"));
+            ? deleteFutureTasksAfterEndDate(schedule, lifecycleEndDate)
+            : closeFutureTasksAfterEndDate(schedule, lifecycleEndDate, String(user?.uid || "system"));
         if (taskChange.changed) {
           data.taskSchedule = taskChange.next;
           data.taskStats = summarize(taskChange.next);

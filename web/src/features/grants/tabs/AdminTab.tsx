@@ -28,6 +28,14 @@ const fmtUsd = (n: number) => fmtCurrencyUSD(n);
 const fmtCount = (n: number, singular: string, plural?: string) =>
   `${n.toLocaleString()} ${n === 1 ? singular : (plural ?? singular + "s")}`;
 
+function nextMonthFirstISO(): string {
+  const value = new Date();
+  value.setHours(12, 0, 0, 0);
+  value.setDate(1);
+  value.setMonth(value.getMonth() + 1);
+  return value.toISOString().slice(0, 10);
+}
+
 function isProgramTarget(row: TGrant | null | undefined): boolean {
   return String((row as any)?.kind || "").trim().toLowerCase() === "program";
 }
@@ -571,7 +579,7 @@ function BulkMigrationDialog({
   onRun: (opts: MigrationOptions, targets: Enrollment[]) => void;
 }) {
   const [toGrantId, setToGrantId] = React.useState("");
-  const [cutoverDate, setCutoverDate] = React.useState(todayISO());
+  const [cutoverDate, setCutoverDate] = React.useState(nextMonthFirstISO());
   const [statuses, setStatuses] = React.useState<EnrollStatus[]>(["active"]);
   const [moveSpends, setMoveSpends] = React.useState(true);
   const [moveTasks, setMoveTasks] = React.useState(true);
@@ -665,7 +673,8 @@ function BulkMigrationDialog({
     (movePaidPayments && impact.futurePaid > 0) ||
     moveSpends;
   const mapped = !mappingRequired || sourceLineItems.every((li) => !!lineItemMap[li.id]);
-  const canRun = !!toGrantId && !!cutoverDate && statuses.length > 0 && targetEnrollments.length > 0 && mapped && confirmText === "MIGRATE" && !running;
+  const validCutover = /^\d{4}-\d{2}-01$/.test(cutoverDate);
+  const canRun = !!toGrantId && validCutover && statuses.length > 0 && targetEnrollments.length > 0 && mapped && confirmText === "MIGRATE" && !running;
 
   if (!open) return null;
 
@@ -695,7 +704,11 @@ function BulkMigrationDialog({
             <div className="mb-1 text-xs font-medium text-slate-600">Destination</div>
             <select className="input w-full" value={toGrantId} onChange={(e) => setToGrantId(e.currentTarget.value)} disabled={running}>
               <option value="">Select destination...</option>
-              {grants.filter((g) => String((g as any)?.id || "") !== String((sourceGrant as any)?.id || "")).map((g) => (
+              {grants.filter((g) => {
+                if (String((g as any)?.id || "") === String((sourceGrant as any)?.id || "")) return false;
+                const status = String((g as any)?.status || "active").toLowerCase();
+                return (g as any)?.deleted !== true && status !== "closed" && status !== "deleted";
+              }).map((g) => (
                 <option key={String((g as any).id)} value={String((g as any).id)}>
                   {String((g as any).name || (g as any).code || (g as any).id)} ({targetLabel(g)})
                 </option>
@@ -704,7 +717,8 @@ function BulkMigrationDialog({
           </label>
           <label>
             <div className="mb-1 text-xs font-medium text-slate-600">Cutover date</div>
-            <input className="input w-full" type="date" value={cutoverDate} onChange={(e) => setCutoverDate(e.currentTarget.value || todayISO())} disabled={running} />
+            <input className="input w-full" type="date" value={cutoverDate} onChange={(e) => setCutoverDate(e.currentTarget.value || nextMonthFirstISO())} disabled={running} />
+            {!validCutover && <div className="mt-1 text-xs text-rose-600">Migration cutover must be the first day of a month.</div>}
           </label>
         </div>
 
@@ -800,7 +814,7 @@ function BulkMigrationDialog({
                   setLineItemMap((prev) => ({ ...prev, [src.id]: value }));
                 }} disabled={!toGrantId || running}>
                   <option value="">Select destination line item...</option>
-                  {destLineItems.map((li) => <option key={li.id} value={li.id}>{li.label || li.id}</option>)}
+                  {destLineItems.map((li: { id: string; label: string }) => <option key={li.id} value={li.id}>{li.label || li.id}</option>)}
                 </select>
               </div>
             ))}

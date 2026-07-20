@@ -16,6 +16,7 @@ import {
   type Claims,
 } from "../../core";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 import { deleteEnrollmentsCore } from "../enrollments/delete";
 import {
   deriveMaxAssistanceSnapshot,
@@ -1088,12 +1089,18 @@ export async function cascadeGrantToEnrollments(
 
   for (const doc of toProcess) {
     const data = doc.data() as any;
+    const closePreview = buildEnrollmentClosePreview({
+      payments: Array.isArray(data?.payments) ? data.payments : [],
+      requestedCloseDate: null,
+      fallbackDate: closeEndDate,
+    });
     const patch: Record<string, unknown> =
       targetStatus === "closed"
         ? {
             status: "closed",
             active: false,
-            endDate: closeEndDate,
+            endDate: closePreview.closeDate,
+            payments: closePreview.retainedPayments,
             closedAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
           }

@@ -27,6 +27,7 @@ import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { isAdminLike, isViewerLike } from "@lib/roles";
 import { toApiError } from "@client/api";
 import type { TGrant as Grant, ISODate } from "@types";
+import { buildEnrollmentClosePreview, enrollmentPaymentDate } from "@hdb/contracts/enrollments";
 import { DetailsTab, ConfigTab, BudgetActivityTab, TasksTab, AssessmentsTab, AllocationTab, AdminTab } from "./tabs";
 import { useTogglePinnedGrant, usePinnedGrantIds } from "./PinnedGrantCards";
 import { useTogglePinnedItem, usePinnedItems } from "@entities/pinned/PinnedItemsSection";
@@ -432,6 +433,7 @@ export default function GrantDetailModal({
   const [savedOnce, setSavedOnce] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
   const [kindDialogOpen, setKindDialogOpen] = useState(false);
+  const [closePreviewOpen, setClosePreviewOpen] = useState(false);
   const [pendingKind, setPendingKind] = useState<"grant" | "program" | null>(null);
   useEffect(() => {
     if (isCreate || !grant || editing) return;
@@ -522,9 +524,29 @@ export default function GrantDetailModal({
     setEditing(true);
   };
 
-  const handleSave = async () => {
+  const grantClosePreview = useMemo(() => {
+    const fallbackDate = safeISODate10(model.endDate || grant?.endDate) || toISODate(new Date());
+    return (affectedEnrollments || []).map((enrollment) => {
+      const row = enrollment as Record<string, unknown>;
+      const payments = Array.isArray(row.payments) ? row.payments as Record<string, unknown>[] : [];
+      const preview = buildEnrollmentClosePreview({ payments, fallbackDate });
+      const unpaidThroughClose = payments.filter((payment) => {
+        const paymentDate = enrollmentPaymentDate(payment);
+        return payment.paid !== true && payment.void !== true && !!paymentDate && paymentDate <= preview.closeDate;
+      });
+      return { row, preview, unpaidThroughClose };
+    });
+  }, [affectedEnrollments, grant?.endDate, model.endDate]);
+
+  const handleSave = async (_event?: React.SyntheticEvent, confirmLifecycleClose = false) => {
     try {
       if (!canEditGrant) return;
+      const requestedStatus = String(model?.status || grant?.status || "draft").toLowerCase();
+      const storedStatus = String(grant?.status || "draft").toLowerCase();
+      if (!isCreate && requestedStatus === "closed" && storedStatus !== "closed" && !confirmLifecycleClose) {
+        setClosePreviewOpen(true);
+        return;
+      }
       if (saveDisabled) {
         toast("Name is required.", { type: "error" });
         return;
@@ -1022,6 +1044,38 @@ export default function GrantDetailModal({
           pinCompletedManaged: true,
         }}
       />
+
+      <Modal
+        isOpen={closePreviewOpen}
+        onClose={() => setClosePreviewOpen(false)}
+        title="Close grant and linked enrollments?"
+        widthClass="max-w-2xl"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setClosePreviewOpen(false)} disabled={saving}>Cancel</button>
+            <button type="button" className="btn btn-sm" onClick={() => { setClosePreviewOpen(false); void handleSave(undefined, true); }} disabled={saving}>
+              {saving ? "Closing..." : "Close grant"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+            {grantClosePreview.length} active enrollment{grantClosePreview.length === 1 ? "" : "s"} will close. {grantClosePreview.reduce((sum, item) => sum + item.preview.futureUnpaidPayments.length, 0)} future unpaid payment{grantClosePreview.reduce((sum, item) => sum + item.preview.futureUnpaidPayments.length, 0) === 1 ? "" : "s"} will be removed and voided.
+            {grantClosePreview.reduce((sum, item) => sum + item.unpaidThroughClose.length, 0) > 0 ? (
+              <div className="mt-2 font-semibold">{grantClosePreview.reduce((sum, item) => sum + item.unpaidThroughClose.length, 0)} unpaid payment{grantClosePreview.reduce((sum, item) => sum + item.unpaidThroughClose.length, 0) === 1 ? "" : "s"} on or before close remain visible for payment or enrollment cleanup review.</div>
+            ) : null}
+          </div>
+          <div className="max-h-72 space-y-2 overflow-auto">
+            {grantClosePreview.map(({ row, preview, unpaidThroughClose }, index) => (
+              <div key={String(row.id || index)} className="rounded-lg border border-slate-200 p-3">
+                <div className="font-semibold text-slate-900">{String(row.customerName || row.clientName || row.customerId || "Enrollment")}</div>
+                <div className="mt-1 text-xs text-slate-600">Ends {fmtDateOrDash(preview.closeDate)} · Last paid {fmtDateOrDash(preview.lastPaidDate)} · Unpaid through close {unpaidThroughClose.length} · Future unpaid voided {preview.futureUnpaidPayments.length}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={kindDialogOpen}

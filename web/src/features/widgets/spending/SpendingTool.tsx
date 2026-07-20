@@ -48,6 +48,7 @@ import type { CardBudget } from "./SpendDetailModal";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets/jotform/jotformSubmissionView";
 import { GRANT_ACCENT_COLORS, grantAccentSolid, grantAccentChip } from "@lib/colorRegistry";
+import { buildQueueLedgerIndex, queueLedgerIssue } from "./spendingReconciliation";
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -275,6 +276,7 @@ type SpendingRow = {
   reversalLedgerId?: string;
   ledgerEntry?: Record<string, unknown>;
   paymentQueueItem?: PaymentQueueItem;
+  reconciliationIssue?: string;
 };
 
 type CreditCardSummaryView = {
@@ -629,12 +631,21 @@ export const SpendingTopbar: DashboardToolDefinition<SpendingFilterState, Spendi
 function RowStatusBadge({ row }: { row: SpendingRow }) {
   const { kind, workflowState, complianceStatus } = row;
 
+  if (row.reconciliationIssue) {
+    return <span title={row.reconciliationIssue} className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 max-w-[150px] truncate">Needs reconciliation</span>;
+  }
+
   if (kind === "queue-projection") {
-    return workflowState === "closed" ? (
-      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">Posted</span>
-    ) : (
+    if (workflowState !== "closed") return (
       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700">Projected</span>
     );
+    if (complianceStatus === "Data Entry Complete") {
+      return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">Data Entry ✓</span>;
+    }
+    if (complianceStatus.startsWith("Posted;")) {
+      return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 max-w-[140px] truncate">{complianceStatus}</span>;
+    }
+    return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">Posted</span>;
   }
 
   if (kind === "grant-ledger") {
@@ -1200,7 +1211,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     { active: true, limit: 200 },
     { enabled: true, staleTime: 30_000 }
   );
-  const { data: ledgerEntries = [], isLoading: ledgerLoading, isError: ledgerError } = useLedgerEntries(
+  const { data: ledgerEntries = [], isError: ledgerError } = useLedgerEntries(
     {
       ...(month ? { month } : {}),
       ...(grantId ? { grantId } : {}),
@@ -1225,8 +1236,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const { data: usersRaw = [] } = useUsers({ limit: 300, status: "all" });
 
-  const loading = sharedDataLoading || cardsLoading || ledgerLoading || queueLoading || otherTasksLoading;
-  const error = sharedDataError || cardsError || ledgerError || queueError || otherTasksError;
+  // Queue data is the operational read model. Ledger enrichment is non-blocking:
+  // the table can render and remain actionable while authoritative posting data loads.
+  const loading = sharedDataLoading || cardsLoading || queueLoading || otherTasksLoading;
+  const error = sharedDataError || cardsError || queueError || otherTasksError;
 
   // ── Selection ────────────────────────────────────────────────────────────
 
@@ -1443,13 +1456,15 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const allRows = React.useMemo(() => {
     const rows: SpendingRow[] = [];
     const ledger = ledgerEntries as Array<Record<string, unknown>>;
+    const queue = paymentQueueItems as Array<Record<string, unknown>>;
+    const reconciliation = buildQueueLedgerIndex(queue, ledger);
 
     for (const e of ledger) {
       const source = String(e?.source || "").toLowerCase();
       const isGrantPayment = source === "enrollment";
       const isCard = source === "card";
       if (!isGrantPayment && !isCard) continue;
-      if (String((e?.origin as Record<string, unknown> | undefined)?.sourcePath || "").startsWith("paymentQueue/")) continue;
+      if (reconciliation.isLedgerRepresentedByQueue(e)) continue;
 
       const entryId = String(e?.id || "");
       const grantId = String(e?.grantId || "");
@@ -1489,7 +1504,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         completed,
         workflowState: isGrantPayment ? "closed" : hasOpenTask || !completed ? "open" : "closed",
         workflowReason: isGrantPayment
-          ? "Posted grant payment"
+          ? "Ledger-only payment"
           : hasOpenTask
           ? "Open spend task"
           : completed
@@ -1512,6 +1527,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         isReversal,
         searchText: [vendor, displayTitle, grantId, lineItemId, String(e?.customerId || "")].join(" ").toLowerCase(),
         ledgerEntry: e,
+        reconciliationIssue: isGrantPayment ? "Reconciliation: ledger entry has no loaded queue item" : undefined,
       });
     }
 
@@ -1536,14 +1552,26 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           .join(" ")
       );
       const queueStatus = String(queueItem.queueStatus || "pending").toLowerCase();
-      const amountCents = Math.round(Number(queueItem.amount || 0) * 100);
+      const linkedLedgers = reconciliation.ledgersForQueue(queueItem as Record<string, unknown>);
+      const linkedLedger = reconciliation.primaryLedgerForQueue(queueItem as Record<string, unknown>);
+      const postedLedger = queueStatus === "posted" ? linkedLedger : null;
+      const amountCents = postedLedger
+        ? toCents(postedLedger.amountCents, postedLedger.amount)
+        : Math.round(Number(queueItem.amount || 0) * 100);
       const workflowState: SpendingWorkflowState = queueStatus === "posted" ? "closed" : "open";
       const bypassClosed = !!queueItem.closedBypassLedger;
       const isProjection = source === "projection";
-      const queueVendor = String(queueItem.merchant || "").trim();
+      const queueVendor = String(queueItem.merchant || postedLedger?.vendor || "").trim();
       const queueExpenseType = String((queueItem as any).expenseType || (queueItem as any).descriptor || "").trim();
       const queuePurchaser = String((queueItem as any).purchaser || "").trim();
       const queueRawSearch = rawAnswerFields(queueItem).map((field) => `${field.label} ${field.key} ${field.value}`).join(" ");
+      const ledgerCompliance = postedLedger?.compliance && typeof postedLedger.compliance === "object"
+        ? postedLedger.compliance as Record<string, unknown>
+        : {};
+      const queueCompliance = (queueItem as any).compliance && typeof (queueItem as any).compliance === "object"
+        ? (queueItem as any).compliance as Record<string, unknown>
+        : {};
+      const effectiveCompliance = { ...ledgerCompliance, ...queueCompliance };
 
       rows.push({
         id: `queue:${queueId}`,
@@ -1551,8 +1579,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         sourceLabel: source === "invoice" ? "Invoice" : isProjection ? "Enrollment" : "Card",
         title: merchant || queueId || "-",
         subtitle: submissionId || queueId,
-        date,
-        month: rowMonth,
+        date: postedLedger ? dateIso10(postedLedger.dueDate || postedLedger.date || postedLedger.createdAt || date) : date,
+        month: postedLedger ? monthFromDate(postedLedger.month || postedLedger.dueDate || date) : rowMonth,
         amountCents,
         completed: workflowState === "closed",
         workflowState,
@@ -1562,9 +1590,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             : isProjection
             ? "Projected spend, not yet paid"
             : "Waiting to post",
-        grantId: String(queueItem.grantId || ""),
-        lineItemId: String(queueItem.lineItemId || ""),
-        customerId: String(queueItem.customerId || ""),
+        grantId: String(postedLedger?.grantId || queueItem.grantId || ""),
+        lineItemId: String(postedLedger?.lineItemId || queueItem.lineItemId || ""),
+        customerId: String(postedLedger?.customerId || queueItem.customerId || ""),
         creditCardId: isProjection ? "" : savedCardId || String(matchedCard?.id || ""),
         creditCardName: isProjection ? "" : cardDisplayName(matchedCard) || savedCardId || "",
         cardDetection: isProjection ? "none" : savedCardId ? "saved" : matchedCard ? "auto" : "none",
@@ -1593,8 +1621,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         linkedLedgerId: String(queueItem.ledgerEntryId || "") || undefined,
         reversalLedgerId: String(queueItem.reversalEntryId || "") || undefined,
         paymentQueueItem: queueItem,
+        ledgerEntry: linkedLedger || undefined,
+        reconciliationIssue: queueLedgerIssue(queueItem as Record<string, unknown>, linkedLedgers) || undefined,
         complianceStatus: isProjection
-          ? complianceStatusLabel((queueItem as any).compliance, queueStatus === "posted")
+          ? complianceStatusLabel(effectiveCompliance, queueStatus === "posted")
           : queueStatus === "posted" ? "Posted" : "Open",
       });
     }
@@ -2322,6 +2352,11 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             Budget Pipelines
           </a>
         </div>
+        {ledgerError && (
+          <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+            Payment queue data is available, but ledger verification could not load. Posting remains available; reconciliation details may be incomplete.
+          </div>
+        )}
         {/* ── Saved view strip ──────────────────────────────────────────── */}
         <div className="flex flex-wrap items-start gap-1.5">
 

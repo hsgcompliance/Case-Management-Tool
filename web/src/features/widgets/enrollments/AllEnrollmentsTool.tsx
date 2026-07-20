@@ -188,6 +188,7 @@ const DETAIL_EXPORT_COLUMNS: ExportColumn<EnrollmentReportRow>[] = [
   { key: "caseManagerName", label: "Case Manager", value: (r) => r.caseManagerName },
   { key: "startDate", label: "Start Date", value: (r) => r.startDate },
   { key: "endDate", label: "End Date", value: (r) => r.endDate },
+  { key: "assistanceEndedOn", label: "Assistance Ended On", value: (r) => r.assistanceEndedOn },
   { key: "status", label: "Enrollment Status", value: (r) => r.status },
   { key: "monthsActive", label: "Months In Enrollment", value: (r) => r.monthsActive ?? "" },
   { key: "isNewInMonth", label: "New This Month", value: (r) => (r.isNewInMonth ? "yes" : "no") },
@@ -519,7 +520,10 @@ function EnrollmentRowsTable({
                 {showGrant ? <td>{r.grantName}</td> : null}
                 <td>{r.caseManagerName || "Unassigned"}</td>
                 <td>{fmtDateOrDash(r.startDate)}</td>
-                <td>{fmtDateOrDash(r.endDate)}</td>
+                <td>
+                  <div>{fmtDateOrDash(r.endDate)}</div>
+                  {r.assistanceEndedOn ? <div className="text-[11px] font-semibold text-amber-700">Assistance ended {fmtDateOrDash(r.assistanceEndedOn)}</div> : null}
+                </td>
                 <td className="capitalize">{r.status}</td>
                 <td className="text-right">{fmtMonths(r.monthsActive)}</td>
                 <td className="text-right" title={r.customerSince ? `Since ${r.customerSince} (${r.customerActive ? "active" : "inactive"})` : undefined}>

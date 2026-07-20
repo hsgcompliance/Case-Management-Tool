@@ -15,6 +15,7 @@ import {
   PaymentsUpdateComplianceBody,
   type TPaymentsUpdateComplianceBody,
 } from "./schemas";
+import { projectionQueueDocId } from "../paymentQueue/service";
 
 /** POST /paymentsUpdateCompliance */
 export async function paymentsUpdateComplianceHandler(req: AuthedRequest, res: Response) {
@@ -55,8 +56,20 @@ export async function paymentsUpdateComplianceHandler(req: AuthedRequest, res: R
       const nextPayments = payments.slice();
       nextPayments[idx] = next;
 
+      const queueRef = db.collection("paymentQueue").doc(projectionQueueDocId(enrollmentId, paymentId));
+      const queueSnap = await tx.get(queueRef);
+
       const write = { payments: nextPayments, updatedAt: FieldValue.serverTimestamp() };
       tx.set(eRef, write, { merge: true });
+      if (queueSnap.exists) {
+        tx.update(queueRef, {
+          "compliance.hmisComplete": !!(next.compliance as Record<string, unknown>)?.hmisComplete,
+          "compliance.caseworthyComplete": !!(next.compliance as Record<string, unknown>)?.caseworthyComplete,
+          updatedAtISO: isoNow(),
+          "system.lastWriter": "paymentsUpdateCompliance",
+          "system.lastWriteAt": isoNow(),
+        });
+      }
       return { ...data, ...write };
     });
 

@@ -7,6 +7,7 @@ import {
   newBulkWriter,
 } from "../../core";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 import {
   onDocumentCreated,
   onDocumentUpdated,
@@ -402,35 +403,42 @@ async function cascadeCustomerInactiveToEnrollments(customerId: string) {
   if (!customerId) return;
 
   // --- READ FIRST ---
-  let snap: FirebaseFirestore.QuerySnapshot;
+  let snaps: FirebaseFirestore.QuerySnapshot[];
   try {
-    snap = await db
-      .collection("customerEnrollments")
-      .where("customerId", "==", customerId)
-      .where("active", "==", true)
-      .get();
+    snaps = await Promise.all([
+      db.collection("customerEnrollments").where("customerId", "==", customerId).get(),
+      db.collection("customerEnrollments").where("clientId", "==", customerId).get(),
+    ]);
   } catch (e: any) {
     console.error(`[cascadeCustomerInactive] read failed for customer ${customerId}:`, e?.message || e);
     return;
   }
 
-  if (snap.empty) return;
+  if (snaps.every((snap) => snap.empty)) return;
 
   const now = isoNow();
   const batch = db.batch();
   const enrollmentIds: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string }> = [];
 
-  for (const doc of snap.docs) {
+  const seen = new Set<string>();
+  for (const doc of snaps.flatMap((snap) => snap.docs)) {
+    if (seen.has(doc.ref.path)) continue;
+    seen.add(doc.ref.path);
     const data = doc.data() as any;
-    // Skip enrollments already closed/deleted
-    const status = String(data?.status || "").toLowerCase();
-    if (status === "closed" || status === "deleted") continue;
+    if (!isActiveEnrollment(data)) continue;
+    const closePreview = buildEnrollmentClosePreview({
+      payments: Array.isArray(data?.payments) ? data.payments : [],
+      requestedCloseDate: null,
+      fallbackDate: now.slice(0, 10),
+    });
 
     batch.set(
       doc.ref,
       {
         status: "closed",
         active: false,
+        endDate: closePreview.closeDate,
+        payments: closePreview.retainedPayments,
         closedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         system: { lastWriter: FN_CUSTOMER_UPDATE, lastWriteAt: FieldValue.serverTimestamp() },

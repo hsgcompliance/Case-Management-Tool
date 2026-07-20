@@ -97,6 +97,29 @@ function normalizeList(res: unknown): Enrollment[] {
   return [];
 }
 
+type EnrollmentPageCursor = {
+  cursorUpdatedAt?: unknown;
+  cursorId?: string;
+  startAfter?: string;
+};
+
+function nextPageCursor(res: unknown): EnrollmentPageCursor | null {
+  if (!res || typeof res !== "object") return null;
+  const page = res as {
+    next?: string | null;
+    nextCursor?: { cursorUpdatedAt?: unknown; cursorId?: unknown } | null;
+  };
+  const stable = page.nextCursor;
+  if (stable?.cursorUpdatedAt != null && String(stable.cursorId || "").trim()) {
+    return {
+      cursorUpdatedAt: stable.cursorUpdatedAt,
+      cursorId: String(stable.cursorId).trim(),
+    };
+  }
+  const legacy = String(page.next || "").trim();
+  return legacy ? { startAfter: legacy } : null;
+}
+
 export const Enrollments = {
   upsert: (rows: EnrollmentsUpsertReq) => {
     const body = sanitizeEnrollmentsUpsertBody(rows);
@@ -131,27 +154,21 @@ export const Enrollments = {
 
     const target = Math.max(1, requestedLimitRaw);
     const out: Enrollment[] = normalizeList(first);
-    let next =
-      first && typeof first === "object"
-        ? ((first as { next?: string | null }).next ?? null)
-        : null;
+    let cursor = nextPageCursor(first);
 
-    while (out.length < target && next) {
+    while (out.length < target && cursor) {
       const remaining = target - out.length;
       const page = await api.get("enrollmentsList", {
         ...(query || {}),
         limit: Math.min(maxPerPage, remaining),
-        startAfter: next,
-        cursorUpdatedAt: undefined,
-        cursorId: undefined,
+        startAfter: cursor.startAfter,
+        cursorUpdatedAt: cursor.cursorUpdatedAt as any,
+        cursorId: cursor.cursorId,
       } as any);
       const items = normalizeList(page);
       if (!items.length) break;
       out.push(...items);
-      next =
-        page && typeof page === "object"
-          ? ((page as { next?: string | null }).next ?? null)
-          : null;
+      cursor = nextPageCursor(page);
     }
 
     return out.slice(0, target);
@@ -163,7 +180,7 @@ export const Enrollments = {
   ): Promise<Enrollment[]> => {
     const maxPerPage = 500;
     const maxPages = Math.max(1, Number(opts?.maxPages ?? 200));
-    const maxItems = Math.max(maxPerPage, Number(opts?.maxItems ?? 50_000));
+    const maxItems = Math.max(1, Number(opts?.maxItems ?? 50_000));
 
     const out: Enrollment[] = [];
     let cursorUpdatedAt: unknown = undefined;
@@ -171,9 +188,10 @@ export const Enrollments = {
     let startAfter: string | undefined = undefined;
 
     for (let i = 0; i < maxPages; i++) {
+      const remaining = maxItems - out.length;
       const page: unknown = await api.get("enrollmentsList", {
         ...(query || {}),
-        limit: maxPerPage,
+        limit: Math.min(maxPerPage, remaining),
         startAfter,
         cursorUpdatedAt: cursorUpdatedAt as any,
         cursorId,
@@ -184,27 +202,11 @@ export const Enrollments = {
       out.push(...items);
       if (out.length >= maxItems) break;
 
-      const next =
-        page && typeof page === "object"
-          ? ((page as { next?: { cursorUpdatedAt?: unknown; cursorId?: string } | string | null }).next ?? null)
-          : null;
-
-      if (next && typeof next === "object" && (next as any).cursorId) {
-        cursorUpdatedAt = (next as any).cursorUpdatedAt;
-        cursorId = String((next as any).cursorId);
-        startAfter = undefined;
-        continue;
-      }
-
-      if (typeof next === "string" && next.trim()) {
-        // Legacy fallback shape: next is doc id only.
-        cursorUpdatedAt = undefined;
-        cursorId = undefined;
-        startAfter = next.trim();
-        continue;
-      }
-
-      break;
+      const next = nextPageCursor(page);
+      if (!next) break;
+      cursorUpdatedAt = next.cursorUpdatedAt;
+      cursorId = next.cursorId;
+      startAfter = next.startAfter;
     }
 
     return out.slice(0, maxItems);
