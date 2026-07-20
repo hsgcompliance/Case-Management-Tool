@@ -235,6 +235,78 @@ export const EnrollmentUnenrollmentReview = z
   .passthrough();
 export type TEnrollmentUnenrollmentReview = z.infer<typeof EnrollmentUnenrollmentReview>;
 
+// ---- Lifecycle close preview -----------------------------------------------
+
+export type TEnrollmentClosePayment = Record<string, unknown> & {
+  id?: string;
+  paid?: boolean | null;
+  void?: boolean | null;
+  dueDate?: unknown;
+  date?: unknown;
+  paidDate?: unknown;
+  paidAt?: unknown;
+};
+
+export type TEnrollmentClosePreview<T extends TEnrollmentClosePayment = TEnrollmentClosePayment> = {
+  closeDate: string;
+  lastPaidDate: string | null;
+  paidAfterClose: T[];
+  futureUnpaid: T[];
+  futureUnpaidPayments: T[];
+  retainedPayments: T[];
+  canClose: boolean;
+};
+
+function enrollmentISO10(value: unknown): string {
+  if (typeof value === "string") return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
+  if (value && typeof value === "object") {
+    const timestamp = value as { toDate?: () => Date; seconds?: number };
+    if (typeof timestamp.toDate === "function") return enrollmentISO10(timestamp.toDate());
+    if (typeof timestamp.seconds === "number") return new Date(timestamp.seconds * 1000).toISOString().slice(0, 10);
+  }
+  return "";
+}
+
+export function enrollmentPaymentDate(payment: TEnrollmentClosePayment): string {
+  return enrollmentISO10(payment.paidDate || payment.paidAt || payment.dueDate || payment.date);
+}
+
+export function enrollmentMonthEnd(value: unknown): string {
+  const iso = enrollmentISO10(value);
+  if (!iso) return "";
+  const [year, month] = iso.split("-").map(Number);
+  if (!year || !month || month < 1 || month > 12) return "";
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+export function buildEnrollmentClosePreview<T extends TEnrollmentClosePayment>(args: {
+  payments?: T[] | null;
+  requestedCloseDate?: unknown;
+  fallbackDate?: unknown;
+}): TEnrollmentClosePreview<T> {
+  const payments = Array.isArray(args.payments) ? args.payments : [];
+  const paidDates = payments
+    .filter((payment) => payment.paid === true && payment.void !== true)
+    .map(enrollmentPaymentDate)
+    .filter(Boolean)
+    .sort();
+  const lastPaidDate = paidDates.at(-1) || null;
+  const closeDate = enrollmentMonthEnd(args.requestedCloseDate || lastPaidDate || args.fallbackDate) || enrollmentMonthEnd(new Date());
+  const paidAfterClose = payments.filter((payment) => payment.paid === true && payment.void !== true && enrollmentPaymentDate(payment) > closeDate);
+  const futureUnpaid = payments.filter((payment) => payment.paid !== true && payment.void !== true && enrollmentPaymentDate(payment) > closeDate);
+  const futureUnpaidSet = new Set(futureUnpaid);
+  return {
+    closeDate,
+    lastPaidDate,
+    paidAfterClose,
+    futureUnpaid,
+    futureUnpaidPayments: futureUnpaid,
+    retainedPayments: payments.filter((payment) => !futureUnpaidSet.has(payment)),
+    canClose: paidAfterClose.length === 0,
+  };
+}
+
 // ---- Core model -------------------------------------------------------------
 
 /** Primary enrollment record. */

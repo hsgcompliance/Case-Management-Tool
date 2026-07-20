@@ -20,6 +20,7 @@ import { fmtCurrencyUSD } from "@lib/formatters";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
 import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "./paymentScheduleBuildSummary";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 
 type CustomerRow = TCustomerEntity & { id: string };
 
@@ -166,7 +167,8 @@ function computeCustomerCascade(enrollments: Enrollment[]): CascadeStats {
   for (const enrollment of enrollments) {
     if (enrollment.deleted === true) continue;
     stats.enrollmentsTotal += 1;
-    if (isActiveEnrollment(enrollment)) stats.enrollmentsActive += 1;
+    const active = isActiveEnrollment(enrollment);
+    if (active) stats.enrollmentsActive += 1;
     const payments = Array.isArray(enrollment.payments) ? enrollment.payments : [];
     for (const payment of payments) {
       if (payment?.void === true) continue;
@@ -175,7 +177,13 @@ function computeCustomerCascade(enrollments: Enrollment[]): CascadeStats {
       if (payment?.paid === true) {
         stats.paidCount += 1;
         stats.paidAmount += amount;
-      } else {
+      }
+    }
+    if (active) {
+      const closePreview = buildEnrollmentClosePreview({ payments, fallbackDate: new Date().toISOString().slice(0, 10) });
+      for (const payment of closePreview.futureUnpaidPayments) {
+        const amount = Number(payment?.amount || 0) || 0;
+        if (amount <= 0) continue;
         stats.projectedCount += 1;
         stats.projectedAmount += amount;
       }
@@ -389,7 +397,10 @@ function BulkEnrollWorkspace({
         const resp = await bulkEnroll.mutateAsync({
           grantId,
           customerIds,
+          skipIfExists: true,
+          existsMode: "nonDeleted",
           extra: { startDate },
+          perCustomerExtra: {},
         });
         const results = (resp as { results?: Array<{ customerId: string; error?: string }> })?.results ?? [];
         for (const r of results) {
@@ -1289,7 +1300,7 @@ function BulkOperationsWorkspace({
       } else if (tool === "refresh-enrollments") {
         for (const customerId of customerIds) {
           await queryClient.invalidateQueries({
-            queryKey: qk.enrollments.byCustomerId(customerId),
+            queryKey: qk.enrollments.byCustomer(customerId),
             exact: false,
           });
         }

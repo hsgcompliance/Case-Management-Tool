@@ -275,6 +275,31 @@ export declare const EnrollmentUnenrollmentReview: z.ZodObject<{
     }, z.core.$strip>]>>>>;
 }, z.core.$loose>;
 export type TEnrollmentUnenrollmentReview = z.infer<typeof EnrollmentUnenrollmentReview>;
+export type TEnrollmentClosePayment = Record<string, unknown> & {
+    id?: string;
+    paid?: boolean | null;
+    void?: boolean | null;
+    dueDate?: unknown;
+    date?: unknown;
+    paidDate?: unknown;
+    paidAt?: unknown;
+};
+export type TEnrollmentClosePreview<T extends TEnrollmentClosePayment = TEnrollmentClosePayment> = {
+    closeDate: string;
+    lastPaidDate: string | null;
+    paidAfterClose: T[];
+    futureUnpaid: T[];
+    futureUnpaidPayments: T[];
+    retainedPayments: T[];
+    canClose: boolean;
+};
+export declare function enrollmentPaymentDate(payment: TEnrollmentClosePayment): string;
+export declare function enrollmentMonthEnd(value: unknown): string;
+export declare function buildEnrollmentClosePreview<T extends TEnrollmentClosePayment>(args: {
+    payments?: T[] | null;
+    requestedCloseDate?: unknown;
+    fallbackDate?: unknown;
+}): TEnrollmentClosePreview<T>;
 /** Primary enrollment record. */
 export declare const Enrollment: z.ZodObject<{
     id: z.ZodString;

@@ -10,6 +10,7 @@ import { useAuth } from "@app/auth/AuthProvider";
 import { isViewerLike } from "@lib/roles";
 import { useCustomer, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
 import { useSheetArchiveClient, useSheetUnarchiveClient } from "@hooks/useGDrive";
+import { useCustomerEnrollments } from "@hooks/useEnrollments";
 import { qk } from "@hooks/queryKeys";
 import type { CustomersUpsertReq } from "@types";
 
@@ -24,6 +25,7 @@ import {
 } from "./tabs";
 import NewCustomerFlow from "./NewCustomerFlow";
 import { getCustomerDriveFolderLink } from "./customerDriveFolder";
+import { CustomerInactivePreviewDialog } from "./components/CustomerInactivePreviewDialog";
 
 type TabKey =
   | "details"
@@ -174,6 +176,10 @@ export function CustomersModal(props: {
   const unarchiveClient = useSheetUnarchiveClient();
   const saving = upsert.isPending;
   const [archivePrompt, setArchivePrompt] = React.useState<{ nextActive: boolean } | null>(null);
+  const inactivePreviewEnrollments = useCustomerEnrollments(customerIdStr, {
+    enabled: !!customerIdStr && archivePrompt?.nextActive === false,
+    limit: 500,
+  });
   const [folderArchiveError, setFolderArchiveError] = React.useState<{
     message: string;
     folderId: string;
@@ -609,7 +615,20 @@ export function CustomersModal(props: {
         </div>
       ) : null}
 
-      {archivePrompt ? (
+      {archivePrompt?.nextActive === false ? (
+        <CustomerInactivePreviewDialog
+          open
+          customerName={String((detail as any)?.name || (detail as any)?.fullName || "customer")}
+          enrollments={(inactivePreviewEnrollments.data || []) as unknown as Record<string, unknown>[]}
+          loading={inactivePreviewEnrollments.isLoading || inactivePreviewEnrollments.isFetching}
+          busy={setCustomerActive.isPending || archiveClient.isPending}
+          onCancel={() => setArchivePrompt(null)}
+          onConfirm={() => {
+            setArchivePrompt(null);
+            void applyCustomerActiveToggle(false, true);
+          }}
+        />
+      ) : archivePrompt ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <div className="text-base font-semibold text-slate-900">

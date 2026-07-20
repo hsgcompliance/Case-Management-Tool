@@ -15,6 +15,7 @@ import type { TGrant as Grant } from "@types";
 import { GrantMetricCards } from "@entities/metrics/cards/GrantMetricCards";
 import { grantAccentChip } from "@lib/colorRegistry";
 import { parseGrantMaxAssistanceMonths } from "@hdb/contracts";
+import { fmtDateOrDash } from "@lib/formatters";
 import { grantDriveTemplates, inferDriveTemplateType, parseDriveFileId } from "../driveTemplates";
 import {
   EnrollmentControlsEditor,
@@ -1165,6 +1166,12 @@ export function DetailsTab({
       {/* ── View mode: metrics + grant info ──────────────────────────── */}
       {!editing && (
         <div className="mt-4 space-y-4">
+          {rentalAssistanceTagged && statusVal === "closed" ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+              <div className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Assistance has ended</div>
+              <div className="mt-1 font-semibold">{fmtDateOrDash(model.endDate || grant?.endDate)}</div>
+            </div>
+          ) : null}
           {/* Kind + Status chips (skipped in pageMode — the workspace header already shows them) */}
           <div className="flex flex-wrap items-center gap-2 empty:hidden">
             {!pageMode && (

@@ -1390,7 +1390,7 @@ export function GrantBudgetSandboxModal({
               <div className="max-w-[260px] truncate font-semibold text-slate-800">{selectedRow.customerLabel || "Selected row"}</div>
             )}
             <div className="text-xs text-slate-400">{selectedRow.date ? fmtMDY(selectedRow.date) : "No date"}</div>
-            {!readOnly && canSave && sourceStatusValue(selectedRow.statusLabel) === "projected" ? (
+            {!readOnly && canSave && statusBucket(selectedRow) === "projected" ? (
               <button
                 type="button"
                 className="btn btn-primary btn-sm"

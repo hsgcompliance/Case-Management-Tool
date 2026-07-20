@@ -14,6 +14,11 @@ import type { Enrollment } from "@client/enrollments";
 
 type SourceLineItem = { id: string; label?: string };
 
+function nextMonthFirstISO(): ISODate {
+  const now = new Date();
+  return toISODate(new Date(now.getFullYear(), now.getMonth() + 1, 1)) as ISODate;
+}
+
 export type EnrollmentMigrateGrantOption = {
   id: string;
   name?: string;
@@ -71,7 +76,7 @@ function EnrollmentMigrateDialogUI({
   onConfirm: (opts: ConfirmPayload) => void;
 }) {
   const today10 = React.useMemo(
-    () => toISODate(new Date()) as ISODate,
+    () => nextMonthFirstISO(),
     [],
   );
 
@@ -223,9 +228,11 @@ function EnrollmentMigrateDialogUI({
     });
 
   const locked = confirmDisabled;
+  const cutoverStartsMonth = /^\d{4}-\d{2}-01$/.test(String(cutoverDate || ""));
   const canSubmit =
     !!toGrantId &&
     !!cutoverDate &&
+    cutoverStartsMonth &&
     migratePaidChoice !== "" &&
     (sourceLineItems?.length ? hasAllMappings : true) &&
     !jsonError &&
@@ -266,6 +273,8 @@ function EnrollmentMigrateDialogUI({
                 ? "Select a destination grant."
                 : migratePaidChoice === ""
                 ? "Choose whether to migrate paid items."
+                : !cutoverStartsMonth
+                ? "Cutover must be the first day of a month so the source closes at the prior month-end."
                 : sourceLineItems?.length && !hasAllMappings
                 ? "Map all source line items."
                 : jsonError
@@ -317,6 +326,7 @@ function EnrollmentMigrateDialogUI({
               onChange={(e) => setCutoverDate((e.currentTarget.value || today10) as ISODate)}
               disabled={locked}
             />
+            {!cutoverStartsMonth ? <div className="mt-1 text-xs font-semibold text-red-700">Choose the first day of a month.</div> : null}
           </label>
         </div>
 
@@ -586,7 +596,10 @@ export function EnrollmentMigrateDialog({
   const grantOptions = React.useMemo<EnrollmentMigrateGrantOption[]>(
     () =>
       (grants || [])
-        .filter((g) => String(g.status || "").toLowerCase() !== "deleted")
+        .filter((g) => {
+          const status = String(g.status || "").toLowerCase();
+          return status !== "deleted" && status !== "closed";
+        })
         .map((g) => ({
           id: String(g.id || ""),
           name: g.name ? String(g.name) : undefined,
@@ -613,7 +626,7 @@ export function EnrollmentMigrateDialog({
       grants={grantOptions}
       defaults={{
         toGrantId: "",
-        cutoverDate: toISODate(new Date()) as ISODate,
+        cutoverDate: nextMonthFirstISO(),
         moveSpends: true,
         moveAssessments: true,
         preserveAssessmentIds: false,

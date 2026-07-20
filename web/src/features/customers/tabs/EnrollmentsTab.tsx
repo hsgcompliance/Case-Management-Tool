@@ -28,6 +28,7 @@ import { RowStateBadge } from "@entities/ui/rowState";
 import { toApiError } from "@client/api";
 import type { Enrollment } from "@client/enrollments";
 import type { EnrollmentsPatchReq } from "@types";
+import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
 import {
   enrollmentControlActionBody,
   enrollmentControlDone,
@@ -219,16 +220,15 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     const tasks = Array.isArray((closeTarget as any)?.taskSchedule) ? ((closeTarget as any).taskSchedule as any[]) : [];
     return tasks;
   }, [closeTarget]);
-  const closeLastPaymentDate = React.useMemo(() => {
-    let maxDue = "";
-    for (const p of closeTargetPayments) {
-      if ((p as any)?.void === true) continue;
-      const due = String((p as any)?.dueDate || (p as any)?.date || "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) continue;
-      if (!maxDue || due > maxDue) maxDue = due;
-    }
-    return maxDue || null;
-  }, [closeTargetPayments]);
+  const closePreview = React.useMemo(
+    () => buildEnrollmentClosePreview({
+      payments: closeTargetPayments,
+      requestedCloseDate: closeDate,
+      fallbackDate: today,
+    }),
+    [closeDate, closeTargetPayments, today],
+  );
+  const closeLastPaymentDate = closePreview.lastPaidDate;
   const closeFutureUnpaidPayments = React.useMemo(
     () =>
       closeTargetPayments.filter((p: any) => {
@@ -254,7 +254,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     if (!closeTarget) return;
     setCloseTaskMode("complete");
     setClosePaymentMode("deleteUnpaid");
-    const suggested = String(closeTarget.endDate || "").slice(0, 10) || today;
+    const suggested = buildEnrollmentClosePreview({
+      payments: Array.isArray((closeTarget as any).payments) ? (closeTarget as any).payments : [],
+      fallbackDate: today,
+    }).closeDate;
     setCloseDate(suggested);
   }, [closeTarget, today]);
 
@@ -310,6 +313,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           await copyGrantTemplates.mutateAsync({
             customerId,
             grantId: gid,
+            createCustomerFolderIfMissing: true,
             enrollmentId: enrollmentId || undefined,
             startDate,
             templateKeys: templateKeysToCopy,
@@ -369,8 +373,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     if (!closeTarget) return;
     setError(null);
     try {
-      if (closeLastPaymentDate && closeDate && closeDate < closeLastPaymentDate) {
-        throw new Error(`Close date must be on or after last payment date (${closeLastPaymentDate}).`);
+      if (!closePreview.canClose) {
+        throw new Error(`Close date must be on or after the last paid item (${closeLastPaymentDate || "unknown"}).`);
       }
 
       const futureTaskRows = closeFutureTasks.slice().sort((a: any, b: any) =>
@@ -414,7 +418,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
       await patchEnrollment(closeTarget.id, {
         status: "closed",
         active: false,
-        endDate: closeDate || closeTarget.endDate || isoToday(),
+        endDate: closePreview.closeDate,
       });
 
       // Void paymentQueue projections. Non-fatal — enrollment is already closed.
@@ -461,7 +465,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const openEdit = (row: Enrollment) => {
     setEditing(row);
     setEditStartDate(row.startDate ? toISODate(String(row.startDate)) : "");
-    setEditEndDate(capEnrollmentEndDate(row.endDate ? toISODate(String(row.endDate)) : "", grantEndDateById.get(String(row.grantId || "")) || ""));
+    const currentEndDate = row.endDate ? toISODate(String(row.endDate)) : "";
+    setEditEndDate(isInactiveEnrollment(row) ? enrollmentMonthEnd(currentEndDate) : capEnrollmentEndDate(currentEndDate, grantEndDateById.get(String(row.grantId || "")) || ""));
   };
 
   const saveEdit = async () => {
@@ -470,7 +475,9 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     try {
       await patchEnrollment(editing.id, {
         startDate: editStartDate || null,
-        endDate: capEnrollmentEndDate(editEndDate, grantEndDateById.get(String(editing.grantId || "")) || "") || null,
+        endDate: (isInactiveEnrollment(editing)
+          ? enrollmentMonthEnd(editEndDate)
+          : capEnrollmentEndDate(editEndDate, grantEndDateById.get(String(editing.grantId || "")) || "")) || null,
       });
       setEditing(null);
       toast("Enrollment dates updated.", { type: "success" });
@@ -821,7 +828,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             <button
               className="btn btn-sm"
               onClick={() => void confirmCloseEnrollment()}
-              disabled={busy || !closeTarget || (!!closeLastPaymentDate && !!closeDate && closeDate < closeLastPaymentDate)}
+              disabled={busy || !closeTarget || !closePreview.canClose}
             >
               {busy ? "Closing..." : "Close Enrollment"}
             </button>
@@ -831,7 +838,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         <div className="space-y-4">
           <div className="field">
             <span className="label">Close Date</span>
-            <DateInput value={closeDate} onChange={setCloseDate} />
+            <DateInput value={closeDate} onChange={(value) => setCloseDate(enrollmentMonthEnd(value) || value)} />
+            <div className="mt-1 text-xs text-slate-500">Close dates are saved as the final day of the selected assistance month.</div>
           </div>
 
           <div className="rounded border border-slate-200 p-3">
@@ -870,11 +878,11 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
           )}
 
           <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-            <div>Last payment date on enrollment: {closeLastPaymentDate || "None"}</div>
-            <div>Closing is blocked if close date is before the last payment date.</div>
-            {closeLastPaymentDate && closeDate && closeDate < closeLastPaymentDate ? (
+            <div>Last paid item: {closeLastPaymentDate || "None"}</div>
+            <div>Closing is blocked only when an already-paid item falls after the close date.</div>
+            {closePreview.paidAfterClose.length > 0 ? (
               <div className="mt-1 text-red-700">
-                Close date {closeDate} is before last payment date {closeLastPaymentDate}.
+                {closePreview.paidAfterClose.length} paid item{closePreview.paidAfterClose.length === 1 ? " is" : "s are"} after {closePreview.closeDate}.
               </div>
             ) : null}
           </div>
@@ -909,8 +917,10 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             <span className="label">End Date</span>
             <DateInput
               value={editEndDate}
-              max={editing ? grantEndDateById.get(String(editing.grantId || "")) || undefined : undefined}
-              onChange={(value) => setEditEndDate(capEnrollmentEndDate(value, editing ? grantEndDateById.get(String(editing.grantId || "")) || "" : ""))}
+              max={editing && !isInactiveEnrollment(editing) ? grantEndDateById.get(String(editing.grantId || "")) || undefined : undefined}
+              onChange={(value) => setEditEndDate(editing && isInactiveEnrollment(editing)
+                ? enrollmentMonthEnd(value)
+                : capEnrollmentEndDate(value, editing ? grantEndDateById.get(String(editing.grantId || "")) || "" : ""))}
             />
           </div>
         </div>

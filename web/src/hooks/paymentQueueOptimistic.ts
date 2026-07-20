@@ -47,15 +47,22 @@ export function findCachedPaymentQueueItemById(qc: QueryClient, id: string) {
   return findCachedPaymentQueueItem(qc, (item) => String(item?.id || "").trim() === queueId);
 }
 
-function removeQueueItem(prev: unknown, queueId: string) {
+function patchPostedQueueItem(prev: unknown, queueId: string, remove: boolean) {
   if (Array.isArray(prev)) {
-    return prev.filter((item) => String(asRecord(item).id || "") !== queueId);
+    if (remove) return prev.filter((item) => String(asRecord(item).id || "") !== queueId);
+    return prev.map((item) => String(asRecord(item).id || "") === queueId
+      ? { ...asRecord(item), queueStatus: "posted", postedAt: new Date().toISOString() }
+      : item);
   }
   const prevObj = asRecord(prev);
   if (Array.isArray(prevObj.items)) {
     return {
       ...prevObj,
-      items: prevObj.items.filter((item) => String(asRecord(item).id || "") !== queueId),
+      items: remove
+        ? prevObj.items.filter((item) => String(asRecord(item).id || "") !== queueId)
+        : prevObj.items.map((item) => String(asRecord(item).id || "") === queueId
+          ? { ...asRecord(item), queueStatus: "posted", postedAt: new Date().toISOString() }
+          : item),
     };
   }
   return prev;
@@ -127,16 +134,18 @@ export function optimisticPostPaymentQueuePatches(
     .map(([key]) => key as unknown[])
     .filter((key) => Array.isArray(key) && key[0] === "paymentQueue" && key[1] === "list");
 
-  if (listKeys.length) {
+  for (const key of listKeys) {
+    const filters = key[2] && typeof key[2] === "object" ? key[2] as Record<string, unknown> : {};
+    const remove = String(filters.queueStatus || "") === "pending";
     patches.push({
-      key: listKeys,
-      update: (prev) => removeQueueItem(prev, queueId),
+      key,
+      update: (prev) => patchPostedQueueItem(prev, queueId, remove),
     });
   }
 
   patches.push({
     key: qk.paymentQueue.detail(queueId),
-    update: (prev) => prev ? { ...asRecord(prev), queueStatus: "posted" } : prev,
+    update: (prev) => prev ? { ...asRecord(prev), queueStatus: "posted", postedAt: new Date().toISOString() } : prev,
   });
 
   if (!grantId) return patches;
@@ -158,5 +167,47 @@ export function optimisticPostPaymentQueuePatches(
     });
   }
 
+  return patches;
+}
+
+export function optimisticPaymentQueueCompliancePatches(
+  qc: QueryClient,
+  enrollmentId: string,
+  paymentId: string,
+  compliancePatch: Record<string, unknown>,
+): OptimisticPatch[] {
+  const matches = (item: PaymentQueueItem) =>
+    String(item.source || "") === "projection" &&
+    String(item.enrollmentId || "").trim() === enrollmentId &&
+    String(item.paymentId || "").trim() === paymentId;
+  const patchItem = (item: PaymentQueueItem) => ({
+    ...item,
+    compliance: {
+      ...asRecord(item.compliance),
+      ...compliancePatch,
+    },
+  });
+  const patches: OptimisticPatch[] = [];
+  const listKeys = qc
+    .getQueriesData({ queryKey: qk.paymentQueue.root })
+    .map(([key]) => key as unknown[])
+    .filter((key) => Array.isArray(key) && key[0] === "paymentQueue" && key[1] === "list");
+
+  if (listKeys.length) {
+    patches.push({
+      key: listKeys,
+      update: (prev) => Array.isArray(prev)
+        ? prev.map((item) => matches(item as PaymentQueueItem) ? patchItem(item as PaymentQueueItem) : item)
+        : prev,
+    });
+  }
+
+  const item = findCachedPaymentQueueItem(qc, matches);
+  if (item?.id) {
+    patches.push({
+      key: qk.paymentQueue.detail(item.id),
+      update: (prev) => prev ? patchItem(prev as PaymentQueueItem) : prev,
+    });
+  }
   return patches;
 }

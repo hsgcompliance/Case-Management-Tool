@@ -327,6 +327,8 @@ async function rolloverPreview(user: Record<string, unknown>, input: { grantId: 
   const blockers: string[] = [];
   const warnings: string[] = [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) blockers.push("destination_start_date_required");
+  else if (!/^\d{4}-\d{2}-01$/.test(cutoverDate)) blockers.push("migration_cutover_must_start_month");
+  if (!isOpen(to)) blockers.push("destination_grant_not_active");
   if (String(to?.linking?.cycle?.previousGrantId || "") !== from.id) blockers.push("cycle_link_not_reciprocal");
   const fromEnd = iso10(from.endDate);
   if (fromEnd && cutoverDate && fromEnd >= cutoverDate) warnings.push("grant_dates_overlap");

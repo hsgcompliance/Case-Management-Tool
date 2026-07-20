@@ -19,6 +19,7 @@ import {
   getGrantFinancialCapabilities,
 } from "../grants/schemas";
 import { EnrollmentsMigrateBody } from "./schemas";
+import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
 
 function migrationError(message: string, code = 400, meta?: Record<string, unknown>) {
   const e = new Error(message) as Error & { code?: number; meta?: Record<string, unknown> };
@@ -27,15 +28,10 @@ function migrationError(message: string, code = 400, meta?: Record<string, unkno
   return e;
 }
 
-function latestPaymentDueDate(payments: any[]): string | null {
-  let maxDue = "";
-  for (const p of Array.isArray(payments) ? payments : []) {
-    if ((p as any)?.void === true) continue;
-    const due = String((p as any)?.dueDate || (p as any)?.date || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) continue;
-    if (!maxDue || due > maxDue) maxDue = due;
-  }
-  return maxDue || null;
+function previousDateISO(value: string): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }
 
 function closeFutureTasksAfter(dateISO: string, schedule: any[]) {
@@ -138,6 +134,11 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
       });
       return;
     }
+    if (closeSource && !/^\d{4}-\d{2}-01$/.test(cutover)) {
+      res.status(400).json({ ok: false, error: "migration_cutover_must_start_month" });
+      return;
+    }
+    const sourceCloseDate = enrollmentMonthEnd(previousDateISO(cutover));
 
     const normalizeMap = (m: any) => {
       if (!m || typeof m !== "object") return {};
@@ -172,6 +173,10 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
         if (!toGrantSnap.exists) throw new Error("To grant not found");
         const fromGrant = fromGrantSnap.data() || {};
         const toGrant = toGrantSnap.data() || {};
+        const destinationStatus = String((toGrant as any)?.status || "active").toLowerCase();
+        if ((toGrant as any)?.deleted === true || destinationStatus === "closed" || destinationStatus === "deleted") {
+          throw migrationError("destination_grant_not_active", 400);
+        }
 
         if (!isDev(user)) {
           if (fromGrant.orgId && fromGrant.orgId !== callerOrgId) {
@@ -609,16 +614,10 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
         let sourceTaskSchedule = moveTasks ? stayTasks : taskSchedule;
 
         if (closeSource) {
-          if (closeSourcePaymentMode === "deleteUnpaid") {
-            sourcePayments = sourcePayments.filter((p: any) => {
-              const due = String(p?.dueDate || p?.date || "").slice(0, 10);
-              const isFuture = /^\d{4}-\d{2}-\d{2}$/.test(due) && due > cutover;
-              return !(isFuture && !p?.paid);
-            });
-          } else if (closeSourcePaymentMode === "spendUnpaid") {
+          if (closeSourcePaymentMode === "spendUnpaid") {
             const remainingFutureUnpaid = sourcePayments.filter((p: any) => {
               const due = String(p?.dueDate || p?.date || "").slice(0, 10);
-              return /^\d{4}-\d{2}-\d{2}$/.test(due) && due > cutover && !p?.paid;
+              return /^\d{4}-\d{2}-\d{2}$/.test(due) && due > sourceCloseDate && !p?.paid;
             });
             if (remainingFutureUnpaid.length) {
               throw new Error("migrate_close_source_spend_unpaid_not_supported");
@@ -626,17 +625,18 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
           }
 
           if (closeSourceTaskMode === "delete") {
-            sourceTaskSchedule = deleteFutureTasksAfter(cutover, sourceTaskSchedule).next;
+            sourceTaskSchedule = deleteFutureTasksAfter(sourceCloseDate, sourceTaskSchedule).next;
           } else {
-            sourceTaskSchedule = closeFutureTasksAfter(cutover, sourceTaskSchedule).next;
+            sourceTaskSchedule = closeFutureTasksAfter(sourceCloseDate, sourceTaskSchedule).next;
           }
 
-          const lastPaymentDate = latestPaymentDueDate(sourcePayments);
-          if (lastPaymentDate && cutover < lastPaymentDate) {
-            const err: any = new Error(`close_date_before_last_payment (${cutover} < ${lastPaymentDate})`);
-            err.meta = { closeDate: cutover, lastPaymentDate };
+          const closePreview = buildEnrollmentClosePreview({ payments: sourcePayments, requestedCloseDate: sourceCloseDate });
+          if (closePreview.paidAfterClose.length) {
+            const err: any = new Error("close_date_before_last_paid_payment");
+            err.meta = { closeDate: sourceCloseDate, lastPaidDate: closePreview.lastPaidDate };
             throw err;
           }
+          sourcePayments = closePreview.retainedPayments;
         }
 
         const sourcePatch: any = {
@@ -662,7 +662,7 @@ export async function migrateEnrollmentHandler(req: any, res: any) {
           Object.assign(sourcePatch, {
             active: false,
             status: "closed",
-            endDate: cutover,
+            endDate: sourceCloseDate,
           });
         }
         tx.update(eRef, sourcePatch);
