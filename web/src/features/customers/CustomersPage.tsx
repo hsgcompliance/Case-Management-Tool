@@ -952,7 +952,11 @@ export function CustomersPage() {
                           </div>
                         </td>
 
-                        <td className="text-slate-700">{c?.caseManagerName || c?.caseManagerId || "-"}</td>
+                        <td className="text-slate-700">
+                          {c?.caseManagerId
+                            ? cmNameByUid.get(String(c.caseManagerId)) || c.caseManagerName || c.caseManagerId
+                            : "-"}
+                        </td>
 
                         <td className="text-slate-700">{secondaryName}</td>
 
