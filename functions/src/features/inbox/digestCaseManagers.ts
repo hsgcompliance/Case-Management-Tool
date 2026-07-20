@@ -5,7 +5,7 @@ import {sendHtmlEmail} from './emailer';
 import {loadDigestEnrollments} from './digestEnrollmentSource';
 import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
-const DASHBOARD_LINK = 'https://households-db.web.app/dashboard';
+const DASHBOARD_LINK = 'https://households-db.web.app/reports/case-manager-load';
 const BRAND = '#2563EB';
 const TEXT = '#1e293b';
 const MUTED = '#64748b';
@@ -14,10 +14,6 @@ const BG_CARD = '#ffffff';
 const BORDER = '#e2e8f0';
 const BG_SECT = '#f8fafc';
 const GREEN_TEXT = '#15803d';
-const AMBER_TEXT = '#b45309';
-const DANGER_TEXT = '#b91c1c';
-
-type DeltaValue = number | null;
 
 type CMRow = {
   uid: string;
@@ -25,9 +21,10 @@ type CMRow = {
   email: string;
   activeCustomers: number;
   activeEnrollments: number;
-  customerDelta: DeltaValue;
-  enrollmentDelta: DeltaValue;
-  acuityAvg: number | null;
+  changedCustomers: number;
+  newCustomers: number;
+  totalAllocation: number;
+  tiers: { tier1: number; tier2: number; tier3: number; untiered: number };
 };
 
 type CaseManagerDigestData = {
@@ -37,8 +34,9 @@ type CaseManagerDigestData = {
   totals: {
     activeCustomers: number;
     activeEnrollments: number;
-    customerDelta: DeltaValue;
-    enrollmentDelta: DeltaValue;
+    changedCustomers: number;
+    newCustomers: number;
+    totalAllocation: number;
   };
   dashboardLink: string;
 };
@@ -55,12 +53,6 @@ function monthLabel(ym: string): string {
   }
 }
 
-function previousMonth(ym: string): string {
-  const [year, month] = ym.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 2, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
 function chunks<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -71,36 +63,34 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
-function numberOrNull(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+function effectiveAllocation(enrollment: Record<string, unknown>): number {
+  const assigned = asRecord(enrollment.clientAllocation).amount;
+  if (assigned != null) {
+    const amount = Number(assigned);
+    if (Number.isFinite(amount) && amount >= 0) return amount;
+  }
+  return (Array.isArray(enrollment.payments) ? enrollment.payments : []).reduce((sum, raw) => {
+    const payment = asRecord(raw);
+    if (payment.void === true) return sum;
+    const amount = Number(payment.amount || 0);
+    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
+  }, 0);
 }
 
-function readActiveCustomersMetric(row: Record<string, unknown>): number | null {
-  return numberOrNull(asRecord(row.customers).active) ??
-    numberOrNull(row.activeCustomers) ??
-    numberOrNull(row.caseloadActive);
+function changedInMonth(enrollment: Record<string, unknown>, month: string): boolean {
+  const migratedFrom = asRecord(enrollment.migratedFrom);
+  const migratedTo = asRecord(enrollment.migratedTo);
+  const continuity = asRecord(enrollment.continuity);
+  return [enrollment.startDate, enrollment.endDate, migratedFrom.cutover, migratedTo.cutover, continuity.cutoffDate]
+      .some((value) => String(value || '').slice(0, 7) === month);
 }
 
-function readActiveEnrollmentsMetric(row: Record<string, unknown>): number | null {
-  return numberOrNull(asRecord(row.enrollments).active) ??
-    numberOrNull(row.activeEnrollments) ??
-    numberOrNull(row.enrollmentActive) ??
-    numberOrNull(row.caseloadActive);
+function money(value: number): string {
+  return new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 0}).format(value);
 }
 
-function deltaBadge(delta: DeltaValue): string {
-  if (delta === null) return `<div style="font-size:10px;color:${MUTED};margin-top:2px">change n/a</div>`;
-  if (delta === 0) return `<div style="font-size:10px;color:${MUTED};margin-top:2px">no change</div>`;
-  const color = delta > 0 ? GREEN_TEXT : DANGER_TEXT;
-  const sign = delta > 0 ? '+' : '';
-  return `<div style="font-size:10px;color:${color};font-weight:700;margin-top:2px">${sign}${delta} from last month</div>`;
-}
-
-function acuityBadge(avg: number | null): string {
-  if (avg === null) return `<span style="color:${MUTED};font-size:12px">-</span>`;
-  const color = avg >= 4 ? DANGER_TEXT : avg >= 3 ? AMBER_TEXT : GREEN_TEXT;
-  return `<span style="font-weight:700;color:${color};font-size:13px">${avg.toFixed(1)}</span>`;
+function tierSummary(tiers: CMRow['tiers']): string {
+  return `<span style="font-size:11px;color:${TEXT};white-space:nowrap">T1 ${tiers.tier1} &middot; T2 ${tiers.tier2} &middot; T3 ${tiers.tier3} &middot; None ${tiers.untiered}</span>`;
 }
 
 function displayNameFromAuth(user: { displayName?: string; email?: string }, uid: string): string {
@@ -115,34 +105,58 @@ export async function buildCaseManagerDigestData(opts: {
   dashboardLink?: string;
 }): Promise<CaseManagerDigestData> {
   const {month, recipientName = 'Team', dashboardLink = DASHBOARD_LINK} = opts;
-  const prevMonth = previousMonth(month);
-
   const customersSnap = await db
       .collection('customers')
       .where('active', '==', true)
       .where('deleted', '!=', true)
-      .select('caseManagerId')
+      .select('caseManagerId', 'tier')
       .get();
 
   const activeCustomersByUid = new Map<string, number>();
+  const tiersByUid = new Map<string, CMRow['tiers']>();
   for (const doc of customersSnap.docs) {
-    const uid = String((doc.data() as Record<string, unknown>).caseManagerId || '').trim();
+    const customer = doc.data() as Record<string, unknown>;
+    const uid = String(customer.caseManagerId || '').trim();
     if (!uid) continue;
     activeCustomersByUid.set(uid, (activeCustomersByUid.get(uid) || 0) + 1);
+    const tiers = tiersByUid.get(uid) || {tier1: 0, tier2: 0, tier3: 0, untiered: 0};
+    const tier = Number(customer.tier);
+    if (tier === 1) tiers.tier1 += 1;
+    else if (tier === 2) tiers.tier2 += 1;
+    else if (tier === 3) tiers.tier3 += 1;
+    else tiers.untiered += 1;
+    tiersByUid.set(uid, tiers);
   }
 
   const activeEnrollmentsByUid = new Map<string, number>();
-  const activeEnrollments = await loadDigestEnrollments({activeOnly: true});
-  for (const row of activeEnrollments) {
+  const allocationByUid = new Map<string, number>();
+  const changedByUid = new Map<string, Set<string>>();
+  const newByUid = new Map<string, Set<string>>();
+  const allEnrollments = await loadDigestEnrollments({});
+  for (const row of allEnrollments) {
     const uid = String(row.caseManagerId || '').trim();
     if (!uid) continue;
-    activeEnrollmentsByUid.set(uid, (activeEnrollmentsByUid.get(uid) || 0) + 1);
+    if (row.active) {
+      activeEnrollmentsByUid.set(uid, (activeEnrollmentsByUid.get(uid) || 0) + 1);
+      allocationByUid.set(uid, (allocationByUid.get(uid) || 0) + effectiveAllocation(row.raw));
+    }
+    if (String(row.startDate || '').slice(0, 7) === month) {
+      const ids = newByUid.get(uid) || new Set<string>();
+      ids.add(row.customerId);
+      newByUid.set(uid, ids);
+    }
+    if (changedInMonth(row.raw, month)) {
+      const ids = changedByUid.get(uid) || new Set<string>();
+      ids.add(row.customerId);
+      changedByUid.set(uid, ids);
+    }
   }
 
   const cmUids = [
     ...new Set([
       ...activeCustomersByUid.keys(),
       ...activeEnrollmentsByUid.keys(),
+      ...changedByUid.keys(),
     ]),
   ];
 
@@ -151,26 +165,15 @@ export async function buildCaseManagerDigestData(opts: {
       recipientName,
       month,
       rows: [],
-      totals: {activeCustomers: 0, activeEnrollments: 0, customerDelta: null, enrollmentDelta: null},
+      totals: {activeCustomers: 0, activeEnrollments: 0, changedCustomers: 0, newCustomers: 0, totalAllocation: 0},
       dashboardLink,
     };
   }
 
   const extrasMap = new Map<string, Record<string, unknown>>();
-  const summaryMap = new Map<string, Record<string, unknown>>();
-  const previousMap = new Map<string, Record<string, unknown>>();
   await Promise.all(chunks(cmUids, 30).map(async (chunk) => {
-    const [extras, summaries] = await Promise.all([
-      db.collection('userExtras').where('__name__', 'in', chunk).get(),
-      db.collection('caseManagerMetrics').where('__name__', 'in', chunk).get(),
-    ]);
+    const extras = await db.collection('userExtras').where('__name__', 'in', chunk).get();
     for (const doc of extras.docs) extrasMap.set(doc.id, doc.data() as Record<string, unknown>);
-    for (const doc of summaries.docs) summaryMap.set(doc.id, doc.data() as Record<string, unknown>);
-  }));
-
-  await Promise.all(cmUids.map(async (uid) => {
-    const snap = await db.doc(`caseManagerMetrics/${uid}/months/${prevMonth}`).get();
-    if (snap.exists) previousMap.set(uid, snap.data() as Record<string, unknown>);
   }));
 
   const authUsers = new Map<string, { displayName?: string; email?: string }>();
@@ -187,15 +190,8 @@ export async function buildCaseManagerDigestData(opts: {
   const rows: CMRow[] = cmUids.map((uid) => {
     const authUser = authUsers.get(uid) || {};
     const extras = extrasMap.get(uid) || {};
-    const summary = summaryMap.get(uid) || {};
-    const previous = previousMap.get(uid) || {};
-    const activeCustomers = activeCustomersByUid.get(uid) || readActiveCustomersMetric(summary) || 0;
-    const activeEnrollments = activeEnrollmentsByUid.get(uid) || readActiveEnrollmentsMetric(summary) || 0;
-    const prevCustomers = readActiveCustomersMetric(previous);
-    const prevEnrollments = readActiveEnrollmentsMetric(previous);
-    const acuityAvg =
-      numberOrNull(asRecord(summary.acuity).scoreAvg) ??
-      numberOrNull(extras.acuityScoreAvg);
+    const activeCustomers = activeCustomersByUid.get(uid) || 0;
+    const activeEnrollments = activeEnrollmentsByUid.get(uid) || 0;
     const name = String(extras.displayName || '').trim() || displayNameFromAuth(authUser, uid);
     const email = String(extras.email || authUser.email || '').trim();
 
@@ -205,18 +201,15 @@ export async function buildCaseManagerDigestData(opts: {
       email,
       activeCustomers,
       activeEnrollments,
-      customerDelta: prevCustomers === null ? null : activeCustomers - prevCustomers,
-      enrollmentDelta: prevEnrollments === null ? null : activeEnrollments - prevEnrollments,
-      acuityAvg,
+      changedCustomers: changedByUid.get(uid)?.size || 0,
+      newCustomers: newByUid.get(uid)?.size || 0,
+      totalAllocation: allocationByUid.get(uid) || 0,
+      tiers: tiersByUid.get(uid) || {tier1: 0, tier2: 0, tier3: 0, untiered: 0},
     };
   });
 
   rows.sort((a, b) => a.name.localeCompare(b.name));
   const sum = (fn: (r: CMRow) => number) => rows.reduce((total, row) => total + fn(row), 0);
-  const sumDelta = (fn: (r: CMRow) => DeltaValue): DeltaValue => {
-    const values = rows.map(fn);
-    return values.every((value) => value !== null) ? values.reduce((total, value) => total + (value || 0), 0) : null;
-  };
 
   return {
     recipientName,
@@ -225,8 +218,9 @@ export async function buildCaseManagerDigestData(opts: {
     totals: {
       activeCustomers: sum((row) => row.activeCustomers),
       activeEnrollments: sum((row) => row.activeEnrollments),
-      customerDelta: sumDelta((row) => row.customerDelta),
-      enrollmentDelta: sumDelta((row) => row.enrollmentDelta),
+      changedCustomers: sum((row) => row.changedCustomers),
+      newCustomers: sum((row) => row.newCustomers),
+      totalAllocation: sum((row) => row.totalAllocation),
     },
     dashboardLink,
   };
@@ -243,14 +237,15 @@ export function buildCaseManagerDigestHtml(data: CaseManagerDigestData): string 
         ${row.email ? `<div style="font-size:11px;color:${MUTED};margin-top:2px">${esc(row.email)}</div>` : ''}
       </td>
       <td style="padding:10px 12px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:${BRAND}">${row.activeCustomers}</div>
-        ${deltaBadge(row.customerDelta)}
+        <div style="font-size:18px;font-weight:800;color:${BRAND}">${row.changedCustomers}</div>
+        <div style="font-size:10px;color:${MUTED};margin-top:2px">${row.newCustomers} new</div>
       </td>
       <td style="padding:10px 12px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:${TEXT}">${row.activeEnrollments}</div>
-        ${deltaBadge(row.enrollmentDelta)}
+        <div style="font-size:16px;font-weight:800;color:${TEXT}">${row.activeCustomers}</div>
+        <div style="font-size:10px;color:${MUTED};margin-top:2px">${row.activeEnrollments} enrollments</div>
       </td>
-      <td style="padding:10px 12px;text-align:center">${acuityBadge(row.acuityAvg)}</td>
+      <td style="padding:10px 12px;text-align:center;font-size:13px;font-weight:700;color:${TEXT}">${money(row.totalAllocation)}</td>
+      <td style="padding:10px 12px;text-align:center">${tierSummary(row.tiers)}</td>
     </tr>`).join('');
 
   const noRows = !rows.length ?
@@ -272,18 +267,18 @@ export function buildCaseManagerDigestHtml(data: CaseManagerDigestData): string 
         <tr><td style="background:${BG_CARD};padding:16px 28px;border-bottom:1px solid ${BORDER}">
           <table cellpadding="0" cellspacing="0"><tr>
             <td style="padding-right:24px;text-align:center">
-              <div style="font-size:22px;font-weight:800;color:${BRAND}">${rows.length}</div>
-              <div style="font-size:11px;color:${MUTED}">Case Managers</div>
+              <div style="font-size:26px;font-weight:800;color:${BRAND}">${totals.changedCustomers}</div>
+              <div style="font-size:11px;color:${MUTED}">Customers Changed</div>
+              <div style="font-size:10px;color:${GREEN_TEXT};font-weight:700;margin-top:2px">${totals.newCustomers} new this month</div>
             </td>
             <td style="padding-right:24px;text-align:center">
               <div style="font-size:22px;font-weight:800;color:${TEXT}">${totals.activeCustomers}</div>
-              <div style="font-size:11px;color:${MUTED}">Active Customers</div>
-              ${deltaBadge(totals.customerDelta)}
+              <div style="font-size:11px;color:${MUTED}">Total Active Caseload</div>
             </td>
             <td style="text-align:center">
-              <div style="font-size:22px;font-weight:800;color:${TEXT}">${totals.activeEnrollments}</div>
-              <div style="font-size:11px;color:${MUTED}">Active Enrollments</div>
-              ${deltaBadge(totals.enrollmentDelta)}
+              <div style="font-size:22px;font-weight:800;color:${TEXT}">${money(totals.totalAllocation)}</div>
+              <div style="font-size:11px;color:${MUTED}">Customer Allocation</div>
+              <div style="font-size:10px;color:${MUTED};margin-top:2px">${totals.activeEnrollments} active enrollments</div>
             </td>
           </tr></table>
         </td></tr>
@@ -294,18 +289,19 @@ export function buildCaseManagerDigestHtml(data: CaseManagerDigestData): string 
             <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
               <thead><tr style="background:${BG_SECT}">
                 <th align="left" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Case Manager</th>
-                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Active Customers</th>
-                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Active Enrollments</th>
-                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Acuity Avg</th>
+                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Customers Changed</th>
+                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Total Caseload</th>
+                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Allocation</th>
+                <th align="center" style="padding:8px 12px;font-size:11px;color:${MUTED};font-weight:700;text-transform:uppercase">Tiers</th>
               </tr></thead>
               <tbody>${tableRows}</tbody>
             </table>` : noRows}
           </div>
-          <div style="font-size:11px;color:${MUTED};margin-top:10px">Monthly change appears when prior-month case manager snapshots include customer and enrollment counts.</div>
+          <div style="font-size:11px;color:${MUTED};margin-top:10px">Customers changed counts distinct customers with an enrollment start, end, or migration in ${label}.</div>
         </td></tr>
 
         <tr><td style="background:${BG_CARD};border-top:1px solid ${BORDER};border-radius:0 0 12px 12px;padding:16px 28px;text-align:center">
-          <a href="${dashboardLink}" style="display:inline-block;background:${BRAND};color:#fff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:700">View Dashboard</a>
+          <a href="${dashboardLink}" style="display:inline-block;background:${BRAND};color:#fff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:700">View Details</a>
           <div style="margin-top:12px;font-size:11px;color:${MUTED}">You're receiving this digest based on your subscription preferences.</div>
         </td></tr>
       </table>
@@ -325,7 +321,7 @@ export async function buildAndSendCaseManagerDigest(
   try {
     const data = await buildCaseManagerDigestData({month: opts.month, recipientName: opts.recipientName});
     const html = buildCaseManagerDigestHtml(data);
-    const subject = `Case Manager Digest - ${monthLabel(opts.month)} (${data.rows.length} CMs, ${data.totals.activeCustomers} customers)`;
+    const subject = `Case Manager Digest - ${monthLabel(opts.month)} (${data.totals.changedCustomers} customers changed, ${data.totals.activeCustomers} total)`;
 
     const sent = await sendHtmlEmail({from: 'hsgcompliance@thehrdc.org', to, subject, html});
     await markDigestSent(key, {id: sent.id || null, to, month: opts.month, subject, digestType: 'caseManagers'});

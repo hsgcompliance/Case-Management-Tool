@@ -7,12 +7,14 @@ import PageHeader from "@entities/Page/PageHeader";
 import RefreshButton from "@entities/ui/RefreshButton";
 import CaseManagerSelect from "@entities/selectors/CaseManagerSelect";
 import { useUsers } from "@hooks/useUsers";
-import { useGrants } from "@hooks/useGrants";
 import { useInboxWorkloadList } from "@hooks/useInbox";
+import { useAdminEnrollmentsData } from "@entities/Page/dashboardStyle/hooks/useAdminEnrollmentsData";
 import { qk } from "@hooks/queryKeys";
 import { isCaseManagerLike } from "@lib/roles";
+import { fmtCurrencyUSD } from "@lib/formatters";
 import { MetricStrip } from "@entities/metrics/strip/MetricStrip";
 import CaseManagerAccordion from "./components/CaseManagerAccordion";
+import { buildCaseManagerReport, emptyCaseManagerReportStats } from "./components/caseManagerReportModel";
 import {
   cmLabel,
   currentYearMonthKey,
@@ -25,6 +27,8 @@ type WorkloadStatItem = {
   status?: string;
   assignedToUid?: string;
   cmUid?: string;
+  customerId?: string;
+  clientId?: string;
 };
 
 function hasCaseManagerRole(u: CaseManagerUser): boolean {
@@ -39,7 +43,7 @@ export function CasemanagersPage() {
   const [cmFilter, setCmFilter] = React.useState<string | null>(null);
 
   const usersQ = useUsers({ status: "all", limit: 500 });
-  useGrants({ limit: 500 }, { staleTime: 60_000 });
+  const reportData = useAdminEnrollmentsData();
 
   // Workload list for month stats (replaces bulk customer/enrollment load)
   const workloadQ = useInboxWorkloadList(
@@ -61,27 +65,50 @@ export function CasemanagersPage() {
     return allCaseManagers.filter((cm) => String(cm.uid) === cmFilter);
   }, [allCaseManagers, cmFilter]);
 
-  // Derive month stats from workload items (no customer docs needed)
+  const caseManagerReport = React.useMemo(
+    () => buildCaseManagerReport({
+      caseManagerIds: allCaseManagers.map((cm) => String(cm.uid || "")),
+      customers: reportData.customers as Array<Record<string, unknown>>,
+      enrollments: reportData.enrollments as Array<Record<string, unknown>>,
+      month: monthKey,
+    }),
+    [allCaseManagers, reportData.customers, reportData.enrollments, monthKey]
+  );
+
+  // Tasks remain available as a secondary workload signal.
   const monthStats = React.useMemo(() => {
     const items = (workloadQ.data || []) as WorkloadStatItem[];
-    let assessments = 0;
-    let payments = 0;
     const tasksByCm = new Map<string, number>();
+    const tasksByCmAndCustomer = new Map<string, Map<string, number>>();
 
     for (const item of items) {
-      const bucket = String(item.bucket || item.type || "").toLowerCase();
       const status = String(item.status || "").toLowerCase();
       if (status !== "open") continue;
 
       const assignedUid = String(item.assignedToUid || item.cmUid || "");
       if (assignedUid) tasksByCm.set(assignedUid, (tasksByCm.get(assignedUid) || 0) + 1);
-
-      if (bucket.includes("assessment")) assessments += 1;
-      else if (bucket.includes("pay") || bucket === "payment") payments += 1;
+      const customerId = String(item.customerId || item.clientId || "");
+      if (assignedUid && customerId) {
+        const byCustomer = tasksByCmAndCustomer.get(assignedUid) || new Map<string, number>();
+        byCustomer.set(customerId, (byCustomer.get(customerId) || 0) + 1);
+        tasksByCmAndCustomer.set(assignedUid, byCustomer);
+      }
     }
 
-    return { assessments, payments, tasksByCm };
+    return { tasksByCm, tasksByCmAndCustomer };
   }, [workloadQ.data]);
+
+  const visibleTotals = React.useMemo(() => {
+    return caseManagers.reduce((totals, cm) => {
+      const stats = caseManagerReport.statsByUid.get(String(cm.uid)) || emptyCaseManagerReportStats();
+      totals.activeCaseload += stats.activeCaseload;
+      totals.newCustomersThisMonth += stats.newCustomersThisMonth;
+      totals.changedCustomersThisMonth += stats.changedCustomersThisMonth;
+      totals.totalAllocation += stats.totalAllocation;
+      totals.openTasks += monthStats.tasksByCm.get(String(cm.uid)) || 0;
+      return totals;
+    }, { activeCaseload: 0, newCustomersThisMonth: 0, changedCustomersThisMonth: 0, totalAllocation: 0, openTasks: 0 });
+  }, [caseManagers, caseManagerReport.statsByUid, monthStats.tasksByCm]);
 
   const caseManagerOptions = React.useMemo(
     () =>
@@ -93,7 +120,7 @@ export function CasemanagersPage() {
     [allCaseManagers]
   );
 
-  const isLoading = usersQ.isLoading;
+  const isLoading = usersQ.isLoading || reportData.sharedDataLoading;
 
   const onRefresh = async () => {
     await Promise.allSettled([
@@ -136,37 +163,47 @@ export function CasemanagersPage() {
       <MetricStrip
         items={[
           {
-            id: "case-managers",
-            label: "Case Managers",
-            value: allCaseManagers.length,
-            subtext: "Total active case managers",
-            metricId: "case-managers",
+            id: "active-caseload",
+            label: "Active Caseload",
+            value: visibleTotals.activeCaseload,
+            subtext: `${caseManagers.length} case manager${caseManagers.length === 1 ? "" : "s"}`,
+            metricId: "my-customers",
           },
           {
-            id: "assessments-due",
-            label: `Assessments Due (${monthKey})`,
-            value: monthStats.assessments,
-            subtext: "Open assessment tasks this month",
-            metricId: "assessments-due",
+            id: "new-customers",
+            label: "New on Load",
+            value: visibleTotals.newCustomersThisMonth,
+            subtext: `${visibleTotals.changedCustomersThisMonth} customers changed in ${monthKey}`,
+            metricId: "grant-unique-clients",
           },
           {
-            id: "payments-due",
-            label: `Payments Due (${monthKey})`,
-            value: monthStats.payments,
-            subtext: "Open payment tasks this month",
-            metricId: "payments-due",
+            id: "customer-allocation",
+            label: "Customer Allocation",
+            value: fmtCurrencyUSD(visibleTotals.totalAllocation),
+            subtext: "Assigned or scheduled active-enrollment total",
+            metricId: "system-spend",
           },
           {
             id: "open-tasks",
             label: "Open Tasks",
-            value: ((workloadQ.data || []) as WorkloadStatItem[]).filter((item) => String(item.status || "") === "open").length,
-            subtext: "Total open inbox tasks this month",
+            value: visibleTotals.openTasks,
+            subtext: "Secondary workload signal for this month",
             metricId: "open-tasks",
           },
         ]}
         className="pt-1"
         gridClassName="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
       />
+
+      {reportData.sharedDataError ? (
+        <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          Customer or enrollment data could not be loaded.
+        </div>
+      ) : reportData.isTruncated.customers || reportData.isTruncated.enrollments ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Caseload totals may be incomplete because the organization exceeds the report display limit.
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="text-sm text-slate-600" data-tour="casemanagers-loading">
@@ -181,7 +218,11 @@ export function CasemanagersPage() {
               key={String(cm.uid)}
               user={cm}
               monthKey={monthKey}
+              customers={caseManagerReport.customersByUid.get(String(cm.uid)) || []}
+              enrollmentsByCustomerId={caseManagerReport.enrollmentsByCustomerId}
+              stats={caseManagerReport.statsByUid.get(String(cm.uid)) || emptyCaseManagerReportStats()}
               taskCount={monthStats.tasksByCm.get(String(cm.uid))}
+              openTasksByCustomerId={monthStats.tasksByCmAndCustomer.get(String(cm.uid)) || new Map()}
               defaultOpen={String(cm.uid) === meUid}
             />
           ))}

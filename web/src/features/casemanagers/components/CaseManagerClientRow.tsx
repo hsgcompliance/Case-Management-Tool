@@ -8,6 +8,7 @@ import { qk } from "@hooks/queryKeys";
 import { useTasksUpdateStatus } from "@hooks/useTasks";
 import { usePaymentsSpend, usePaymentsUpdateCompliance } from "@hooks/usePayments";
 import { metricPillClass, populationChipClass, statusChipClass, toneTextClass } from "@lib/colorRegistry";
+import { fmtCurrencyUSD } from "@lib/formatters";
 import type { CustomerRow, EnrollmentRow } from "./model";
 import { customerLabel, fmtDOB, populationLabel, toISO10 } from "./model";
 import { customerContactRoleForUid } from "@features/customers/contactCaseManagers";
@@ -18,6 +19,8 @@ type Props = {
   monthKey: string;
   cmName: string;
   cmUid: string;
+  openTaskCount: number;
+  allocation: number;
 };
 
 type AssessmentDue = {
@@ -49,7 +52,7 @@ function isAssessmentTask(task: Record<string, unknown> | null | undefined): boo
   return type.includes("assessment");
 }
 
-export default function CaseManagerClientRow({ customer, enrollments, monthKey, cmName, cmUid }: Props) {
+export default function CaseManagerClientRow({ customer, enrollments, monthKey, cmName, cmUid, openTaskCount, allocation }: Props) {
   const router = useRouter();
   const qc = useQueryClient();
   const taskStatus = useTasksUpdateStatus();
@@ -148,6 +151,7 @@ export default function CaseManagerClientRow({ customer, enrollments, monthKey, 
         enrollmentId: p.enrollmentId,
         paymentId: p.paymentId,
         reverse: !next,
+        forceSync: false,
       },
     });
     await refreshEnrollmentViews(p.enrollmentId);
@@ -170,6 +174,7 @@ export default function CaseManagerClientRow({ customer, enrollments, monthKey, 
   const pop = populationLabel(customer.population);
   const status = String(customer.status || "");
   const contactRole = customerContactRoleForUid(customer as Record<string, unknown>, cmUid);
+  const tier = Number((customer as { tier?: unknown }).tier);
 
   return (
     <li className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -201,6 +206,18 @@ export default function CaseManagerClientRow({ customer, enrollments, monthKey, 
               {pop ? (
                 <span className={["rounded-full border px-2 py-0.5", populationChipClass(pop)].join(" ")}>{pop}</span>
               ) : null}
+              <span className={[
+                "rounded-full border px-2 py-0.5 font-semibold",
+                tier === 1
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : tier === 2
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : tier === 3
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-white text-slate-500",
+              ].join(" ")}>
+                {tier >= 1 && tier <= 3 ? `Tier ${tier}` : "Untiered"}
+              </span>
               {status ? (
                 <span className={["rounded-full border px-2 py-0.5", statusChipClass(status)].join(" ")}>{status}</span>
               ) : null}
@@ -211,14 +228,20 @@ export default function CaseManagerClientRow({ customer, enrollments, monthKey, 
               </div>
             ) : null}
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+              <span className={["rounded-full border px-2 py-0.5", metricPillClass("system-spend")].join(" ")}>
+                Allocation <b>{fmtCurrencyUSD(allocation)}</b>
+              </span>
+              <span className={["rounded-full border px-2 py-0.5", metricPillClass("open-tasks")].join(" ")}>
+                Open tasks <b>{openTaskCount}</b>
+              </span>
+              <span className={["rounded-full border px-2 py-0.5", metricPillClass("my-enrollments")].join(" ")}>
+                Enrollments <b>{header.active}</b>/<b>{header.total}</b>
+              </span>
               <span className={["rounded-full border px-2 py-0.5", metricPillClass("assessments-due")].join(" ")}>
                 Assess due <b>{header.assessDue}</b>
               </span>
               <span className={["rounded-full border px-2 py-0.5", metricPillClass("payments-due")].join(" ")}>
                 Pays due <b>{header.payDue}</b>
-              </span>
-              <span className={["rounded-full border px-2 py-0.5", metricPillClass("my-enrollments")].join(" ")}>
-                Enrollments <b>{header.active}</b>/<b>{header.total}</b>
               </span>
             </div>
           </div>
