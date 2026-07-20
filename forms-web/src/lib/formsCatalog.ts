@@ -239,24 +239,12 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
   {
-    title: "Build rent assistance payment schedule",
+    title: "Link intake & build assistance payment schedule",
     note:
-      "Turn the completed Rent Determination into a reviewed payment schedule: pick the enrollment(s) to bill, " +
-      "check the generated rows (deposit, prorated/arrears, monthly, utility allowance), then apply. Payments are " +
-      "created on the enrollment in order and flow into the payment queue automatically. Nothing is created until you apply.",
+      "Confirm the sidebar submissions are linked, review the webhook-prefilled household and landlord information, " +
+      "then select the funded grant and line item and build the payment schedule. The enrollment is resolved first; " +
+      "payments are then created in order and flow into the real payment queue.",
     rentCertBuilder: true,
-    noCompletionRequired: true,
-  },
-  {
-    title: "Link intake submissions to customer",
-    note: "Open the Submissions tab and confirm each completed intake submission is linked to the current customer. If linked submissions are missing key answers, use the builder below to capture the fallback intake facts.",
-    checklist: [
-      "Open the Submissions tab",
-      "Link each matching intake submission to the current customer",
-      "Confirm linked submissions appear in the customer details header",
-    ],
-    links: [{ href: "/staff/submissions", label: "Open Submissions tab" }],
-    manualInfoBuilder: true,
     noCompletionRequired: true,
   },
   {

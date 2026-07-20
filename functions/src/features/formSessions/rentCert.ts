@@ -171,7 +171,13 @@ async function listProgramsForForms(orgId: string) {
   const snap = await db.collection("grants").where("orgId", "==", org).limit(250).get();
   return snap.docs
     .map((doc) => ({id: doc.id, ...(doc.data() || {})} as Record<string, any>))
-    .filter((grant) => grant.deleted !== true && String(grant.status || "active") !== "closed")
+    // This workflow creates real enrollments and payment-queue projections, so
+    // draft, inactive, closed, and deleted grants must never be selectable.
+    .filter((grant) =>
+      grant.deleted !== true &&
+      grant.active !== false &&
+      String(grant.status || "active").toLowerCase() === "active"
+    )
     .map((grant) => ({
       grantId: String(grant.id),
       grantName: normStr(grant.name) || normStr(grant.title) || String(grant.id),
