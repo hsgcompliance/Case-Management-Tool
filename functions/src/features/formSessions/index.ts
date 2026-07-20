@@ -17,4 +17,5 @@ export {
 export {
   formsEnrollmentsList_http as formsEnrollmentsList,
   formsRentCertApply_http as formsRentCertApply,
+  formsCustomerNotEligible_http as formsCustomerNotEligible,
 } from "./rentCert";
