@@ -8,13 +8,13 @@ import { CustomerSearchBar } from "./CustomerSearchBar";
 import { SubmitNotifications } from "./SubmitNotifications";
 import { RENT_DETERMINATION_FORM_ID } from "@/lib/rentCertExtract";
 
-// Primary tabs are the day-to-day surfaces. The power-user views (All forms,
-// Submissions, Webhooks, Activity) live behind the ☰ menu — most staff never
-// need them.
+// Primary tabs are the day-to-day surfaces. Configuration and operational
+// utilities stay grouped under Tools.
 const PRIMARY_TABS = [
   { to: "/staff/purchases", label: "Purchases" },
-  { to: "/staff/referrals", label: "Referrals" },
   { to: "/staff/intake", label: "Intake forms" },
+  { to: "/staff/referrals", label: "Referrals" },
+  { to: "/staff/submissions", label: "Submissions" },
 ];
 
 const MENU_TABS = [
@@ -24,7 +24,6 @@ const MENU_TABS = [
     label: "New Rent Cert",
   },
   { to: "/staff/forms", label: "All forms" },
-  { to: "/staff/submissions", label: "Submissions" },
   { to: "/staff/webhooks", label: "Webhooks" },
   { to: "/staff/activity", label: "Activity" },
 ];
@@ -36,8 +35,8 @@ export function StaffLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const tabs = isAdmin ? [...PRIMARY_TABS, { to: "/staff/admin", label: "Admin" }] : PRIMARY_TABS;
-  const activeMenuTab = MENU_TABS.find((tab) => {
+  const menuTabs = isAdmin ? [...MENU_TABS, { to: "/staff/admin", label: "Admin" }] : MENU_TABS;
+  const activeMenuTab = menuTabs.find((tab) => {
     if (tab.label === "New Rent Cert") {
       return location.pathname === "/staff/submissions" && new URLSearchParams(location.search).get("formId") === RENT_DETERMINATION_FORM_ID;
     }
@@ -82,7 +81,7 @@ export function StaffLayout() {
           {/* No overflow-x-auto here: it would clip the ☰ dropdown (overflow-x
               forces vertical clipping too). The few tabs fit without scrolling. */}
           <nav aria-label="Staff sections" className="-mb-px flex flex-wrap items-center gap-1">
-            {tabs.map((t) => (
+            {PRIMARY_TABS.map((t) => (
               <NavLink
                 key={t.to}
                 to={t.to}
@@ -103,7 +102,7 @@ export function StaffLayout() {
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
-                title="More tools (submissions, webhooks, activity)"
+                title="Tools and administration"
                 className={[
                   "flex items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2 text-sm font-medium transition sm:px-3",
                   activeMenuTab
@@ -111,12 +110,12 @@ export function StaffLayout() {
                     : "border-transparent text-slate-500 hover:text-slate-700",
                 ].join(" ")}
               >
-                <span aria-hidden className="text-base leading-none">☰</span>
-                {activeMenuTab ? activeMenuTab.label : null}
+                <span>Tools</span>
+                <span aria-hidden className="text-[10px] leading-none">{menuOpen ? "▲" : "▼"}</span>
               </button>
               {menuOpen ? (
                 <div className="absolute left-0 z-30 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                  {MENU_TABS.map((t) => (
+                  {menuTabs.map((t) => (
                     <NavLink
                       key={t.to}
                       to={t.to}
