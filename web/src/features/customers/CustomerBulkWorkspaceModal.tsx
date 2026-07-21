@@ -9,6 +9,7 @@ import { GrantBudgetStrip } from "@entities/grants/GrantBudgetStrip";
 import { useEnrollCustomer, useEnrollmentsBulkEnroll } from "@hooks/useEnrollments";
 import { usePatchCustomers, useSoftDeleteCustomers, useHardDeleteCustomers } from "@hooks/useCustomers";
 import { usePaymentsBuildSchedule } from "@hooks/usePayments";
+import { useGrants } from "@hooks/useGrants";
 import type { PaymentScheduleBuildInput } from "@hooks/usePayments";
 import type { TCustomerEntity, ReqOf, TPayment } from "@types";
 import type { Enrollment } from "@client/enrollments";
@@ -20,6 +21,7 @@ import { fmtCurrencyUSD } from "@lib/formatters";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@hooks/queryKeys";
 import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "./paymentScheduleBuildSummary";
+import { paymentScheduleGrantIds } from "./paymentScheduleEligibility";
 import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 
 type CustomerRow = TCustomerEntity & { id: string };
@@ -823,6 +825,7 @@ function BulkPaymentsWorkspace({
   onClearSelection: () => void;
 }) {
   const { data: enrollmentsByCustomer, loading, setData } = useSelectedCustomerEnrollments(customers, true);
+  const { data: grants = [] } = useGrants({ limit: 500 });
   const enrollCustomer = useEnrollCustomer();
   const buildPayments = usePaymentsBuildSchedule();
   const [currentIndex, setCurrentIndex] = React.useState(0);
@@ -835,9 +838,16 @@ function BulkPaymentsWorkspace({
   const [paymentBuildSummary, setPaymentBuildSummary] = React.useState<PaymentScheduleBuildSummary | null>(null);
   const currentCustomer = customers[currentIndex] || null;
   const currentCustomerId = String(currentCustomer?.id || "");
+  const eligiblePaymentGrantIds = React.useMemo(
+    () => paymentScheduleGrantIds(grants as Array<Record<string, unknown>>),
+    [grants],
+  );
   const currentEnrollments = React.useMemo(
-    () => (enrollmentsByCustomer[currentCustomerId] || []).filter(isActiveEnrollment),
-    [currentCustomerId, enrollmentsByCustomer],
+    () => (enrollmentsByCustomer[currentCustomerId] || []).filter((enrollment) =>
+      isActiveEnrollment(enrollment) &&
+      eligiblePaymentGrantIds.has(String(enrollment.grantId || "").trim()),
+    ),
+    [currentCustomerId, eligiblePaymentGrantIds, enrollmentsByCustomer],
   );
   const currentEnrollmentOptions = React.useMemo(
     () => currentEnrollments.map(toEnrollmentOption),

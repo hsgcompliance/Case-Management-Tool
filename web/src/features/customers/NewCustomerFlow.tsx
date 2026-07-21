@@ -37,6 +37,7 @@ import type { DupMatch } from "@lib/duplicateScore";
 import { enrollmentControlsForGrant } from "@features/enrollments/enrollmentControls";
 import { defaultGrantDriveTemplateKeys, grantDriveTemplates } from "@features/grants/driveTemplates";
 import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "./paymentScheduleBuildSummary";
+import { paymentScheduleGrantIds } from "./paymentScheduleEligibility";
 
 type FlowStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type Population = "Youth" | "Individual" | "Family" | "";
@@ -699,29 +700,35 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
     });
   }, [firstName, lastName, cwId]);
 
+  const eligiblePaymentGrantIds = React.useMemo(
+    () => paymentScheduleGrantIds(grants as Array<Record<string, unknown>>),
+    [grants],
+  );
   const builderEnrollments = React.useMemo(
     () =>
-      enrollments.map((enrollment) => {
-        const status = String(enrollment.status || "").toLowerCase();
-        const lineItemIds = Array.from(
-          new Set(
-            readPayments(enrollment)
-              .map((payment) => String(payment.lineItemId || "").trim())
-              .filter(Boolean),
-          ),
-        );
-        return {
-          id: String(enrollment.id || ""),
-          label: formatEnrollmentLabel(enrollment as unknown as Record<string, unknown>),
-          grantId: String(enrollment.grantId || ""),
-          endDate: enrollment.endDate ? String(enrollment.endDate).slice(0, 10) : null,
-          statusLabel: status === "closed" || status === "deleted" ? ("closed" as const) : ("open" as const),
-          lineItemIds,
-          scheduleMeta: (enrollment as Record<string, unknown>).scheduleMeta,
-          payments: readPayments(enrollment) as unknown as TPayment[],
-        };
-      }),
-    [enrollments],
+      enrollments
+        .filter((enrollment) => eligiblePaymentGrantIds.has(String(enrollment.grantId || "").trim()))
+        .map((enrollment) => {
+          const status = String(enrollment.status || "").toLowerCase();
+          const lineItemIds = Array.from(
+            new Set(
+              readPayments(enrollment)
+                .map((payment) => String(payment.lineItemId || "").trim())
+                .filter(Boolean),
+            ),
+          );
+          return {
+            id: String(enrollment.id || ""),
+            label: formatEnrollmentLabel(enrollment as unknown as Record<string, unknown>),
+            grantId: String(enrollment.grantId || ""),
+            endDate: enrollment.endDate ? String(enrollment.endDate).slice(0, 10) : null,
+            statusLabel: status === "closed" || status === "deleted" ? ("closed" as const) : ("open" as const),
+            lineItemIds,
+            scheduleMeta: (enrollment as Record<string, unknown>).scheduleMeta,
+            payments: readPayments(enrollment) as unknown as TPayment[],
+          };
+        }),
+    [eligiblePaymentGrantIds, enrollments],
   );
 
   const paymentScheduleCount = React.useMemo(

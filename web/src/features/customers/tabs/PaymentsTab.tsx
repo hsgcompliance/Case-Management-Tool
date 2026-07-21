@@ -35,6 +35,7 @@ const PaymentEditorSheetSurface = dynamic(
 import { CustomerPaymentsTable } from "../components";
 import { addMonthsISO } from "../components/paymentScheduleUtils";
 import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "../paymentScheduleBuildSummary";
+import { paymentScheduleGrantIds } from "../paymentScheduleEligibility";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
@@ -71,20 +72,6 @@ const BY_TYPE_LABELS: Record<string, string> = {
   "prorated": "Pro-Rated",
   "service": "Support Service",
 };
-
-function grantBudgetTotal(grant: unknown): number {
-  const g = grant && typeof grant === "object" ? (grant as Record<string, unknown>) : {};
-  const budget = g.budget && typeof g.budget === "object" ? (g.budget as Record<string, unknown>) : {};
-  const totals = budget.totals && typeof budget.totals === "object" ? (budget.totals as Record<string, unknown>) : {};
-  const directTotal = Number(budget.total ?? totals.total ?? 0);
-  if (Number.isFinite(directTotal) && directTotal > 0) return directTotal;
-  const lineItems = Array.isArray(budget.lineItems) ? budget.lineItems : [];
-  return lineItems.reduce((sum, raw) => {
-    const item = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const amount = Number(item.amount ?? item.total ?? item.budget ?? 0);
-    return sum + (Number.isFinite(amount) ? amount : 0);
-  }, 0);
-}
 
 function isOpenEnrollment(enrollment: unknown): boolean {
   const row = enrollment && typeof enrollment === "object" ? (enrollment as Record<string, unknown>) : {};
@@ -160,30 +147,26 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   const [viewMode, setViewMode] = React.useState<"legacy" | "sheet">("legacy");
   const [buildSummary, setBuildSummary] = React.useState<PaymentScheduleBuildSummary | null>(null);
 
-  const grantBudgetById = React.useMemo(() => {
-    const m = new Map<string, number>();
-    for (const grant of grants as Array<Record<string, unknown>>) {
-      const id = String(grant?.id || "").trim();
-      if (id) m.set(id, grantBudgetTotal(grant));
-    }
-    return m;
-  }, [grants]);
+  const eligiblePaymentGrantIds = React.useMemo(
+    () => paymentScheduleGrantIds(grants as Array<Record<string, unknown>>),
+    [grants],
+  );
 
-  const fundedEnrollments = React.useMemo(() => {
+  const paymentEligibleEnrollments = React.useMemo(() => {
     return enrollments.filter((enrollment) => {
       const grantId = String(enrollment?.grantId || "").trim();
-      return !!grantId && (grantBudgetById.get(grantId) || 0) > 0;
+      return !!grantId && eligiblePaymentGrantIds.has(grantId);
     });
-  }, [enrollments, grantBudgetById]);
+  }, [enrollments, eligiblePaymentGrantIds]);
 
   const grantEnrollments = React.useMemo(
-    () => fundedEnrollments.filter(isOpenEnrollment),
-    [fundedEnrollments],
+    () => paymentEligibleEnrollments.filter(isOpenEnrollment),
+    [paymentEligibleEnrollments],
   );
 
   const grantEnrollmentIds = React.useMemo(
-    () => new Set(fundedEnrollments.map((enrollment) => String(enrollment.id || ""))),
-    [fundedEnrollments],
+    () => new Set(paymentEligibleEnrollments.map((enrollment) => String(enrollment.id || ""))),
+    [paymentEligibleEnrollments],
   );
 
   React.useEffect(() => {
