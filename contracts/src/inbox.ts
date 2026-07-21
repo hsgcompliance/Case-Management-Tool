@@ -74,6 +74,7 @@ export const InboxItemSchema = z
     assignedToUid: z.string().nullable(),
     assignedToGroup: InboxAssignedGroupEnum.nullish(),
     cmUid: z.string().nullable(),
+    secondaryCmUid: z.string().nullable().default(null),
 
     // org scoping / projection
     orgId: z.string().nullish(),
@@ -112,6 +113,14 @@ export const InboxListMyQuerySchema = z
 
 export type TInboxListMyQuery = z.infer<typeof InboxListMyQuerySchema>;
 export type TInboxListMyResp = Ok<{ items: TInboxItemEntity[] }>;
+
+export const InboxTasksDueListQuerySchema = z
+  .object({
+    month: YYYY_MM.optional(),
+  })
+  .partial();
+export type TInboxTasksDueListQuery = z.infer<typeof InboxTasksDueListQuerySchema>;
+export type TInboxTasksDueListResp = Ok<{ items: TInboxItemEntity[]; month: string }>;
 
 export const InboxWorkloadListQuerySchema = z
   .object({

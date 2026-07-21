@@ -167,6 +167,40 @@ async function syncCustomerCaseManagerToEnrollments(
   }
 }
 
+async function syncCustomerCmFieldsToUserTasks(
+  customerId: string,
+  before: any,
+  after: any
+) {
+  if (!customerId) return;
+
+  const nextCmUid = String(after?.caseManagerId || "").trim() || null;
+  const prevCmUid = String(before?.caseManagerId || "").trim() || null;
+  const nextSecondaryCmUid = String(after?.secondaryCaseManagerId || "").trim() || null;
+  const prevSecondaryCmUid = String(before?.secondaryCaseManagerId || "").trim() || null;
+
+  if (nextCmUid === prevCmUid && nextSecondaryCmUid === prevSecondaryCmUid) return;
+
+  const snap = await db.collection("userTasks").where("clientId", "==", customerId).get();
+  if (snap.empty) return;
+
+  const batch = db.batch();
+  let writes = 0;
+  snap.forEach((doc) => {
+    const row = doc.data() || {};
+    const patch: Record<string, unknown> = {};
+    if (String((row as any).cmUid || "").trim() !== (nextCmUid || "")) patch.cmUid = nextCmUid;
+    if (String((row as any).secondaryCmUid || "").trim() !== (nextSecondaryCmUid || "")) {
+      patch.secondaryCmUid = nextSecondaryCmUid;
+    }
+    if (!Object.keys(patch).length) return;
+    batch.set(doc.ref, patch, { merge: true });
+    writes += 1;
+  });
+
+  if (writes) await batch.commit();
+}
+
 async function syncCustomerSnapshotsToOperationalRecords(
   customerId: string,
   before: any,
@@ -379,6 +413,10 @@ export const onCustomerUpdate = onDocumentUpdated(
 
     if (changedKeys.includes("caseManagerId") || changedKeys.includes("caseManagerName")) {
       await syncCustomerCaseManagerToEnrollments(String(e.params.id || ""), before, after);
+    }
+
+    if (changedKeys.includes("caseManagerId") || changedKeys.includes("secondaryCaseManagerId")) {
+      await syncCustomerCmFieldsToUserTasks(String(e.params.id || ""), before, after);
     }
 
     if (

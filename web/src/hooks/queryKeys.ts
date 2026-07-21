@@ -91,6 +91,7 @@ export const qk = {
     root: ["inbox"] as const,
     my: (filters?: Record<string, unknown>) =>
       ["inbox", "my", stable(filters || {})] as const,
+    due: (month?: string) => ["inbox", "due", month ?? "current"] as const,
     workload: (filters?: Record<string, unknown>) =>
       ["inbox", "workload", stable(filters || {})] as const,
     digestPreview: (month: string, cmUid?: string) =>

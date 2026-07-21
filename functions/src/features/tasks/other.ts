@@ -100,6 +100,7 @@ export const createOtherTask = secureHandler(
       dueDate,
       dueMonth,
       notify: body.notify !== false,
+      customerId: body.customerId || null,
 
       status: "open",
       completed: false,

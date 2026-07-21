@@ -2,14 +2,18 @@
 
 import React from "react";
 import type { Enrollment, TCustomerEntity } from "@types";
+import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
 import { CUSTOMER_CARD_ENROLLMENTS_LIMIT, useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
 import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
+import { useMyTasksDue } from "@hooks/useInbox";
+import { useTasksDueModal } from "@entities/tasks/TasksDueModalController";
 import { currentMonthKey } from "@hooks/useMetrics";
 import { useGrant, useGrants } from "@hooks/useGrants";
 import { useAuth } from "@app/auth/AuthProvider";
 import { Modal } from "@entities/ui/Modal";
 import { CustomerActionMenuBody, EnrollCustomerQuickModal, TIER_SELECTED_CLASS } from "./CustomerActionMenu";
+import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
 import { EnrollmentMigrateDialog } from "@entities/dialogs/enrollment/EnrollmentMigrateDialog";
 import { EnrollmentCleanupDialog, type EnrollmentCleanupOptions } from "@entities/dialogs/enrollment/EnrollmentCleanupDialog";
 import { populationChipClass, populationTone } from "@lib/colorRegistry";
@@ -561,6 +565,14 @@ function EnrollmentQuickModal({
         ? "border-slate-200 bg-slate-100 text-slate-600"
         : "border-amber-200 bg-amber-50 text-amber-700";
   const busy = patch.isPending || applyAction.isPending || deleteEnrollment.isPending;
+  const closePreview = React.useMemo(
+    () => buildEnrollmentClosePreview({
+      payments: Array.isArray((enrollment as any)?.payments) ? (enrollment as any).payments : [],
+      requestedCloseDate: closeDate,
+      fallbackDate: todayISO(),
+    }),
+    [closeDate, enrollment],
+  );
 
   const patchEnrollment = async (patchData: Record<string, unknown>) => {
     if (!enrollmentId) return;
@@ -583,7 +595,7 @@ function EnrollmentQuickModal({
   };
 
   const closeEnrollment = () => {
-    if (closePreview.paidAfterClose.length) return;
+    if (!closePreview.canClose) return;
     void patchEnrollment({
       status: "closed",
       active: false,
@@ -810,14 +822,14 @@ function EnrollmentQuickModal({
                 <div className="grid gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 md:grid-cols-[1fr_auto]">
                   <label className="space-y-1">
                     <span className="text-xs font-semibold uppercase tracking-wide text-amber-700">Enrollment End Date</span>
-                    <input className="input" type="date" value={closeDate} onChange={(e) => setCloseDate(enrollmentMonthEnd(e.currentTarget.value))} />
-                    <span className="block text-xs text-amber-800">
-                      Assistance ends {closePreview.closeDate}. {closePreview.futureUnpaid.length} future unpaid payment{closePreview.futureUnpaid.length === 1 ? "" : "s"} will be voided.
-                    </span>
-                    {closePreview.paidAfterClose.length ? <span className="block text-xs font-semibold text-rose-700">Choose a date on or after the last paid month.</span> : null}
+                    <input className="input" type="date" value={closeDate} onChange={(e) => setCloseDate(enrollmentMonthEnd(e.currentTarget.value) || e.currentTarget.value)} />
+                    <span className="block text-xs text-amber-800">Saved as month-end. {closePreview.futureUnpaidPayments.length} future unpaid payment{closePreview.futureUnpaidPayments.length === 1 ? "" : "s"} will be removed/voided.</span>
+                    {closePreview.lastPaidDate ? <span className="block text-xs text-slate-600">Last paid item: {closePreview.lastPaidDate}</span> : null}
+                    {closePreview.paidAfterClose.length ? <span className="block text-xs font-semibold text-red-700">Move the close month after all paid items.</span> : null}
                   </label>
                   <div className="flex items-end gap-2">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={closeEnrollment} disabled={busy || closePreview.paidAfterClose.length > 0}>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={closeEnrollment} disabled={busy || !closePreview.canClose}>
+
                       Confirm Close
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCloseEditorOpen(false)} disabled={busy}>
@@ -924,6 +936,12 @@ function CustomerCardInner({
   const canManageEnrollments = !isViewerLike(profile as any);
   const setCustomerActive = useSetCustomerActive();
   const setCustomerTier = useSetCustomerTier();
+  const { openTasksDueModal } = useTasksDueModal();
+  const tasksDueQuery = useMyTasksDue();
+  const tasksDueCount = React.useMemo(() => {
+    const items = tasksDueQuery.data || [];
+    return items.filter((i) => i.status !== "done" && i.clientId === customer.id).length;
+  }, [tasksDueQuery.data, customer.id]);
   const [colSpan, setColSpan] = React.useState(1);
   const dragRef = React.useRef<{ startX: number; startSpan: number } | null>(null);
   const showEnrollmentSections = colSpan > 1;
@@ -934,6 +952,8 @@ function CustomerCardInner({
   const [actionBar, setActionBar] = React.useState<{ x: number; y: number } | null>(null);
   // Farewell animation when marking a customer inactive: red outline → grey → fade out.
   const [archivePhase, setArchivePhase] = React.useState<null | "outline" | "fade" | "collapse">(null);
+  const [inactivePreviewOpen, setInactivePreviewOpen] = React.useState(false);
+  const [shouldLoadEnrollments, setShouldLoadEnrollments] = React.useState(false);
   const archiveTimers = React.useRef<number[]>([]);
   const clearArchiveTimers = React.useCallback(() => {
     for (const id of archiveTimers.current) window.clearTimeout(id);
@@ -1008,6 +1028,7 @@ function CustomerCardInner({
       setInactivePreviewOpen(true);
       return;
     }
+    setInactivePreviewOpen(false);
 
     // Marking inactive: play red outline → grey → fade out, then commit. The
     // mutation is optimistic and drops the card from active-filtered lists, so
@@ -1234,6 +1255,20 @@ function CustomerCardInner({
           </div>
         </div>
       )}
+      {tasksDueCount > 0 ? (
+        <button
+          type="button"
+          className="absolute right-14 top-4 z-20 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none text-white shadow-sm hover:bg-red-700"
+          title={`${tasksDueCount} task${tasksDueCount === 1 ? "" : "s"} due this month`}
+          onClick={(event) => {
+            event.stopPropagation();
+            openTasksDueModal({ clientId: customer.id, customerName: displayName(customer) });
+          }}
+          data-tour="customer-card-tasks-due-bubble"
+        >
+          {tasksDueCount > 99 ? "99+" : tasksDueCount}
+        </button>
+      ) : null}
       <div
         className={[
           "absolute right-4 top-4 z-20 transition-opacity",
@@ -1809,6 +1844,7 @@ function CustomerCardInner({
                 setEnrollmentPopupId(contextMenu.enrollmentId);
                 setContextMenu(null);
               }}
+              disabled={busy}
               role="menuitem"
             >
               Review and close enrollment
@@ -1870,6 +1906,16 @@ function CustomerCardInner({
           />
         </div>
       ) : null}
+
+      <CustomerInactivePreviewDialog
+        open={inactivePreviewOpen}
+        customerName={displayName(customer)}
+        enrollments={enrollments as unknown as Record<string, unknown>[]}
+        loading={enrollmentsQuery.isLoading || enrollmentsQuery.isFetching}
+        busy={setCustomerActive.isPending || archivePhase !== null}
+        onCancel={() => setInactivePreviewOpen(false)}
+        onConfirm={() => void onToggleCustomerActive(true)}
+      />
 
       {paymentPopupEnrollment ? (
         <PaymentScheduleQuickModal

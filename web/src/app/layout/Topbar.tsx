@@ -11,6 +11,7 @@ import AdminMenu from "./AdminMenu";
 import DevMenu from "./DevMenu";
 import { shouldUseEmulators } from "@lib/runtimeEnv";
 import { isAdminLike, isDevLike, isViewerLike } from "@lib/roles";
+import { TasksDueBell } from "@entities/tasks/TasksDueBell";
 
 const nav = [
   { to: "/reports", label: "Reports" },
@@ -230,6 +231,7 @@ export function Topbar() {
               ) : null}
             </div>
           ) : null}
+          {showNav && user ? <TasksDueBell /> : null}
           <button
             className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             onClick={toggleTheme}

@@ -104,6 +104,26 @@
       ]
     },
     {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "cmUid", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueMonth", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "secondaryCmUid", "order": "ASCENDING" },
+        { "fieldPath": "dueDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "customerEnrollments",
       "queryScope": "COLLECTION",
       "fields": [

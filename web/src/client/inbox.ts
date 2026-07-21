@@ -9,6 +9,8 @@ import type {
 export const Inbox = {
   listMy: (query?: { month?: string; includeOverdue?: boolean; includeGroup?: boolean }) =>
     api.get('inboxListMy', query) as Promise<InboxListMyResp>,
+  tasksDueList: (query?: { month?: string }) =>
+    api.get('inboxTasksDueList', query) as Promise<RespOf<"inboxTasksDueList">>,
   metricsMy: (query?: { month?: string }) =>
     api.get('inboxMetricsMy', query) as Promise<InboxMetricsMyResp>,
   workloadList: (query?: {

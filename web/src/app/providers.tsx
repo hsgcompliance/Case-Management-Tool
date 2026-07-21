@@ -11,6 +11,7 @@ import { shouldUseEmulators } from "@lib/runtimeEnv";
 import { resolveFunctionsBase } from "@lib/functionsBase";
 import { getAuth } from "firebase/auth";
 import GameMiniPlayerProvider from "@features/games/GameMiniPlayerContext";
+import { TasksDueModalProvider } from "@entities/tasks/TasksDueModalController";
 
 const CHUNK_RELOAD_ONCE_KEY = "__hdb_chunk_reload_once__";
 
@@ -157,7 +158,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={qc}>
       <AuthProvider>
         <GameMiniPlayerProvider>
-          {children}
+          <TasksDueModalProvider>{children}</TasksDueModalProvider>
         </GameMiniPlayerProvider>
       </AuthProvider>
     </QueryClientProvider>
