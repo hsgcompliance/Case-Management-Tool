@@ -102,6 +102,26 @@ function defaultMonthly(kind: MonthlyKind): MonthlyPlan {
   return { id: rowId(kind), kind, firstDue: "", months: "", monthlyAmount: "", lineItemId: "" };
 }
 
+type RentCertDraft = {
+  version: 1;
+  selectedGrantId: string;
+  defaultLineItemId: string;
+  vendor: string;
+  landlord: LandlordDraft;
+  singles: Record<SingleKind, SinglePlan>;
+  rentPlans: MonthlyPlan[];
+  utilityPlans: MonthlyPlan[];
+  lastSubmittedSignature: string;
+};
+
+function draftStorageKey(customerId: string): string {
+  return `hdb:forms:rent-cert-draft:${customerId}`;
+}
+
+function draftSignature(draft: Omit<RentCertDraft, "version" | "lastSubmittedSignature">): string {
+  return JSON.stringify(draft);
+}
+
 function infoClasses(complete: boolean): string {
   return complete
     ? "border-emerald-300 bg-emerald-50/70"
@@ -269,8 +289,10 @@ function MonthlyPlanCard({
 
 export function RentCertScheduleBuilder({
   webhookSnapshot,
+  onSubmissionStateChange,
 }: {
   webhookSnapshot: IntakeWebhookSnapshot | null;
+  onSubmissionStateChange?: (state: { submitted: boolean; dirty: boolean }) => void;
 }) {
   const { customer } = useCurrentCustomer();
   const [customerDetail, setCustomerDetail] = useState<CustomerDetail | null>(null);
@@ -291,6 +313,8 @@ export function RentCertScheduleBuilder({
   const [results, setResults] = useState<RentCertRowResult[] | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [lastSubmittedSignature, setLastSubmittedSignature] = useState("");
+  const [hydratedCustomerId, setHydratedCustomerId] = useState("");
   const prefill = useMemo(() => extractAssistancePrefill(webhookSnapshot), [webhookSnapshot]);
   const lastPrefill = useRef("");
 
@@ -326,17 +350,58 @@ export function RentCertScheduleBuilder({
   useEffect(() => { loadEnrollments(); }, [loadEnrollments]);
 
   useEffect(() => {
-    setSelectedGrantId("");
-    setDefaultLineItemId("");
-    setVendor("");
-    setLandlord({ name: "", contact: "", phone: "", email: "", address: "", unitAddress: "" });
-    setSingles({ deposit: defaultSingle("deposit"), prorated: defaultSingle("prorated"), arrears: defaultSingle("arrears") });
-    setRentPlans([defaultMonthly("rent")]);
-    setUtilityPlans([]);
+    let cached: RentCertDraft | null = null;
+    if (customer) {
+      try {
+        const raw = localStorage.getItem(draftStorageKey(customer.id));
+        const parsed = raw ? JSON.parse(raw) as RentCertDraft : null;
+        if (parsed?.version === 1) cached = parsed;
+      } catch { /* ignore invalid or unavailable browser storage */ }
+    }
+    setSelectedGrantId(cached?.selectedGrantId || "");
+    setDefaultLineItemId(cached?.defaultLineItemId || "");
+    setVendor(cached?.vendor || "");
+    setLandlord(cached?.landlord || { name: "", contact: "", phone: "", email: "", address: "", unitAddress: "" });
+    setSingles(cached?.singles || { deposit: defaultSingle("deposit"), prorated: defaultSingle("prorated"), arrears: defaultSingle("arrears") });
+    setRentPlans(cached?.rentPlans?.length ? cached.rentPlans : [defaultMonthly("rent")]);
+    setUtilityPlans(cached?.utilityPlans || []);
+    setLastSubmittedSignature(cached?.lastSubmittedSignature || "");
     setResults(null);
     setApplyError(null);
     lastPrefill.current = "";
+    setHydratedCustomerId(customer?.id || "");
   }, [customer?.id]);
+
+  const currentSignature = useMemo(() => draftSignature({
+    selectedGrantId,
+    defaultLineItemId,
+    vendor,
+    landlord,
+    singles,
+    rentPlans,
+    utilityPlans,
+  }), [defaultLineItemId, landlord, rentPlans, selectedGrantId, singles, utilityPlans, vendor]);
+  const submitted = Boolean(lastSubmittedSignature) && currentSignature === lastSubmittedSignature;
+
+  useEffect(() => {
+    if (!customer || hydratedCustomerId !== customer.id) return;
+    const draft: RentCertDraft = {
+      version: 1,
+      selectedGrantId,
+      defaultLineItemId,
+      vendor,
+      landlord,
+      singles,
+      rentPlans,
+      utilityPlans,
+      lastSubmittedSignature,
+    };
+    try { localStorage.setItem(draftStorageKey(customer.id), JSON.stringify(draft)); } catch { /* ignore */ }
+  }, [customer, defaultLineItemId, hydratedCustomerId, landlord, lastSubmittedSignature, rentPlans, selectedGrantId, singles, utilityPlans, vendor]);
+
+  useEffect(() => {
+    onSubmissionStateChange?.({ submitted, dirty: Boolean(lastSubmittedSignature) && !submitted });
+  }, [lastSubmittedSignature, onSubmissionStateChange, submitted]);
 
   useEffect(() => {
     const key = JSON.stringify(prefill);
@@ -522,6 +587,7 @@ export function RentCertScheduleBuilder({
         rows,
       });
       setResults(response.results);
+      setLastSubmittedSignature(currentSignature);
       loadEnrollments();
     } catch (error) {
       setApplyError(error instanceof Error ? error.message : String(error));
@@ -545,7 +611,7 @@ export function RentCertScheduleBuilder({
         <h3 className="mt-0.5 text-lg font-bold">Link intake, enroll &amp; build payment schedule</h3>
         <p className="mt-1 text-sm text-indigo-100">
           Prefill comes from the combined Webhooks sidebar model. Staff must manually select the funded grant and line item.
-          Apply resolves the enrollment first, then creates the real payment schedule and queue projections.
+          Submit resolves the enrollment first, then creates the real payment schedule and queue projections.
         </p>
       </div>
 
@@ -709,18 +775,18 @@ export function RentCertScheduleBuilder({
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
           <div className="text-xs text-slate-600">
-            {applying ? "Resolving enrollment first, then pushing payment schedule…" : "Nothing is written until Apply is clicked."}
+            {applying ? "Resolving enrollment first, then pushing payment schedule…" : submitted ? "Submitted. Editing any field will require another Submit." : "Nothing is written until Submit is clicked."}
           </div>
           <button
             type="button"
             onClick={apply}
             disabled={!paymentReady || applying}
-            className="rounded-md bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {applying ? "Building enrollment & schedule…" : "Apply enrollment & payment schedule"}
+            {applying ? "Submitting…" : "Submit"}
           </button>
         </div>
-        {applyError ? <div className="mt-2 text-xs text-rose-700">Apply failed: {applyError}</div> : null}
+        {applyError ? <div className="mt-2 text-xs text-rose-700">Submit failed: {applyError}</div> : null}
         {results ? (
           <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
             ✓ {results.filter((result) => result.status === "created").length} payment row{results.filter((result) => result.status === "created").length === 1 ? "" : "s"} created. Enrollment response was resolved before schedule creation; queue projections are syncing.

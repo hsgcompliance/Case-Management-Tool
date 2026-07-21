@@ -66,6 +66,7 @@ const CANONICAL = new Set<string>([
   "otherContacts",
   "contactCaseManagerIds",
   "population",
+  "tier",
   "assistanceLength",
   "acuityScore",
   "acuity",
@@ -300,6 +301,7 @@ export function normalizeOne(input: CustomerInput, caller: Claims) {
     enrolled,
 
     population: (input as any).population ?? null,
+    tier: (input as any).tier ?? null,
     acuityScore: (input as any).acuityScore ?? null,
     acuity: (input as any).acuity ?? null,
     meta,
@@ -472,6 +474,7 @@ export async function patchCustomers(
     }
 
     if ("population" in safePatch) data.population = safePatch.population ?? null;
+    if ("tier" in safePatch) data.tier = safePatch.tier ?? null;
     if ("acuityScore" in safePatch) data.acuityScore = safePatch.acuityScore ?? null;
     if ("acuity" in safePatch) data.acuity = safePatch.acuity ?? null;
     if ("meta" in safePatch) data.meta = sanitizeNestedObject(safePatch.meta ?? {});

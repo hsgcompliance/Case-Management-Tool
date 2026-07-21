@@ -220,6 +220,10 @@ export function FormsCategoryView({
   // right away instead of waiting for its next poll tick.
   const [webhookRefresh, setWebhookRefresh] = useState(0);
   const [webhookSnapshot, setWebhookSnapshot] = useState<IntakeWebhookSnapshot | null>(null);
+  const [rentCertSubmitted, setRentCertSubmitted] = useState(false);
+  const handleRentCertSubmissionState = useCallback((state: { submitted: boolean }) => {
+    setRentCertSubmitted(state.submitted);
+  }, []);
 
   // Stable per-step callback: an inline arrow would re-run JotformEmbed's
   // message-listener effect every parent render and wipe its submitted state.
@@ -309,6 +313,10 @@ export function FormsCategoryView({
     const prev = idx > 0 ? steps[idx - 1] : null;
     const next = idx < steps.length - 1 ? steps[idx + 1] : null;
     const isDone = !!progress.done[step.key];
+    const confirmUnsubmittedSchedule = () => {
+      if (!step.rentCertBuilder || rentCertSubmitted) return true;
+      return window.confirm("The enrollment and payment schedule have not been submitted. Mark this step complete and continue anyway?");
+    };
 
     const nav = (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
@@ -331,7 +339,10 @@ export function FormsCategoryView({
           ) : (
             <button
               type="button"
-              onClick={() => setDone(step.key, !isDone)}
+              onClick={() => {
+                if (!isDone && !confirmUnsubmittedSchedule()) return;
+                setDone(step.key, !isDone);
+              }}
               className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
                 isDone
                   ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -345,7 +356,10 @@ export function FormsCategoryView({
         {next ? (
           <button
             type="button"
-            onClick={() => setView({ kind: "step", idx: idx + 1 })}
+            onClick={() => {
+              if (!confirmUnsubmittedSchedule()) return;
+              setView({ kind: "step", idx: idx + 1 });
+            }}
             className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${
               isDone
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -470,7 +484,7 @@ export function FormsCategoryView({
           </div>
         ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
-        {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} /> : null}
+        {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} onSubmissionStateChange={handleRentCertSubmissionState} /> : null}
         {step.intakeTypeGate ? (
           intakeType ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
@@ -589,6 +603,7 @@ export function FormsCategoryView({
           <button
             type="button"
             onClick={() => {
+              if (!confirmUnsubmittedSchedule()) return;
               setDone(step.key, true);
               if (next) setView({ kind: "step", idx: idx + 1 });
               else setView({ kind: "list" });

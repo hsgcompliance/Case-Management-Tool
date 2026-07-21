@@ -77,6 +77,6 @@ export async function applyRentCertSchedule(body: {
   return postAuthed("formsRentCertApply", body);
 }
 
-export async function markCustomerNotEligible(body: { customerId: string; enrollmentId: string }): Promise<{ ok: true; customerInactivated: boolean }> {
+export async function markCustomerNotEligible(body: { customerId: string; enrollmentId?: string }): Promise<{ ok: true; customerInactivated: boolean }> {
   return postAuthed("formsCustomerNotEligible", body);
 }
