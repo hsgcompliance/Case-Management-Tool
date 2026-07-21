@@ -18,7 +18,8 @@ export function toast(message: string, { duration = 3000, type = 'info' }: Toast
     color: white; padding: 12px 18px; border-radius: 8px;
     box-shadow: 0 12px 40px rgba(0,0,0,0.25);
     font-size: 0.9rem; z-index: 12000; opacity: 0;
-    transition: opacity .2s ease-in-out; max-width: 320px;
+    transition: opacity .2s ease-in-out; max-width: 380px;
+    white-space: pre-line;
   `;
   document.body.appendChild(t);
   requestAnimationFrame(() => (t.style.opacity = '1'));

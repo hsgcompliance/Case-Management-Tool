@@ -1402,7 +1402,7 @@ export default function PaymentScheduleBuilderDialog({
               </div>
             </div>
           )}
-          {error && <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div>}
+          {error && <div className="whitespace-pre-line rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div>}
 
           {scheduleEditWarning && (
             <div className={`rounded border px-3 py-2 text-xs ${

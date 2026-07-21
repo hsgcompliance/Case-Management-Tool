@@ -685,7 +685,7 @@ export default function PaymentsProjectionsAdjustDialog({
           </div>
         ) : null}
 
-        {error ? <div className="rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div> : null}
+        {error ? <div className="whitespace-pre-line rounded border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">{error}</div> : null}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_20rem]">
           <label className="text-sm">

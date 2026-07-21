@@ -641,8 +641,10 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       setBuilderOpen(false);
       toast("Payment schedule built.", { type: "success" });
     } catch (e: unknown) {
-      setError(toApiError(e).error || "Failed to build payment schedule.");
+      const message = toApiError(e).error || "Failed to build payment schedule.";
+      setError(message);
       setBuildSummary(null);
+      toast(message, { type: "error", duration: 8000 });
     }
   };
 

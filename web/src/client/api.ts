@@ -1158,7 +1158,28 @@ export async function listAll<N extends EndpointName, T = unknown>(
   return out;
 }
 
+function scheduleCollisionMessage(response: unknown): string | null {
+  if (!response || typeof response !== "object") return null;
+  const r = response as Record<string, unknown>;
+  if (r.error !== "monthly_schedule_collision" || !Array.isArray(r.conflicts)) return null;
+  const lines = (r.conflicts as Array<Record<string, unknown>>).map((c) => {
+    const amount = Number(c.conflictAmount || 0).toFixed(2);
+    const status = c.conflictPaid ? "paid" : "scheduled";
+    return `${String(c.dueMonth || "")}: another enrollment (${String(c.conflictEnrollmentId || "")}) already has a ${status} rent/utility payment ($${amount}) for this month.`;
+  });
+  const recommendation = typeof r.recommendation === "string" ? r.recommendation : "";
+  return [
+    "Can't add this — it would double up rent/utility for a month another enrollment already has covered:",
+    ...lines,
+    recommendation,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function toApiError(e: any, fallback = 'Request failed') {
+  const collisionMsg = scheduleCollisionMessage(e?.meta?.response);
+  if (collisionMsg) return { error: collisionMsg };
   const msg =
     extractBackendErrorMessage(e?.meta?.response) ||
     extractBackendErrorMessage(e) ||

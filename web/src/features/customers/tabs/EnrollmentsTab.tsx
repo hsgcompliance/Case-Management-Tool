@@ -286,6 +286,12 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     [filtered],
   );
 
+  const priorEnrollmentsInSelectedGrant = React.useMemo(() => {
+    const gid = String(grantId || "").trim();
+    if (!gid) return [];
+    return enrollments.filter((e) => String(e.grantId || "").trim() === gid && isInactiveEnrollment(e));
+  }, [enrollments, grantId]);
+
   const onCreate = async () => {
     const gid = String(grantId || "").trim();
     if (!gid) return;
@@ -712,6 +718,32 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             {enroll.isPending ? "Creating..." : "Enroll"}
           </button>
         </div>
+        {priorEnrollmentsInSelectedGrant.length > 0 && (
+          <div className="mt-2 space-y-1 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
+            <div className="font-semibold">
+              This customer has {priorEnrollmentsInSelectedGrant.length} prior enrollment{priorEnrollmentsInSelectedGrant.length === 1 ? "" : "s"} in this grant:
+            </div>
+            {priorEnrollmentsInSelectedGrant.map((e) => (
+              <div key={e.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  {formatEnrollmentLabel(e as unknown as Record<string, unknown>)} — {String(e.status || "closed").trim()} · {fmtDateOrDash(e.startDate)}–{e.endDate ? fmtDateOrDash(e.endDate) : "open"}
+                </span>
+                <button
+                  type="button"
+                  className="btn-ghost btn-xs"
+                  disabled={patch.isPending}
+                  onClick={() => void reopenEnrollment(e)}
+                >
+                  Reopen this one instead
+                </button>
+              </div>
+            ))}
+            <div className="text-[11px] text-sky-700 dark:text-sky-300">
+              Creating a new enrollment is fine for a separate assistance episode (e.g. a second crisis this
+              grant year) — just make sure the payment schedules don&apos;t cover the same months.
+            </div>
+          </div>
+        )}
         <div className="mt-2 flex items-center gap-2">
           <input
             id="generateTaskSchedule"
