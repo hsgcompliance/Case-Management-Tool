@@ -23,6 +23,8 @@ type SinglePlan = {
   kind: SingleKind;
   date: string;
   amount: string;
+  /** Empty = use the default grant. */
+  grantId: string;
   lineItemId: string;
 };
 
@@ -32,6 +34,8 @@ type MonthlyPlan = {
   firstDue: string;
   months: string;
   monthlyAmount: string;
+  /** Empty = use the default grant. */
+  grantId: string;
   lineItemId: string;
 };
 
@@ -51,6 +55,7 @@ type PreviewRow = {
   label: string;
   dueDate: string;
   amount: number;
+  grantId: string;
   lineItemId: string;
 };
 
@@ -95,16 +100,17 @@ function inclusiveMonths(start: string, end: string): string {
 }
 
 function defaultSingle(kind: SingleKind): SinglePlan {
-  return { kind, date: "", amount: "", lineItemId: "" };
+  return { kind, date: "", amount: "", grantId: "", lineItemId: "" };
 }
 
 function defaultMonthly(kind: MonthlyKind): MonthlyPlan {
-  return { id: rowId(kind), kind, firstDue: "", months: "", monthlyAmount: "", lineItemId: "" };
+  return { id: rowId(kind), kind, firstDue: "", months: "", monthlyAmount: "", grantId: "", lineItemId: "" };
 }
 
 type RentCertDraft = {
-  version: 1;
-  selectedGrantId: string;
+  version: 2;
+  selectedGrantIds: string[];
+  defaultGrantId: string;
   defaultLineItemId: string;
   vendor: string;
   landlord: LandlordDraft;
@@ -158,7 +164,7 @@ function Field({
   placeholder?: string;
 }) {
   return (
-    <label className="min-w-0 text-xs text-slate-600">
+    <label className="min-w-[140px] flex-1 text-xs text-slate-600">
       <span>{label}</span>
       <input
         type={type}
@@ -169,6 +175,34 @@ function Field({
         onChange={(event) => onChange(event.currentTarget.value)}
         className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-indigo-400"
       />
+    </label>
+  );
+}
+
+function GrantField({
+  value,
+  onChange,
+  options,
+  label = "Grant",
+  placeholder = "Default grant",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { grantId: string; grantName: string }[];
+  label?: string;
+  placeholder?: string;
+}) {
+  return (
+    <label className="min-w-[160px] flex-1 text-xs text-slate-600">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => <option key={option.grantId} value={option.grantId}>{option.grantName}</option>)}
+      </select>
     </label>
   );
 }
@@ -187,7 +221,7 @@ function LineItemField({
   allowDefault?: boolean;
 }) {
   return (
-    <label className="min-w-0 text-xs text-slate-600">
+    <label className="min-w-[140px] flex-1 text-xs text-slate-600">
       <span>{label}</span>
       <select
         value={value}
@@ -226,26 +260,45 @@ function InfoSection({
 function SinglePlanCard({
   plan,
   onChange,
-  lineItems,
+  showGrantSelect,
+  grantOptions,
+  lineItemsForGrant,
+  defaultGrantId,
   defaultLineItemId,
 }: {
   plan: SinglePlan;
   onChange: (patch: Partial<SinglePlan>) => void;
-  lineItems: EnrollmentLineItem[];
+  showGrantSelect: boolean;
+  grantOptions: { grantId: string; grantName: string }[];
+  lineItemsForGrant: (grantId: string) => EnrollmentLineItem[];
+  defaultGrantId: string;
   defaultLineItemId: string;
 }) {
-  const active = Boolean(plan.amount || plan.date || plan.lineItemId);
-  const complete = active && positiveNumber(plan.amount) > 0 && isISO(plan.date) && Boolean(plan.lineItemId || defaultLineItemId);
+  const usingDefaultGrant = !plan.grantId;
+  const resolvedGrantId = plan.grantId || defaultGrantId;
+  const lineItems = lineItemsForGrant(resolvedGrantId);
+  const effectiveLineItemId = plan.lineItemId || (usingDefaultGrant ? defaultLineItemId : "");
+  const active = Boolean(plan.amount || plan.date || plan.lineItemId || plan.grantId);
+  const complete = active && positiveNumber(plan.amount) > 0 && isISO(plan.date) && Boolean(effectiveLineItemId);
   return (
     <div className={`rounded-lg border px-3 py-3 ${active ? (complete ? "border-emerald-300 bg-emerald-50/40" : "border-rose-300 bg-rose-50/40") : "border-slate-200 bg-white"}`}>
       <div className="mb-2 flex items-center justify-between">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{SINGLE_LABELS[plan.kind]}</div>
         {active ? <StateBadge complete={complete} /> : <span className="text-[10px] font-medium uppercase text-slate-400">optional</span>}
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="flex flex-wrap gap-2">
         <Field label="Amount" type="number" value={plan.amount} onChange={(amount) => onChange({ amount })} placeholder="0.00" />
         <Field label="Payment date" type="date" value={plan.date} onChange={(date) => onChange({ date })} />
-        <LineItemField value={plan.lineItemId} onChange={(lineItemId) => onChange({ lineItemId })} lineItems={lineItems} />
+        {showGrantSelect ? (
+          <GrantField value={plan.grantId} onChange={(grantId) => onChange({ grantId, lineItemId: "" })} options={grantOptions} />
+        ) : null}
+        <LineItemField
+          value={plan.lineItemId}
+          onChange={(lineItemId) => onChange({ lineItemId })}
+          lineItems={lineItems}
+          allowDefault={usingDefaultGrant}
+          label={usingDefaultGrant ? "Line item override" : "Line item (required)"}
+        />
       </div>
     </div>
   );
@@ -255,17 +308,27 @@ function MonthlyPlanCard({
   plan,
   onChange,
   onRemove,
-  lineItems,
+  showGrantSelect,
+  grantOptions,
+  lineItemsForGrant,
+  defaultGrantId,
   defaultLineItemId,
 }: {
   plan: MonthlyPlan;
   onChange: (patch: Partial<MonthlyPlan>) => void;
   onRemove: () => void;
-  lineItems: EnrollmentLineItem[];
+  showGrantSelect: boolean;
+  grantOptions: { grantId: string; grantName: string }[];
+  lineItemsForGrant: (grantId: string) => EnrollmentLineItem[];
+  defaultGrantId: string;
   defaultLineItemId: string;
 }) {
-  const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId);
-  const complete = active && isISO(plan.firstDue) && positiveMonths(plan.months) > 0 && positiveNumber(plan.monthlyAmount) > 0 && Boolean(plan.lineItemId || defaultLineItemId);
+  const usingDefaultGrant = !plan.grantId;
+  const resolvedGrantId = plan.grantId || defaultGrantId;
+  const lineItems = lineItemsForGrant(resolvedGrantId);
+  const effectiveLineItemId = plan.lineItemId || (usingDefaultGrant ? defaultLineItemId : "");
+  const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId || plan.grantId);
+  const complete = active && isISO(plan.firstDue) && positiveMonths(plan.months) > 0 && positiveNumber(plan.monthlyAmount) > 0 && Boolean(effectiveLineItemId);
   return (
     <div className={`rounded-lg border px-3 py-3 ${active ? (complete ? "border-emerald-300 bg-emerald-50/40" : "border-rose-300 bg-rose-50/40") : "border-slate-200 bg-white"}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -277,11 +340,20 @@ function MonthlyPlanCard({
           <button type="button" onClick={onRemove} className="text-xs text-rose-500 hover:text-rose-700">Remove</button>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+      <div className="flex flex-wrap gap-2">
         <Field label="Monthly amount" type="number" value={plan.monthlyAmount} onChange={(monthlyAmount) => onChange({ monthlyAmount })} placeholder="0.00" />
         <Field label="First due date" type="date" value={plan.firstDue} onChange={(firstDue) => onChange({ firstDue })} />
         <Field label="Number of months" type="number" value={plan.months} onChange={(months) => onChange({ months })} placeholder="12" />
-        <LineItemField value={plan.lineItemId} onChange={(lineItemId) => onChange({ lineItemId })} lineItems={lineItems} />
+        {showGrantSelect ? (
+          <GrantField value={plan.grantId} onChange={(grantId) => onChange({ grantId, lineItemId: "" })} options={grantOptions} />
+        ) : null}
+        <LineItemField
+          value={plan.lineItemId}
+          onChange={(lineItemId) => onChange({ lineItemId })}
+          lineItems={lineItems}
+          allowDefault={usingDefaultGrant}
+          label={usingDefaultGrant ? "Line item override" : "Line item (required)"}
+        />
       </div>
     </div>
   );
@@ -299,7 +371,8 @@ export function RentCertScheduleBuilder({
   const [enrollments, setEnrollments] = useState<FormsEnrollment[]>([]);
   const [programs, setPrograms] = useState<FormsProgram[]>([]);
   const [loadingPrograms, setLoadingPrograms] = useState(false);
-  const [selectedGrantId, setSelectedGrantId] = useState("");
+  const [selectedGrantIds, setSelectedGrantIds] = useState<string[]>([]);
+  const [defaultGrantId, setDefaultGrantId] = useState("");
   const [defaultLineItemId, setDefaultLineItemId] = useState("");
   const [vendor, setVendor] = useState("");
   const [landlord, setLandlord] = useState<LandlordDraft>({ name: "", contact: "", phone: "", email: "", address: "", unitAddress: "" });
@@ -355,10 +428,11 @@ export function RentCertScheduleBuilder({
       try {
         const raw = localStorage.getItem(draftStorageKey(customer.id));
         const parsed = raw ? JSON.parse(raw) as RentCertDraft : null;
-        if (parsed?.version === 1) cached = parsed;
+        if (parsed?.version === 2) cached = parsed;
       } catch { /* ignore invalid or unavailable browser storage */ }
     }
-    setSelectedGrantId(cached?.selectedGrantId || "");
+    setSelectedGrantIds(cached?.selectedGrantIds || []);
+    setDefaultGrantId(cached?.defaultGrantId || "");
     setDefaultLineItemId(cached?.defaultLineItemId || "");
     setVendor(cached?.vendor || "");
     setLandlord(cached?.landlord || { name: "", contact: "", phone: "", email: "", address: "", unitAddress: "" });
@@ -373,21 +447,23 @@ export function RentCertScheduleBuilder({
   }, [customer?.id]);
 
   const currentSignature = useMemo(() => draftSignature({
-    selectedGrantId,
+    selectedGrantIds,
+    defaultGrantId,
     defaultLineItemId,
     vendor,
     landlord,
     singles,
     rentPlans,
     utilityPlans,
-  }), [defaultLineItemId, landlord, rentPlans, selectedGrantId, singles, utilityPlans, vendor]);
+  }), [defaultGrantId, defaultLineItemId, landlord, rentPlans, selectedGrantIds, singles, utilityPlans, vendor]);
   const submitted = Boolean(lastSubmittedSignature) && currentSignature === lastSubmittedSignature;
 
   useEffect(() => {
     if (!customer || hydratedCustomerId !== customer.id) return;
     const draft: RentCertDraft = {
-      version: 1,
-      selectedGrantId,
+      version: 2,
+      selectedGrantIds,
+      defaultGrantId,
       defaultLineItemId,
       vendor,
       landlord,
@@ -397,7 +473,7 @@ export function RentCertScheduleBuilder({
       lastSubmittedSignature,
     };
     try { localStorage.setItem(draftStorageKey(customer.id), JSON.stringify(draft)); } catch { /* ignore */ }
-  }, [customer, defaultLineItemId, hydratedCustomerId, landlord, lastSubmittedSignature, rentPlans, selectedGrantId, singles, utilityPlans, vendor]);
+  }, [customer, defaultGrantId, defaultLineItemId, hydratedCustomerId, landlord, lastSubmittedSignature, rentPlans, selectedGrantIds, singles, utilityPlans, vendor]);
 
   useEffect(() => {
     onSubmissionStateChange?.({ submitted, dirty: Boolean(lastSubmittedSignature) && !submitted });
@@ -451,11 +527,38 @@ export function RentCertScheduleBuilder({
     }
   }, [prefill, webhookSnapshot]);
 
-  const selectedProgram = programs.find((program) => program.grantId === selectedGrantId) ?? null;
-  const lineItems = selectedProgram?.lineItems.filter((item) => !item.locked) ?? [];
-  const selectedEnrollment = enrollments.find((enrollment) =>
-    enrollment.grantId === selectedGrantId && enrollment.active && enrollment.billable,
-  ) ?? null;
+  const programsById = useMemo(() => new Map(programs.map((program) => [program.grantId, program])), [programs]);
+  const grantOptions = useMemo(
+    () => selectedGrantIds.map((grantId) => ({ grantId, grantName: programsById.get(grantId)?.grantName || grantId })),
+    [selectedGrantIds, programsById],
+  );
+  const enrollmentByGrantId = useMemo(() => {
+    const map = new Map<string, FormsEnrollment | null>();
+    selectedGrantIds.forEach((grantId) => {
+      map.set(grantId, enrollments.find((enrollment) => enrollment.grantId === grantId && enrollment.active && enrollment.billable) ?? null);
+    });
+    return map;
+  }, [enrollments, selectedGrantIds]);
+  const lineItemsForGrant = useCallback(
+    (grantId: string): EnrollmentLineItem[] => programsById.get(grantId)?.lineItems.filter((item) => !item.locked) ?? [],
+    [programsById],
+  );
+  const defaultLineItems = lineItemsForGrant(defaultGrantId);
+  const showGrantSelect = selectedGrantIds.length > 1;
+
+  // Keep the default grant valid whenever the selected-grant set changes
+  // (first grant added, current default removed, etc.).
+  useEffect(() => {
+    if (!selectedGrantIds.length) {
+      if (defaultGrantId) setDefaultGrantId("");
+      return;
+    }
+    if (!selectedGrantIds.includes(defaultGrantId)) {
+      setDefaultGrantId(selectedGrantIds[0]);
+      setDefaultLineItemId("");
+    }
+  }, [selectedGrantIds, defaultGrantId]);
+
   const sourceSubmissionId = webhookSnapshot?.submissions.find((item) => item.linkedToCurrent)?.submissionId
     || webhookSnapshot?.submissions[0]?.submissionId
     || (customer ? `intake-${customer.id}` : "intake-session");
@@ -466,38 +569,44 @@ export function RentCertScheduleBuilder({
   const householdMembers = webhookSnapshot?.household.members ?? [];
   const householdReady = Boolean(customer && (customer.cwId || customerDetail?.dob || householdMembers.length));
   const landlordReady = Boolean(landlord.name && (landlord.phone || landlord.email || landlord.contact) && (landlord.address || landlord.unitAddress));
-  const enrollmentReady = Boolean(customer && selectedGrantId && selectedProgram);
+  const enrollmentReady = Boolean(customer && selectedGrantIds.length);
 
   const schedule = useMemo(() => {
     const rows: PreviewRow[] = [];
     const issues: string[] = [];
+    const resolveRow = (plan: { grantId: string; lineItemId: string }) => {
+      const usingDefaultGrant = !plan.grantId;
+      const grantId = plan.grantId || defaultGrantId;
+      const lineItemId = plan.lineItemId || (usingDefaultGrant ? defaultLineItemId : "");
+      return { grantId, lineItemId, items: lineItemsForGrant(grantId) };
+    };
     const addSingle = (plan: SinglePlan) => {
-      const active = Boolean(plan.amount || plan.date || plan.lineItemId);
+      const active = Boolean(plan.amount || plan.date || plan.lineItemId || plan.grantId);
       if (!active) return;
       const amount = positiveNumber(plan.amount);
-      const lineItemId = plan.lineItemId || defaultLineItemId;
-      if (!amount || !isISO(plan.date) || !lineItemId) {
-        issues.push(`${SINGLE_LABELS[plan.kind]} needs an amount, payment date, and line item.`);
+      const { grantId, lineItemId, items } = resolveRow(plan);
+      if (!amount || !isISO(plan.date) || !grantId || !lineItemId) {
+        issues.push(`${SINGLE_LABELS[plan.kind]} needs an amount, payment date, grant, and line item.`);
         return;
       }
-      if (!lineItems.some((item) => item.id === lineItemId)) {
-        issues.push(`${SINGLE_LABELS[plan.kind]} has a line item that does not belong to the selected active grant.`);
+      if (!items.some((item) => item.id === lineItemId)) {
+        issues.push(`${SINGLE_LABELS[plan.kind]} has a line item that does not belong to its selected grant.`);
         return;
       }
-      rows.push({ key: plan.kind, type: plan.kind, label: SINGLE_LABELS[plan.kind], dueDate: plan.date, amount, lineItemId });
+      rows.push({ key: plan.kind, type: plan.kind, label: SINGLE_LABELS[plan.kind], dueDate: plan.date, amount, grantId, lineItemId });
     };
     const addMonthly = (plan: MonthlyPlan) => {
-      const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId);
+      const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId || plan.grantId);
       if (!active) return;
       const amount = positiveNumber(plan.monthlyAmount);
       const months = positiveMonths(plan.months);
-      const lineItemId = plan.lineItemId || defaultLineItemId;
-      if (!amount || !months || !isISO(plan.firstDue) || !lineItemId) {
-        issues.push(`${plan.kind === "rent" ? "Rent" : "Utility"} period needs an amount, first date, 1–120 months, and line item.`);
+      const { grantId, lineItemId, items } = resolveRow(plan);
+      if (!amount || !months || !isISO(plan.firstDue) || !grantId || !lineItemId) {
+        issues.push(`${plan.kind === "rent" ? "Rent" : "Utility"} period needs an amount, first date, 1–120 months, grant, and line item.`);
         return;
       }
-      if (!lineItems.some((item) => item.id === lineItemId)) {
-        issues.push(`${plan.kind === "rent" ? "Rent" : "Utility"} period has a line item that does not belong to the selected active grant.`);
+      if (!items.some((item) => item.id === lineItemId)) {
+        issues.push(`${plan.kind === "rent" ? "Rent" : "Utility"} period has a line item that does not belong to its selected grant.`);
         return;
       }
       for (let index = 0; index < months; index += 1) {
@@ -509,6 +618,7 @@ export function RentCertScheduleBuilder({
           label: `${plan.kind === "rent" ? "Rent" : "Utility"} · ${dueDate.slice(0, 7)}`,
           dueDate,
           amount,
+          grantId,
           lineItemId,
         });
       }
@@ -518,51 +628,78 @@ export function RentCertScheduleBuilder({
     utilityPlans.forEach(addMonthly);
     if (!rows.length) issues.push("Add at least one complete payment row or recurring period.");
     if (!vendor.trim()) issues.push("Default vendor / payee is required.");
-    if (!defaultLineItemId && rows.some((row) => !row.lineItemId)) issues.push("A line item is required for every payment row.");
 
     const seen = new Set<string>();
     for (const row of rows) {
       const family = row.type === "monthly" && row.sub === "utility" ? "utility" : row.type === "deposit" ? "deposit" : "landlord";
-      const key = `${family}:${row.dueDate.slice(0, 7)}`;
-      if (seen.has(key)) issues.push(`Two ${family} payments overlap in ${row.dueDate.slice(0, 7)}. Adjust the periods.`);
+      const key = `${row.grantId}:${family}:${row.dueDate.slice(0, 7)}`;
+      if (seen.has(key)) issues.push(`Two ${family} payments overlap in ${row.dueDate.slice(0, 7)} on the same grant. Adjust the periods.`);
       seen.add(key);
-      if (selectedEnrollment) {
-        const conflict = findConflict(row, selectedEnrollment.payments, sourceSubmissionId);
+      const enrollment = enrollmentByGrantId.get(row.grantId);
+      if (enrollment) {
+        const conflict = findConflict(row, enrollment.payments, sourceSubmissionId);
         if (conflict && !conflict.sameSource) issues.push(`${row.label}: ${describeConflict(conflict)}.`);
       }
     }
     return { rows, issues: [...new Set(issues)] };
-  }, [defaultLineItemId, lineItems, rentPlans, selectedEnrollment, singles, sourceSubmissionId, utilityPlans, vendor]);
+  }, [defaultGrantId, defaultLineItemId, enrollmentByGrantId, lineItemsForGrant, rentPlans, singles, sourceSubmissionId, utilityPlans, vendor]);
 
   const paymentReady = enrollmentReady && schedule.rows.length > 0 && schedule.issues.length === 0;
   const total = schedule.rows.reduce((sum, row) => sum + row.amount, 0);
 
-  const chooseGrant = (grantId: string) => {
-    setSelectedGrantId(grantId);
+  const addGrant = (grantId: string) => {
+    if (!grantId || selectedGrantIds.includes(grantId)) return;
+    setSelectedGrantIds((current) => [...current, grantId]);
+    setResults(null);
+    setApplyError(null);
+  };
+
+  const removeGrant = (grantId: string) => {
+    setSelectedGrantIds((current) => current.filter((id) => id !== grantId));
+    setSingles((current) => {
+      const next = { ...current };
+      (Object.keys(next) as SingleKind[]).forEach((kind) => {
+        if (next[kind].grantId === grantId) next[kind] = { ...next[kind], grantId: "", lineItemId: "" };
+      });
+      return next;
+    });
+    setRentPlans((current) => current.map((plan) => plan.grantId === grantId ? { ...plan, grantId: "", lineItemId: "" } : plan));
+    setUtilityPlans((current) => current.map((plan) => plan.grantId === grantId ? { ...plan, grantId: "", lineItemId: "" } : plan));
+    setResults(null);
+    setApplyError(null);
+  };
+
+  const setDefaultGrant = (grantId: string) => {
+    setDefaultGrantId(grantId);
     setDefaultLineItemId("");
-    setSingles((current) => ({
-      deposit: { ...current.deposit, lineItemId: "" },
-      prorated: { ...current.prorated, lineItemId: "" },
-      arrears: { ...current.arrears, lineItemId: "" },
-    }));
-    setRentPlans((current) => current.map((plan) => ({ ...plan, lineItemId: "" })));
-    setUtilityPlans((current) => current.map((plan) => ({ ...plan, lineItemId: "" })));
+    setSingles((current) => {
+      const next = { ...current };
+      (Object.keys(next) as SingleKind[]).forEach((kind) => {
+        if (!next[kind].grantId) next[kind] = { ...next[kind], lineItemId: "" };
+      });
+      return next;
+    });
+    setRentPlans((current) => current.map((plan) => !plan.grantId ? { ...plan, lineItemId: "" } : plan));
+    setUtilityPlans((current) => current.map((plan) => !plan.grantId ? { ...plan, lineItemId: "" } : plan));
     setResults(null);
     setApplyError(null);
   };
 
   const apply = async () => {
-    if (!customer || !selectedProgram || !paymentReady) return;
-    const rows: RentCertApplyRow[] = schedule.rows.map((row) => ({
-      ...(selectedEnrollment ? { enrollmentId: selectedEnrollment.id } : { grantId: selectedProgram.grantId }),
-      lineItemId: row.lineItemId,
-      type: row.type,
-      ...(row.type === "monthly" ? { sub: row.sub ?? "rent" } : {}),
-      amount: row.amount,
-      dueDate: row.dueDate,
-      label: row.label,
-      vendor: vendor.trim(),
-    }));
+    if (!customer || !paymentReady) return;
+    const rows: RentCertApplyRow[] = schedule.rows.map((row) => {
+      const enrollment = enrollmentByGrantId.get(row.grantId);
+      return {
+        ...(enrollment ? { enrollmentId: enrollment.id } : { grantId: row.grantId }),
+        lineItemId: row.lineItemId,
+        type: row.type,
+        ...(row.type === "monthly" ? { sub: row.sub ?? "rent" } : {}),
+        amount: row.amount,
+        dueDate: row.dueDate,
+        label: row.label,
+        vendor: vendor.trim(),
+      };
+    });
     setApplying(true);
     setApplyError(null);
     setResults(null);
@@ -572,8 +709,8 @@ export function RentCertScheduleBuilder({
         submissionId: sourceSubmissionId,
         certification: {
           sourceProgramName: prefill.programName || null,
-          selectedGrantId: selectedProgram.grantId,
-          selectedGrantName: selectedProgram.grantName,
+          selectedGrantIds: selectedGrantIds.join(","),
+          selectedGrantNames: grantOptions.map((option) => option.grantName).join(", "),
           landlordName: landlord.name || null,
           landlordContact: landlord.contact || null,
           landlordPhone: landlord.phone || null,
@@ -610,8 +747,9 @@ export function RentCertScheduleBuilder({
         <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-indigo-100">Primary intake action</div>
         <h3 className="mt-0.5 text-lg font-bold">Link intake, enroll &amp; build payment schedule</h3>
         <p className="mt-1 text-sm text-indigo-100">
-          Prefill comes from the combined Webhooks sidebar model. Staff must manually select the funded grant and line item.
-          Submit resolves the enrollment first, then creates the real payment schedule and queue projections.
+          Prefill comes from the combined Webhooks sidebar model. Staff must manually select every funded grant, and the
+          line item for each payment row. Submit resolves each grant&apos;s enrollment first, then creates the real
+          payment schedule and queue projections.
         </p>
       </div>
 
@@ -654,53 +792,99 @@ export function RentCertScheduleBuilder({
       <section className={`rounded-xl border-2 px-3 py-3 ${requiredClasses(enrollmentReady)}`}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div>
-            <h4 className="text-sm font-semibold text-slate-900">Enrollment</h4>
-            <p className="text-xs text-slate-500">Manual selection is always required. No fuzzy or automatic grant selection.</p>
+            <h4 className="text-sm font-semibold text-slate-900">Funding grant(s) &amp; enrollment</h4>
+            <p className="text-xs text-slate-500">
+              Select every grant this schedule draws from — e.g. a TSS Client enrollment for the deposit and a
+              separate grant for ongoing rent. Manual selection only, no fuzzy or automatic matching.
+            </p>
           </div>
           <StateBadge complete={enrollmentReady} />
         </div>
         {prefill.programName ? (
           <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-            Webhook program reference: <b>{prefill.programName}</b>. Confirm the correct active grant below.
+            Webhook program reference: <b>{prefill.programName}</b>. Confirm the correct active grant(s) below.
           </div>
         ) : null}
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <label className="text-xs text-slate-600">
-            <span>Active grant / program</span>
-            <select
-              value={selectedGrantId}
-              onChange={(event) => chooseGrant(event.currentTarget.value)}
-              disabled={loadingPrograms}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
-            >
-              <option value="">{loadingPrograms ? "Loading active grants…" : "— manually select grant —"}</option>
-              {programs.map((program) => <option key={program.grantId} value={program.grantId}>{program.grantName}</option>)}
-            </select>
-          </label>
-          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-            {selectedEnrollment
-              ? <>Existing active enrollment: <b>{selectedEnrollment.grantName || selectedEnrollment.grantId}</b></>
-              : selectedProgram
-                ? <>A new enrollment will be created for <b>{selectedProgram.grantName}</b> before schedule rows are pushed.</>
-                : "Select a grant to resolve or create the enrollment."}
+        <label className="text-xs text-slate-600">
+          <span>Add an active grant / program</span>
+          <select
+            value=""
+            onChange={(event) => { if (event.currentTarget.value) addGrant(event.currentTarget.value); }}
+            disabled={loadingPrograms}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">{loadingPrograms ? "Loading active grants…" : "— select a grant to add —"}</option>
+            {programs.filter((program) => !selectedGrantIds.includes(program.grantId)).map((program) => (
+              <option key={program.grantId} value={program.grantId}>{program.grantName}</option>
+            ))}
+          </select>
+        </label>
+
+        {selectedGrantIds.length ? (
+          <div className="mt-2 space-y-1.5">
+            {selectedGrantIds.map((grantId) => {
+              const program = programsById.get(grantId);
+              const enrollment = enrollmentByGrantId.get(grantId) ?? null;
+              const isDefault = grantId === defaultGrantId;
+              return (
+                <div key={grantId} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+                  <div className="text-xs text-slate-700">
+                    <b>{program?.grantName || grantId}</b>{" "}
+                    {enrollment
+                      ? <span className="text-emerald-700">· existing active enrollment</span>
+                      : <span className="text-amber-700">· new enrollment will be created</span>}
+                    {showGrantSelect && isDefault ? (
+                      <span className="ml-1 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-indigo-700">Default</span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {showGrantSelect && !isDefault ? (
+                      <button type="button" onClick={() => setDefaultGrant(grantId)} className="text-xs text-indigo-600 hover:text-indigo-800">Set default</button>
+                    ) : null}
+                    <button type="button" onClick={() => removeGrant(grantId)} className="text-xs text-rose-500 hover:text-rose-700">Remove</button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        ) : (
+          <div className="mt-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            Select at least one grant to resolve or create the enrollment.
+          </div>
+        )}
       </section>
 
       <section className={`rounded-xl border-2 px-3 py-3 ${requiredClasses(paymentReady)}`}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-semibold text-slate-900">Payment schedule</h4>
-            <p className="text-xs text-slate-500">Same guided schema as Customer → Payments → Build Payment Schedule.</p>
+            <p className="text-xs text-slate-500">
+              Same guided schema as Customer → Payments → Build Payment Schedule.
+              {showGrantSelect ? " Two or more grants selected — each row now picks its own grant and line item." : ""}
+            </p>
           </div>
           <StateBadge complete={paymentReady} />
         </div>
 
-        <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 sm:grid-cols-2">
+        <div className="mb-3 flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+          {showGrantSelect ? (
+            <label className="min-w-[160px] flex-1 text-xs text-slate-600">
+              <span>Default grant</span>
+              <select
+                value={defaultGrantId}
+                onChange={(event) => setDefaultGrant(event.currentTarget.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+              >
+                {selectedGrantIds.map((grantId) => (
+                  <option key={grantId} value={grantId}>{programsById.get(grantId)?.grantName || grantId}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <LineItemField
             value={defaultLineItemId}
             onChange={(lineItemId) => { setDefaultLineItemId(lineItemId); setResults(null); }}
-            lineItems={lineItems}
+            lineItems={defaultLineItems}
             label="Default line item (required unless every row overrides)"
             allowDefault={false}
           />
@@ -713,7 +897,10 @@ export function RentCertScheduleBuilder({
               key={kind}
               plan={singles[kind]}
               onChange={(patch) => { setSingles((current) => ({ ...current, [kind]: { ...current[kind], ...patch } })); setResults(null); }}
-              lineItems={lineItems}
+              showGrantSelect={showGrantSelect}
+              grantOptions={grantOptions}
+              lineItemsForGrant={lineItemsForGrant}
+              defaultGrantId={defaultGrantId}
               defaultLineItemId={defaultLineItemId}
             />
           ))}
@@ -725,7 +912,10 @@ export function RentCertScheduleBuilder({
               plan={plan}
               onChange={(patch) => { setRentPlans((current) => current.map((item) => item.id === plan.id ? { ...item, ...patch } : item)); setResults(null); }}
               onRemove={() => setRentPlans((current) => current.filter((item) => item.id !== plan.id))}
-              lineItems={lineItems}
+              showGrantSelect={showGrantSelect}
+              grantOptions={grantOptions}
+              lineItemsForGrant={lineItemsForGrant}
+              defaultGrantId={defaultGrantId}
               defaultLineItemId={defaultLineItemId}
             />
           ))}
@@ -740,7 +930,10 @@ export function RentCertScheduleBuilder({
               plan={plan}
               onChange={(patch) => { setUtilityPlans((current) => current.map((item) => item.id === plan.id ? { ...item, ...patch } : item)); setResults(null); }}
               onRemove={() => setUtilityPlans((current) => current.filter((item) => item.id !== plan.id))}
-              lineItems={lineItems}
+              showGrantSelect={showGrantSelect}
+              grantOptions={grantOptions}
+              lineItemsForGrant={lineItemsForGrant}
+              defaultGrantId={defaultGrantId}
               defaultLineItemId={defaultLineItemId}
             />
           ))}
@@ -762,10 +955,24 @@ export function RentCertScheduleBuilder({
           {schedule.rows.length ? (
             <div className="max-h-64 overflow-auto">
               <table className="w-full text-left text-xs">
-                <thead className="sticky top-0 bg-white text-slate-400"><tr><th className="py-1">Date</th><th>Type</th><th>Line item</th><th className="text-right">Amount</th></tr></thead>
+                <thead className="sticky top-0 bg-white text-slate-400">
+                  <tr>
+                    <th className="py-1">Date</th>
+                    <th>Type</th>
+                    {showGrantSelect ? <th>Grant</th> : null}
+                    <th>Line item</th>
+                    <th className="text-right">Amount</th>
+                  </tr>
+                </thead>
                 <tbody className="divide-y divide-slate-100">
                   {schedule.rows.map((row) => (
-                    <tr key={row.key}><td className="py-1">{row.dueDate}</td><td>{row.label}</td><td>{lineItems.find((item) => item.id === row.lineItemId)?.label || row.lineItemId}</td><td className="text-right font-medium">{money(row.amount)}</td></tr>
+                    <tr key={row.key}>
+                      <td className="py-1">{row.dueDate}</td>
+                      <td>{row.label}</td>
+                      {showGrantSelect ? <td>{programsById.get(row.grantId)?.grantName || row.grantId}</td> : null}
+                      <td>{lineItemsForGrant(row.grantId).find((item) => item.id === row.lineItemId)?.label || row.lineItemId}</td>
+                      <td className="text-right font-medium">{money(row.amount)}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -775,7 +982,7 @@ export function RentCertScheduleBuilder({
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
           <div className="text-xs text-slate-600">
-            {applying ? "Resolving enrollment first, then pushing payment schedule…" : submitted ? "Submitted. Editing any field will require another Submit." : "Nothing is written until Submit is clicked."}
+            {applying ? "Resolving enrollment(s) first, then pushing payment schedule…" : submitted ? "Submitted. Editing any field will require another Submit." : "Nothing is written until Submit is clicked."}
           </div>
           <button
             type="button"
