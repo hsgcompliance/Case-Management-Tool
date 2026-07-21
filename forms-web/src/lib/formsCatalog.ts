@@ -79,11 +79,12 @@ export const FORMS: FormDef[] = [
 export const WEB_APP_BASE = "https://housing-db-v2.web.app";
 
 /** Intake programs selected in step 1. PATH and TSS may accompany another path. */
-export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "path-housing" | "tss-deposit-fee";
+export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "bridging-home" | "path-housing" | "tss-deposit-fee";
 
 export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] = [
   { id: "eviction-prevention", label: "Eviction Prevention Intake", hint: "Assessment is a spreadsheet, not a form" },
   { id: "hud-rental", label: "HUD Rental Intake", hint: "Requires Coordinated Entry Assessment in HMIS" },
+  { id: "bridging-home", label: "Bridging Home Intake", hint: "HUD workflow without an inspection" },
   { id: "path-housing", label: "PATH Housing Intake", hint: "Requires HMIS entry" },
   { id: "tss-deposit-fee", label: "TSS Deposit & Application Fee Only", hint: "Deposit / application fee assistance only" },
 ];
@@ -143,6 +144,8 @@ export type IntakeFlowStep = {
   intakeTypeGate?: boolean;
   /** Show program-specific HMIS/assessment instructions selected in step 1. */
   intakeGuidance?: boolean;
+  /** Conditional inspection step: HQS for HUD, Habitability for Eviction Prevention. */
+  inspectionGate?: boolean;
 };
 
 /**
@@ -156,7 +159,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     title: "Choose intake type",
     section: "Basic intake",
     intakeTypeGate: true,
-    note: "Select every program involved. PATH and TSS can be combined with another program; HUD Rental and Eviction Prevention cannot be selected together.",
+    note: "Select every program involved. PATH and TSS can accompany one primary program. HUD Rental, Bridging Home, and Eviction Prevention are mutually exclusive.",
   },
   { formId: "260346853938064" }, // Self-Declaration of Citizenship Status
   { formId: "251076068294057" }, // HRDC Release of Information
@@ -228,6 +231,11 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
       { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
     ],
     prominentLinks: true,
+  },
+  {
+    title: "Schedule inspection",
+    note: "HUD Rental requires an HQS inspection. Eviction Prevention requires a Habitability Inspection.",
+    inspectionGate: true,
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
   {
