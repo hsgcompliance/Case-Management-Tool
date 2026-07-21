@@ -107,6 +107,8 @@ export type IntakeFlowStep = {
   checklist?: string[];
   /** External links. `{customerId}` is replaced with the active customer's id. */
   links?: { href: string; label: string }[];
+  /** Render external workflow actions as large, centered primary buttons. */
+  prominentLinks?: boolean;
   /** Optional steps don't block "all steps complete". */
   optional?: boolean;
   /** Informational/builder step: navigation is allowed without a manual completion mark. */
@@ -174,6 +176,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     section: "Full intake",
     note: "Open Caseworthy and create the client, or update the existing client's assessments.",
     links: [{ href: "https://cw.caseworthy.net/hrdc09_prod.ecm", label: "Open Caseworthy" }],
+    prominentLinks: true,
   },
   {
     title: "Create customer document & Google folder",
@@ -202,6 +205,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
         label: "Eviction Prevention Assessment (spreadsheet)",
       },
     ],
+    prominentLinks: true,
   },
   {
     title: "Collect documents",
@@ -228,6 +232,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
       { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
       { href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" },
     ],
+    prominentLinks: true,
   },
   { formId: "251001226310030", title: "Eligibility Determination Request" },
   {
@@ -236,6 +241,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     links: [
       { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
     ],
+    prominentLinks: true,
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
   {
@@ -251,6 +257,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     title: "Memorandum of Understanding",
     note: "Send the MOU for signature, then file the signed copy in the customer's Drive folder.",
     links: [{ href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" }],
+    prominentLinks: true,
   },
 ];
 
