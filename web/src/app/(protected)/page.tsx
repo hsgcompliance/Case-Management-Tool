@@ -3,14 +3,14 @@ import RunnerGame from "@features/games/runner/RunnerGame";
 const OTHER_APPS = [
   {
     name: "Mobile App",
-    description: "Your on the go Case Management Tool",
+    description: "Manage your caseload on the go  & quickly access  workbooks",
     href: "https://housing-db-mobile.web.app/",
     icon: "phone",
     accent: "bg-cyan-50 text-cyan-700 ring-cyan-200",
   },
   {
     name: "Forms App",
-    description: "Jotforms Made Easy (I hope)",
+    description: "Jotforms & Intakes Made Easy (I hope)",
     href: "https://housing-db-forms.web.app/",
     icon: "form",
     accent: "bg-amber-50 text-amber-700 ring-amber-200",
@@ -77,7 +77,7 @@ export default function Page() {
             <header className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-4">
               <div>
                 <h1 className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
-                  Households DB v2
+                   Case Management Dashboard
                 </h1>
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
                   Customer, grant, enrollment, payment, and reporting workflows in one operations workspace.
@@ -137,7 +137,7 @@ export default function Page() {
             </div>
 
             <div className="hidden rounded-md border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-500 lg:block">
-              Use the links when you need mobile case work or quick Jotform support without leaving the workspace.
+              These apps are simpler, load faster and are designed to clear out all the clutter from your workspace.
             </div>
           </aside>
         </div>
