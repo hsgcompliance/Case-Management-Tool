@@ -28,6 +28,120 @@ import {
   PaymentsUpsertProjectionsBody,
   type TPaymentsUpsertProjectionsBody,
 } from './schemas';
+
+/**
+ * Thrown when a schedule write would introduce a `monthly` (rent/utility) row
+ * for a customer+grant+line-item+month that another enrollment already has a
+ * live `monthly` row for. This is always a genuine duplicate — two rent
+ * charges landing in the same month for the same grant — never a false
+ * positive, unlike deposit/service/prorated rows which legitimately coexist
+ * with rent in the same month. See root-cause doc for why this check exists:
+ * docs/active-projects.local/report-reconciliation-workbench/root-cause-2026-07-21-duplicate-enrollment.md
+ */
+export class ScheduleMonthCollisionError extends Error {
+  code = 409;
+  conflicts: Array<{
+    lineItemId: string;
+    dueMonth: string;
+    conflictEnrollmentId: string;
+    conflictPaymentId: string;
+    conflictAmount: number;
+    conflictPaid: boolean;
+  }>;
+  constructor(conflicts: ScheduleMonthCollisionError['conflicts']) {
+    super('monthly_schedule_collision');
+    this.conflicts = conflicts;
+  }
+}
+
+/** lineItemId -> set of YYYY-MM months carrying a live (non-void) `monthly` row. */
+function monthlyMonthsByLineItem(payments: any[]): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const p of Array.isArray(payments) ? payments : []) {
+    if (String(p?.type || '') !== 'monthly') continue;
+    if (p?.void === true) continue;
+    const lineItemId = String(p?.lineItemId || '').trim();
+    const month = String(p?.dueDate || p?.date || '').slice(0, 7);
+    if (!lineItemId || !/^\d{4}-\d{2}$/.test(month)) continue;
+    const set = out.get(lineItemId) || new Set<string>();
+    set.add(month);
+    out.set(lineItemId, set);
+  }
+  return out;
+}
+
+/**
+ * Finds (lineItemId, month) pairs that are newly carrying a `monthly` row in
+ * `nextPayments` but did not in `prevPayments` — i.e. what this write is
+ * actually introducing, not months that already existed on this enrollment
+ * before this call touched anything.
+ */
+function newlyIntroducedMonthlyMonths(
+  prevPayments: any[],
+  nextPayments: any[],
+): Array<{lineItemId: string; month: string}> {
+  const prev = monthlyMonthsByLineItem(prevPayments);
+  const next = monthlyMonthsByLineItem(nextPayments);
+  const out: Array<{lineItemId: string; month: string}> = [];
+  for (const [lineItemId, months] of next) {
+    const prevMonths = prev.get(lineItemId);
+    for (const month of months) {
+      if (!prevMonths?.has(month)) out.push({lineItemId, month});
+    }
+  }
+  return out;
+}
+
+/**
+ * Cross-enrollment check: for each newly-introduced (lineItemId, month) pair,
+ * does any OTHER enrollment for the same customer+grant already have a live
+ * `monthly` row for that exact month? Reads inside the caller's transaction
+ * so the check and the eventual write are atomic.
+ */
+async function findMonthlyCollisions(
+  trx: FirebaseFirestore.Transaction,
+  args: {enrollmentId: string; customerId: string; grantId: string; introduced: Array<{lineItemId: string; month: string}>},
+): Promise<ScheduleMonthCollisionError['conflicts']> {
+  if (!args.introduced.length || !args.customerId || !args.grantId) return [];
+
+  const wanted = new Map<string, Set<string>>();
+  for (const {lineItemId, month} of args.introduced) {
+    const set = wanted.get(lineItemId) || new Set<string>();
+    set.add(month);
+    wanted.set(lineItemId, set);
+  }
+
+  const siblingsSnap = await trx.get(
+    db.collection('customerEnrollments')
+      .where('customerId', '==', args.customerId)
+      .where('grantId', '==', args.grantId),
+  );
+
+  const conflicts: ScheduleMonthCollisionError['conflicts'] = [];
+  for (const doc of siblingsSnap.docs) {
+    if (doc.id === args.enrollmentId) continue;
+    const payments: any[] = Array.isArray(doc.data()?.payments) ? doc.data()!.payments : [];
+    for (const p of payments) {
+      if (String(p?.type || '') !== 'monthly') continue;
+      if (p?.void === true) continue;
+      const lineItemId = String(p?.lineItemId || '').trim();
+      const months = wanted.get(lineItemId);
+      if (!months) continue;
+      const month = String(p?.dueDate || p?.date || '').slice(0, 7);
+      if (!months.has(month)) continue;
+      conflicts.push({
+        lineItemId,
+        dueMonth: month,
+        conflictEnrollmentId: doc.id,
+        conflictPaymentId: String(p?.id || ''),
+        conflictAmount: Number(p?.amount || 0),
+        conflictPaid: p?.paid === true,
+      });
+    }
+  }
+  return conflicts;
+}
+
 /**
  * Shared transaction core: replace an enrollment's projected payment schedule
  * and adjust the grant budget's projected totals accordingly.
@@ -77,6 +191,25 @@ export async function runEnrollmentProjectionsUpsert(
           ...(p?.date !== undefined ? {date: undefined} : {}),
         };
       });
+
+      // Block newly-introduced `monthly` (rent/utility) rows that land on the same
+      // month as another enrollment's existing `monthly` row for this customer+grant.
+      // Deposit/service/prorated/arrears rows are never checked — those legitimately
+      // share a month with rent, including across enrollments (e.g. two separate
+      // ESG Homeless Prevention episodes in one grant year). Only genuinely NEW
+      // months introduced by this write are checked, so pre-existing collisions in
+      // untouched months don't block unrelated edits (those surface via the
+      // reconciliation-tool audit scan instead).
+      const introducedMonthly = newlyIntroducedMonthlyMonths(oldPayments, withIds);
+      if (introducedMonthly.length) {
+        const conflicts = await findMonthlyCollisions(trx, {
+          enrollmentId,
+          customerId: String(e.customerId || ''),
+          grantId: String(e.grantId || ''),
+          introduced: introducedMonthly,
+        });
+        if (conflicts.length) throw new ScheduleMonthCollisionError(conflicts);
+      }
 
       // projected totals by LI: ALL unpaid
       const sumUnpaidByLI = (arr: any[]) =>
@@ -221,6 +354,17 @@ export async function paymentsUpsertProjectionsHandler(req: Request, res: Respon
     const result = await runEnrollmentProjectionsUpsert(user, enrollmentId, () => payments || []);
     return res.status(200).json({ok: true, ...result});
   } catch (err: any) {
+    if (err instanceof ScheduleMonthCollisionError) {
+      return res.status(409).json({
+        ok: false,
+        error: 'monthly_schedule_collision',
+        conflicts: err.conflicts,
+        recommendation:
+          'Another enrollment already has a rent/utility payment scheduled for this month on this grant. ' +
+          'Use the Adjust Schedule flow on that existing enrollment to change the amount instead of building ' +
+          'or adding a new schedule row here — creating a second one will double-count against the grant budget.',
+      });
+    }
     return res.status(500).json({ok: false, error: err?.message || String(err)});
   }
 }

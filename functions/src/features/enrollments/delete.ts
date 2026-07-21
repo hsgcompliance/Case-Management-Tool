@@ -282,6 +282,7 @@ export async function deleteEnrollmentsCore(
               },
 
               note: "Auto-reversal on enrollment delete",
+              reversalOf: spendId || null,
             });
 
             // Legacy grant-level ledgerEvents (optional)

@@ -447,6 +447,7 @@ export async function paymentsAdjustSpendHandler(req: Request, res: Response) {
         lineItemLabelAtSpend: oldSpend?.lineItemLabelAtSpend ?? null,
         customerNameAtSpend: fallbackCustomerNameAtSpend,
         paymentLabelAtSpend: fallbackPaymentLabelAtSpend,
+        reversalOf: resolvedSpendId,
 
         createdAt: tsNow,
         updatedAt: tsNow,

@@ -218,10 +218,11 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
           .collection('spends')
           .where('paymentId', '==', paymentId)
           .orderBy('ts', 'desc')
-          .limit(1);
+          .limit(5);
 
       const lastSpendSnap = await trx.get(lastSpendQuery);
-      const lastEdgeId = lastSpendSnap.empty ? '0' : (lastSpendSnap.docs[0].id || '0');
+      const lastSpendDocs = lastSpendSnap.docs.map((d) => ({id: d.id, ...(d.data() as any)}));
+      const lastEdgeId = lastSpendDocs[0]?.id || '0';
 
       const projectionQueueId = projectionQueueDocId(enrollmentId, paymentId);
       const projectionQueueRef = db.collection('paymentQueue').doc(projectionQueueId);
@@ -310,11 +311,10 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
         });
       }
 
-      // ---- reversal linkage (best-effort, from embedded array) ----
-      const prevSpend = (Array.isArray(e.spends) ? e.spends : [])
-          .slice()
-          .reverse()
-          .find((s: any) => s?.paymentId === paymentId && !s?.reversalOf);
+      // ---- reversal linkage: latest positive (non-reversal) spend subdoc for this
+      // payment. The embedded enrollment.spends[] array is no longer written (50-cap
+      // fix), so this must read the spends subcollection, not the embedded array.
+      const prevSpend = lastSpendDocs.find((s) => !s?.reversalOf && Number(s?.amount || 0) > 0) || null;
 
       const snapNote =
         Array.isArray(p?.note) ?
@@ -420,6 +420,7 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
         lineItemLabelAtSpend: safeSpendEntry.lineItemLabelAtSpend ?? null,
         customerNameAtSpend: safeSpendEntry.customerNameAtSpend ?? null,
         paymentLabelAtSpend: safeSpendEntry.paymentLabelAtSpend ?? null,
+        reversalOf: safeSpendEntry.reversalOf ?? null,
 
         compliance: {
           hmisComplete: !!(p.compliance?.hmisComplete),

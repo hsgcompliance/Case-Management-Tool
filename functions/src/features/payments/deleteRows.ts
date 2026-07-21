@@ -194,6 +194,7 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
                 lineItemLabelAtSpend: sp?.lineItemLabelAtSpend ?? li?.label ?? li?.name ?? lineItemId,
                 customerNameAtSpend: sp?.customerNameAtSpend ?? e?.customerName ?? e?.clientName ?? null,
                 paymentLabelAtSpend: sp?.paymentLabelAtSpend ?? ((dueDateISO ? `${dueDateISO} · ` : "") + paymentTypeLabel(p)),
+                reversalOf: spendId || null,
                 createdAt: tsNow,
                 updatedAt: tsNow,
               });

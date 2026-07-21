@@ -94,6 +94,57 @@ function sourceUpdatedAt(row: Record<string, unknown>): string | null {
   return toIso(row.updatedAtISO) || toIso(row.updatedAt) || toIso(row.system && (row.system as Record<string, unknown>).lastWriteAt);
 }
 
+function reversalTargetFromLedger(row: Record<string, unknown>): string {
+  const origin = (row.origin && typeof row.origin === "object" ? row.origin : {}) as Record<string, unknown>;
+  const direct = firstText(row.reversalOf, origin.reversalOf);
+  if (direct) return direct;
+  const labels = Array.isArray(row.labels) ? row.labels : [];
+  for (const label of labels) {
+    const match = String(label || "").trim().match(/^reversalOf:(.+)$/i);
+    if (match?.[1]) return match[1].trim();
+  }
+  return "";
+}
+
+function buildLedgerReversalLinks(rows: Array<{ doc: { id: string; updateTime?: unknown }; data: Record<string, unknown> }>) {
+  const targetByReversalId = new Map<string, string>();
+  const reversedById = new Map<string, string[]>();
+  const unmatchedPositiveByKey = new Map<string, string[]>();
+  const ordered = [...rows].sort((a, b) => {
+    const aTime = toIso(a.data.createdAt) || toIso(a.data.ts) || toIso(a.doc.updateTime) || "";
+    const bTime = toIso(b.data.createdAt) || toIso(b.data.ts) || toIso(b.doc.updateTime) || "";
+    return aTime.localeCompare(bTime) || a.doc.id.localeCompare(b.doc.id);
+  });
+
+  for (const { doc, data } of ordered) {
+    const amount = amountCents(amountFromLedger(data));
+    const explicitTarget = reversalTargetFromLedger(data);
+    if (explicitTarget) {
+      targetByReversalId.set(doc.id, explicitTarget);
+      continue;
+    }
+    const enrollmentId = firstText(data.enrollmentId);
+    const paymentId = firstText(data.paymentId, (data.origin as Record<string, unknown> | undefined)?.baseId);
+    if (!enrollmentId || !paymentId || amount === 0) continue;
+    const key = `${enrollmentId}\u0000${paymentId}\u0000${Math.abs(amount)}`;
+    const unmatched = unmatchedPositiveByKey.get(key) || [];
+    if (amount > 0) {
+      unmatched.push(doc.id);
+      unmatchedPositiveByKey.set(key, unmatched);
+    } else if (unmatched.length) {
+      const target = unmatched.pop();
+      if (target) targetByReversalId.set(doc.id, target);
+    }
+  }
+
+  for (const [reversalId, targetId] of targetByReversalId) {
+    const current = reversedById.get(targetId) || [];
+    current.push(reversalId);
+    reversedById.set(targetId, current);
+  }
+  return { targetByReversalId, reversedById };
+}
+
 function changed(row: TGrantBudgetManagerRow): boolean {
   if (row.rowState && row.rowState !== "clean") return true;
   const original = row.original || {};
@@ -198,7 +249,6 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
     doc,
     data: { id: doc.id, ...(doc.data() || {}) } as Record<string, unknown>,
   }));
-  const reversedById = new Map<string, string[]>();
   const queueIdsFromLedger = Array.from(new Set(ledgerRows.map(({ data }) => {
     const origin = (data.origin && typeof data.origin === "object" ? data.origin : {}) as Record<string, unknown>;
     return queueIdFromOrigin(origin);
@@ -211,21 +261,14 @@ async function loadRowsForGrant(grantId: string, grant: Record<string, unknown>)
       if (snap.exists) queueById.set(snap.id, { id: snap.id, ...(snap.data() || {}) } as Record<string, unknown>);
     }
   }
-  for (const { doc, data } of ledgerRows) {
-    const origin = (data.origin && typeof data.origin === "object" ? data.origin : {}) as Record<string, unknown>;
-    const reversalOf = String(data.reversalOf || origin.reversalOf || "").trim();
-    if (!reversalOf) continue;
-    const current = reversedById.get(reversalOf) || [];
-    current.push(doc.id);
-    reversedById.set(reversalOf, current);
-  }
+  const { targetByReversalId, reversedById } = buildLedgerReversalLinks(ledgerRows);
   for (const { doc, data: row } of ledgerRows) {
     const amount = amountFromLedger(row);
     const date = date10(row.dueDate, row.date, row.createdAt, doc.updateTime);
     const updatedAt = sourceUpdatedAt(row) || toIso(doc.updateTime);
     const origin = (row.origin && typeof row.origin === "object" ? row.origin : {}) as Record<string, unknown>;
     const queueRow = queueById.get(queueIdFromOrigin(origin)) || {};
-    const reversalOf = String(row.reversalOf || origin.reversalOf || "").trim() || null;
+    const reversalOf = targetByReversalId.get(doc.id) || null;
     const reversedByLedgerItemIds = reversedById.get(doc.id) || [];
     const ledgerStatus = reversalOf
       ? "reversal"

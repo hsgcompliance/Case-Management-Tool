@@ -174,6 +174,23 @@ export const enrollmentsPatch = secureHandler(
       const nextDeleted = Boolean(
         Object.prototype.hasOwnProperty.call(data, "deleted") ? data.deleted : existing.deleted
       );
+
+      // Deletion must go through enrollmentsDelete: it reverses paid ledger entries,
+      // voids unpaid rows, and unlinks payment-queue rows. This generic patch endpoint
+      // blocks direct payments[] edits (ALWAYS_IMMUTABLE) but was otherwise happy to flip
+      // status/deleted straight to "deleted", which orphaned an enrollment's entire
+      // financial trail (found 2026-07-21 — see
+      // docs/active-projects.local/report-reconciliation-workbench/root-cause-2026-07-21-duplicate-enrollment.md).
+      const existingDeleted =
+        Boolean(existing.deleted) || String(existing.status || "").toLowerCase() === "deleted";
+      if (nextDeleted && !existingDeleted) {
+        throw err("use_enrollments_delete_for_deletion", 400, {
+          id,
+          hint:
+            "Deleting an enrollment must go through enrollmentsDelete so paid ledger entries are reversed and pending payment-queue rows are cleaned up. enrollmentsPatch cannot delete an enrollment.",
+        });
+      }
+
       const nextActive =
         Object.prototype.hasOwnProperty.call(data, "active")
           ? Boolean(data.active)
