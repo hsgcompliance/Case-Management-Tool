@@ -35,6 +35,10 @@ export const tasksUpsertManual = secureHandler(async (req, res) => {
     const customerDoc = customerSnap?.exists ? (customerSnap.data() || {}) : {};
 
     const cmUid = resolveCaseManagerUid(e) || resolveCaseManagerUid(customerDoc);
+    // No resolvable case manager on the enrollment/customer: fall back to
+    // whoever is creating the task rather than leaving it unassigned (that
+    // silently dropped it into the casemanager backlog with no one to see it).
+    const fallbackAssigneeUid = cmUid || uid;
     const customerName =
       String(e.customerName || e.clientName || "").trim() ||
       String((customerDoc as any).name || "").trim() ||
@@ -65,8 +69,8 @@ export const tasksUpsertManual = secureHandler(async (req, res) => {
       defId: null,
 
       assignedToGroup: base.assignedToGroup ?? "casemanager",
-      assignedToUid: base.assignedToUid ?? cmUid ?? null,
-      assignedAt: base.assignedAt ?? (cmUid ? nowIso : null),
+      assignedToUid: base.assignedToUid ?? fallbackAssigneeUid,
+      assignedAt: base.assignedAt ?? nowIso,
       assignedBy: base.assignedBy ?? (cmUid ? "system" : uid),
 
       completed: base.completed ?? false,

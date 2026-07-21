@@ -274,7 +274,10 @@ export function useTasksUpsertManual() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ReqOf<"tasksUpsertManual">) => Tasks.upsertManual(body),
-    onSuccess: async () => invalidateTaskRelated(qc),
+    // The new task only lands in userTasks once onEnrollmentInboxIndexer fires
+    // (async trigger, cold-start can be 3-5s) — refetch the inbox after a
+    // delay so the bell/bubble/queue don't refetch too early and look empty.
+    onSuccess: async () => invalidateTaskRelatedWithDelayedInbox(qc),
   });
 }
 
@@ -401,7 +404,9 @@ export function useTaskOtherCreate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: ReqOf<"tasksOtherCreate">) => Tasks.other.create(b),
-    onSuccess: async () => invalidateTaskRelated(qc),
+    // onOtherTaskWrite is an async trigger too — same rationale as
+    // useTasksUpsertManual, delay the inbox refetch so it doesn't race it.
+    onSuccess: async () => invalidateTaskRelatedWithDelayedInbox(qc),
   });
 }
 export function useTaskOtherUpdate() {

@@ -6,7 +6,9 @@ import { useAuth } from "@app/auth/AuthProvider";
 import { isViewerLike } from "@lib/roles";
 import { useMyTasksDue } from "@hooks/useInbox";
 import { useCustomersAll } from "@hooks/useCustomers";
-import { useTaskOtherCreate, useTaskOtherStatus, useTasksUpdateStatus } from "@hooks/useTasks";
+import { useCustomerEnrollments } from "@hooks/useEnrollments";
+import { useTaskOtherCreate, useTaskOtherStatus, useTasksUpdateStatus, useTasksUpsertManual } from "@hooks/useTasks";
+import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import type { InboxItem, TCustomer as Customer } from "@types";
 
 type Props = {
@@ -72,6 +74,7 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
   const [group, setGroup] = React.useState<GroupOption>("");
   const [customerQuery, setCustomerQuery] = React.useState("");
   const [selectedCustomer, setSelectedCustomer] = React.useState<{ id: string; label: string } | null>(null);
+  const [selectedEnrollmentId, setSelectedEnrollmentId] = React.useState("");
   const [showCreate, setShowCreate] = React.useState(false);
 
   const customersQ = useCustomersAll(undefined, { enabled: showCreate });
@@ -82,7 +85,17 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
     return all.filter((c) => customerLabel(c).toLowerCase().includes(q)).slice(0, 8);
   }, [customerQuery, customersQ.data]);
 
+  // Once a customer is picked, offer their enrollments so the task can be
+  // filed against one directly instead of always falling back to "other".
+  const enrollmentsQ = useCustomerEnrollments(selectedCustomer?.id, { enabled: showCreate && !!selectedCustomer?.id });
+  const enrollmentOptions = React.useMemo(() => {
+    const list = enrollmentsQ.data || [];
+    return [...list].sort((a: any, b: any) => Number(b?.active) - Number(a?.active));
+  }, [enrollmentsQ.data]);
+
   const createTask = useTaskOtherCreate();
+  const upsertEnrollmentTask = useTasksUpsertManual();
+  const submitting = createTask.isPending || upsertEnrollmentTask.isPending;
 
   const resetCreateForm = React.useCallback(() => {
     setTitle("");
@@ -91,6 +104,7 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
     setGroup("");
     setCustomerQuery("");
     setSelectedCustomer(null);
+    setSelectedEnrollmentId("");
   }, []);
 
   // Reset per-open state, and preset the customer link when opened from a customer card bubble.
@@ -104,15 +118,28 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
   const canSubmit = title.trim().length > 0 && dueDate.trim().length > 0;
 
   const handleCreate = async () => {
-    if (!canSubmit || createTask.isPending) return;
-    await createTask.mutateAsync({
-      title: title.trim(),
-      notes: notes.trim() || undefined,
-      dueDate,
-      notify: true,
-      customerId: selectedCustomer?.id || null,
-      assign: group ? { group } : undefined,
-    });
+    if (!canSubmit || submitting) return;
+    if (selectedEnrollmentId) {
+      await upsertEnrollmentTask.mutateAsync({
+        enrollmentId: selectedEnrollmentId,
+        task: {
+          title: title.trim(),
+          notes: notes.trim() || undefined,
+          dueDate,
+          notify: true,
+          bucket: "task",
+        },
+      });
+    } else {
+      await createTask.mutateAsync({
+        title: title.trim(),
+        notes: notes.trim() || undefined,
+        dueDate,
+        notify: true,
+        customerId: selectedCustomer?.id || null,
+        assign: group ? { group } : undefined,
+      });
+    }
     resetCreateForm();
     setShowCreate(false);
   };
@@ -183,7 +210,10 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
                   <button
                     type="button"
                     className="text-xs text-slate-500 hover:text-slate-800"
-                    onClick={() => setSelectedCustomer(null)}
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setSelectedEnrollmentId("");
+                    }}
                   >
                     ✕
                   </button>
@@ -207,6 +237,7 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
                           onClick={() => {
                             setSelectedCustomer({ id: String(c.id), label: customerLabel(c) });
                             setCustomerQuery("");
+                            setSelectedEnrollmentId("");
                           }}
                         >
                           {customerLabel(c)}
@@ -217,9 +248,38 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
                 </div>
               )}
             </div>
+            {selectedCustomer ? (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Enrollment (optional)</label>
+                <select
+                  className="w-full rounded border px-2 py-1"
+                  value={selectedEnrollmentId}
+                  onChange={(e) => setSelectedEnrollmentId(e.currentTarget.value)}
+                  disabled={enrollmentsQ.isLoading}
+                >
+                  <option value="">
+                    {enrollmentsQ.isLoading ? "Loading enrollments…" : "— none (general/other task) —"}
+                  </option>
+                  {enrollmentOptions.map((enrollment: any) => (
+                    <option key={String(enrollment.id)} value={String(enrollment.id)}>
+                      {formatEnrollmentLabel(enrollment, { fallback: String(enrollment.id) })}
+                      {enrollment.active === false ? " (closed)" : ""}
+                    </option>
+                  ))}
+                </select>
+                {selectedEnrollmentId ? (
+                  <p className="text-xs text-slate-500">
+                    Filed on this enrollment&apos;s task schedule and auto-assigned to its case manager.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Group (optional)</label>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                Group (optional){selectedEnrollmentId ? " — ignored for enrollment tasks" : ""}
+              </label>
               <select
+                disabled={!!selectedEnrollmentId}
                 className="w-full rounded border px-2 py-1"
                 value={group}
                 onChange={(e) => setGroup(e.currentTarget.value as GroupOption)}
@@ -233,10 +293,10 @@ export function TasksDueModal({ isOpen, clientId, customerName, onClose }: Props
             <div className="flex justify-end">
               <button
                 className="btn-primary disabled:opacity-50"
-                disabled={!canSubmit || createTask.isPending}
+                disabled={!canSubmit || submitting}
                 onClick={handleCreate}
               >
-                {createTask.isPending ? "Creating…" : "Create Task"}
+                {submitting ? "Creating…" : "Create Task"}
               </button>
             </div>
           </div>

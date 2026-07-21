@@ -7,12 +7,16 @@ import { secureHandler, db, toMonthKey, isAdmin, roleTagsFromClaims } from "../.
  * "Tasks due this month" scoped to the viewer's own relationships: tasks
  * assigned directly to them, plus any open task tied to a customer where
  * they're the primary or secondary case manager (regardless of who the
- * task itself is assigned to). For compliance/admin viewers, this also
- * includes the unclaimed compliance group-backlog (assignedToGroup ===
- * "compliance", assignedToUid === null) — mirrors the group-backlog
- * branch in inboxListMy so compliance staff see their queue here too,
- * not just on the CaseLoad Board. Note: grantCompliance items have no
- * dueMonth/dueDate and so never appear in this month-scoped view.
+ * task itself is assigned to). For compliance/admin/case-manager viewers,
+ * this also includes the unclaimed group-backlog for their group
+ * (assignedToGroup === "compliance" | "casemanager", assignedToUid ===
+ * null) — mirrors the group-backlog branch in inboxListMy so those staff
+ * see their queue here too, not just on the CaseLoad Board. Without the
+ * "casemanager" branch, a task created with no resolvable case manager
+ * (assignedToGroup defaults to "casemanager", assignedToUid null) matches
+ * none of the direct-assignment branches either and is invisible here.
+ * Note: grantCompliance items have no dueMonth/dueDate and so never
+ * appear in this month-scoped view.
  */
 export const inboxTasksDueList = secureHandler(
   async (req, res) => {
@@ -27,7 +31,9 @@ export const inboxTasksDueList = secureHandler(
     const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : toMonthKey(new Date());
 
     const tags = roleTagsFromClaims(ctx);
-    const compliance = isAdmin(ctx) || tags.includes("compliance");
+    const admin = isAdmin(ctx);
+    const compliance = admin || tags.includes("compliance");
+    const caseManager = admin || tags.includes("casemanager");
 
     const inboxRef = db.collection("userTasks");
     const base = inboxRef.where("status", "==", "open").where("dueMonth", "==", month);
@@ -39,6 +45,9 @@ export const inboxTasksDueList = secureHandler(
     ];
     if (compliance) {
       queries.push(base.where("assignedToGroup", "==", "compliance").where("assignedToUid", "==", null).get());
+    }
+    if (caseManager) {
+      queries.push(base.where("assignedToGroup", "==", "casemanager").where("assignedToUid", "==", null).get());
     }
     const snaps = await Promise.all(queries);
 
