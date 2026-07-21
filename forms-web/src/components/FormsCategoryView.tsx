@@ -464,17 +464,24 @@ export function FormsCategoryView({
               </ul>
             ) : null}
             {step.links?.length ? (
-              <div className="flex flex-wrap gap-2">
+              <div className={`flex flex-wrap gap-3 ${step.prominentLinks ? "items-center justify-center py-5" : ""}`}>
                 {step.links.map((l) => (
                   <a
                     key={l.href}
                     href={resolveHref(l.href)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                    className={
+                      step.prominentLinks
+                        ? "inline-flex min-h-12 items-center justify-center rounded-lg bg-indigo-600 px-7 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+                        : "rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                    }
                   >
-                    <span className="inline-flex items-center gap-1.5">
-                      <ExternalServiceIcon href={resolveHref(l.href)} />
+                    <span className={`inline-flex items-center ${step.prominentLinks ? "gap-2" : "gap-1.5"}`}>
+                      <ExternalServiceIcon
+                        href={resolveHref(l.href)}
+                        className={step.prominentLinks ? "h-5 w-5" : undefined}
+                      />
                       {l.label}
                     </span>
                   </a>
