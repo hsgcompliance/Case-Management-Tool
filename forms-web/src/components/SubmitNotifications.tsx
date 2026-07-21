@@ -9,7 +9,7 @@ import {
   sessionCustomer,
   type IntakeSession,
 } from "@/lib/intakeSessions";
-import { intakeTypeLabel } from "@/lib/formsCatalog";
+import { intakeTypeLabel, intakeTypesLabel } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { useCatalog } from "@/hooks/useCatalog";
 
@@ -156,7 +156,7 @@ export function SubmitNotifications() {
                         </span>
                       </div>
                       <div className="truncate text-[11px] text-slate-400">
-                        {intakeTypeLabel(s.intakeType) || "Intake"} · {shortDate(s.updatedAtISO)} · resume →
+                        {intakeTypesLabel(s.intakeTypes) || intakeTypeLabel(s.intakeType) || "Intake"} · {shortDate(s.updatedAtISO)} · resume →
                       </div>
                     </button>
                     <button

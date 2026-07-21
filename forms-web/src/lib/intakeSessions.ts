@@ -17,7 +17,9 @@ export type IntakeSession = {
   cwId: string | null;
   dob: string | null;
   caseManagerName: string | null;
+  /** Legacy primary program for previously cached sessions. */
   intakeType: IntakeTypeId | null;
+  intakeTypes?: IntakeTypeId[];
   doneCount: number;
   totalSteps: number;
   startedAtISO: string;

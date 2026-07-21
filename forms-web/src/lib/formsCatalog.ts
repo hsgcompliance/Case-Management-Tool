@@ -78,11 +78,7 @@ export const FORMS: FormDef[] = [
 /** The staff web app (customer documents + Google Drive folders live there). */
 export const WEB_APP_BASE = "https://housing-db-v2.web.app";
 
-/**
- * Intake paths (step 1 of the flow). Today the choice is informational — every
- * path runs the same steps — but it's persisted per session so flow-path
- * differences can branch on it later.
- */
+/** Intake programs selected in step 1. PATH and TSS may accompany another path. */
 export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "path-housing" | "tss-deposit-fee";
 
 export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] = [
@@ -94,6 +90,10 @@ export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] =
 
 export function intakeTypeLabel(id: string | null | undefined): string {
   return INTAKE_TYPES.find((t) => t.id === id)?.label ?? "";
+}
+
+export function intakeTypesLabel(ids: readonly string[] | null | undefined): string {
+  return (ids ?? []).map(intakeTypeLabel).filter(Boolean).join(" + ");
 }
 
 export type IntakeFlowStep = {
@@ -137,11 +137,12 @@ export type IntakeFlowStep = {
    */
   rentCertBuilder?: boolean;
   /**
-   * Intake-type gate: the step opens with a full-page choice between the intake
-   * paths (INTAKE_TYPES). Informational for now — persisted per session so the
-   * flow can branch on it later.
+   * Intake-type gate: select one or more compatible programs. Persisted per
+   * session and used to branch later workflow guidance.
    */
   intakeTypeGate?: boolean;
+  /** Show program-specific HMIS/assessment instructions selected in step 1. */
+  intakeGuidance?: boolean;
 };
 
 /**
@@ -155,7 +156,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     title: "Choose intake type",
     section: "Basic intake",
     intakeTypeGate: true,
-    note: "Pick the intake path. Every path runs the same steps for now — flow differences per type are coming.",
+    note: "Select every program involved. PATH and TSS can be combined with another program; HUD Rental and Eviction Prevention cannot be selected together.",
   },
   { formId: "260346853938064" }, // Self-Declaration of Citizenship Status
   { formId: "251076068294057" }, // HRDC Release of Information
@@ -188,24 +189,9 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     ],
   },
   {
-    formId: "251471204342143", // MT Homelessness Prevention Assessment (HMIS)
-    title: "HMIS / Homelessness Prevention Assessment",
-    note:
-      "HUD Rental intake: complete the REQUIRED Coordinated Entry Assessment in HMIS (ServicePoint link below). " +
-      "PATH intake also requires an HMIS entry. " +
-      "Eviction Prevention: the assessment is NOT a form — use the Eviction Prevention Assessment spreadsheet below. " +
-      "Otherwise use this MT Homelessness Prevention Assessment form.",
-    links: [
-      {
-        href: "https://wscs.wellsky.com/montana/com.bowmansystems.sp5.core.ServicePoint/index.html",
-        label: "HMIS (ServicePoint) — Coordinated Entry",
-      },
-      {
-        href: "https://docs.google.com/spreadsheets/d/15oqPBUXZ450AsgSCQ8s5HmNWNMP5Vv9R/edit?rtpof=true",
-        label: "Eviction Prevention Assessment (spreadsheet)",
-      },
-    ],
-    prominentLinks: true,
+    title: "Program assessment requirements",
+    note: "Complete the requirements shown for every program selected in Step 1.",
+    intakeGuidance: true,
   },
   {
     title: "Collect documents",
