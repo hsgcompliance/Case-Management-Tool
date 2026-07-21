@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildQueueLedgerIndex, paymentQueueIdFromLedger, queueLedgerIssue } from "./spendingReconciliation";
+import { buildQueueLedgerIndex, linkedReversalLedgerIds, paymentQueueIdFromLedger, queueLedgerIssue } from "./spendingReconciliation";
 
 describe("spending queue/ledger reconciliation", () => {
   it("recognizes queue provenance in both supported ledger shapes", () => {
@@ -29,5 +29,23 @@ describe("spending queue/ledger reconciliation", () => {
     const second = { id: "led-2", amountCents: 1200, grantId: "g2", lineItemId: "li2", origin: { paymentQueueId: "pq-1" } };
     expect(queueLedgerIssue(queue, [first, second])).toBe("Reconciliation: 2 ledger entries linked");
     expect(queueLedgerIssue(queue, [second])).toBe("Reconciliation: amount, grant, budget mismatch");
+  });
+
+  it("links adjustment reversals to the spend they cancel", () => {
+    const ids = linkedReversalLedgerIds([
+      { id: "spend-1", amountCents: 1000, enrollmentId: "e1", paymentId: "p1", createdAt: "2026-01-01" },
+      { id: "rev-1", amountCents: -1000, labels: ["adjustment", "reversalOf:spend-1"], createdAt: "2026-01-02" },
+      { id: "replacement-1", amountCents: 1200, labels: ["adjustment", "adjusted:spend-1"], createdAt: "2026-01-02" },
+    ]);
+    expect([...ids].sort()).toEqual(["rev-1", "spend-1"]);
+  });
+
+  it("pairs legacy negative reversals with the latest matching spend", () => {
+    const ids = linkedReversalLedgerIds([
+      { id: "spend-1", amountCents: 1000, enrollmentId: "e1", paymentId: "p1", createdAt: "2026-01-01" },
+      { id: "rev-1", amountCents: -1000, enrollmentId: "e1", paymentId: "p1", createdAt: "2026-01-02" },
+      { id: "replacement-1", amountCents: 1200, enrollmentId: "e1", paymentId: "p1", createdAt: "2026-01-03" },
+    ]);
+    expect([...ids].sort()).toEqual(["rev-1", "spend-1"]);
   });
 });

@@ -48,7 +48,7 @@ import type { CardBudget } from "./SpendDetailModal";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets/jotform/jotformSubmissionView";
 import { GRANT_ACCENT_COLORS, grantAccentSolid, grantAccentChip } from "@lib/colorRegistry";
-import { buildQueueLedgerIndex, queueLedgerIssue } from "./spendingReconciliation";
+import { buildQueueLedgerIndex, linkedReversalLedgerIds, queueLedgerIssue } from "./spendingReconciliation";
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -272,6 +272,7 @@ type SpendingRow = {
   expenseType: string;
   purchaser: string;
   isReversal: boolean;
+  isReversalRelated: boolean;
   linkedLedgerId?: string;
   reversalLedgerId?: string;
   ledgerEntry?: Record<string, unknown>;
@@ -1458,10 +1459,11 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     const ledger = ledgerEntries as Array<Record<string, unknown>>;
     const queue = paymentQueueItems as Array<Record<string, unknown>>;
     const reconciliation = buildQueueLedgerIndex(queue, ledger);
+    const reversalRelatedLedgerIds = linkedReversalLedgerIds(ledger);
 
     for (const e of ledger) {
       const source = String(e?.source || "").toLowerCase();
-      const isGrantPayment = source === "enrollment";
+      const isGrantPayment = source === "enrollment" || source === "adjustment";
       const isCard = source === "card";
       if (!isGrantPayment && !isCard) continue;
       if (reconciliation.isLedgerRepresentedByQueue(e)) continue;
@@ -1525,6 +1527,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         expenseType: "",
         purchaser: String(e?.purchaser || "").trim(),
         isReversal,
+        isReversalRelated: reversalRelatedLedgerIds.has(entryId),
         searchText: [vendor, displayTitle, grantId, lineItemId, String(e?.customerId || "")].join(" ").toLowerCase(),
         ledgerEntry: e,
         reconciliationIssue: isGrantPayment ? "Reconciliation: ledger entry has no loaded queue item" : undefined,
@@ -1602,6 +1605,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         expenseType: queueExpenseType,
         purchaser: queuePurchaser,
         isReversal: amountCents < 0 || String((queueItem as any).direction || "").toLowerCase() === "return",
+        isReversalRelated: workflowState === "closed"
+          && reversalRelatedLedgerIds.has(String(postedLedger?.id || queueItem.ledgerEntryId || "")),
         searchText: [
           merchant,
           queueVendor,
@@ -1844,7 +1849,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       const grantPass = !grantId || row.grantId === grantId;
       const bucketPass =
         !cardBucketFilter || !isCardBudgetRow(row) || row.cardBucket === cardBucketFilter;
-      const reversalPass = showReversals || !row.isReversal;
+      const reversalPass = showReversals || (!row.isReversal && !row.isReversalRelated);
       const customerIdPass = !filterCustomerId || row.customerId === filterCustomerId;
       const rawRowCmId = String(
         (row.paymentQueueItem as Record<string, unknown> | undefined)?.caseManagerId
@@ -2652,7 +2657,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 checked={!!filterState.showReversals}
                 onChange={(e) => setFilter({ showReversals: e.currentTarget.checked })}
               />
-              Show reversals
+              Show reversals and linked spends
             </label>
           </div>
 

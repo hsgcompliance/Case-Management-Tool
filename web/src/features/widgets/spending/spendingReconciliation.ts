@@ -13,6 +13,62 @@ export function paymentQueueIdFromLedger(entry: SpendingRecord): string {
   return match?.[1] || "";
 }
 
+function centsOf(row: SpendingRecord): number {
+  const cents = Number(row.amountCents);
+  if (Number.isFinite(cents)) return Math.trunc(cents);
+  const amount = Number(row.amount);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+}
+
+function reversalTargetId(entry: SpendingRecord): string {
+  const origin = asRecord(entry.origin);
+  const direct = String(entry.reversalOf || origin.reversalOf || "").trim();
+  if (direct) return direct;
+  const labels = Array.isArray(entry.labels) ? entry.labels : [];
+  for (const label of labels) {
+    const match = String(label || "").trim().match(/^reversalOf:(.+)$/i);
+    if (match?.[1]) return match[1].trim();
+  }
+  return "";
+}
+
+/** Ledger IDs that belong to a reversal pair: both the reversal and the spend it cancels. */
+export function linkedReversalLedgerIds(ledgerEntries: SpendingRecord[]): Set<string> {
+  const related = new Set<string>();
+  const unmatchedPositiveByKey = new Map<string, string[]>();
+  const ordered = [...ledgerEntries].sort((a, b) => {
+    const time = (row: SpendingRecord) => String(row.createdAt || row.ts || row.updatedAt || row.date || "");
+    return time(a).localeCompare(time(b)) || String(a.id || "").localeCompare(String(b.id || ""));
+  });
+
+  for (const entry of ordered) {
+    const id = String(entry.id || "").trim();
+    if (!id) continue;
+    const target = reversalTargetId(entry);
+    if (target) {
+      related.add(id);
+      related.add(target);
+      continue;
+    }
+    const amount = centsOf(entry);
+    const origin = asRecord(entry.origin);
+    const enrollmentId = String(entry.enrollmentId || "").trim();
+    const paymentId = String(entry.paymentId || origin.baseId || "").trim();
+    if (!enrollmentId || !paymentId || amount === 0) continue;
+    const key = `${enrollmentId}\u0000${paymentId}\u0000${Math.abs(amount)}`;
+    const unmatched = unmatchedPositiveByKey.get(key) || [];
+    if (amount > 0) {
+      unmatched.push(id);
+      unmatchedPositiveByKey.set(key, unmatched);
+    } else {
+      const cancelledId = unmatched.pop();
+      related.add(id);
+      if (cancelledId) related.add(cancelledId);
+    }
+  }
+  return related;
+}
+
 export function buildQueueLedgerIndex(
   queueItems: SpendingRecord[],
   ledgerEntries: SpendingRecord[],
@@ -61,13 +117,6 @@ export function buildQueueLedgerIndex(
   }
 
   return { ledgersForQueue, primaryLedgerForQueue, isLedgerRepresentedByQueue };
-}
-
-function centsOf(row: SpendingRecord): number {
-  const cents = Number(row.amountCents);
-  if (Number.isFinite(cents)) return Math.trunc(cents);
-  const amount = Number(row.amount);
-  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
 }
 
 export function queueLedgerIssue(item: SpendingRecord, ledgers: SpendingRecord[]): string {
