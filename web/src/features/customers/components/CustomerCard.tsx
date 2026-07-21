@@ -27,8 +27,6 @@ import { customerContactRoleForUid } from "../contactCaseManagers";
 import { getCustomerDriveFolderLink, getCustomerWorkbookRef } from "../customerDriveFolder";
 import { WorkbookSheetModal } from "@entities/workbook/WorkbookSheetModal";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
-import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
-import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
 import {
   enrollmentControlActionBody,
   enrollmentControlDone,
@@ -565,14 +563,6 @@ function EnrollmentQuickModal({
         ? "border-slate-200 bg-slate-100 text-slate-600"
         : "border-amber-200 bg-amber-50 text-amber-700";
   const busy = patch.isPending || applyAction.isPending || deleteEnrollment.isPending;
-  const closePreview = React.useMemo(
-    () => buildEnrollmentClosePreview({
-      payments: Array.isArray((enrollment as any)?.payments) ? (enrollment as any).payments : [],
-      requestedCloseDate: closeDate,
-      fallbackDate: todayISO(),
-    }),
-    [closeDate, enrollment],
-  );
 
   const patchEnrollment = async (patchData: Record<string, unknown>) => {
     if (!enrollmentId) return;
@@ -993,8 +983,6 @@ function CustomerCardInner({
   const age = calcAge((customer as { dob?: string | null }).dob || null);
   const inactiveCustomer = isInactiveCustomer(customer);
   const customerTier = (customer as { tier?: number | null }).tier ?? null;
-  const [inactivePreviewOpen, setInactivePreviewOpen] = React.useState(false);
-  const [shouldLoadEnrollments, setShouldLoadEnrollments] = React.useState(false);
 
   const onSelectTier = React.useCallback(
     async (t: number) => {
@@ -1844,7 +1832,6 @@ function CustomerCardInner({
                 setEnrollmentPopupId(contextMenu.enrollmentId);
                 setContextMenu(null);
               }}
-              disabled={busy}
               role="menuitem"
             >
               Review and close enrollment
@@ -1949,19 +1936,6 @@ function CustomerCardInner({
           }}
         />
       ) : null}
-
-      <CustomerInactivePreviewDialog
-        open={inactivePreviewOpen}
-        customerName={displayName(customer)}
-        enrollments={enrollments}
-        loading={enrollmentsQuery.isLoading || enrollmentsQuery.isFetching}
-        busy={setCustomerActive.isPending}
-        onCancel={() => setInactivePreviewOpen(false)}
-        onConfirm={() => {
-          setInactivePreviewOpen(false);
-          void onToggleCustomerActive(true);
-        }}
-      />
     </article>
   );
 }
