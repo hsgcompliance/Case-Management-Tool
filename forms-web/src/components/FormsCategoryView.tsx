@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { INTAKE_TYPES, intakeTypeLabel, type FormDef, type IntakeFlowStep, type IntakeTypeId } from "@/lib/formsCatalog";
+import { INTAKE_TYPES, intakeTypesLabel, type FormDef, type IntakeFlowStep, type IntakeTypeId } from "@/lib/formsCatalog";
 import { removeIntakeSession, upsertIntakeSession } from "@/lib/intakeSessions";
 import { setCustomerTssStatus } from "@/lib/customersApi";
 import { getCustomerDetail } from "@/lib/customerDetailApi";
@@ -26,8 +26,10 @@ type FlowProgress = {
   checks: Record<string, number[]>;
   /** TSS gate selection — also presets the folder build + customer doc push. */
   tssVariant?: TssVariant;
-  /** Intake-type gate selection (step 1) — informational for now. */
+  /** Legacy single intake selection, retained only for local-cache migration. */
   intakeType?: IntakeTypeId;
+  /** Compatible intake programs selected in step 1. */
+  intakeTypes?: IntakeTypeId[];
 };
 
 const EMPTY_PROGRESS: FlowProgress = { done: {}, checks: {} };
@@ -39,11 +41,14 @@ function loadProgress(key: string): FlowProgress {
     const raw = localStorage.getItem(key);
     if (!raw) return EMPTY_PROGRESS;
     const p = JSON.parse(raw) as Partial<FlowProgress>;
+    const intakeTypes = Array.isArray(p.intakeTypes)
+      ? [...new Set(p.intakeTypes.filter((id): id is IntakeTypeId => INTAKE_TYPE_IDS.has(id)))]
+      : p.intakeType && INTAKE_TYPE_IDS.has(p.intakeType) ? [p.intakeType] : [];
     return {
       done: p.done ?? {},
       checks: p.checks ?? {},
       ...(p.tssVariant === "payer" || p.tssVariant === "nonpayer" ? { tssVariant: p.tssVariant } : {}),
-      ...(p.intakeType && INTAKE_TYPE_IDS.has(p.intakeType) ? { intakeType: p.intakeType } : {}),
+      ...(intakeTypes.length ? { intakeTypes } : {}),
     };
   } catch {
     return EMPTY_PROGRESS;
@@ -58,6 +63,58 @@ type ResolvedStep = IntakeFlowStep & {
 };
 
 type View = { kind: "list" } | { kind: "step"; idx: number } | { kind: "form"; form: FormDef };
+
+const HMIS_URL = "https://wscs.wellsky.com/montana/com.bowmansystems.sp5.core.ServicePoint/index.html";
+const EVICTION_ASSESSMENT_URL = "https://docs.google.com/spreadsheets/d/15oqPBUXZ450AsgSCQ8s5HmNWNMP5Vv9R/edit?rtpof=true";
+const TSS_HOUSING_ASSESSMENT_URL = "https://drive.google.com/file/d/1s-WjmM_FZd4HwfC2Tzeve4_mlsaTdxa0/view?usp=drive_link";
+
+function GuidanceLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-7 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-indigo-500">
+      <ExternalServiceIcon href={href} className="h-5 w-5" />
+      {children}
+    </a>
+  );
+}
+
+function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] }) {
+  const selected = new Set(intakeTypes);
+  const needsHmis = selected.has("hud-rental") || selected.has("path-housing");
+  if (!selected.size) {
+    return <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Return to Step 1 and select at least one intake program to see its requirements.</div>;
+  }
+  return (
+    <div className="space-y-3">
+      {selected.has("eviction-prevention") ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+          <h3 className="font-semibold text-amber-950">Eviction Prevention</h3>
+          <p className="mt-1 text-sm text-amber-900">Complete the Eviction Prevention Assessment in the Google Sheet.</p>
+          <div className="mt-4 flex justify-center"><GuidanceLink href={EVICTION_ASSESSMENT_URL}>Open Eviction Prevention Assessment</GuidanceLink></div>
+        </section>
+      ) : null}
+      {selected.has("hud-rental") ? (
+        <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4">
+          <h3 className="font-semibold text-sky-950">HUD Rental Assistance</h3>
+          <p className="mt-1 text-sm text-sky-900">Please verify that a Coordinated Entry (CE) entry exists with a MAP Assessment dated in the current month. Download a PDF of the MAP Assessment and save it in the customer file.</p>
+        </section>
+      ) : null}
+      {selected.has("path-housing") ? (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+          <h3 className="font-semibold text-emerald-950">PATH</h3>
+          <p className="mt-1 text-sm text-emerald-900">Please open HMIS and make sure the customer is enrolled in PATH Supportive Services and/or Outreach Services.</p>
+        </section>
+      ) : null}
+      {needsHmis ? <div className="flex justify-center py-2"><GuidanceLink href={HMIS_URL}>Open HMIS (ServicePoint)</GuidanceLink></div> : null}
+      {selected.has("tss-deposit-fee") ? (
+        <section className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-4">
+          <h3 className="font-semibold text-violet-950">TSS Housing Assessment</h3>
+          <p className="mt-1 text-sm text-violet-900">Please print and complete the Housing Assessment. You may also complete it after the customer is approved for Medicaid, if preferred.</p>
+          <div className="mt-4 flex justify-center"><GuidanceLink href={TSS_HOUSING_ASSESSMENT_URL}>Open Housing Assessment</GuidanceLink></div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
 
 export function FormsCategoryView({
   heading,
@@ -130,7 +187,7 @@ export function FormsCategoryView({
           done: { ...anon.done, ...next.done },
           checks: { ...anon.checks, ...next.checks },
           ...(next.tssVariant ?? anon.tssVariant ? { tssVariant: next.tssVariant ?? anon.tssVariant } : {}),
-          ...(next.intakeType ?? anon.intakeType ? { intakeType: next.intakeType ?? anon.intakeType } : {}),
+          ...(next.intakeTypes?.length || anon.intakeTypes?.length ? { intakeTypes: next.intakeTypes?.length ? next.intakeTypes : anon.intakeTypes } : {}),
         };
         try {
           localStorage.setItem(storageKey, JSON.stringify(merged));
@@ -189,7 +246,7 @@ export function FormsCategoryView({
       Object.values(progress.done).some(Boolean) ||
       Object.values(progress.checks).some((c) => c.length > 0) ||
       !!progress.tssVariant ||
-      !!progress.intakeType;
+      !!progress.intakeTypes?.length;
     if (!hasProgress) return;
     upsertIntakeSession({
       customerId: customer?.id ?? null,
@@ -197,7 +254,8 @@ export function FormsCategoryView({
       cwId: customer?.cwId ?? null,
       dob: customer?.dob ?? null,
       caseManagerName: customer?.caseManagerName ?? null,
-      intakeType: progress.intakeType ?? null,
+      intakeType: progress.intakeTypes?.[0] ?? null,
+      intakeTypes: progress.intakeTypes ?? [],
       doneCount,
       totalSteps: steps.length,
     });
@@ -265,11 +323,17 @@ export function FormsCategoryView({
     updateProgress((p) => ({ ...p, tssVariant: v }));
   };
 
-  // Intake-type gate (step 1): persisted per session; informational for now,
-  // the flow will branch on it later.
-  const intakeType = progress.intakeType ?? null;
-  const chooseIntakeType = (v: IntakeTypeId, stepKey: string) => {
-    updateProgress((p) => ({ ...p, intakeType: v, done: { ...p.done, [stepKey]: true } }));
+  // Step 1 supports program combinations, except HUD Rental and Eviction
+  // Prevention, which are mutually exclusive primary assistance paths.
+  const intakeTypes = progress.intakeTypes ?? [];
+  const toggleIntakeType = (v: IntakeTypeId, stepKey: string) => {
+    updateProgress((p) => {
+      const current = new Set(p.intakeTypes ?? []);
+      if (current.has(v)) current.delete(v);
+      else current.add(v);
+      const next = INTAKE_TYPES.map((type) => type.id).filter((id) => current.has(id));
+      return { ...p, intakeTypes: next, done: { ...p.done, [stepKey]: next.length > 0 } };
+    });
   };
 
   // Persisted across list and open views so context (card spend, current
@@ -492,59 +556,54 @@ export function FormsCategoryView({
         ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
         {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} onSubmissionStateChange={handleRentCertSubmissionState} /> : null}
+        {step.intakeGuidance ? <IntakeProgramGuidance intakeTypes={intakeTypes} /> : null}
         {step.intakeTypeGate ? (
-          intakeType ? (
-            <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-slate-800">
-                  Intake type: <span className="text-indigo-600">{intakeTypeLabel(intakeType)}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (next) setView({ kind: "step", idx: idx + 1 });
-                    else setView({ kind: "list" });
-                  }}
-                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
-                >
-                  Continue →
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {INTAKE_TYPES.filter((t) => t.id !== intakeType).map((t) => (
+          <div className="rounded-xl border border-indigo-200 bg-white px-6 py-8 text-center">
+            <div className="text-base font-semibold text-slate-900">Which programs are part of this intake?</div>
+            <p className="mx-auto mt-1 max-w-xl text-xs text-slate-500">
+              Select all that apply. PATH and TSS can accompany another program. HUD Rental and Eviction Prevention cannot be combined.
+            </p>
+            <div className="mx-auto mt-5 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
+              {INTAKE_TYPES.map((t) => {
+                const selected = intakeTypes.includes(t.id);
+                const conflicts = (t.id === "hud-rental" && intakeTypes.includes("eviction-prevention")) ||
+                  (t.id === "eviction-prevention" && intakeTypes.includes("hud-rental"));
+                return (
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => chooseIntakeType(t.id, step.key)}
-                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:border-indigo-300 hover:text-indigo-600"
+                    disabled={conflicts}
+                    aria-pressed={selected}
+                    onClick={() => toggleIntakeType(t.id, step.key)}
+                    className={`rounded-xl border-2 px-4 py-5 text-sm font-bold transition disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300 ${
+                      selected
+                        ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                        : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
+                    }`}
                   >
-                    Switch to {t.label}
+                    <span className="block">{selected ? "✓ " : ""}{t.label}</span>
+                    <span className={`mt-1 block text-[11px] font-medium ${selected ? "text-indigo-100" : "text-indigo-400"}`}>{conflicts ? "Conflicts with the selected primary program" : t.hint}</span>
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          ) : (
-            <div className="rounded-xl border border-indigo-200 bg-white px-6 py-10 text-center">
-              <div className="text-base font-semibold text-slate-900">Which intake is this?</div>
-              <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
-                Every path runs the same steps for now — the choice is saved with this intake session so the flow
-                can branch on it later.
-              </p>
-              <div className="mx-auto mt-5 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
-                {INTAKE_TYPES.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => chooseIntakeType(t.id, step.key)}
-                    className="rounded-xl border-2 border-indigo-200 bg-indigo-50 px-4 py-5 text-sm font-bold text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
-                  >
-                    {t.label}
-                    <span className="mt-1 block text-[11px] font-medium text-indigo-400">{t.hint}</span>
-                  </button>
-                ))}
-              </div>
+            <div className="mx-auto mt-5 flex max-w-xl flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <span className="text-left text-xs font-medium text-slate-500">
+                {intakeTypes.length ? <><b className="text-slate-700">Selected:</b> {intakeTypesLabel(intakeTypes)}</> : "Select at least one program to continue."}
+              </span>
+              <button
+                type="button"
+                disabled={!intakeTypes.length}
+                onClick={() => {
+                  if (next) setView({ kind: "step", idx: idx + 1 });
+                  else setView({ kind: "list" });
+                }}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Continue →
+              </button>
             </div>
-          )
+          </div>
         ) : step.tssGate && !tssVariant ? (
           // Full-page gate: payer vs non-payer decides which form loads (and
           // presets the folder build + customer doc payer status).
@@ -667,7 +726,7 @@ export function FormsCategoryView({
               Flow steps
               <span className="ml-2 text-xs font-medium text-slate-400">
                 {doneCount} of {steps.length} complete{customer ? ` · ${customer.name}` : " · no customer selected"}
-                {intakeType ? ` · ${intakeTypeLabel(intakeType)}` : ""}
+                {intakeTypes.length ? ` · ${intakeTypesLabel(intakeTypes)}` : ""}
               </span>
             </h3>
             <div className="flex items-center gap-2">
