@@ -4,6 +4,12 @@ import { getAuthed, postAuthed } from "./authedApi";
 
 export type EnrollmentLineItem = { id: string; label: string; locked: boolean };
 
+export type FormsProgram = {
+  grantId: string;
+  grantName: string;
+  lineItems: EnrollmentLineItem[];
+};
+
 export type EnrollmentPaymentSummary = {
   id: string;
   type: string;
@@ -36,19 +42,21 @@ export type FormsEnrollment = {
   payments: EnrollmentPaymentSummary[];
 };
 
-export async function listEnrollmentsForCustomer(customerId: string): Promise<FormsEnrollment[]> {
-  const out = await getAuthed<{ ok: true; items: FormsEnrollment[] }>("formsEnrollmentsList", { customerId });
-  return out.items ?? [];
+export async function listEnrollmentsForCustomer(customerId: string): Promise<{ enrollments: FormsEnrollment[]; programs: FormsProgram[] }> {
+  const out = await getAuthed<{ ok: true; items: FormsEnrollment[]; programs?: FormsProgram[] }>("formsEnrollmentsList", { customerId });
+  return { enrollments: out.items ?? [], programs: out.programs ?? [] };
 }
 
 export type RentCertApplyRow = {
-  enrollmentId: string;
+  enrollmentId?: string;
+  grantId?: string;
   lineItemId: string;
   type: "deposit" | "prorated" | "arrears" | "monthly";
   sub?: "rent" | "utility";
   amount: number;
   dueDate: string; // YYYY-MM-DD
   label?: string;
+  vendor?: string;
 };
 
 export type RentCertRowResult = {
@@ -67,4 +75,8 @@ export async function applyRentCertSchedule(body: {
   rows: RentCertApplyRow[];
 }): Promise<{ ok: true; created: number; results: RentCertRowResult[] }> {
   return postAuthed("formsRentCertApply", body);
+}
+
+export async function markCustomerNotEligible(body: { customerId: string; enrollmentId?: string }): Promise<{ ok: true; customerInactivated: boolean }> {
+  return postAuthed("formsCustomerNotEligible", body);
 }

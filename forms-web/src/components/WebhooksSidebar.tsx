@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { listWebhookEventDetails, type WebhookEventDetail } from "@/lib/webhookDetailsApi";
 import { getSubmissionLinks, linkSubmission, type SubmissionLink } from "@/lib/submissionLinksApi";
 import { extractHousehold, type ExtractedValue, type HouseholdMember, type SlotValue } from "@/lib/householdExtract";
+import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
 import { formById } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { matchName, type NameMatch } from "@/lib/nameMatch";
@@ -264,9 +265,11 @@ export function WebhooksSidebar({
   formIds,
   /** Bump to trigger near-term refreshes (e.g. when the embed detects a submit). */
   refreshKey = 0,
+  onSnapshot,
 }: {
   formIds: string[];
   refreshKey?: number;
+  onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
 }) {
   const { customer } = useCurrentCustomer();
   const [collapsed, setCollapsed] = useState(() => {
@@ -491,6 +494,19 @@ export function WebhooksSidebar({
     () => extractHousehold(modelRows.map((r) => r.ev), (id) => formById(id)?.title || `Form ${id}`),
     [modelRows]
   );
+
+  useEffect(() => {
+    onSnapshot?.({
+      household,
+      submissions: modelRows.map(({ ev, linkedToCurrent }) => ({
+        formId: ev.formId,
+        formTitle: formById(ev.formId)?.title || `Form ${ev.formId}`,
+        submissionId: ev.submissionId,
+        receivedAtISO: ev.receivedAtISO,
+        linkedToCurrent,
+      })),
+    });
+  }, [household, modelRows, onSnapshot]);
 
   const copyAll = () => {
     const lines: string[] = [];

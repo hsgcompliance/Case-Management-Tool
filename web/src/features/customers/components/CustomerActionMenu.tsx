@@ -5,11 +5,12 @@ import { createPortal } from "react-dom";
 import type { TCustomerEntity } from "@types";
 import { Modal } from "@entities/ui/Modal";
 import GrantSelect from "@entities/selectors/GrantSelect";
-import { useEnrollCustomer } from "@hooks/useEnrollments";
+import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
 import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
 import { toast } from "@lib/toast";
 import { toApiError } from "@client/api";
 import { todayISO } from "./paymentScheduleUtils";
+import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
 
 // Selected-state colors for the Tier 1/2/3 mini-cards / pickers.
 // Tier 1 = highest risk (red) → Tier 3 = lowest (green).
@@ -262,12 +263,14 @@ export function CustomerRowActionMenu({
   const setTier = useSetCustomerTier();
   const [open, setOpen] = React.useState(false);
   const [enrollOpen, setEnrollOpen] = React.useState(false);
+  const [inactivePreviewOpen, setInactivePreviewOpen] = React.useState(false);
   const [menuPos, setMenuPos] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const btnRef = React.useRef<HTMLButtonElement | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const openedFromContextMenu = React.useRef(false);
 
   const inactive = isInactiveCustomer(customer);
+  const enrollmentsQuery = useCustomerEnrollments(customer.id, { enabled: inactivePreviewOpen && !inactive, limit: 500 });
   const currentTier = (customer as { tier?: number | null }).tier ?? null;
   const busy = setActive.isPending || setTier.isPending;
 
@@ -323,9 +326,19 @@ export function CustomerRowActionMenu({
       await setActive.mutateAsync({ id: customer.id, active: inactive });
       toast(inactive ? "Customer marked active." : "Customer marked inactive.", { type: "success" });
       onChanged?.();
+      return true;
     } catch (error: unknown) {
       toast(toApiError(error).error || "Failed to update status.", { type: "error" });
+      return false;
     }
+  };
+
+  const requestToggleActive = () => {
+    if (inactive) {
+      void toggleActive();
+      return;
+    }
+    setInactivePreviewOpen(true);
   };
 
   const selectTier = async (t: number) => {
@@ -358,7 +371,7 @@ export function CustomerRowActionMenu({
             }}
             onToggleActive={() => {
               setOpen(false);
-              void toggleActive();
+              requestToggleActive();
             }}
             onEnroll={() => {
               setOpen(false);
@@ -406,6 +419,19 @@ export function CustomerRowActionMenu({
           onEnrolled={() => onChanged?.()}
         />
       ) : null}
+      <CustomerInactivePreviewDialog
+        open={inactivePreviewOpen}
+        customerName={displayName(customer)}
+        enrollments={(enrollmentsQuery.data || []) as unknown as Record<string, unknown>[]}
+        loading={enrollmentsQuery.isLoading || enrollmentsQuery.isFetching}
+        busy={setActive.isPending}
+        onCancel={() => setInactivePreviewOpen(false)}
+        onConfirm={() => {
+          void toggleActive().then((changed) => {
+            if (changed) setInactivePreviewOpen(false);
+          });
+        }}
+      />
     </div>
   );
 }

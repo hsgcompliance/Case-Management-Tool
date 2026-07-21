@@ -6,6 +6,7 @@ import { DateInput } from "@entities/ui/DateInput";
 import { parseISO10Strict } from "@lib/date";
 import { fmtDateOrDash } from "@lib/formatters";
 import { CustomerWorkbookPanel } from "./CustomerWorkbookPanel";
+import { useCustomerEnrollments } from "@hooks/useEnrollments";
 
 type AnyRecord = Record<string, any>;
 type Status = "active" | "inactive";
@@ -88,6 +89,20 @@ export function DetailsTab({
   }, [model?.status]);
 
   const age = React.useMemo(() => computeAgeYears(asStr(model?.dob)), [model?.dob]);
+  const enrollmentsQuery = useCustomerEnrollments(customerId || "", { enabled: !creating && !!customerId, limit: 500 });
+  const assistanceEndedOn = React.useMemo(() => {
+    const enrollments = enrollmentsQuery.data || [];
+    const hasOpen = enrollments.some((row: AnyRecord) => {
+      const rowStatus = String(row?.status || "").toLowerCase();
+      return row?.deleted !== true && rowStatus !== "deleted" && rowStatus !== "closed" && row?.active !== false;
+    });
+    if (hasOpen) return "";
+    return enrollments
+      .map((row: AnyRecord) => String(row?.endDate || "").slice(0, 10))
+      .filter((date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+      .sort()
+      .at(-1) || "";
+  }, [enrollmentsQuery.data]);
 
   const setField = (k: string, v: any) => setModel((m: AnyRecord) => ({ ...(m || {}), [k]: v }));
 
@@ -244,6 +259,12 @@ export function DetailsTab({
 
   return (
     <div className="space-y-5">
+      {assistanceEndedOn ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
+          <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Assistance ended</div>
+          <div className="mt-1 text-lg font-semibold">{fmtDateOrDash(assistanceEndedOn)}</div>
+        </div>
+      ) : null}
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
         <div className="space-y-5">
           <div className="flex items-start justify-between gap-3">

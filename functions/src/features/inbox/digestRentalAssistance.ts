@@ -217,9 +217,7 @@ export async function buildRentalAssistanceDigestData(opts: {
     }));
   }
 
-  const activeAssistanceByCustomer = new Set<string>();
   const groups = new Map<string, GrantAssistanceGroup>();
-  const endedCandidates: EndedAssistanceRow[] = [];
   const today = todayISO();
 
   for (const enrollment of enrollments) {
@@ -233,7 +231,7 @@ export async function buildRentalAssistanceDigestData(opts: {
     if (!payments.length) continue;
 
     const grant = grantMap.get(grantId) || {};
-    if (isDeletedGrant(grant)) continue;
+    if (isDeletedGrant(grant) || !isActiveGrant(grant)) continue;
     const grantName = String(enrollment.grantName || grant.name || grant.code || grantId);
     const grantCode = String(grant.code || '');
     const name = String(enrollment.customerName || enrollment.clientName || '').trim() || customerName(customer, customerId);
@@ -246,7 +244,6 @@ export async function buildRentalAssistanceDigestData(opts: {
       !isActiveGrant(grant);
 
     if (active && !assistanceHasEnded) {
-      activeAssistanceByCustomer.add(customerId);
       const due = computeNextRentCertDue([enrollment], {today});
       const lastAssistance = computeLastAssistanceDate([enrollment]);
       const group = groups.get(grantId) || {
@@ -266,17 +263,6 @@ export async function buildRentalAssistanceDigestData(opts: {
           : lastAssistance ? `None (last assistance ${fmtDate(lastAssistance)})` : 'N/A',
       });
       groups.set(grantId, group);
-    } else if (active) {
-      const paidPayments = payments.filter((payment) => payment.paid);
-      const lastPayment = (paidPayments.length ? paidPayments : payments)
-          .sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
-      endedCandidates.push({
-        customerId,
-        grantName,
-        customerName: name,
-        startDate: String(enrollment.startDate || ''),
-        lastPaymentDate: lastPayment?.dueDate || '',
-      });
     }
   }
 
@@ -287,9 +273,7 @@ export async function buildRentalAssistanceDigestData(opts: {
       }))
       .sort((a, b) => a.grantName.localeCompare(b.grantName));
 
-  const ended = endedCandidates
-      .filter((row) => row.customerId && !activeAssistanceByCustomer.has(row.customerId))
-      .sort((a, b) => a.customerName.localeCompare(b.customerName) || a.grantName.localeCompare(b.grantName));
+  const ended: EndedAssistanceRow[] = [];
 
   return {recipientName, month, groups: grouped, ended, dashboardLink};
 }

@@ -4,6 +4,7 @@ export type FormsCustomer = {
   id: string;
   name: string;
   caseManagerName: string | null;
+  caseManagerId?: string | null;
   cwId: string | null;
   dob: string | null;
 };
@@ -58,6 +59,20 @@ export function createCustomer(body: CreateCustomerBody): Promise<CreateCustomer
 /** Persist the intake TSS payer/non-payer gate selection onto the customer doc. */
 export function setCustomerTssStatus(customerId: string, status: "payer" | "nonpayer"): Promise<void> {
   return postAuthed("formsCustomerSetTssStatus", { customerId, status });
+}
+
+export type UpdateFormsCustomerBody = {
+  name: string;
+  cwId: string | null;
+  caseManagerId: string | null;
+  population: "Youth" | "Individual" | "Family" | null;
+  status: "active" | "inactive";
+  tier: 1 | 2 | 3 | null;
+};
+
+/** Reuse the canonical Dashboard customer patch endpoint from the Forms editor. */
+export function updateFormsCustomer(customerId: string, patch: UpdateFormsCustomerBody): Promise<{ ok: true; ids: string[] }> {
+  return postAuthed("formsCustomerUpdate", { customerId, ...patch });
 }
 
 export function filterCustomers(list: FormsCustomer[], q: string, limit = 12): FormsCustomer[] {

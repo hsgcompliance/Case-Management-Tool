@@ -1,634 +1,798 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
-import { listWebhookEventDetails, type WebhookEventDetail } from "@/lib/webhookDetailsApi";
-import {
-  EMPTY_CERT,
-  extractCertFields,
-  RENT_DETERMINATION_FORM_ID,
-  type CertFields,
-} from "@/lib/rentCertExtract";
-import {
-  describeConflict,
-  findConflict,
-  generateSchedule,
-  SECTION_LABELS,
-  type DraftRow,
-  type ScheduleSection,
-} from "@/lib/rentCertSchedule";
+import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
 import {
   applyRentCertSchedule,
   listEnrollmentsForCustomer,
+  type EnrollmentLineItem,
   type FormsEnrollment,
+  type FormsProgram,
   type RentCertApplyRow,
   type RentCertRowResult,
 } from "@/lib/rentCertApi";
-import { matchName } from "@/lib/nameMatch";
+import { describeConflict, findConflict } from "@/lib/rentCertSchedule";
+import {
+  extractAssistancePrefill,
+  type IntakeWebhookSnapshot,
+} from "@/lib/intakeWebhookSnapshot";
 
-// Rent Cert Smart Schedule Builder — parse a completed Rent Determination
-// submission, let staff SELECT the billable enrollment(s) (no auto-creation,
-// no fuzzy magic — selection is the decision), review the generated rows per
-// section, then apply once. The backend creates the payment rows per
-// enrollment in order; projections + payment queue follow via triggers.
+type SingleKind = "deposit" | "prorated" | "arrears";
+type MonthlyKind = "rent" | "utility";
 
-const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-type RowState = DraftRow & {
-  enrollmentId: string | null;
-  lineItemId: string | null;
+type SinglePlan = {
+  kind: SingleKind;
+  date: string;
+  amount: string;
+  lineItemId: string;
 };
 
-const SECTION_ORDER: ScheduleSection[] = ["deposit", "prorated", "arrears", "recurring", "utility"];
+type MonthlyPlan = {
+  id: string;
+  kind: MonthlyKind;
+  firstDue: string;
+  months: string;
+  monthlyAmount: string;
+  lineItemId: string;
+};
 
-/** Default line item for an enrollment: prefer a rent-ish unlocked item. */
-function defaultLineItem(e: FormsEnrollment): string | null {
-  const unlocked = e.lineItems.filter((li) => !li.locked);
-  if (!unlocked.length) return null;
-  const rentish = unlocked.find((li) => /rent|rental|housing|assistance/i.test(li.label));
-  return (rentish ?? unlocked[0]).id;
+type LandlordDraft = {
+  name: string;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+  unitAddress: string;
+};
+
+type PreviewRow = {
+  key: string;
+  type: "deposit" | "prorated" | "arrears" | "monthly";
+  sub?: "rent" | "utility";
+  label: string;
+  dueDate: string;
+  amount: number;
+  lineItemId: string;
+};
+
+const SINGLE_LABELS: Record<SingleKind, string> = {
+  deposit: "Security Deposit",
+  prorated: "Prorated Rent",
+  arrears: "Arrears",
+};
+
+const money = (amount: number) =>
+  amount.toLocaleString(undefined, { style: "currency", currency: "USD" });
+
+const rowId = (prefix: string) =>
+  `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
+const isISO = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+function positiveNumber(value: string): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? Number(amount.toFixed(2)) : 0;
 }
 
-export function RentCertScheduleBuilder() {
-  const { customer } = useCurrentCustomer();
+function positiveMonths(value: string): number {
+  const months = Math.floor(Number(value));
+  return Number.isFinite(months) && months > 0 && months <= 120 ? months : 0;
+}
 
-  // ── source submission (webhook events for the Rent Determination form) ──
-  const [events, setEvents] = useState<WebhookEventDetail[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+function addMonthsISO(value: string, offset: number): string {
+  const [year, month, day] = value.split("-").map(Number);
+  const total = year * 12 + month - 1 + offset;
+  const nextYear = Math.floor(total / 12);
+  const nextMonth = (total % 12) + 1;
+  const lastDay = new Date(Date.UTC(nextYear, nextMonth, 0)).getUTCDate();
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+}
 
-  useEffect(() => {
-    let alive = true;
-    setEventsLoading(true);
-    listWebhookEventDetails([RENT_DETERMINATION_FORM_ID], 50)
-      .then((items) => {
-        if (!alive) return;
-        setEvents(items);
-      })
-      .catch(() => alive && setEvents([]))
-      .finally(() => alive && setEventsLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, []);
+function inclusiveMonths(start: string, end: string): string {
+  if (!isISO(start) || !isISO(end) || end < start) return "";
+  const [sy, sm] = start.split("-").map(Number);
+  const [ey, em] = end.split("-").map(Number);
+  return String(Math.max(1, (ey - sy) * 12 + em - sm + 1));
+}
 
-  // Prefer the newest submission whose submitter matches the active customer.
-  useEffect(() => {
-    if (selectedEventId || !events.length) return;
-    const matching = customer
-      ? events.find((ev) => matchName(ev.submitterName, customer.name) !== "none")
-      : null;
-    setSelectedEventId((matching ?? events[0]).id);
-  }, [events, customer, selectedEventId]);
+function defaultSingle(kind: SingleKind): SinglePlan {
+  return { kind, date: "", amount: "", lineItemId: "" };
+}
 
-  const selectedEvent = useMemo(
-    () => events.find((ev) => ev.id === selectedEventId) ?? null,
-    [events, selectedEventId],
+function defaultMonthly(kind: MonthlyKind): MonthlyPlan {
+  return { id: rowId(kind), kind, firstDue: "", months: "", monthlyAmount: "", lineItemId: "" };
+}
+
+type RentCertDraft = {
+  version: 1;
+  selectedGrantId: string;
+  defaultLineItemId: string;
+  vendor: string;
+  landlord: LandlordDraft;
+  singles: Record<SingleKind, SinglePlan>;
+  rentPlans: MonthlyPlan[];
+  utilityPlans: MonthlyPlan[];
+  lastSubmittedSignature: string;
+};
+
+function draftStorageKey(customerId: string): string {
+  return `hdb:forms:rent-cert-draft:${customerId}`;
+}
+
+function draftSignature(draft: Omit<RentCertDraft, "version" | "lastSubmittedSignature">): string {
+  return JSON.stringify(draft);
+}
+
+function infoClasses(complete: boolean): string {
+  return complete
+    ? "border-emerald-300 bg-emerald-50/70"
+    : "border-amber-300 bg-amber-50/70";
+}
+
+function requiredClasses(complete: boolean): string {
+  return complete
+    ? "border-emerald-400 bg-emerald-50/50"
+    : "border-rose-400 bg-rose-50/50";
+}
+
+function StateBadge({ complete, optional = false }: { complete: boolean; optional?: boolean }) {
+  return (
+    <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
+      complete ? "bg-emerald-100 text-emerald-700" : optional ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700"
+    }`}>
+      {complete ? "ready" : optional ? "review" : "incomplete"}
+    </span>
   );
+}
 
-  // ── certification fields (parsed, then staff-editable) ──
-  const [cert, setCert] = useState<CertFields>(EMPTY_CERT);
-  useEffect(() => {
-    setCert(selectedEvent ? extractCertFields(selectedEvent) : EMPTY_CERT);
-    setRows(null);
-    setResults(null);
-  }, [selectedEvent]);
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "email" | "tel" | "date" | "number";
+  placeholder?: string;
+}) {
+  return (
+    <label className="min-w-0 text-xs text-slate-600">
+      <span>{label}</span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        min={type === "number" ? "0" : undefined}
+        step={type === "number" ? "0.01" : undefined}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-indigo-400"
+      />
+    </label>
+  );
+}
 
-  const setCertField = <K extends keyof CertFields>(key: K, value: CertFields[K]) =>
-    setCert((c) => ({ ...c, [key]: value }));
+function LineItemField({
+  value,
+  onChange,
+  lineItems,
+  label = "Line item override",
+  allowDefault = true,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  lineItems: EnrollmentLineItem[];
+  label?: string;
+  allowDefault?: boolean;
+}) {
+  return (
+    <label className="min-w-0 text-xs text-slate-600">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+      >
+        {allowDefault ? <option value="">Use default line item</option> : <option value="">— select required line item —</option>}
+        {lineItems.filter((item) => !item.locked).map((item) => (
+          <option key={item.id} value={item.id}>{item.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
-  // ── enrollments (staff selection = the decision) ──
+function InfoSection({
+  title,
+  complete,
+  children,
+}: {
+  title: string;
+  complete: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`rounded-xl border-2 px-3 py-3 ${infoClasses(complete)}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
+        <StateBadge complete={complete} optional />
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SinglePlanCard({
+  plan,
+  onChange,
+  lineItems,
+  defaultLineItemId,
+}: {
+  plan: SinglePlan;
+  onChange: (patch: Partial<SinglePlan>) => void;
+  lineItems: EnrollmentLineItem[];
+  defaultLineItemId: string;
+}) {
+  const active = Boolean(plan.amount || plan.date || plan.lineItemId);
+  const complete = active && positiveNumber(plan.amount) > 0 && isISO(plan.date) && Boolean(plan.lineItemId || defaultLineItemId);
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${active ? (complete ? "border-emerald-300 bg-emerald-50/40" : "border-rose-300 bg-rose-50/40") : "border-slate-200 bg-white"}`}>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{SINGLE_LABELS[plan.kind]}</div>
+        {active ? <StateBadge complete={complete} /> : <span className="text-[10px] font-medium uppercase text-slate-400">optional</span>}
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Field label="Amount" type="number" value={plan.amount} onChange={(amount) => onChange({ amount })} placeholder="0.00" />
+        <Field label="Payment date" type="date" value={plan.date} onChange={(date) => onChange({ date })} />
+        <LineItemField value={plan.lineItemId} onChange={(lineItemId) => onChange({ lineItemId })} lineItems={lineItems} />
+      </div>
+    </div>
+  );
+}
+
+function MonthlyPlanCard({
+  plan,
+  onChange,
+  onRemove,
+  lineItems,
+  defaultLineItemId,
+}: {
+  plan: MonthlyPlan;
+  onChange: (patch: Partial<MonthlyPlan>) => void;
+  onRemove: () => void;
+  lineItems: EnrollmentLineItem[];
+  defaultLineItemId: string;
+}) {
+  const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId);
+  const complete = active && isISO(plan.firstDue) && positiveMonths(plan.months) > 0 && positiveNumber(plan.monthlyAmount) > 0 && Boolean(plan.lineItemId || defaultLineItemId);
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${active ? (complete ? "border-emerald-300 bg-emerald-50/40" : "border-rose-300 bg-rose-50/40") : "border-slate-200 bg-white"}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {plan.kind === "rent" ? "Recurring Rent Period" : "Recurring Utility Period"}
+        </div>
+        <div className="flex items-center gap-2">
+          {active ? <StateBadge complete={complete} /> : null}
+          <button type="button" onClick={onRemove} className="text-xs text-rose-500 hover:text-rose-700">Remove</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+        <Field label="Monthly amount" type="number" value={plan.monthlyAmount} onChange={(monthlyAmount) => onChange({ monthlyAmount })} placeholder="0.00" />
+        <Field label="First due date" type="date" value={plan.firstDue} onChange={(firstDue) => onChange({ firstDue })} />
+        <Field label="Number of months" type="number" value={plan.months} onChange={(months) => onChange({ months })} placeholder="12" />
+        <LineItemField value={plan.lineItemId} onChange={(lineItemId) => onChange({ lineItemId })} lineItems={lineItems} />
+      </div>
+    </div>
+  );
+}
+
+export function RentCertScheduleBuilder({
+  webhookSnapshot,
+  onSubmissionStateChange,
+}: {
+  webhookSnapshot: IntakeWebhookSnapshot | null;
+  onSubmissionStateChange?: (state: { submitted: boolean; dirty: boolean }) => void;
+}) {
+  const { customer } = useCurrentCustomer();
+  const [customerDetail, setCustomerDetail] = useState<CustomerDetail | null>(null);
   const [enrollments, setEnrollments] = useState<FormsEnrollment[]>([]);
-  const [enrollmentsLoading, setEnrollmentsLoading] = useState(false);
-  const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<string[]>([]);
-  const [lineItemByEnrollment, setLineItemByEnrollment] = useState<Record<string, string>>({});
+  const [programs, setPrograms] = useState<FormsProgram[]>([]);
+  const [loadingPrograms, setLoadingPrograms] = useState(false);
+  const [selectedGrantId, setSelectedGrantId] = useState("");
+  const [defaultLineItemId, setDefaultLineItemId] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [landlord, setLandlord] = useState<LandlordDraft>({ name: "", contact: "", phone: "", email: "", address: "", unitAddress: "" });
+  const [singles, setSingles] = useState<Record<SingleKind, SinglePlan>>({
+    deposit: defaultSingle("deposit"),
+    prorated: defaultSingle("prorated"),
+    arrears: defaultSingle("arrears"),
+  });
+  const [rentPlans, setRentPlans] = useState<MonthlyPlan[]>([defaultMonthly("rent")]);
+  const [utilityPlans, setUtilityPlans] = useState<MonthlyPlan[]>([]);
+  const [results, setResults] = useState<RentCertRowResult[] | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [lastSubmittedSignature, setLastSubmittedSignature] = useState("");
+  const [hydratedCustomerId, setHydratedCustomerId] = useState("");
+  const prefill = useMemo(() => extractAssistancePrefill(webhookSnapshot), [webhookSnapshot]);
+  const lastPrefill = useRef("");
 
   const loadEnrollments = useCallback(() => {
     if (!customer) {
       setEnrollments([]);
-      setSelectedEnrollmentIds([]);
+      setPrograms([]);
       return;
     }
-    setEnrollmentsLoading(true);
+    setLoadingPrograms(true);
     listEnrollmentsForCustomer(customer.id)
-      .then((items) => {
-        setEnrollments(items);
-        // Preselect a single active billable enrollment; otherwise make staff choose.
-        const activeBillable = items.filter((e) => e.active && e.billable);
-        setSelectedEnrollmentIds((cur) => {
-          const still = cur.filter((id) => items.some((e) => e.id === id));
-          if (still.length) return still;
-          return activeBillable.length === 1 ? [activeBillable[0].id] : [];
-        });
-        setLineItemByEnrollment((cur) => {
-          const next = { ...cur };
-          for (const e of items) if (!next[e.id]) next[e.id] = defaultLineItem(e) ?? "";
-          return next;
-        });
+      .then(({ enrollments: nextEnrollments, programs: nextPrograms }) => {
+        setEnrollments(nextEnrollments);
+        setPrograms(nextPrograms);
       })
-      .catch(() => setEnrollments([]))
-      .finally(() => setEnrollmentsLoading(false));
+      .catch(() => {
+        setEnrollments([]);
+        setPrograms([]);
+      })
+      .finally(() => setLoadingPrograms(false));
   }, [customer]);
 
   useEffect(() => {
-    loadEnrollments();
-  }, [loadEnrollments]);
+    let alive = true;
+    if (!customer) {
+      setCustomerDetail(null);
+      return;
+    }
+    getCustomerDetail(customer.id).then((detail) => alive && setCustomerDetail(detail));
+    return () => { alive = false; };
+  }, [customer]);
 
-  const selectedEnrollments = useMemo(
-    () => selectedEnrollmentIds.map((id) => enrollments.find((e) => e.id === id)).filter((x): x is FormsEnrollment => !!x),
-    [selectedEnrollmentIds, enrollments],
-  );
-  const primaryEnrollment = selectedEnrollments[0] ?? null;
+  useEffect(() => { loadEnrollments(); }, [loadEnrollments]);
 
-  const toggleEnrollment = (id: string) => {
-    setSelectedEnrollmentIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  useEffect(() => {
+    let cached: RentCertDraft | null = null;
+    if (customer) {
+      try {
+        const raw = localStorage.getItem(draftStorageKey(customer.id));
+        const parsed = raw ? JSON.parse(raw) as RentCertDraft : null;
+        if (parsed?.version === 1) cached = parsed;
+      } catch { /* ignore invalid or unavailable browser storage */ }
+    }
+    setSelectedGrantId(cached?.selectedGrantId || "");
+    setDefaultLineItemId(cached?.defaultLineItemId || "");
+    setVendor(cached?.vendor || "");
+    setLandlord(cached?.landlord || { name: "", contact: "", phone: "", email: "", address: "", unitAddress: "" });
+    setSingles(cached?.singles || { deposit: defaultSingle("deposit"), prorated: defaultSingle("prorated"), arrears: defaultSingle("arrears") });
+    setRentPlans(cached?.rentPlans?.length ? cached.rentPlans : [defaultMonthly("rent")]);
+    setUtilityPlans(cached?.utilityPlans || []);
+    setLastSubmittedSignature(cached?.lastSubmittedSignature || "");
     setResults(null);
-  };
+    setApplyError(null);
+    lastPrefill.current = "";
+    setHydratedCustomerId(customer?.id || "");
+  }, [customer?.id]);
 
-  // ── generated rows (preview state) ──
-  const [rows, setRows] = useState<RowState[] | null>(null);
-  const [genWarnings, setGenWarnings] = useState<string[]>([]);
-  const [results, setResults] = useState<RentCertRowResult[] | null>(null);
-  const [applying, setApplying] = useState(false);
-  const [applyError, setApplyError] = useState<string | null>(null);
+  const currentSignature = useMemo(() => draftSignature({
+    selectedGrantId,
+    defaultLineItemId,
+    vendor,
+    landlord,
+    singles,
+    rentPlans,
+    utilityPlans,
+  }), [defaultLineItemId, landlord, rentPlans, selectedGrantId, singles, utilityPlans, vendor]);
+  const submitted = Boolean(lastSubmittedSignature) && currentSignature === lastSubmittedSignature;
 
-  const submissionId = selectedEvent?.submissionId ?? null;
+  useEffect(() => {
+    if (!customer || hydratedCustomerId !== customer.id) return;
+    const draft: RentCertDraft = {
+      version: 1,
+      selectedGrantId,
+      defaultLineItemId,
+      vendor,
+      landlord,
+      singles,
+      rentPlans,
+      utilityPlans,
+      lastSubmittedSignature,
+    };
+    try { localStorage.setItem(draftStorageKey(customer.id), JSON.stringify(draft)); } catch { /* ignore */ }
+  }, [customer, defaultLineItemId, hydratedCustomerId, landlord, lastSubmittedSignature, rentPlans, selectedGrantId, singles, utilityPlans, vendor]);
 
-  const generate = () => {
-    const g = generateSchedule(cert);
-    const enrollmentId = primaryEnrollment?.id ?? null;
-    setGenWarnings(g.warnings);
-    setRows(
-      g.rows.map((r) => {
-        const conflict = primaryEnrollment ? findConflict(r, primaryEnrollment.payments, submissionId) : null;
-        return {
-          ...r,
-          enrollmentId,
-          lineItemId: enrollmentId ? lineItemByEnrollment[enrollmentId] || null : null,
-          // Conflicting rows start EXCLUDED — staff resolves during preview.
-          include: r.include && !conflict,
-          warnings: conflict ? [...r.warnings, describeConflict(conflict)] : r.warnings,
-        };
-      }),
-    );
+  useEffect(() => {
+    onSubmissionStateChange?.({ submitted, dirty: Boolean(lastSubmittedSignature) && !submitted });
+  }, [lastSubmittedSignature, onSubmissionStateChange, submitted]);
+
+  useEffect(() => {
+    const key = JSON.stringify(prefill);
+    if (!webhookSnapshot || key === lastPrefill.current) return;
+    lastPrefill.current = key;
+    setLandlord((current) => ({
+      name: current.name || prefill.landlordName,
+      contact: current.contact || prefill.landlordContact,
+      phone: current.phone || prefill.landlordPhone,
+      email: current.email || prefill.landlordEmail,
+      address: current.address || prefill.landlordAddress,
+      unitAddress: current.unitAddress || prefill.unitAddress,
+    }));
+    setVendor((current) => current || prefill.landlordName);
+    setSingles((current) => ({
+      deposit: {
+        ...current.deposit,
+        amount: current.deposit.amount || prefill.depositAmount,
+        date: current.deposit.date || prefill.assistanceStart,
+      },
+      prorated: {
+        ...current.prorated,
+        amount: current.prorated.amount || prefill.proratedAmount,
+        date: current.prorated.date || prefill.assistanceStart,
+      },
+      arrears: {
+        ...current.arrears,
+        amount: current.arrears.amount || prefill.arrearsAmount,
+        date: current.arrears.date || prefill.assistanceStart,
+      },
+    }));
+    if (prefill.monthlyRent) {
+      setRentPlans((current) => current.map((plan, index) => index === 0 ? {
+        ...plan,
+        monthlyAmount: plan.monthlyAmount || prefill.monthlyRent,
+        firstDue: plan.firstDue || prefill.assistanceStart,
+        months: plan.months || inclusiveMonths(prefill.assistanceStart, prefill.assistanceEnd),
+      } : plan));
+    }
+    if (prefill.utilityAmount) {
+      setUtilityPlans((current) => current.length ? current : [{
+        ...defaultMonthly("utility"),
+        monthlyAmount: prefill.utilityAmount,
+        firstDue: prefill.assistanceStart,
+        months: inclusiveMonths(prefill.assistanceStart, prefill.assistanceEnd),
+      }]);
+    }
+  }, [prefill, webhookSnapshot]);
+
+  const selectedProgram = programs.find((program) => program.grantId === selectedGrantId) ?? null;
+  const lineItems = selectedProgram?.lineItems.filter((item) => !item.locked) ?? [];
+  const selectedEnrollment = enrollments.find((enrollment) =>
+    enrollment.grantId === selectedGrantId && enrollment.active && enrollment.billable,
+  ) ?? null;
+  const sourceSubmissionId = webhookSnapshot?.submissions.find((item) => item.linkedToCurrent)?.submissionId
+    || webhookSnapshot?.submissions[0]?.submissionId
+    || (customer ? `intake-${customer.id}` : "intake-session");
+
+  const linkedSubmissions = webhookSnapshot?.submissions.filter((item) => item.linkedToCurrent).length ?? 0;
+  const submissionCount = webhookSnapshot?.submissions.length ?? 0;
+  const linksReady = submissionCount > 0 && linkedSubmissions === submissionCount;
+  const householdMembers = webhookSnapshot?.household.members ?? [];
+  const householdReady = Boolean(customer && (customer.cwId || customerDetail?.dob || householdMembers.length));
+  const landlordReady = Boolean(landlord.name && (landlord.phone || landlord.email || landlord.contact) && (landlord.address || landlord.unitAddress));
+  const enrollmentReady = Boolean(customer && selectedGrantId && selectedProgram);
+
+  const schedule = useMemo(() => {
+    const rows: PreviewRow[] = [];
+    const issues: string[] = [];
+    const addSingle = (plan: SinglePlan) => {
+      const active = Boolean(plan.amount || plan.date || plan.lineItemId);
+      if (!active) return;
+      const amount = positiveNumber(plan.amount);
+      const lineItemId = plan.lineItemId || defaultLineItemId;
+      if (!amount || !isISO(plan.date) || !lineItemId) {
+        issues.push(`${SINGLE_LABELS[plan.kind]} needs an amount, payment date, and line item.`);
+        return;
+      }
+      if (!lineItems.some((item) => item.id === lineItemId)) {
+        issues.push(`${SINGLE_LABELS[plan.kind]} has a line item that does not belong to the selected active grant.`);
+        return;
+      }
+      rows.push({ key: plan.kind, type: plan.kind, label: SINGLE_LABELS[plan.kind], dueDate: plan.date, amount, lineItemId });
+    };
+    const addMonthly = (plan: MonthlyPlan) => {
+      const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId);
+      if (!active) return;
+      const amount = positiveNumber(plan.monthlyAmount);
+      const months = positiveMonths(plan.months);
+      const lineItemId = plan.lineItemId || defaultLineItemId;
+      if (!amount || !months || !isISO(plan.firstDue) || !lineItemId) {
+        issues.push(`${plan.kind === "rent" ? "Rent" : "Utility"} period needs an amount, first date, 1–120 months, and line item.`);
+        return;
+      }
+      if (!lineItems.some((item) => item.id === lineItemId)) {
+        issues.push(`${plan.kind === "rent" ? "Rent" : "Utility"} period has a line item that does not belong to the selected active grant.`);
+        return;
+      }
+      for (let index = 0; index < months; index += 1) {
+        const dueDate = addMonthsISO(plan.firstDue, index);
+        rows.push({
+          key: `${plan.id}:${dueDate}`,
+          type: "monthly",
+          sub: plan.kind,
+          label: `${plan.kind === "rent" ? "Rent" : "Utility"} · ${dueDate.slice(0, 7)}`,
+          dueDate,
+          amount,
+          lineItemId,
+        });
+      }
+    };
+    (Object.keys(singles) as SingleKind[]).forEach((kind) => addSingle(singles[kind]));
+    rentPlans.forEach(addMonthly);
+    utilityPlans.forEach(addMonthly);
+    if (!rows.length) issues.push("Add at least one complete payment row or recurring period.");
+    if (!vendor.trim()) issues.push("Default vendor / payee is required.");
+    if (!defaultLineItemId && rows.some((row) => !row.lineItemId)) issues.push("A line item is required for every payment row.");
+
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const family = row.type === "monthly" && row.sub === "utility" ? "utility" : row.type === "deposit" ? "deposit" : "landlord";
+      const key = `${family}:${row.dueDate.slice(0, 7)}`;
+      if (seen.has(key)) issues.push(`Two ${family} payments overlap in ${row.dueDate.slice(0, 7)}. Adjust the periods.`);
+      seen.add(key);
+      if (selectedEnrollment) {
+        const conflict = findConflict(row, selectedEnrollment.payments, sourceSubmissionId);
+        if (conflict && !conflict.sameSource) issues.push(`${row.label}: ${describeConflict(conflict)}.`);
+      }
+    }
+    return { rows, issues: [...new Set(issues)] };
+  }, [defaultLineItemId, lineItems, rentPlans, selectedEnrollment, singles, sourceSubmissionId, utilityPlans, vendor]);
+
+  const paymentReady = enrollmentReady && schedule.rows.length > 0 && schedule.issues.length === 0;
+  const total = schedule.rows.reduce((sum, row) => sum + row.amount, 0);
+
+  const chooseGrant = (grantId: string) => {
+    setSelectedGrantId(grantId);
+    setDefaultLineItemId("");
+    setSingles((current) => ({
+      deposit: { ...current.deposit, lineItemId: "" },
+      prorated: { ...current.prorated, lineItemId: "" },
+      arrears: { ...current.arrears, lineItemId: "" },
+    }));
+    setRentPlans((current) => current.map((plan) => ({ ...plan, lineItemId: "" })));
+    setUtilityPlans((current) => current.map((plan) => ({ ...plan, lineItemId: "" })));
     setResults(null);
     setApplyError(null);
   };
-
-  const updateRow = (key: string, patch: Partial<RowState>) => {
-    setRows((cur) => (cur ? cur.map((r) => (r.key === key ? { ...r, ...patch } : r)) : cur));
-    setResults(null);
-  };
-
-  // Re-evaluate conflicts live (enrollment/date edits change them).
-  const annotatedRows = useMemo(() => {
-    if (!rows) return null;
-    return rows.map((r) => {
-      const enr = enrollments.find((e) => e.id === r.enrollmentId) ?? null;
-      const conflict = enr && r.dueDate ? findConflict(r, enr.payments, submissionId) : null;
-      return { ...r, conflict };
-    });
-  }, [rows, enrollments, submissionId]);
-
-  const includedRows = (annotatedRows ?? []).filter((r) => r.include);
-  const includedTotal = includedRows.reduce((s, r) => s + (Number.isFinite(r.amount) ? r.amount : 0), 0);
-  const blockers = includedRows.filter(
-    (r) => !r.enrollmentId || !r.lineItemId || !r.dueDate || !(r.amount > 0) || (r.conflict && !r.conflict.sameSource),
-  );
 
   const apply = async () => {
-    if (!customer || !submissionId || !annotatedRows) return;
-    const payload: RentCertApplyRow[] = includedRows.map((r) => ({
-      enrollmentId: r.enrollmentId!,
-      lineItemId: r.lineItemId!,
-      type: r.type,
-      ...(r.type === "monthly" ? { sub: r.sub ?? "rent" } : {}),
-      amount: r.amount,
-      dueDate: r.dueDate,
-      label: r.label,
+    if (!customer || !selectedProgram || !paymentReady) return;
+    const rows: RentCertApplyRow[] = schedule.rows.map((row) => ({
+      ...(selectedEnrollment ? { enrollmentId: selectedEnrollment.id } : { grantId: selectedProgram.grantId }),
+      lineItemId: row.lineItemId,
+      type: row.type,
+      ...(row.type === "monthly" ? { sub: row.sub ?? "rent" } : {}),
+      amount: row.amount,
+      dueDate: row.dueDate,
+      label: row.label,
+      vendor: vendor.trim(),
     }));
-    if (!payload.length) return;
     setApplying(true);
     setApplyError(null);
+    setResults(null);
     try {
-      const out = await applyRentCertSchedule({
+      const response = await applyRentCertSchedule({
         customerId: customer.id,
-        submissionId,
-        formId: RENT_DETERMINATION_FORM_ID,
+        submissionId: sourceSubmissionId,
         certification: {
-          programName: cert.programName,
-          effectiveDate: cert.effectiveDate,
-          expirationDate: cert.expirationDate,
-          reason: cert.reason,
-          intakePurpose: cert.intakePurpose,
-          includeArrears: cert.includeArrears,
-          proratedMonth: cert.proratedMonth,
-          depositAmount: cert.depositAmount,
-          monthlyHousingCost: cert.monthlyHousingCost,
-          proratedOrArrears: cert.proratedOrArrears,
-          tenantRentPayment: cert.tenantRentPayment,
-          hrdcPayment: cert.hrdcPayment,
-          utilityAllowance: cert.utilityAllowance,
+          sourceProgramName: prefill.programName || null,
+          selectedGrantId: selectedProgram.grantId,
+          selectedGrantName: selectedProgram.grantName,
+          landlordName: landlord.name || null,
+          landlordContact: landlord.contact || null,
+          landlordPhone: landlord.phone || null,
+          landlordEmail: landlord.email || null,
+          landlordAddress: landlord.address || null,
+          unitAddress: landlord.unitAddress || null,
+          householdName: customer.name,
+          householdMemberCount: householdMembers.length || customerDetail?.household.memberCount || null,
+          linkedSubmissionCount: linkedSubmissions,
         },
-        rows: payload,
+        rows,
       });
-      // Map results (indexed into the included payload) back onto row keys.
-      const keyed = out.results.map((res, i) => ({ ...res, key: includedRows[res.index]?.key ?? String(i) }));
-      setResults(keyed as RentCertRowResult[]);
-      loadEnrollments(); // refresh payment summaries → conflicts show the new rows
-    } catch (err) {
-      setApplyError(err instanceof Error ? err.message : String(err));
+      setResults(response.results);
+      setLastSubmittedSignature(currentSignature);
+      loadEnrollments();
+    } catch (error) {
+      setApplyError(error instanceof Error ? error.message : String(error));
     } finally {
       setApplying(false);
     }
   };
 
-  const resultByKey = useMemo(() => {
-    const m = new Map<string, RentCertRowResult>();
-    for (const r of (results ?? []) as Array<RentCertRowResult & { key?: string }>) {
-      if (r.key) m.set(r.key, r);
-    }
-    return m;
-  }, [results]);
-
-  // ── render ──
   if (!customer) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
-        Link a customer first — the schedule builder needs their enrollments to bill against.
+      <div className="rounded-xl border-2 border-rose-300 bg-rose-50 px-4 py-6 text-center text-sm text-rose-700">
+        Link or create the customer first. Enrollment and payment schedule creation require a customer ID.
       </div>
     );
   }
 
-  const numInput = (value: number | null, onChange: (v: number | null) => void, placeholder = "blank") => (
-    <input
-      type="number"
-      step="0.01"
-      value={value ?? ""}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-      className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
-    />
-  );
-  const dateInput = (value: string | null, onChange: (v: string | null) => void) => (
-    <input
-      type="date"
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value || null)}
-      className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
-    />
-  );
-
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-white px-4 py-4">
-      <div>
-        <h3 className="text-sm font-semibold text-slate-900">Rent cert payment schedule builder</h3>
-        <p className="text-xs text-slate-500">
-          Parse the completed Rent Determination, pick the enrollment(s) to bill, review the generated rows, then
-          apply — payments are created on the enrollment and flow into the payment queue in order.
+    <div className="space-y-4 rounded-2xl border-2 border-indigo-300 bg-white px-4 py-4 shadow-sm">
+      <div className="rounded-xl bg-indigo-600 px-4 py-3 text-white">
+        <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-indigo-100">Primary intake action</div>
+        <h3 className="mt-0.5 text-lg font-bold">Link intake, enroll &amp; build payment schedule</h3>
+        <p className="mt-1 text-sm text-indigo-100">
+          Prefill comes from the combined Webhooks sidebar model. Staff must manually select the funded grant and line item.
+          Submit resolves the enrollment first, then creates the real payment schedule and queue projections.
         </p>
       </div>
 
-      {/* 1 · Source submission */}
-      <div className="space-y-2">
-        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">1 · Source submission</div>
-        {eventsLoading ? (
-          <div className="text-xs text-slate-400">Loading Rent Determination submissions…</div>
-        ) : events.length ? (
-          <select
-            value={selectedEventId ?? ""}
-            onChange={(e) => setSelectedEventId(e.target.value || null)}
-            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
-          >
-            {events.map((ev) => {
-              const m = matchName(ev.submitterName, customer.name);
-              return (
-                <option key={ev.id} value={ev.id}>
-                  {ev.submitterName || "(no name)"} · {ev.receivedAtISO?.slice(0, 10) ?? "?"}
-                  {m !== "none" ? ` · matches ${customer.name}` : ""}
-                </option>
-              );
-            })}
-          </select>
-        ) : (
-          <div className="text-xs text-slate-400">
-            No Rent Determination webhook events found — submit the form first, or fill the fields below manually.
+      <InfoSection title="Intake submissions" complete={linksReady}>
+        <div className="text-xs text-slate-700">
+          {submissionCount
+            ? `${linkedSubmissions} of ${submissionCount} sidebar submission${submissionCount === 1 ? "" : "s"} linked to ${customer.name}.`
+            : "No matching webhook submissions are in this intake session yet."}
+          {!linksReady ? " Use the Link controls in the Webhooks sidebar to finish linking." : " All sidebar submissions are linked."}
+        </div>
+      </InfoSection>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <InfoSection title="Landlord information" complete={landlordReady}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Field label="Landlord / company name" value={landlord.name} onChange={(name) => {
+              setLandlord((current) => ({ ...current, name }));
+              setVendor((current) => !current || current === landlord.name ? name : current);
+            }} />
+            <Field label="Contact person" value={landlord.contact} onChange={(contact) => setLandlord((current) => ({ ...current, contact }))} />
+            <Field label="Phone" type="tel" value={landlord.phone} onChange={(phone) => setLandlord((current) => ({ ...current, phone }))} />
+            <Field label="Email" type="email" value={landlord.email} onChange={(email) => setLandlord((current) => ({ ...current, email }))} />
+            <Field label="Landlord mailing address" value={landlord.address} onChange={(address) => setLandlord((current) => ({ ...current, address }))} />
+            <Field label="Assisted unit address" value={landlord.unitAddress} onChange={(unitAddress) => setLandlord((current) => ({ ...current, unitAddress }))} />
           </div>
-        )}
+        </InfoSection>
+
+        <InfoSection title="Household information" complete={householdReady}>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+            <div><span className="text-slate-500">Head of household</span><div className="font-semibold text-slate-900">{customerDetail?.household.headOfHousehold || customer.name}</div></div>
+            <div><span className="text-slate-500">CWID</span><div className="font-semibold text-slate-900">{customerDetail?.cwId || customer.cwId || "—"}</div></div>
+            <div><span className="text-slate-500">DOB</span><div className="font-semibold text-slate-900">{customerDetail?.dob || householdMembers.find((member) => member.isHoH)?.dob?.value || "—"}</div></div>
+            <div><span className="text-slate-500">Members</span><div className="font-semibold text-slate-900">{householdMembers.length || customerDetail?.household.memberCount || "—"}</div></div>
+            <div><span className="text-slate-500">Phone</span><div className="font-semibold text-slate-900">{householdMembers.find((member) => member.isHoH)?.phone?.value || "—"}</div></div>
+            <div><span className="text-slate-500">Email</span><div className="font-semibold text-slate-900">{householdMembers.find((member) => member.isHoH)?.email?.value || "—"}</div></div>
+          </div>
+        </InfoSection>
       </div>
 
-      {/* 2 · Certification fields (editable) */}
-      <div className="space-y-2">
-        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">2 · Certification fields</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <section className={`rounded-xl border-2 px-3 py-3 ${requiredClasses(enrollmentReady)}`}>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Enrollment</h4>
+            <p className="text-xs text-slate-500">Manual selection is always required. No fuzzy or automatic grant selection.</p>
+          </div>
+          <StateBadge complete={enrollmentReady} />
+        </div>
+        {prefill.programName ? (
+          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+            Webhook program reference: <b>{prefill.programName}</b>. Confirm the correct active grant below.
+          </div>
+        ) : null}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <label className="text-xs text-slate-600">
-            Program name
-            <input
-              value={cert.programName ?? ""}
-              onChange={(e) => setCertField("programName", e.target.value || null)}
-              className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
+            <span>Active grant / program</span>
+            <select
+              value={selectedGrantId}
+              onChange={(event) => chooseGrant(event.currentTarget.value)}
+              disabled={loadingPrograms}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+            >
+              <option value="">{loadingPrograms ? "Loading active grants…" : "— manually select grant —"}</option>
+              {programs.map((program) => <option key={program.grantId} value={program.grantId}>{program.grantName}</option>)}
+            </select>
+          </label>
+          <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+            {selectedEnrollment
+              ? <>Existing active enrollment: <b>{selectedEnrollment.grantName || selectedEnrollment.grantId}</b></>
+              : selectedProgram
+                ? <>A new enrollment will be created for <b>{selectedProgram.grantName}</b> before schedule rows are pushed.</>
+                : "Select a grant to resolve or create the enrollment."}
+          </div>
+        </div>
+      </section>
+
+      <section className={`rounded-xl border-2 px-3 py-3 ${requiredClasses(paymentReady)}`}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Payment schedule</h4>
+            <p className="text-xs text-slate-500">Same guided schema as Customer → Payments → Build Payment Schedule.</p>
+          </div>
+          <StateBadge complete={paymentReady} />
+        </div>
+
+        <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 sm:grid-cols-2">
+          <LineItemField
+            value={defaultLineItemId}
+            onChange={(lineItemId) => { setDefaultLineItemId(lineItemId); setResults(null); }}
+            lineItems={lineItems}
+            label="Default line item (required unless every row overrides)"
+            allowDefault={false}
+          />
+          <Field label="Default vendor / payee (required)" value={vendor} onChange={setVendor} placeholder="Landlord or property company" />
+        </div>
+
+        <div className="space-y-2">
+          {(Object.keys(singles) as SingleKind[]).map((kind) => (
+            <SinglePlanCard
+              key={kind}
+              plan={singles[kind]}
+              onChange={(patch) => { setSingles((current) => ({ ...current, [kind]: { ...current[kind], ...patch } })); setResults(null); }}
+              lineItems={lineItems}
+              defaultLineItemId={defaultLineItemId}
             />
-          </label>
-          <label className="text-xs text-slate-600">
-            Reason
-            <select
-              value={cert.reason ?? ""}
-              onChange={(e) => setCertField("reason", e.target.value || null)}
-              className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
-            >
-              <option value="">—</option>
-              <option>Initial</option>
-              <option>Interim</option>
-              <option>Annual</option>
-            </select>
-          </label>
-          <label className="text-xs text-slate-600">
-            Intake purpose
-            <select
-              value={cert.intakePurpose ?? ""}
-              onChange={(e) => setCertField("intakePurpose", e.target.value || null)}
-              className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
-            >
-              <option value="">—</option>
-              <option>New Intake</option>
-              <option>YHDP Transitional Housing Recert</option>
-              <option>Update Rent Cert Letter</option>
-            </select>
-          </label>
-          <label className="text-xs text-slate-600">
-            Effective date
-            <div className="mt-0.5">{dateInput(cert.effectiveDate, (v) => setCertField("effectiveDate", v))}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            Expiration date
-            <div className="mt-0.5">{dateInput(cert.expirationDate, (v) => setCertField("expirationDate", v))}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            Include arrears?
-            <select
-              value={cert.includeArrears == null ? "" : cert.includeArrears ? "yes" : "no"}
-              onChange={(e) =>
-                setCertField("includeArrears", e.target.value === "" ? null : e.target.value === "yes")
-              }
-              className="mt-0.5 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
-            >
-              <option value="">—</option>
-              <option value="no">No</option>
-              <option value="yes">Yes</option>
-            </select>
-          </label>
-          <label className="text-xs text-slate-600">
-            Monthly housing cost
-            <div className="mt-0.5">{numInput(cert.monthlyHousingCost, (v) => setCertField("monthlyHousingCost", v))}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            HRDC payment
-            <div className="mt-0.5">{numInput(cert.hrdcPayment, (v) => setCertField("hrdcPayment", v))}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            Deposit amount
-            <div className="mt-0.5">{numInput(cert.depositAmount, (v) => setCertField("depositAmount", v))}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            Prorated rent / arrears
-            <div className="mt-0.5">{numInput(cert.proratedOrArrears, (v) => setCertField("proratedOrArrears", v))}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            Tenant rent payment
-            <div className="mt-0.5">{numInput(cert.tenantRentPayment, (v) => setCertField("tenantRentPayment", v), "blank ≠ 0")}</div>
-          </label>
-          <label className="text-xs text-slate-600">
-            Utility allowance
-            <div className="mt-0.5">{numInput(cert.utilityAllowance, (v) => setCertField("utilityAllowance", v))}</div>
-          </label>
-        </div>
-      </div>
+          ))}
 
-      {/* 3 · Enrollment selection */}
-      <div className="space-y-2">
-        <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-          3 · Bill against enrollment(s)
-        </div>
-        {enrollmentsLoading ? (
-          <div className="text-xs text-slate-400">Loading enrollments…</div>
-        ) : enrollments.length ? (
-          <div className="flex flex-wrap gap-1.5">
-            {enrollments.map((e) => {
-              const selected = selectedEnrollmentIds.includes(e.id);
-              const disabled = !e.billable;
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  disabled={disabled}
-                  title={disabled ? "No unlocked budget line items on this grant" : undefined}
-                  onClick={() => toggleEnrollment(e.id)}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                    selected
-                      ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-                      : disabled
-                        ? "border-slate-100 bg-slate-50 text-slate-300"
-                        : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"
-                  }`}
-                >
-                  {selected ? "✓ " : ""}
-                  {e.grantName ?? e.grantId}
-                  <span className="ml-1 font-normal text-slate-400">
-                    {e.startDate ?? "?"} · {e.active ? "active" : e.status ?? "inactive"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="text-xs text-amber-700">
-            No enrollments found for {customer.name} — enroll them in a grant in the web app first. Enrollments are
-            never created from here.
-          </div>
-        )}
-        {selectedEnrollments.map((e) => (
-          <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <span className="font-semibold">{e.grantName ?? e.grantId}</span>
-            <span>line item:</span>
-            <select
-              value={lineItemByEnrollment[e.id] ?? ""}
-              onChange={(ev) => {
-                setLineItemByEnrollment((cur) => ({ ...cur, [e.id]: ev.target.value }));
-                setRows((cur) =>
-                  cur ? cur.map((r) => (r.enrollmentId === e.id ? { ...r, lineItemId: ev.target.value || null } : r)) : cur,
-                );
-              }}
-              className="rounded-md border border-slate-200 px-2 py-1"
-            >
-              <option value="">— pick —</option>
-              {e.lineItems.filter((li) => !li.locked).map((li) => (
-                <option key={li.id} value={li.id}>
-                  {li.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        ))}
-      </div>
+          <div className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recurring Rent</div>
+          {rentPlans.map((plan) => (
+            <MonthlyPlanCard
+              key={plan.id}
+              plan={plan}
+              onChange={(patch) => { setRentPlans((current) => current.map((item) => item.id === plan.id ? { ...item, ...patch } : item)); setResults(null); }}
+              onRemove={() => setRentPlans((current) => current.filter((item) => item.id !== plan.id))}
+              lineItems={lineItems}
+              defaultLineItemId={defaultLineItemId}
+            />
+          ))}
+          <button type="button" onClick={() => setRentPlans((current) => [...current, defaultMonthly("rent")])} className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+            + Add rent change period
+          </button>
 
-      {/* 4 · Generate + preview */}
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-400">4 · Schedule preview</div>
-          <button
-            type="button"
-            onClick={generate}
-            disabled={!primaryEnrollment}
-            className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
-          >
-            {rows ? "Regenerate schedule" : "Generate schedule"}
+          <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Utility Assistance</div>
+          {utilityPlans.map((plan) => (
+            <MonthlyPlanCard
+              key={plan.id}
+              plan={plan}
+              onChange={(patch) => { setUtilityPlans((current) => current.map((item) => item.id === plan.id ? { ...item, ...patch } : item)); setResults(null); }}
+              onRemove={() => setUtilityPlans((current) => current.filter((item) => item.id !== plan.id))}
+              lineItems={lineItems}
+              defaultLineItemId={defaultLineItemId}
+            />
+          ))}
+          <button type="button" onClick={() => setUtilityPlans((current) => [...current, defaultMonthly("utility")])} className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+            + Add utility period
           </button>
         </div>
-        {!primaryEnrollment ? (
-          <div className="text-xs text-slate-400">Select at least one billable enrollment to generate.</div>
-        ) : null}
 
-        {genWarnings.length ? (
-          <ul className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-            {genWarnings.map((w, i) => (
-              <li key={i} className="text-xs text-amber-800">
-                ⚠ {w}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-
-        {annotatedRows
-          ? SECTION_ORDER.map((section) => {
-              const sectionRows = annotatedRows.filter((r) => r.section === section);
-              if (!sectionRows.length) return null;
-              return (
-                <div key={section} className="space-y-1">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    {SECTION_LABELS[section]}
-                  </div>
-                  {sectionRows.map((r) => {
-                    const res = resultByKey.get(r.key);
-                    return (
-                      <div
-                        key={r.key}
-                        className={`flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 ${
-                          r.conflict && !r.conflict.sameSource
-                            ? "border-rose-200 bg-rose-50"
-                            : r.include
-                              ? "border-slate-200 bg-white"
-                              : "border-slate-100 bg-slate-50 opacity-70"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={r.include}
-                          onChange={(e) => updateRow(r.key, { include: e.target.checked })}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-600"
-                        />
-                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-700">{r.label}</span>
-                        <input
-                          type="date"
-                          value={r.dueDate}
-                          onChange={(e) => updateRow(r.key, { dueDate: e.target.value })}
-                          className="rounded-md border border-slate-200 px-1.5 py-1 text-xs"
-                        />
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={Number.isFinite(r.amount) ? r.amount : ""}
-                          onChange={(e) => updateRow(r.key, { amount: Number(e.target.value) })}
-                          className="w-24 rounded-md border border-slate-200 px-1.5 py-1 text-right text-xs"
-                        />
-                        {selectedEnrollments.length > 1 ? (
-                          <select
-                            value={r.enrollmentId ?? ""}
-                            onChange={(e) => {
-                              const id = e.target.value || null;
-                              updateRow(r.key, {
-                                enrollmentId: id,
-                                lineItemId: id ? lineItemByEnrollment[id] || null : null,
-                              });
-                            }}
-                            className="rounded-md border border-slate-200 px-1.5 py-1 text-xs"
-                          >
-                            {selectedEnrollments.map((e) => (
-                              <option key={e.id} value={e.id}>
-                                {e.grantName ?? e.grantId}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
-                        {res ? (
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
-                              res.status === "created"
-                                ? "bg-emerald-100 text-emerald-700"
-                                : res.status === "already_applied"
-                                  ? "bg-slate-100 text-slate-500"
-                                  : "bg-rose-100 text-rose-700"
-                            }`}
-                          >
-                            {res.status === "created"
-                              ? "✓ created"
-                              : res.status === "already_applied"
-                                ? "already applied"
-                                : res.status === "failed"
-                                  ? `failed: ${res.error ?? "error"}`
-                                  : "conflict — not created"}
-                          </span>
-                        ) : null}
-                        {(r.conflict && !r.conflict.sameSource) || r.warnings.length ? (
-                          <span className="w-full text-[11px] text-rose-600">
-                            {[...(r.conflict && !r.conflict.sameSource ? [describeConflict(r.conflict)] : []), ...r.warnings].join(" · ")}
-                          </span>
-                        ) : r.conflict?.sameSource ? (
-                          <span className="w-full text-[11px] text-slate-400">{describeConflict(r.conflict)}</span>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })
-          : null}
-      </div>
-
-      {/* 5 · Apply */}
-      {annotatedRows ? (
-        <div className="space-y-2 border-t border-slate-100 pt-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs text-slate-600">
-              <b>{includedRows.length}</b> row{includedRows.length === 1 ? "" : "s"} · <b>{money(includedTotal)}</b>
-              {blockers.length ? (
-                <span className="ml-2 text-rose-600">
-                  {blockers.length} row{blockers.length === 1 ? "" : "s"} blocked (conflict or missing
-                  enrollment/line-item/date/amount) — uncheck or fix to apply.
-                </span>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={apply}
-              disabled={applying || !includedRows.length || blockers.length > 0 || !submissionId}
-              className="rounded-md bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
-            >
-              {applying ? "Applying…" : "Apply payment schedule"}
-            </button>
+        <div className="mt-4 rounded-lg border border-slate-200 bg-white px-3 py-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Schedule preview</div>
+            <div className="text-xs text-slate-700"><b>{schedule.rows.length}</b> rows · <b>{money(total)}</b></div>
           </div>
-          {!submissionId ? (
-            <div className="text-[11px] text-amber-700">
-              Applying needs a source submission (idempotency is keyed on it) — select one above.
-            </div>
+          {schedule.issues.length ? (
+            <ul className="mb-2 space-y-1 rounded-md border border-rose-200 bg-rose-50 px-3 py-2">
+              {schedule.issues.map((issue) => <li key={issue} className="text-xs text-rose-700">• {issue}</li>)}
+            </ul>
           ) : null}
-          {applyError ? <div className="text-xs text-rose-600">Apply failed: {applyError}</div> : null}
-          {results ? (
-            <div className="text-xs text-emerald-700">
-              ✓ {results.filter((r) => r.status === "created").length} payment
-              {results.filter((r) => r.status === "created").length === 1 ? "" : "s"} created — projections and the
-              payment queue update automatically.
+          {schedule.rows.length ? (
+            <div className="max-h-64 overflow-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-white text-slate-400"><tr><th className="py-1">Date</th><th>Type</th><th>Line item</th><th className="text-right">Amount</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {schedule.rows.map((row) => (
+                    <tr key={row.key}><td className="py-1">{row.dueDate}</td><td>{row.label}</td><td>{lineItems.find((item) => item.id === row.lineItemId)?.label || row.lineItemId}</td><td className="text-right font-medium">{money(row.amount)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ) : null}
+          ) : <div className="text-xs text-slate-400">Complete one payment section to preview real queue rows.</div>}
         </div>
-      ) : null}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+          <div className="text-xs text-slate-600">
+            {applying ? "Resolving enrollment first, then pushing payment schedule…" : submitted ? "Submitted. Editing any field will require another Submit." : "Nothing is written until Submit is clicked."}
+          </div>
+          <button
+            type="button"
+            onClick={apply}
+            disabled={!paymentReady || applying}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {applying ? "Submitting…" : "Submit"}
+          </button>
+        </div>
+        {applyError ? <div className="mt-2 text-xs text-rose-700">Submit failed: {applyError}</div> : null}
+        {results ? (
+          <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            ✓ {results.filter((result) => result.status === "created").length} payment row{results.filter((result) => result.status === "created").length === 1 ? "" : "s"} created. Enrollment response was resolved before schedule creation; queue projections are syncing.
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

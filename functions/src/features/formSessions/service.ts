@@ -485,6 +485,7 @@ export type FormsCustomerItem = {
   id: string;
   name: string;
   caseManagerName: string | null;
+  caseManagerId: string | null;
   cwId: string | null;
   dob: string | null;
 };
@@ -507,6 +508,7 @@ export async function listCustomersForForms(orgId: string, limit = 5000): Promis
         id: String(r.id),
         name: name || String(r.id),
         caseManagerName: String(r.caseManagerName || "").trim() || null,
+        caseManagerId: String(r.caseManagerId || "").trim() || null,
         cwId: String(r.cwId || "").trim() || null,
         dob: String(r.dob || "").trim() || null,
       };
@@ -558,9 +560,11 @@ export type FormsCustomerDetail = {
   cwId: string | null;
   dob: string | null;
   caseManagerName: string | null;
+  caseManagerId: string | null;
   secondaryCaseManagerName: string | null;
   population: string | null;
   status: string | null;
+  tier: number | null;
   acuityScore: number | null;
   otherContacts: Array<{ name: string | null; role: string | null }>;
   linkedSubmissions: FormsLinkedSubmission[];
@@ -586,9 +590,11 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
   const cwId = sTrim(r.cwId);
   const dob = sTrim(r.dob);
   const caseManagerName = sTrim(r.caseManagerName);
+  const caseManagerId = sTrim(r.caseManagerId);
   const secondaryCaseManagerName = sTrim(r.secondaryCaseManagerName);
   const population = sTrim(r.population);
   const status = sTrim(r.status);
+  const tier = [1, 2, 3].includes(Number(r.tier)) ? Number(r.tier) : null;
   const acuityScore = Number.isFinite(Number(r.acuityScore)) ? Number(r.acuityScore) : null;
 
   const otherContacts = Array.isArray(r.otherContacts)
@@ -654,9 +660,11 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
     cwId: cwId || null,
     dob: dob || null,
     caseManagerName: caseManagerName || null,
+    caseManagerId: caseManagerId || null,
     secondaryCaseManagerName: secondaryCaseManagerName || null,
     population: population || null,
     status: status || null,
+    tier,
     acuityScore,
     otherContacts,
     linkedSubmissions,

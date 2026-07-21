@@ -2,7 +2,6 @@
 // Enrollment digest: active enrollments, new this month, ending soon.
 import { db } from "../../core";
 import { sendHtmlEmail } from "./emailer";
-import { monthAdd } from "./utils";
 import { loadDigestEnrollments } from "./digestEnrollmentSource";
 import {markDigestFailed, markDigestSent, reserveDigestSend} from './digestSendGuard';
 
@@ -112,14 +111,18 @@ export async function buildEnrollmentDigestData(opts: {
   }
 
   const lookupGrantIds = [...new Set(enrollments.map((e) => String(e.grantId || "")).filter(Boolean))];
-  const grantMap = new Map<string, string>();
+  const grantMap = new Map<string, { name: string; active: boolean }>();
   if (lookupGrantIds.length) {
     await Promise.all(
       chunks(lookupGrantIds, 30).map(async (chunk) => {
         const snap = await db.collection("grants").where("__name__", "in", chunk).get();
         for (const doc of snap.docs) {
           const grant = doc.data() as Record<string, unknown>;
-          grantMap.set(doc.id, String(grant.name || grant.code || doc.id));
+          const status = String(grant.status || "active").toLowerCase();
+          grantMap.set(doc.id, {
+            name: String(grant.name || grant.code || doc.id),
+            active: grant.deleted !== true && status !== "closed" && status !== "deleted",
+          });
         }
       })
     );
@@ -133,17 +136,24 @@ export async function buildEnrollmentDigestData(opts: {
       String(e.customerId || e.clientId || "-"),
     grantName:
       String(e.grantName || "").trim() ||
-      grantMap.get(String(e.grantId || "")) ||
+      grantMap.get(String(e.grantId || ""))?.name ||
       String(e.grantId || "-"),
     startDate: String(e.startDate || ""),
     endDate: String(e.endDate || ""),
     status: String(e.status || "active"),
   });
 
-  const active = enrollments.filter((e) => e.active === true || ['active', 'open'].includes(String(e.status || '').toLowerCase())).map(toRow).sort((a, b) => a.customerName.localeCompare(b.customerName));
+  const today = new Date().toISOString().slice(0, 10);
+  const activeSource = enrollments.filter((e) => {
+    const lifecycleActive = e.active === true || ['active', 'open'].includes(String(e.status || '').toLowerCase());
+    const grantActive = grantMap.get(String(e.grantId || ""))?.active !== false;
+    const endDate = String(e.endDate || "").slice(0, 10);
+    return lifecycleActive && grantActive && (!endDate || endDate >= today);
+  });
+  const active = activeSource.map(toRow).sort((a, b) => a.customerName.localeCompare(b.customerName));
   const newThisMonth = active.filter((e) => e.startDate.startsWith(month));
-  const endingThisMonth = enrollments.map(toRow).filter((e) => e.endDate.startsWith(month));
-  const endingLastMonth = enrollments.map(toRow).filter((e) => e.endDate.startsWith(monthAdd(month, -1)));
+  const endingThisMonth = active.filter((e) => e.endDate.startsWith(month));
+  const endingLastMonth: EnrollmentRow[] = [];
 
   return { recipientName, month, active, newThisMonth, endingThisMonth, endingLastMonth, dashboardLink };
 }

@@ -1,6 +1,7 @@
 import React from "react";
 import { createPortal } from "react-dom";
 import { parseGrantMaxAssistanceMonths } from "@hdb/contracts";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { toast } from "@lib/toast";
@@ -26,6 +27,7 @@ export type RentalAssistanceFilterState = {
   grantIds: string[];
   rentCert: "all" | "due" | "missing";
   maxRemaining: "all" | "threeOrLess" | "exhausted";
+  showEnded?: boolean;
 };
 
 type RentalAssistanceRow = {
@@ -49,6 +51,7 @@ type RentalAssistanceRow = {
   maxAssistanceCutoffDate: string;
   maxAssistanceMonthsRemaining: number | null;
   activeThisMonth: boolean;
+  assistanceHasEnded: boolean;
 };
 
 type RentalPaymentRef = {
@@ -267,8 +270,26 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
         .sort();
       const activeThisMonth = assistancePayments.some((payment) => isoMonth(payment.dueDate) === month);
-      if (status === "active" && !activeThisMonth) continue;
-      if (status === "inactive" && activeThisMonth) continue;
+      const enrollmentStatus = String(enrollment.status || "").toLowerCase();
+      const grantStatus = String(grant?.status || "").toLowerCase();
+      const closePreview = buildEnrollmentClosePreview({ payments: assistancePaymentRows, fallbackDate: todayISO() });
+      const persistedEndDate = safeISODate10(enrollment.endDate);
+      const assistanceEndDate =
+        (enrollmentStatus === "closed" || enrollment.active === false || grantStatus === "closed" || grant?.active === false)
+          ? (persistedEndDate || closePreview.closeDate)
+          : (persistedEndDate || paymentDates[paymentDates.length - 1] || "");
+      const assistanceHasEnded =
+        enrollmentStatus === "closed" ||
+        enrollment.active === false ||
+        grantStatus === "closed" ||
+        grant?.active === false ||
+        (!!assistanceEndDate && assistanceEndDate < todayISO());
+      if (assistanceHasEnded) {
+        if (!filterState.showEnded) continue;
+      } else {
+        if (status === "active" && !activeThisMonth) continue;
+        if (status === "inactive" && activeThisMonth) continue;
+      }
 
       const customerId = String(enrollment.customerId || enrollment.clientId || "").trim();
       const customer = customersById.get(customerId);
@@ -333,7 +354,7 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         grantId,
         assistanceStartDate,
         monthsOfAssistance,
-        assistanceEndDate: paymentDates[paymentDates.length - 1] || "",
+        assistanceEndDate,
         nextRentCertDue,
         nextRentCertTargetDate: nextRentCertPayment?.dueDate || nextRentCertEvent?.targetPaymentDate || "",
         nextRentCertPaymentId: nextRentCertPayment?.id || "",
@@ -342,6 +363,7 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
         maxAssistanceCutoffDate,
         maxAssistanceMonthsRemaining: remaining,
         activeThisMonth,
+        assistanceHasEnded,
       });
     }
 
@@ -356,6 +378,7 @@ function useRentalAssistanceRows(filterState: RentalAssistanceFilterState) {
     filterState.maxRemaining,
     filterState.query,
     filterState.rentCert,
+    filterState.showEnded,
     grantNameById,
     grantsById,
     continuumIdsByEnrollment,
@@ -398,6 +421,14 @@ export const RentalAssistanceTopbar: DashboardToolDefinition<RentalAssistanceFil
           </button>
         ))}
       </div>
+      <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
+        <input
+          type="checkbox"
+          checked={value.showEnded === true}
+          onChange={(event) => onChange({ ...value, showEnded: event.currentTarget.checked })}
+        />
+        Assistance has ended
+      </label>
       <select
         className="input"
         value={value.caseManagerId}
@@ -955,7 +986,10 @@ export const RentalAssistanceMain: DashboardToolDefinition<RentalAssistanceFilte
                 </td>
                 <td>{fmtDateOrDash(row.assistanceStartDate)}</td>
                 <td className="text-center tabular-nums">{row.monthsOfAssistance ?? "-"}</td>
-                <td>{fmtDateOrDash(row.assistanceEndDate)}</td>
+                <td>
+                  <div>{fmtDateOrDash(row.assistanceEndDate)}</div>
+                  {row.assistanceHasEnded ? <div className="text-[11px] font-semibold text-amber-700">Assistance ended</div> : null}
+                </td>
                 <td title={`Rent cert for ${row.nextRentCertTargetDate || "next rental payment"}. Right-click the row to add or update it.`}>
                   {fmtDateOrDash(row.nextRentCertDue)}
                 </td>

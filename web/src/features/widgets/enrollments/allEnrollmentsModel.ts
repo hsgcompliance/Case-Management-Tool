@@ -20,6 +20,7 @@ export type EnrollmentReportRow = {
   status: string;
   startDate: string;
   endDate: string;
+  assistanceEndedOn: string;
   /** Whole months elapsed in this enrollment (start → end, or asOf while active). */
   monthsActive: number | null;
   /** startDate falls inside the asOf month. */
@@ -194,6 +195,7 @@ export function buildEnrollmentReportRows(input: BuildRowsInput): EnrollmentRepo
     const active = enrollmentIsActive(raw);
     const startDate = isoOrEmpty(raw?.startDate);
     const endDate = isoOrEmpty(raw?.endDate);
+    const grantClosed = ["closed", "deleted"].includes(String(grant?.status || "").toLowerCase()) || grant?.active === false;
     const monthsEnd = active || !endDate ? asOf : endDate;
     const migratedFrom = (raw?.migratedFrom || null) as Record<string, unknown> | null;
     const migratedTo = (raw?.migratedTo || null) as Record<string, unknown> | null;
@@ -224,6 +226,7 @@ export function buildEnrollmentReportRows(input: BuildRowsInput): EnrollmentRepo
       status: enrollmentStatusLabel(raw),
       startDate,
       endDate,
+      assistanceEndedOn: !active || grantClosed ? (endDate || isoOrEmpty(grant?.endDate)) : "",
       monthsActive: monthsBetweenISO(startDate, monthsEnd),
       isNewInMonth: !!asOfMonth && !!startDate && startDate.slice(0, 7) === asOfMonth,
       migratedIn: !!migratedFrom?.enrollmentId || !!migratedFrom?.grantId,

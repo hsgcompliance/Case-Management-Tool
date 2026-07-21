@@ -27,6 +27,8 @@ import { customerContactRoleForUid } from "../contactCaseManagers";
 import { getCustomerDriveFolderLink, getCustomerWorkbookRef } from "../customerDriveFolder";
 import { WorkbookSheetModal } from "@entities/workbook/WorkbookSheetModal";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
+import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
+import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
 import {
   enrollmentControlActionBody,
   enrollmentControlDone,
@@ -319,12 +321,6 @@ function paymentDueDate(payment: Record<string, unknown>): string {
   return String(payment.dueDate || payment.date || "").slice(0, 10);
 }
 
-function defaultCloseDateForGrant(grant: Record<string, unknown> | null | undefined): string {
-  const today = todayISO();
-  const grantEndDate = String(grant?.endDate || "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(grantEndDate) && grantEndDate < today ? grantEndDate : today;
-}
-
 function toDraftPaymentRows(enrollment: Enrollment | null): DraftPaymentRow[] {
   const payments = Array.isArray(enrollment?.payments) ? enrollment.payments : [];
   return payments.map((raw, index) => {
@@ -539,7 +535,11 @@ function EnrollmentQuickModal({
     if (!open) return;
     setStartDate(String(enrollment?.startDate || "").slice(0, 10));
     setEndDate(String(enrollment?.endDate || "").slice(0, 10));
-    setCloseDate(todayISO());
+    setCloseDate(buildEnrollmentClosePreview({
+      payments: Array.isArray(enrollment?.payments) ? enrollment.payments : [],
+      requestedCloseDate: null,
+      fallbackDate: todayISO(),
+    }).closeDate);
     setManageOpen(false);
     setDateEditorOpen(false);
     setCloseEditorOpen(false);
@@ -548,15 +548,13 @@ function EnrollmentQuickModal({
     setCleanupOpen(false);
   }, [enrollment, open]);
 
-  React.useEffect(() => {
-    if (!open) return;
-    const today = todayISO();
-    const defaultCloseDate = defaultCloseDateForGrant(grant as Record<string, unknown> | null);
-    setCloseDate((current) => (current === today ? defaultCloseDate : current));
-  }, [grant, open]);
-
   const enrollmentId = String(enrollment?.id || "");
   const status = String(enrollment?.status || (enrollment?.active === false ? "closed" : "active")).toLowerCase();
+  const closePreview = React.useMemo(() => buildEnrollmentClosePreview({
+    payments: Array.isArray(enrollment?.payments) ? enrollment.payments : [],
+    requestedCloseDate: closeDate,
+    fallbackDate: todayISO(),
+  }), [closeDate, enrollment?.payments]);
   const enrollmentLabel = formatEnrollmentLabel(enrollment as unknown as Record<string, unknown>, { fallback: enrollmentId || "Enrollment" });
   const grantName = String(grant?.name || enrollment?.grantName || "").trim();
   const grantDescription = String(grant?.description || grant?.summary || "").trim();
@@ -831,6 +829,7 @@ function EnrollmentQuickModal({
                   </label>
                   <div className="flex items-end gap-2">
                     <button type="button" className="btn btn-primary btn-sm" onClick={closeEnrollment} disabled={busy || !closePreview.canClose}>
+
                       Confirm Close
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCloseEditorOpen(false)} disabled={busy}>
@@ -935,7 +934,6 @@ function CustomerCardInner({
 }: CustomerCardProps) {
   const { profile } = useAuth();
   const canManageEnrollments = !isViewerLike(profile as any);
-  const patchEnrollment = useEnrollmentsPatch();
   const setCustomerActive = useSetCustomerActive();
   const setCustomerTier = useSetCustomerTier();
   const { openTasksDueModal } = useTasksDueModal();
@@ -995,6 +993,8 @@ function CustomerCardInner({
   const age = calcAge((customer as { dob?: string | null }).dob || null);
   const inactiveCustomer = isInactiveCustomer(customer);
   const customerTier = (customer as { tier?: number | null }).tier ?? null;
+  const [inactivePreviewOpen, setInactivePreviewOpen] = React.useState(false);
+  const [shouldLoadEnrollments, setShouldLoadEnrollments] = React.useState(false);
 
   const onSelectTier = React.useCallback(
     async (t: number) => {
@@ -1844,7 +1844,7 @@ function CustomerCardInner({
                 setEnrollmentPopupId(contextMenu.enrollmentId);
                 setContextMenu(null);
               }}
-              disabled={patchEnrollment.isPending}
+              disabled={busy}
               role="menuitem"
             >
               Review and close enrollment
@@ -1949,6 +1949,19 @@ function CustomerCardInner({
           }}
         />
       ) : null}
+
+      <CustomerInactivePreviewDialog
+        open={inactivePreviewOpen}
+        customerName={displayName(customer)}
+        enrollments={enrollments}
+        loading={enrollmentsQuery.isLoading || enrollmentsQuery.isFetching}
+        busy={setCustomerActive.isPending}
+        onCancel={() => setInactivePreviewOpen(false)}
+        onConfirm={() => {
+          setInactivePreviewOpen(false);
+          void onToggleCustomerActive(true);
+        }}
+      />
     </article>
   );
 }

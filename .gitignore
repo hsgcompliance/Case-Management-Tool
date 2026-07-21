@@ -105,3 +105,6 @@ archive/migration/scripts/
 archive/migration/lib/
 archive/migration/artifacts/
 archive/seed-emulator/logs/
+
+# Temp config written/cleaned up by scripts/deploy-functions-safe.mjs
+.firebase.deploy-functions-safe.json

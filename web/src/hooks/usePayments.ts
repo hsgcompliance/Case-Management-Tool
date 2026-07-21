@@ -12,6 +12,7 @@ import { qk } from "./queryKeys";
 import { customerEnrollmentsQueryKey } from "./useEnrollments";
 import {
   findCachedPaymentQueueItem,
+  optimisticPaymentQueueCompliancePatches,
   optimisticPostPaymentQueuePatches,
 } from "./paymentQueueOptimistic";
 import { RQ_DEFAULTS } from "./base";
@@ -728,6 +729,30 @@ function optimisticLedgerPatches(
   }];
 }
 
+function optimisticLedgerCompliancePatches(
+  qc: ReturnType<typeof useQueryClient>,
+  enrollmentId: string,
+  paymentId: string,
+  compliancePatch: Record<string, unknown>,
+) {
+  const ledgerKeys = qc
+    .getQueriesData({ queryKey: qk.ledger.root })
+    .map(([key]) => key as unknown[])
+    .filter((key) => Array.isArray(key) && key[0] === "ledger" && key[1] === "list");
+  if (!ledgerKeys.length) return [];
+  return [{
+    key: ledgerKeys,
+    update: (prev: unknown) => Array.isArray(prev) ? prev.map((row) => {
+      const raw = row && typeof row === "object" ? row as Record<string, unknown> : {};
+      const origin = raw.origin && typeof raw.origin === "object" ? raw.origin as Record<string, unknown> : {};
+      const rowPaymentId = String(raw.paymentId || origin.baseId || "").trim();
+      if (String(raw.enrollmentId || "").trim() !== enrollmentId || rowPaymentId !== paymentId) return row;
+      const current = raw.compliance && typeof raw.compliance === "object" ? raw.compliance as Record<string, unknown> : {};
+      return { ...raw, compliance: { ...current, ...compliancePatch } };
+    }) : prev,
+  }];
+}
+
 function buildProjectionPayload(
   existing: TPayment[],
   generated: TPaymentProjectionInput[],
@@ -921,7 +946,7 @@ export function usePaymentsUpdateCompliance() {
       if (!enrollmentId || !paymentId) return [];
       const patch = (body?.patch || {}) as Record<string, unknown>;
 
-      return paymentMutationPatches(queryClient, {
+      const patches = paymentMutationPatches(queryClient, {
         enrollmentId,
         paymentId,
         patch: (payment) => {
@@ -936,6 +961,9 @@ export function usePaymentsUpdateCompliance() {
           } as TPayment;
         },
       });
+      patches.push(...optimisticPaymentQueueCompliancePatches(queryClient, enrollmentId, paymentId, patch));
+      patches.push(...optimisticLedgerCompliancePatches(queryClient, enrollmentId, paymentId, patch));
+      return patches;
     },
     mutationFn: (body: PaymentsUpdateComplianceReq) =>
       Payments.updateCompliance(body) as Promise<PaymentsUpdateComplianceResp>,

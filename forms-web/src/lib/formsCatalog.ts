@@ -78,22 +78,23 @@ export const FORMS: FormDef[] = [
 /** The staff web app (customer documents + Google Drive folders live there). */
 export const WEB_APP_BASE = "https://housing-db-v2.web.app";
 
-/**
- * Intake paths (step 1 of the flow). Today the choice is informational — every
- * path runs the same steps — but it's persisted per session so flow-path
- * differences can branch on it later.
- */
-export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "path-housing" | "tss-deposit-fee";
+/** Intake programs selected in step 1. PATH and TSS may accompany another path. */
+export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "bridging-home" | "path-housing" | "tss-deposit-fee";
 
 export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] = [
   { id: "eviction-prevention", label: "Eviction Prevention Intake", hint: "Assessment is a spreadsheet, not a form" },
   { id: "hud-rental", label: "HUD Rental Intake", hint: "Requires Coordinated Entry Assessment in HMIS" },
+  { id: "bridging-home", label: "Bridging Home Intake", hint: "HUD workflow without an inspection" },
   { id: "path-housing", label: "PATH Housing Intake", hint: "Requires HMIS entry" },
   { id: "tss-deposit-fee", label: "TSS Deposit & Application Fee Only", hint: "Deposit / application fee assistance only" },
 ];
 
 export function intakeTypeLabel(id: string | null | undefined): string {
   return INTAKE_TYPES.find((t) => t.id === id)?.label ?? "";
+}
+
+export function intakeTypesLabel(ids: readonly string[] | null | undefined): string {
+  return (ids ?? []).map(intakeTypeLabel).filter(Boolean).join(" + ");
 }
 
 export type IntakeFlowStep = {
@@ -107,8 +108,12 @@ export type IntakeFlowStep = {
   checklist?: string[];
   /** External links. `{customerId}` is replaced with the active customer's id. */
   links?: { href: string; label: string }[];
+  /** Render external workflow actions as large, centered primary buttons. */
+  prominentLinks?: boolean;
   /** Optional steps don't block "all steps complete". */
   optional?: boolean;
+  /** Informational/builder step: navigation is allowed without a manual completion mark. */
+  noCompletionRequired?: boolean;
   /**
    * The step where the customer record gets created. Intake usually STARTS
    * without an existing customer (ROIs/disclosures → Caseworthy → customer
@@ -133,11 +138,14 @@ export type IntakeFlowStep = {
    */
   rentCertBuilder?: boolean;
   /**
-   * Intake-type gate: the step opens with a full-page choice between the intake
-   * paths (INTAKE_TYPES). Informational for now — persisted per session so the
-   * flow can branch on it later.
+   * Intake-type gate: select one or more compatible programs. Persisted per
+   * session and used to branch later workflow guidance.
    */
   intakeTypeGate?: boolean;
+  /** Show program-specific HMIS/assessment instructions selected in step 1. */
+  intakeGuidance?: boolean;
+  /** Conditional inspection step: HQS for HUD, Habitability for Eviction Prevention. */
+  inspectionGate?: boolean;
 };
 
 /**
@@ -151,7 +159,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     title: "Choose intake type",
     section: "Basic intake",
     intakeTypeGate: true,
-    note: "Pick the intake path. Every path runs the same steps for now — flow differences per type are coming.",
+    note: "Select every program involved. PATH and TSS can accompany one primary program. HUD Rental, Bridging Home, and Eviction Prevention are mutually exclusive.",
   },
   { formId: "260346853938064" }, // Self-Declaration of Citizenship Status
   { formId: "251076068294057" }, // HRDC Release of Information
@@ -172,6 +180,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     section: "Full intake",
     note: "Open Caseworthy and create the client, or update the existing client's assessments.",
     links: [{ href: "https://cw.caseworthy.net/hrdc09_prod.ecm", label: "Open Caseworthy" }],
+    prominentLinks: true,
   },
   {
     title: "Create customer document & Google folder",
@@ -183,23 +192,9 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     ],
   },
   {
-    formId: "251471204342143", // MT Homelessness Prevention Assessment (HMIS)
-    title: "HMIS / Homelessness Prevention Assessment",
-    note:
-      "HUD Rental intake: complete the REQUIRED Coordinated Entry Assessment in HMIS (ServicePoint link below). " +
-      "PATH intake also requires an HMIS entry. " +
-      "Eviction Prevention: the assessment is NOT a form — use the Eviction Prevention Assessment spreadsheet below. " +
-      "Otherwise use this MT Homelessness Prevention Assessment form.",
-    links: [
-      {
-        href: "https://wscs.wellsky.com/montana/com.bowmansystems.sp5.core.ServicePoint/index.html",
-        label: "HMIS (ServicePoint) — Coordinated Entry",
-      },
-      {
-        href: "https://docs.google.com/spreadsheets/d/15oqPBUXZ450AsgSCQ8s5HmNWNMP5Vv9R/edit?rtpof=true",
-        label: "Eviction Prevention Assessment (spreadsheet)",
-      },
-    ],
+    title: "Program assessment requirements",
+    note: "Complete the requirements shown for every program selected in Step 1.",
+    intakeGuidance: true,
   },
   {
     title: "Collect documents",
@@ -226,6 +221,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
       { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
       { href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" },
     ],
+    prominentLinks: true,
   },
   { formId: "251001226310030", title: "Eligibility Determination Request" },
   {
@@ -234,31 +230,28 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     links: [
       { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
     ],
+    prominentLinks: true,
+  },
+  {
+    title: "Schedule inspection",
+    note: "HUD Rental requires an HQS inspection. Eviction Prevention requires a Habitability Inspection.",
+    inspectionGate: true,
   },
   { formId: "251916705430050", title: "Unit Eligibility Determination (Rent Determination)" },
   {
-    title: "Build rent assistance payment schedule",
+    title: "Link intake & build assistance payment schedule",
     note:
-      "Turn the completed Rent Determination into a reviewed payment schedule: pick the enrollment(s) to bill, " +
-      "check the generated rows (deposit, prorated/arrears, monthly, utility allowance), then apply. Payments are " +
-      "created on the enrollment in order and flow into the payment queue automatically. Nothing is created until you apply.",
+      "Confirm the sidebar submissions are linked, review the webhook-prefilled household and landlord information, " +
+      "then select the funded grant and line item and build the payment schedule. The enrollment is resolved first; " +
+      "payments are then created in order and flow into the real payment queue.",
     rentCertBuilder: true,
-  },
-  {
-    title: "Link intake submissions to customer",
-    note: "Open the Submissions tab and confirm each completed intake submission is linked to the current customer. If linked submissions are missing key answers, use the builder below to capture the fallback intake facts.",
-    checklist: [
-      "Open the Submissions tab",
-      "Link each matching intake submission to the current customer",
-      "Confirm linked submissions appear in the customer details header",
-    ],
-    links: [{ href: "/staff/submissions", label: "Open Submissions tab" }],
-    manualInfoBuilder: true,
+    noCompletionRequired: true,
   },
   {
     title: "Memorandum of Understanding",
     note: "Send the MOU for signature, then file the signed copy in the customer's Drive folder.",
     links: [{ href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" }],
+    prominentLinks: true,
   },
 ];
 

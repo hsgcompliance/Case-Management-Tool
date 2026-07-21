@@ -20,9 +20,12 @@
 // enrollment + service month).
 // -----------------------------------------------------------------------------
 import { z } from "@hdb/contracts";
+import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
 import { db, FieldValue, normId, normStr, secureHandler } from "../../core";
 import { runEnrollmentProjectionsUpsert } from "../payments/upsertProjections";
 import { primarySubtype } from "../payments/utils";
+import { createCustomerEnrollment } from "../enrollments/enroll";
+import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
 import { getTargetOrg } from "./http";
 
 /* ───────────────────────────── shared helpers ───────────────────────────── */
@@ -162,6 +165,32 @@ async function listEnrollmentsForForms(orgId: string, customerId: string): Promi
   );
 }
 
+async function listProgramsForForms(orgId: string) {
+  const org = normId(orgId);
+  if (!org) return [];
+  const snap = await db.collection("grants").where("orgId", "==", org).limit(250).get();
+  return snap.docs
+    .map((doc) => ({id: doc.id, ...(doc.data() || {})} as Record<string, any>))
+    // This workflow creates real enrollments and payment-queue projections, so
+    // draft, inactive, closed, and deleted grants must never be selectable.
+    .filter((grant) =>
+      grant.deleted !== true &&
+      grant.active !== false &&
+      String(grant.status || "active").toLowerCase() === "active"
+    )
+    .map((grant) => ({
+      grantId: String(grant.id),
+      grantName: normStr(grant.name) || normStr(grant.title) || String(grant.id),
+      lineItems: (Array.isArray(grant?.budget?.lineItems) ? grant.budget.lineItems : []).map((lineItem: any) => ({
+        id: String(lineItem?.id || ""),
+        label: normStr(lineItem?.label) || normStr(lineItem?.name) || String(lineItem?.id || ""),
+        locked: lineItem?.locked === true,
+      })),
+    }))
+    .filter((grant) => grant.lineItems.some((lineItem: FormsEnrollmentLineItem) => !lineItem.locked))
+    .sort((a, b) => a.grantName.localeCompare(b.grantName));
+}
+
 export const formsEnrollmentsList_http = secureHandler(
   async (req, res) => {
     const targetOrg = getTargetOrg(req, req.query);
@@ -171,8 +200,11 @@ export const formsEnrollmentsList_http = secureHandler(
       res.status(400).json({ ok: false, error: "customerId_required" });
       return;
     }
-    const items = await listEnrollmentsForForms(targetOrg, String(customerId));
-    res.status(200).json({ ok: true, items, count: items.length });
+    const [items, programs] = await Promise.all([
+      listEnrollmentsForForms(targetOrg, String(customerId)),
+      listProgramsForForms(targetOrg),
+    ]);
+    res.status(200).json({ ok: true, items, programs, count: items.length });
   },
   { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] },
 );
@@ -180,14 +212,16 @@ export const formsEnrollmentsList_http = secureHandler(
 /* ───────────────────────────── schedule apply ───────────────────────────── */
 
 const ApplyRow = z.object({
-  enrollmentId: z.string().min(1),
+  enrollmentId: z.string().min(1).optional(),
+  grantId: z.string().min(1).optional(),
   lineItemId: z.string().min(1),
   type: z.enum(["deposit", "prorated", "arrears", "monthly"]),
   sub: z.enum(["rent", "utility"]).optional(),
   amount: z.number().positive(),
   dueDate: z.string().regex(ISO10),
   label: z.string().trim().max(120).optional(),
-});
+  vendor: z.string().trim().max(200).optional(),
+}).refine((row) => !!row.enrollmentId || !!row.grantId, {message: "enrollmentId_or_grantId_required"});
 
 const FormsRentCertApplyBody = z.object({
   customerId: z.string().min(1),
@@ -220,10 +254,32 @@ export const formsRentCertApply_http = secureHandler(
     const targetOrg = getTargetOrg(req, req.body);
     const { customerId, submissionId, formId, certification, rows } = parsed.data;
 
+    // Enrollment must exist before projection writes. Resolve/create each grant
+    // sequentially here while the forms UI still performs one Apply action.
+    const enrollmentByGrant = new Map<string, string>();
+    const resolvedRows: Array<TFormsRentCertApplyRow & {enrollmentId: string}> = [];
+    for (const row of rows) {
+      let enrollmentId = row.enrollmentId;
+      if (!enrollmentId && row.grantId) {
+        enrollmentId = enrollmentByGrant.get(row.grantId);
+        if (!enrollmentId) {
+          const ensured = await createCustomerEnrollment(user, {
+            grantId: row.grantId,
+            customerId,
+            extra: {startDate: row.dueDate, generateTaskSchedule: true},
+          });
+          enrollmentId = ensured.id;
+          enrollmentByGrant.set(row.grantId, enrollmentId);
+        }
+      }
+      if (!enrollmentId) throw new Error("enrollment_required");
+      resolvedRows.push({...row, enrollmentId});
+    }
+
     // Preserve row order per enrollment AND process enrollments in first-seen
     // order — the queue builds in the same order the preview showed.
     const groups = new Map<string, Array<{ row: TFormsRentCertApplyRow; index: number }>>();
-    rows.forEach((row, index) => {
+    resolvedRows.forEach((row, index) => {
       const g = groups.get(row.enrollmentId) || [];
       g.push({ row, index });
       groups.set(row.enrollmentId, g);
@@ -278,6 +334,7 @@ export const formsRentCertApply_http = secureHandler(
               paid: false,
               paidFromGrant: false,
               note,
+              ...(row.vendor ? {vendor: row.vendor} : {}),
             };
             accepted.push(payment);
             groupResults.push({ index, enrollmentId, status: "created" });
@@ -327,4 +384,85 @@ export const formsRentCertApply_http = secureHandler(
     res.status(200).json({ ok: true, created, results });
   },
   { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] },
+);
+
+const CustomerNotEligibleBody = z.object({
+  customerId: z.string().min(1),
+  enrollmentId: z.string().min(1).optional(),
+});
+
+export const formsCustomerNotEligible_http = secureHandler(
+  async (req, res) => {
+    const parsed = CustomerNotEligibleBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ok: false, error: "invalid_body"});
+      return;
+    }
+    const targetOrg = getTargetOrg(req, req.body);
+    const {customerId, enrollmentId} = parsed.data;
+    const customerRef = db.collection("customers").doc(customerId);
+    const customerSnap = await customerRef.get();
+    if (!customerSnap.exists || normId((customerSnap.data() || {}).orgId) !== normId(targetOrg)) {
+      res.status(404).json({ok: false, error: "customer_not_found"});
+      return;
+    }
+
+    const now = FieldValue.serverTimestamp();
+    const today = new Date().toISOString().slice(0, 10);
+    if (enrollmentId) {
+      const enrollmentRef = db.collection("customerEnrollments").doc(enrollmentId);
+      const enrollmentSnap = await enrollmentRef.get();
+      const enrollment = enrollmentSnap.data() || {};
+      if (!enrollmentSnap.exists || normId(enrollment.orgId) !== normId(targetOrg) || normId(enrollment.customerId) !== normId(customerId)) {
+        res.status(404).json({ok: false, error: "enrollment_not_found"});
+        return;
+      }
+      const closePreview = buildEnrollmentClosePreview({
+        payments: Array.isArray(enrollment.payments) ? enrollment.payments : [],
+        requestedCloseDate: today,
+        fallbackDate: today,
+      });
+      await enrollmentRef.set({
+        active: false,
+        status: "closed",
+        endDate: closePreview.closeDate,
+        payments: closePreview.retainedPayments,
+        closedAt: now,
+        ineligibility: {
+          markedAt: now,
+          markedBy: String((req.user as any)?.uid || ""),
+          source: "forms-intake",
+        },
+        updatedAt: now,
+      }, {merge: true});
+      await syncEnrollmentProjectionQueueItems({
+        orgId: targetOrg,
+        enrollmentId,
+        grantId: String(enrollment.grantId || "") || null,
+        customerId,
+        payments: closePreview.retainedPayments,
+      }).catch(() => undefined);
+    }
+
+    const otherSnap = await db.collection("customerEnrollments").where("customerId", "==", customerId).limit(100).get();
+    const hasOtherOpenEnrollment = otherSnap.docs.some((doc) => {
+      if (doc.id === enrollmentId) return false;
+      const row = doc.data() || {};
+      return normId(row.orgId) === normId(targetOrg) && row.deleted !== true && row.active !== false && String(row.status || "active") !== "closed";
+    });
+    if (!hasOtherOpenEnrollment) {
+      await customerRef.set({
+        active: false,
+        status: "inactive",
+        ineligibility: {
+          markedAt: now,
+          markedBy: String((req.user as any)?.uid || ""),
+          source: "forms-intake",
+        },
+        updatedAt: now,
+      }, {merge: true});
+    }
+    res.status(200).json({ok: true, enrollmentId: enrollmentId || null, customerInactivated: !hasOtherOpenEnrollment});
+  },
+  {auth: "user", appCheck: false, methods: ["POST", "OPTIONS"]},
 );

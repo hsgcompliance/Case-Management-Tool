@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { FormsCustomer } from "@/lib/customersApi";
-import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
-import { listIntakeSessions, onIntakeSessionsChange, sessionCustomer } from "@/lib/intakeSessions";
+import { clearCustomerDetailCache, getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
+import { loadCustomers } from "@/lib/customersApi";
+import { listIntakeSessions, onIntakeSessionsChange, removeIntakeSession, sessionCustomer } from "@/lib/intakeSessions";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { formatDob } from "@/lib/format";
+import { listEnrollmentsForCustomer, markCustomerNotEligible, type FormsEnrollment } from "@/lib/rentCertApi";
+import { CustomerEditPanel } from "./CustomerEditPanel";
+import { ExternalServiceIcon } from "./ui";
 
 // Tabbed customer header for the Intake / All forms pages.
 //   • Customer tab — the current customer sourced from the customer DOC (not the
@@ -56,7 +60,7 @@ function CustomerTab({ detail, fallback }: { detail: CustomerDetail | null; fall
       {detail?.secondaryCaseManagerName ? <Field label="Secondary CM" value={detail.secondaryCaseManagerName} /> : null}
       {detail?.population ? <Field label="Population" value={detail.population} /> : null}
       {detail?.status ? <Field label="Status" value={detail.status} /> : null}
-      {detail?.acuityScore != null ? <Field label="Acuity" value={String(detail.acuityScore)} /> : null}
+      {detail?.tier != null ? <Field label="Tier" value={`Tier ${detail.tier}`} /> : null}
     </div>
   );
 }
@@ -132,6 +136,12 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
   const [tab, setTab] = useState<"customer" | "household">("customer");
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [openEnrollments, setOpenEnrollments] = useState<FormsEnrollment[]>([]);
+  const [notEligibleOpen, setNotEligibleOpen] = useState(false);
+  const [notEligibleEnrollmentId, setNotEligibleEnrollmentId] = useState("");
+  const [notEligibleBusy, setNotEligibleBusy] = useState(false);
+  const [notEligibleResult, setNotEligibleResult] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   // Nav steps through my active intake customers (local sessions registry).
   useEffect(() => {
@@ -156,6 +166,48 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
     return () => { alive = false; };
   }, [customer?.id]);
 
+  useEffect(() => {
+    if (!customer) {
+      setOpenEnrollments([]);
+      return;
+    }
+    listEnrollmentsForCustomer(customer.id).then(({ enrollments }) => {
+      const open = enrollments.filter((row) => row.active && row.status !== "closed");
+      setOpenEnrollments(open);
+      setNotEligibleEnrollmentId(open[0]?.id || "");
+    }).catch(() => setOpenEnrollments([]));
+  }, [customer?.id]);
+
+  const markNotEligible = async () => {
+    if (!customer) return;
+    const enrollment = openEnrollments.find((row) => row.id === notEligibleEnrollmentId);
+    const message = enrollment
+      ? `Mark ${customer.name} not eligible for ${enrollment.grantName || "this program"} and close that enrollment?`
+      : `Mark ${customer.name} inactive? This customer has no open enrollment to close.`;
+    if (!window.confirm(message)) return;
+    setNotEligibleBusy(true);
+    setNotEligibleResult(null);
+    try {
+      const result = await markCustomerNotEligible({ customerId: customer.id, ...(notEligibleEnrollmentId ? { enrollmentId: notEligibleEnrollmentId } : {}) });
+      setOpenEnrollments((rows) => rows.filter((row) => row.id !== notEligibleEnrollmentId));
+      setNotEligibleOpen(false);
+      setNotEligibleResult(result.customerInactivated
+        ? `${enrollment ? "Enrollment closed; " : ""}customer marked inactive.`
+        : "Enrollment closed; customer remains active because another enrollment is open.");
+      if (result.customerInactivated) {
+        removeIntakeSession(customer.id);
+        try { localStorage.removeItem(`hdb:forms:rent-cert-draft:${customer.id}`); } catch { /* ignore */ }
+        setCustomer(null);
+      } else {
+        getCustomerDetail(customer.id, true).then(setDetail);
+      }
+    } catch (error) {
+      setNotEligibleResult(`Could not close enrollment: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setNotEligibleBusy(false);
+    }
+  };
+
   const index = useMemo(() => {
     if (!nav || !navList || !customer) return -1;
     return navList.findIndex((c) => c.id === customer.id);
@@ -169,6 +221,16 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
     if (next) setCustomer(next);
   };
 
+  const refreshAfterEdit = async () => {
+    if (!customer) return;
+    clearCustomerDetailCache(customer.id);
+    const [nextDetail, customers] = await Promise.all([getCustomerDetail(customer.id, true), loadCustomers(true)]);
+    setDetail(nextDetail);
+    const nextCustomer = customers.find((item) => item.id === customer.id);
+    if (nextCustomer) setCustomer(nextCustomer);
+    setEditing(false);
+  };
+
   if (!customer) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-400">
@@ -176,6 +238,8 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
       </div>
     );
   }
+
+  const customerUrl = `https://housing-db-v2.web.app/customers/${encodeURIComponent(customer.id)}`;
 
   return (
     <div className="rounded-xl border border-indigo-100 bg-indigo-50/40">
@@ -193,8 +257,11 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
           </button>
         ) : null}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-bold text-slate-900">
-            {customer.name}
+          <div className="flex min-w-0 items-center gap-1.5 text-sm font-bold text-slate-900">
+            <span className="truncate">{customer.name}</span>
+            <a href={customerUrl} target="_blank" rel="noopener noreferrer" title={`Open ${customer.name} in Dashboard`} aria-label={`Open ${customer.name} in Dashboard in a new tab`} className="shrink-0 rounded p-0.5 text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700">
+              <ExternalServiceIcon href={customerUrl} className="h-3.5 w-3.5" />
+            </a>
             {customer.cwId ? <span className="font-normal text-slate-400"> · {customer.cwId}</span> : null}
           </div>
           {nav && navList ? (
@@ -207,11 +274,20 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
         </div>
         <button
           type="button"
-          disabled
-          title="Editing customer details — coming soon"
-          className="hidden shrink-0 cursor-not-allowed rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-300 sm:block"
+          onClick={() => setNotEligibleOpen((value) => !value)}
+          disabled={notEligibleBusy}
+          title={openEnrollments.length ? "Close an ineligible program enrollment" : "Mark this customer inactive"}
+          className="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Edit ✎
+          Customer not eligible
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing((value) => !value)}
+          title="Edit customer details"
+          className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          {editing ? "Cancel edit" : "Edit ✎"}
         </button>
         {nav ? (
           <button
@@ -225,6 +301,26 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
           </button>
         ) : null}
       </div>
+
+      {notEligibleOpen ? (
+        <div className="flex flex-wrap items-end gap-2 border-t border-indigo-100 bg-white px-3 py-2.5">
+          {openEnrollments.length ? <label className="min-w-56 flex-1 text-xs font-medium text-slate-600">
+            Enrollment to close
+            <select
+              value={notEligibleEnrollmentId}
+              onChange={(event) => setNotEligibleEnrollmentId(event.currentTarget.value)}
+              className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+            >
+              {openEnrollments.map((row) => <option key={row.id} value={row.id}>{row.grantName || row.grantId}</option>)}
+            </select>
+          </label> : <div className="min-w-56 flex-1 text-xs text-slate-600">No open enrollment. Confirming will mark the customer inactive.</div>}
+          <button type="button" onClick={markNotEligible} disabled={(openEnrollments.length > 0 && !notEligibleEnrollmentId) || notEligibleBusy} className="rounded-md bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-40">
+            {notEligibleBusy ? "Updating…" : openEnrollments.length ? "Confirm not eligible" : "Confirm inactive"}
+          </button>
+        </div>
+      ) : null}
+      {notEligibleResult ? <div className="border-t border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">{notEligibleResult}</div> : null}
+      {editing ? <CustomerEditPanel customer={customer} detail={detail} onCancel={() => setEditing(false)} onSaved={refreshAfterEdit} /> : null}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-indigo-100 px-3">

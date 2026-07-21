@@ -6,19 +6,24 @@ import { useAuth } from "@/hooks/useAuth";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { CustomerSearchBar } from "./CustomerSearchBar";
 import { SubmitNotifications } from "./SubmitNotifications";
+import { RENT_DETERMINATION_FORM_ID } from "@/lib/rentCertExtract";
 
-// Primary tabs are the day-to-day surfaces. The power-user views (All forms,
-// Submissions, Webhooks, Activity) live behind the ☰ menu — most staff never
-// need them.
+// Primary tabs are the day-to-day surfaces. Configuration and operational
+// utilities stay grouped under Tools.
 const PRIMARY_TABS = [
   { to: "/staff/purchases", label: "Purchases" },
-  { to: "/staff/referrals", label: "Referrals" },
   { to: "/staff/intake", label: "Intake forms" },
+  { to: "/staff/referrals", label: "Referrals" },
+  { to: "/staff/submissions", label: "Submissions" },
 ];
 
 const MENU_TABS = [
+  {
+    to: `/staff/submissions?formId=${RENT_DETERMINATION_FORM_ID}`,
+    matchPath: "/staff/submissions",
+    label: "New Rent Cert",
+  },
   { to: "/staff/forms", label: "All forms" },
-  { to: "/staff/submissions", label: "Submissions" },
   { to: "/staff/webhooks", label: "Webhooks" },
   { to: "/staff/activity", label: "Activity" },
 ];
@@ -30,8 +35,13 @@ export function StaffLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const tabs = isAdmin ? [...PRIMARY_TABS, { to: "/staff/admin", label: "Admin" }] : PRIMARY_TABS;
-  const activeMenuTab = MENU_TABS.find((t) => location.pathname.startsWith(t.to));
+  const menuTabs = isAdmin ? [...MENU_TABS, { to: "/staff/admin", label: "Admin" }] : MENU_TABS;
+  const activeMenuTab = menuTabs.find((tab) => {
+    if (tab.label === "New Rent Cert") {
+      return location.pathname === "/staff/submissions" && new URLSearchParams(location.search).get("formId") === RENT_DETERMINATION_FORM_ID;
+    }
+    return location.pathname.startsWith(tab.matchPath ?? tab.to);
+  });
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -45,7 +55,7 @@ export function StaffLayout() {
   useEffect(() => setMenuOpen(false), [location.pathname]);
 
   return (
-    <div className="min-h-full bg-slate-50">
+    <div className="flex min-h-full flex-col bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-screen-2xl px-4">
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -71,7 +81,7 @@ export function StaffLayout() {
           {/* No overflow-x-auto here: it would clip the ☰ dropdown (overflow-x
               forces vertical clipping too). The few tabs fit without scrolling. */}
           <nav aria-label="Staff sections" className="-mb-px flex flex-wrap items-center gap-1">
-            {tabs.map((t) => (
+            {PRIMARY_TABS.map((t) => (
               <NavLink
                 key={t.to}
                 to={t.to}
@@ -92,7 +102,7 @@ export function StaffLayout() {
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
-                title="More tools (submissions, webhooks, activity)"
+                title="Tools and administration"
                 className={[
                   "flex items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 py-2 text-sm font-medium transition sm:px-3",
                   activeMenuTab
@@ -100,19 +110,19 @@ export function StaffLayout() {
                     : "border-transparent text-slate-500 hover:text-slate-700",
                 ].join(" ")}
               >
-                <span aria-hidden className="text-base leading-none">☰</span>
-                {activeMenuTab ? activeMenuTab.label : null}
+                <span>Tools</span>
+                <span aria-hidden className="text-[10px] leading-none">{menuOpen ? "▲" : "▼"}</span>
               </button>
               {menuOpen ? (
                 <div className="absolute left-0 z-30 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                  {MENU_TABS.map((t) => (
+                  {menuTabs.map((t) => (
                     <NavLink
                       key={t.to}
                       to={t.to}
-                      className={({ isActive }) =>
+                      className={() =>
                         [
                           "block px-3 py-2 text-sm font-medium",
-                          isActive ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50",
+                          activeMenuTab?.label === t.label ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50",
                         ].join(" ")
                       }
                     >
@@ -126,9 +136,21 @@ export function StaffLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-screen-2xl px-4 py-5">
+      <main className="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-5">
         <Outlet />
       </main>
+      <footer className="border-t border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-screen-2xl items-center justify-center gap-5 px-4 py-3 text-xs text-slate-500">
+          <a href="https://housing-db-mobile.web.app" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-medium hover:text-teal-700">
+            <img src="/hdb-mobile-icon.svg" alt="" className="h-5 w-5 rounded" />
+            Mobile
+          </a>
+          <a href="https://housing-db-v2.web.app" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-medium hover:text-sky-700">
+            <img src="/hdb-web-icon.svg" alt="" className="h-5 w-5 rounded" />
+            Dashboard
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

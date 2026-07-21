@@ -61,7 +61,10 @@ __export(enrollments_exports, {
   ScheduleMeta: () => ScheduleMeta,
   ScheduleMetaMigrated: () => ScheduleMetaMigrated,
   ScheduleMetaV1: () => ScheduleMetaV1,
-  TaskScheduleMeta: () => TaskScheduleMeta
+  TaskScheduleMeta: () => TaskScheduleMeta,
+  buildEnrollmentClosePreview: () => buildEnrollmentClosePreview,
+  enrollmentMonthEnd: () => enrollmentMonthEnd,
+  enrollmentPaymentDate: () => enrollmentPaymentDate
 });
 module.exports = __toCommonJS(enrollments_exports);
 
@@ -1051,6 +1054,44 @@ var EnrollmentUnenrollmentReview = import_zod2.z.object({
   flaggedAt: TsLike.nullish().optional(),
   clearedAt: TsLike.nullish().optional()
 }).passthrough();
+function enrollmentISO10(value) {
+  if (typeof value === "string") return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString().slice(0, 10);
+  if (value && typeof value === "object") {
+    const timestamp = value;
+    if (typeof timestamp.toDate === "function") return enrollmentISO10(timestamp.toDate());
+    if (typeof timestamp.seconds === "number") return new Date(timestamp.seconds * 1e3).toISOString().slice(0, 10);
+  }
+  return "";
+}
+function enrollmentPaymentDate(payment) {
+  return enrollmentISO10(payment.paidDate || payment.paidAt || payment.dueDate || payment.date);
+}
+function enrollmentMonthEnd(value) {
+  const iso = enrollmentISO10(value);
+  if (!iso) return "";
+  const [year, month] = iso.split("-").map(Number);
+  if (!year || !month || month < 1 || month > 12) return "";
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+function buildEnrollmentClosePreview(args) {
+  const payments = Array.isArray(args.payments) ? args.payments : [];
+  const paidDates = payments.filter((payment) => payment.paid === true && payment.void !== true).map(enrollmentPaymentDate).filter(Boolean).sort();
+  const lastPaidDate = paidDates.at(-1) || null;
+  const closeDate = enrollmentMonthEnd(args.requestedCloseDate || lastPaidDate || args.fallbackDate) || enrollmentMonthEnd(/* @__PURE__ */ new Date());
+  const paidAfterClose = payments.filter((payment) => payment.paid === true && payment.void !== true && enrollmentPaymentDate(payment) > closeDate);
+  const futureUnpaid = payments.filter((payment) => payment.paid !== true && payment.void !== true && enrollmentPaymentDate(payment) > closeDate);
+  const futureUnpaidSet = new Set(futureUnpaid);
+  return {
+    closeDate,
+    lastPaidDate,
+    paidAfterClose,
+    futureUnpaid,
+    futureUnpaidPayments: futureUnpaid,
+    retainedPayments: payments.filter((payment) => !futureUnpaidSet.has(payment)),
+    canClose: paidAfterClose.length === 0
+  };
+}
 var Enrollment = import_zod2.z.object({
   id: Id,
   grantId: import_zod2.z.string(),
@@ -1368,5 +1409,8 @@ var EnrollmentsAdminReverseLedgerEntryBody = import_zod2.z.object({
   ScheduleMeta,
   ScheduleMetaMigrated,
   ScheduleMetaV1,
-  TaskScheduleMeta
+  TaskScheduleMeta,
+  buildEnrollmentClosePreview,
+  enrollmentMonthEnd,
+  enrollmentPaymentDate
 });

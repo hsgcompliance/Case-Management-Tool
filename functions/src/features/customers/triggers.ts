@@ -452,22 +452,21 @@ async function cascadeCustomerInactiveToEnrollments(customerId: string) {
     return;
   }
 
-  const docs = Array.from(
-    new Map(snaps.flatMap((snap) => snap.docs).map((doc) => [doc.id, doc])).values(),
-  );
-  if (!docs.length) return;
+  if (snaps.every((snap) => snap.empty)) return;
 
   const now = isoNow();
   const batch = db.batch();
   const enrollmentIds: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string }> = [];
 
-  for (const doc of docs) {
+  const seen = new Set<string>();
+  for (const doc of snaps.flatMap((snap) => snap.docs)) {
+    if (seen.has(doc.ref.path)) continue;
+    seen.add(doc.ref.path);
     const data = doc.data() as any;
-    // Skip enrollments already closed/deleted
-    const status = String(data?.status || "").toLowerCase();
-    if (status === "closed" || status === "deleted" || data?.active === false) continue;
+    if (!isActiveEnrollment(data)) continue;
     const closePreview = buildEnrollmentClosePreview({
       payments: Array.isArray(data?.payments) ? data.payments : [],
+      requestedCloseDate: null,
       fallbackDate: now.slice(0, 10),
     });
 

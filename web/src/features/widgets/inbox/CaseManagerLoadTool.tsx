@@ -23,9 +23,16 @@ import {
   useTasksUpdateFields,
 } from "@hooks/useTasks";
 import { useMe, useUsers, type CompositeUser } from "@hooks/useUsers";
-import { useAdminCaseloadData } from "@entities/Page/dashboardStyle/hooks/useAdminCaseloadData";
-import { fmtDateOrDash } from "@lib/formatters";
-import { hasRole, isAdminLike, normalizeRole } from "@lib/roles";
+import { useAdminEnrollmentsData } from "@entities/Page/dashboardStyle/hooks/useAdminEnrollmentsData";
+import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
+import {
+  buildCaseManagerReport,
+  effectiveEnrollmentAllocation,
+  emptyCaseManagerReportStats,
+  reportCustomerIsActive,
+  reportEnrollmentIsActive,
+} from "@features/casemanagers/components/caseManagerReportModel";
+import { hasRole, isAdminLike, isCaseManagerLike, normalizeRole } from "@lib/roles";
 import { reassignDebugLog } from "@lib/reassignDebug";
 import { toast } from "@lib/toast";
 import { Pagination, usePagination } from "@entities/ui/dashboardStyle/Pagination";
@@ -61,9 +68,15 @@ type CaseManagerLoadTopbarProps = {
 type CaseManagerLoadRow = {
   caseManagerId: string;
   caseManagerName: string;
-  acuityScore: number | null;
   customers: number;
   enrollments: number;
+  newCustomers: number;
+  changedCustomers: number;
+  totalAllocation: number;
+  tier1: number;
+  tier2: number;
+  tier3: number;
+  untiered: number;
   openTasks: number;
   completedTasks: number;
   totalTasks: number;
@@ -103,7 +116,7 @@ export const CaseManagerLoadTopbar: DashboardToolDefinition<
         checked={value.showLegacyCols}
         onChange={(e) => onChange({ ...value, showLegacyCols: e.currentTarget.checked })}
       />
-      Show customer/enrollment cols
+      Show task totals
     </label>
   </>
 );
@@ -119,11 +132,6 @@ function displayUserName(u: CompositeUser | null | undefined): string {
   const email = String(u.email || "").trim();
   if (email) return email;
   return String(u.uid || "");
-}
-
-function readFinite(v: unknown): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
 }
 
 function ownerKeyFromInbox(row: InboxRow): string {
@@ -164,7 +172,7 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
   const usersQ = useUsers({ status: "all", limit: 500 });
   const [monthState, setMonthState] = React.useState(monthKeyNow());
   const [selectedUidState, setSelectedUidState] = React.useState<string>("");
-  const [showLegacyColsState, setShowLegacyColsState] = React.useState(true);
+  const [showLegacyColsState, setShowLegacyColsState] = React.useState(false);
   const [digestOpen, setDigestOpen] = React.useState(false);
 
   const canAdminMutate = isAdminLike(me);
@@ -217,10 +225,19 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
     staleTime: 20_000,
   });
 
-  const caseloadData = useAdminCaseloadData({
-    selectedUid,
-    usersData: usersQ.data ?? [],
-  });
+  const caseloadData = useAdminEnrollmentsData();
+
+  const caseManagerReport = React.useMemo(
+    () => buildCaseManagerReport({
+      caseManagerIds: (usersQ.data || [])
+        .filter((user) => isCaseManagerLike(user))
+        .map((user) => String(user.uid || "")),
+      customers: caseloadData.customers as Array<Record<string, unknown>>,
+      enrollments: caseloadData.enrollments as Array<Record<string, unknown>>,
+      month,
+    }),
+    [usersQ.data, caseloadData.customers, caseloadData.enrollments, month]
+  );
 
   const workloadItems = React.useMemo<InboxRow[]>(
     () => (workloadQ.data || []) as InboxRow[],
@@ -234,11 +251,13 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
 
   const userByUid = React.useMemo(() => {
     const m = new Map<string, CompositeUser>();
-    for (const u of usersQ.data || []) m.set(String(u.uid || ""), u);
+    for (const u of usersQ.data || []) {
+      if (isCaseManagerLike(u)) m.set(String(u.uid || ""), u);
+    }
     return m;
   }, [usersQ.data]);
 
-  const { baseLoadByUid, customerNameById } = caseloadData;
+  const { customerNameById } = caseloadData;
 
   const tasksByUid = React.useMemo(() => {
     const m = new Map<string, InboxRow[]>();
@@ -256,13 +275,12 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
   const rows = React.useMemo<CaseManagerLoadRow[]>(() => {
     const uids = new Set<string>();
     for (const uid of userByUid.keys()) uids.add(uid);
-    for (const uid of baseLoadByUid.keys()) if (uid && uid !== "unassigned") uids.add(uid);
-    for (const uid of tasksByUid.keys()) uids.add(uid);
+    for (const uid of caseManagerReport.statsByUid.keys()) if (uid && uid !== "unassigned") uids.add(uid);
 
     const out: CaseManagerLoadRow[] = [];
     for (const uid of uids) {
       const user = userByUid.get(uid);
-      const base = baseLoadByUid.get(uid);
+      const stats = caseManagerReport.statsByUid.get(uid) || emptyCaseManagerReportStats();
       const tasks = tasksByUid.get(uid) || [];
       let open = 0;
       let completed = 0;
@@ -274,11 +292,16 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
         caseManagerId: uid,
         caseManagerName:
           displayUserName(user) ||
-          ownerLabel(uid, base?.caseManagerName || uid),
-        acuityScore: readFinite((user?.extras as any)?.acuityScoreAvg ?? (user?.extras as any)?.metrics?.acuityScoreAvg) ??
-          (base && base.acuityCount > 0 ? base.acuitySum / base.acuityCount : null),
-        customers: base?.customers || 0,
-        enrollments: base?.enrollments || 0,
+          ownerLabel(uid, uid),
+        customers: stats.activeCaseload,
+        enrollments: stats.activeEnrollments,
+        newCustomers: stats.newCustomersThisMonth,
+        changedCustomers: stats.changedCustomersThisMonth,
+        totalAllocation: stats.totalAllocation,
+        tier1: stats.tier1,
+        tier2: stats.tier2,
+        tier3: stats.tier3,
+        untiered: stats.untiered,
         openTasks: open,
         completedTasks: completed,
         totalTasks: tasks.length,
@@ -286,11 +309,11 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
     }
 
     out.sort((a, b) => {
-      if (b.openTasks !== a.openTasks) return b.openTasks - a.openTasks;
+      if (b.customers !== a.customers) return b.customers - a.customers;
       return a.caseManagerName.localeCompare(b.caseManagerName);
     });
     return out;
-  }, [userByUid, baseLoadByUid, tasksByUid]);
+  }, [userByUid, caseManagerReport.statsByUid, tasksByUid]);
 
   const setSelectedUid = React.useCallback(
     (nextUid: string, row?: CaseManagerLoadRow) => {
@@ -321,6 +344,32 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
       return String(a.dueDate || "9999-99-99").localeCompare(String(b.dueDate || "9999-99-99"));
     });
   }, [selectedUid, tasksByUid]);
+
+  const selectedCustomers = React.useMemo(() => {
+    const taskCounts = new Map<string, number>();
+    for (const task of selectedTasks) {
+      if (isInboxClosed(task.status)) continue;
+      const customerId = String(task.customerId || task.clientId || "").trim();
+      if (customerId) taskCounts.set(customerId, (taskCounts.get(customerId) || 0) + 1);
+    }
+    return (caseManagerReport.customersByUid.get(selectedUid) || [])
+      .filter(reportCustomerIsActive)
+      .map((customer) => {
+        const customerId = String(customer.id || "");
+        const enrollments = caseManagerReport.enrollmentsByCustomerId.get(customerId) || [];
+        return {
+          id: customerId,
+          name: customerNameById.get(customerId) || String(customer.name || customerId || "-"),
+          tier: Number(customer.tier),
+          enrollments: enrollments.filter(reportEnrollmentIsActive).length,
+          allocation: enrollments
+            .filter(reportEnrollmentIsActive)
+            .reduce((sum, enrollment) => sum + effectiveEnrollmentAllocation(enrollment), 0),
+          openTasks: taskCounts.get(customerId) || 0,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [caseManagerReport.customersByUid, caseManagerReport.enrollmentsByCustomerId, customerNameById, selectedTasks, selectedUid]);
 
   const onCompleteOrReopen = React.useCallback(
     async (row: InboxRow, action: "complete" | "reopen") => {
@@ -493,7 +542,7 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
 
   return (
     <ToolCard
-      title="Case Loads"
+      title="Case Manager Statistics"
       actions={
         <>
           <RefreshButton queryKeys={[qk.inbox.workload(workloadFilters)]} label="Refresh" />
@@ -503,36 +552,50 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
             filenameBase={`case-loads-${month}`}
             columns={[
               { key: "caseManagerName", label: "Case Manager", value: (r: CaseManagerLoadRow) => r.caseManagerName },
+              { key: "customers", label: "Active Caseload", value: (r: CaseManagerLoadRow) => r.customers },
+              { key: "newCustomers", label: "New Customers", value: (r: CaseManagerLoadRow) => r.newCustomers },
+              { key: "changedCustomers", label: "Customers Changed", value: (r: CaseManagerLoadRow) => r.changedCustomers },
+              { key: "totalAllocation", label: "Customer Allocation", value: (r: CaseManagerLoadRow) => r.totalAllocation },
+              { key: "tier1", label: "Tier 1", value: (r: CaseManagerLoadRow) => r.tier1 },
+              { key: "tier2", label: "Tier 2", value: (r: CaseManagerLoadRow) => r.tier2 },
+              { key: "tier3", label: "Tier 3", value: (r: CaseManagerLoadRow) => r.tier3 },
+              { key: "untiered", label: "Untiered", value: (r: CaseManagerLoadRow) => r.untiered },
               { key: "openTasks", label: "Open Tasks", value: (r: CaseManagerLoadRow) => r.openTasks },
               { key: "completedTasks", label: "Completed Tasks", value: (r: CaseManagerLoadRow) => r.completedTasks },
               { key: "totalTasks", label: "Total Tasks", value: (r: CaseManagerLoadRow) => r.totalTasks },
-              { key: "customers", label: "Customers", value: (r: CaseManagerLoadRow) => r.customers },
               { key: "enrollments", label: "Enrollments", value: (r: CaseManagerLoadRow) => r.enrollments },
             ]}
           />
         </>
       }
     >
+      {caseloadData.sharedDataError ? (
+        <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          Customer or enrollment data could not be loaded. Task counts may still appear.
+        </div>
+      ) : caseloadData.isTruncated.customers || caseloadData.isTruncated.enrollments ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Caseload totals may be incomplete because the organization exceeds the report display limit.
+        </div>
+      ) : null}
       {!showDetailOnly ? (
         <ToolTable
           headers={[
             "Staff",
+            <span key="customers" className="block text-right">Active Caseload</span>,
+            <span key="new" className="block text-right">New This Month</span>,
+            <span key="allocation" className="block text-right">Allocation</span>,
             <span key="open" className="block text-right">Open Tasks</span>,
-            <span key="completed" className="block text-right">Completed</span>,
-            <span key="total" className="block text-right">Total</span>,
+            <span key="tiers" className="block text-right">Tiers 1 / 2 / 3 / None</span>,
             ...(showLegacyCols ? [
-              <span key="customers" className="block text-right" title={caseloadData.isMetricsFallback ? "Value from cached metrics; select a CM for accurate count" : undefined}>
-                {caseloadData.isMetricsFallback ? "Customers (est)" : "Customers"}
-              </span>,
-              <span key="enrollments" className="block text-right" title={caseloadData.isMetricsFallback ? "Value from cached metrics; select a CM for accurate count" : undefined}>
-                {caseloadData.isMetricsFallback ? "Enrollments (est)" : "Enrollments"}
-              </span>,
+              <span key="completed" className="block text-right">Completed Tasks</span>,
+              <span key="total" className="block text-right">Total Tasks</span>,
             ] : []),
           ]}
           rows={
-            (workloadQ.isLoading || caseloadData.isLoading) ? (
+            (workloadQ.isLoading || caseloadData.sharedDataLoading) ? (
               <tr>
-                <td colSpan={showLegacyCols ? 6 : 4}>Loading workload...</td>
+                <td colSpan={showLegacyCols ? 8 : 6}>Loading case manager report...</td>
               </tr>
             ) : pagination.pageRows.length ? (
               pagination.pageRows.map((r) => {
@@ -544,17 +607,19 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
                     onClick={() => setSelectedUid(r.caseManagerId, r)}
                   >
                     <td>{r.caseManagerName}</td>
+                    <td className="text-right font-semibold">{r.customers}</td>
+                    <td className="text-right" title={`${r.changedCustomers} customers changed in ${month}`}>{r.newCustomers}</td>
+                    <td className="text-right font-medium">{fmtCurrencyUSD(r.totalAllocation)}</td>
                     <td className="text-right font-semibold">{r.openTasks}</td>
-                    <td className="text-right">{r.completedTasks}</td>
-                    <td className="text-right">{r.totalTasks}</td>
-                    {showLegacyCols ? <td className="text-right">{r.customers}</td> : null}
-                    {showLegacyCols ? <td className="text-right">{r.enrollments}</td> : null}
+                    <td className="text-right">{r.tier1} / {r.tier2} / {r.tier3} / {r.untiered}</td>
+                    {showLegacyCols ? <td className="text-right">{r.completedTasks}</td> : null}
+                    {showLegacyCols ? <td className="text-right">{r.totalTasks}</td> : null}
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={showLegacyCols ? 6 : 4}>No workload rows found for this month.</td>
+                <td colSpan={showLegacyCols ? 8 : 6}>No case manager rows found for this month.</td>
               </tr>
             )
           }
@@ -567,7 +632,7 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
       {selectedRow ? (
         <section className="rounded border border-slate-200 p-3 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">{selectedRow.caseManagerName} - {month} workload</h3>
+            <h3 className="text-sm font-semibold">{selectedRow.caseManagerName} - {month} caseload</h3>
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500">{selectedTasks.length} tasks</span>
               {canSendDigest ? (
@@ -589,31 +654,50 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="card-section rounded border border-slate-200">
-              <div className="text-xs text-slate-500">Open</div>
+              <div className="text-xs text-slate-500">Active Caseload</div>
+              <div className="text-xl font-semibold">{selectedRow.customers}</div>
+              <div className="text-xs text-slate-500">{selectedRow.enrollments} active enrollments</div>
+            </div>
+            <div className="card-section rounded border border-slate-200">
+              <div className="text-xs text-slate-500">New on Load</div>
+              <div className="text-xl font-semibold">{selectedRow.newCustomers}</div>
+              <div className="text-xs text-slate-500">{selectedRow.changedCustomers} customers changed</div>
+            </div>
+            <div className="card-section rounded border border-slate-200">
+              <div className="text-xs text-slate-500">Customer Allocation</div>
+              <div className="text-xl font-semibold">{fmtCurrencyUSD(selectedRow.totalAllocation)}</div>
+            </div>
+            <div className="card-section rounded border border-slate-200">
+              <div className="text-xs text-slate-500">Open Tasks</div>
               <div className="text-xl font-semibold">{selectedRow.openTasks}</div>
-            </div>
-            <div className="card-section rounded border border-slate-200">
-              <div className="text-xs text-slate-500">Completed</div>
-              <div className="text-xl font-semibold">{selectedRow.completedTasks}</div>
-            </div>
-            <div className="card-section rounded border border-slate-200">
-              <div className="text-xs text-slate-500">Total</div>
-              <div className="text-xl font-semibold">{selectedRow.totalTasks}</div>
-            </div>
-            <div className="card-section rounded border border-slate-200">
-              <div className="text-xs text-slate-500">Customers</div>
-              <div className="text-xl font-semibold">{showLegacyCols ? selectedRow.customers : "--"}</div>
-            </div>
-            <div className="card-section rounded border border-slate-200">
-              <div className="text-xs text-slate-500">Enrollments</div>
-              <div className="text-xl font-semibold">{showLegacyCols ? selectedRow.enrollments : "--"}</div>
+              <div className="text-xs text-slate-500">Secondary workload signal</div>
             </div>
           </div>
 
-          <ToolTable
-            headers={["Due", "Title", "Customer", "Source", "Status", "Actions"]}
+          <div>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Customers</h4>
+            <ToolTable
+              headers={["Customer", "Tier", <span key="allocation" className="block text-right">Allocation</span>, <span key="enrollments" className="block text-right">Enrollments</span>, <span key="tasks" className="block text-right">Open Tasks</span>]}
+              rows={selectedCustomers.length ? selectedCustomers.map((customer) => (
+                <tr key={customer.id}>
+                  <td>{customer.name}</td>
+                  <td>{customer.tier >= 1 && customer.tier <= 3 ? `Tier ${customer.tier}` : "Untiered"}</td>
+                  <td className="text-right font-medium">{fmtCurrencyUSD(customer.allocation)}</td>
+                  <td className="text-right">{customer.enrollments}</td>
+                  <td className="text-right">{customer.openTasks}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan={5}>No active customers on this load.</td></tr>
+              )}
+            />
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Tasks / reminders</h4>
+            <ToolTable
+              headers={["Due", "Title", "Customer", "Source", "Status", "Actions"]}
             rows={
               selectedTasks.length ? (
                 selectedTasks.map((task) => {
@@ -681,7 +765,8 @@ export function CaseManagerLoadTool(props: CaseManagerLoadToolProps = {}) {
                 </tr>
               )
             }
-          />
+            />
+          </div>
         </section>
       ) : null}
       {selectedRow && canSendDigest ? (
