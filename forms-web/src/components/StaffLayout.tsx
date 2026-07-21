@@ -18,6 +18,11 @@ const PRIMARY_TABS = [
 ];
 
 const MENU_TABS = [
+  {
+    to: `/staff/submissions?formId=${RENT_DETERMINATION_FORM_ID}`,
+    matchPath: "/staff/submissions",
+    label: "New Rent Cert",
+  },
   { to: "/staff/forms", label: "All forms" },
   { to: "/staff/submissions", label: "Submissions" },
   { to: "/staff/webhooks", label: "Webhooks" },
@@ -32,7 +37,12 @@ export function StaffLayout() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const tabs = isAdmin ? [...PRIMARY_TABS, { to: "/staff/admin", label: "Admin" }] : PRIMARY_TABS;
-  const activeMenuTab = MENU_TABS.find((t) => location.pathname.startsWith(t.to));
+  const activeMenuTab = MENU_TABS.find((tab) => {
+    if (tab.label === "New Rent Cert") {
+      return location.pathname === "/staff/submissions" && new URLSearchParams(location.search).get("formId") === RENT_DETERMINATION_FORM_ID;
+    }
+    return location.pathname.startsWith(tab.matchPath ?? tab.to);
+  });
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -46,7 +56,7 @@ export function StaffLayout() {
   useEffect(() => setMenuOpen(false), [location.pathname]);
 
   return (
-    <div className="min-h-full bg-slate-50">
+    <div className="flex min-h-full flex-col bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-screen-2xl px-4">
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -55,13 +65,6 @@ export function StaffLayout() {
               <div className="text-sm font-bold text-slate-900">Staff workspace</div>
             </NavLink>
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-              <NavLink
-                to={`/staff/submissions?formId=${RENT_DETERMINATION_FORM_ID}`}
-                className="whitespace-nowrap rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white no-underline hover:bg-indigo-500"
-                title="Open Submission Manager with Rent Determination & Unit Eligibility selected"
-              >
-                + New Rent Cert
-              </NavLink>
               <SubmitNotifications />
               <span className="hidden max-w-[14rem] truncate text-xs text-slate-500 sm:inline">{user?.email}</span>
               <button
@@ -117,10 +120,10 @@ export function StaffLayout() {
                     <NavLink
                       key={t.to}
                       to={t.to}
-                      className={({ isActive }) =>
+                      className={() =>
                         [
                           "block px-3 py-2 text-sm font-medium",
-                          isActive ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50",
+                          activeMenuTab?.label === t.label ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50",
                         ].join(" ")
                       }
                     >
@@ -134,9 +137,21 @@ export function StaffLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-screen-2xl px-4 py-5">
+      <main className="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-5">
         <Outlet />
       </main>
+      <footer className="border-t border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-screen-2xl items-center justify-center gap-5 px-4 py-3 text-xs text-slate-500">
+          <a href="https://housing-db-mobile.web.app" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-medium hover:text-teal-700">
+            <img src="/hdb-mobile-icon.svg" alt="" className="h-5 w-5 rounded" />
+            Mobile
+          </a>
+          <a href="https://housing-db-v2.web.app" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-medium hover:text-sky-700">
+            <img src="/hdb-web-icon.svg" alt="" className="h-5 w-5 rounded" />
+            Dashboard
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

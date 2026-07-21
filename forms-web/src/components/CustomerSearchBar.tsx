@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadCustomers, filterCustomers, type FormsCustomer } from "@/lib/customersApi";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { CreateCustomerModal } from "./CreateCustomerModal";
+import { ExternalServiceIcon } from "./ui";
 
 // Top-of-page customer search: pick a "current session customer", switch, or clear.
 // Loads the minimal customer index once (name/id/CWID) and filters client-side.
@@ -53,19 +54,31 @@ export function CustomerSearchBar() {
   ) : null;
 
   if (customer) {
+    const customerUrl = `https://housing-db-v2.web.app/customers/${encodeURIComponent(customer.id)}`;
     return (
       <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 py-1 pl-1.5 pr-1 text-xs font-semibold text-indigo-700">
+          <a
+            href={customerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${customer.name} in Dashboard`}
+            aria-label={`Open ${customer.name} in Dashboard in a new tab`}
+            className="rounded-full p-1 text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700"
+          >
+            <ExternalServiceIcon href={customerUrl} className="h-3.5 w-3.5" />
+          </a>
           {customer.name}{customer.cwId ? <span className="font-normal text-indigo-400"> · {customer.cwId}</span> : null}
-        </span>
         <button
           type="button"
           onClick={() => { setCustomer(null); setQ(""); setOpen(true); }}
-          className="text-xs text-slate-400 underline underline-offset-2 hover:text-slate-600"
+          title="Clear active customer and choose another"
+          aria-label="Clear active customer and choose another"
+          className="rounded-full px-1.5 py-0.5 text-sm leading-none text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"
         >
-          Switch
+          ×
         </button>
+        </span>
         {newButton}
         {modal}
       </div>

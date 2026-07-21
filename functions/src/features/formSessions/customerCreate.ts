@@ -21,7 +21,7 @@ import {
   GOOGLE_OAUTH_CLIENT_SECRET,
   GOOGLE_OAUTH_REFRESH_TOKEN,
 } from "../../core";
-import { upsertCustomers } from "../customers/service";
+import { patchCustomers, upsertCustomers } from "../customers/service";
 
 const FormsCustomerCreateBody = z.object({
   firstName: z.string().trim().min(1).max(80),
@@ -124,6 +124,44 @@ export const formsCustomerSetTssStatus_http = secureHandler(
     res.status(200).json({ ok: true, customerId: body.customerId, status: body.status });
   },
   { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
+);
+
+const FormsCustomerUpdateBody = z.object({
+  customerId: z.string().trim().min(1),
+  name: z.string().trim().min(1).max(160),
+  cwId: z.string().trim().max(40).nullable(),
+  caseManagerId: z.string().trim().max(128).nullable(),
+  population: z.enum(["Youth", "Individual", "Family"]).nullable(),
+  status: z.enum(["active", "inactive"]),
+  tier: z.number().int().min(1).max(3).nullable(),
+});
+
+/** Forms-auth adapter over the canonical customer patch service. */
+export const formsCustomerUpdate_http = secureHandler(
+  async (req, res) => {
+    const body = FormsCustomerUpdateBody.parse(req.body ?? {});
+    const cleaned = body.name.replace(/\s+/g, " ").trim();
+    const comma = cleaned.includes(",") ? cleaned.split(",", 2).map((part) => part.trim()) : null;
+    const parts = cleaned.split(" ").filter(Boolean);
+    const firstName = comma ? comma[1] : parts[0];
+    const lastName = comma ? comma[0] : parts.slice(1).join(" ");
+    const out = await patchCustomers({
+      id: body.customerId,
+      patch: {
+        name: cleaned,
+        fullName: cleaned,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        cwId: body.cwId,
+        caseManagerId: body.caseManagerId,
+        population: body.population,
+        status: body.status,
+        tier: body.tier,
+      } as any,
+    }, req.user!);
+    res.status(200).json({ok: true, ...out});
+  },
+  {auth: "user", appCheck: false, methods: ["POST", "OPTIONS"]},
 );
 
 export const formsCustomerCreate_http = secureHandler(

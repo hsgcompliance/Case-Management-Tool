@@ -388,7 +388,7 @@ export const formsRentCertApply_http = secureHandler(
 
 const CustomerNotEligibleBody = z.object({
   customerId: z.string().min(1),
-  enrollmentId: z.string().min(1),
+  enrollmentId: z.string().min(1).optional(),
 });
 
 export const formsCustomerNotEligible_http = secureHandler(
@@ -400,41 +400,49 @@ export const formsCustomerNotEligible_http = secureHandler(
     }
     const targetOrg = getTargetOrg(req, req.body);
     const {customerId, enrollmentId} = parsed.data;
-    const enrollmentRef = db.collection("customerEnrollments").doc(enrollmentId);
-    const enrollmentSnap = await enrollmentRef.get();
-    const enrollment = enrollmentSnap.data() || {};
-    if (!enrollmentSnap.exists || normId(enrollment.orgId) !== normId(targetOrg) || normId(enrollment.customerId) !== normId(customerId)) {
-      res.status(404).json({ok: false, error: "enrollment_not_found"});
+    const customerRef = db.collection("customers").doc(customerId);
+    const customerSnap = await customerRef.get();
+    if (!customerSnap.exists || normId((customerSnap.data() || {}).orgId) !== normId(targetOrg)) {
+      res.status(404).json({ok: false, error: "customer_not_found"});
       return;
     }
 
     const now = FieldValue.serverTimestamp();
     const today = new Date().toISOString().slice(0, 10);
-    const closePreview = buildEnrollmentClosePreview({
-      payments: Array.isArray(enrollment.payments) ? enrollment.payments : [],
-      requestedCloseDate: today,
-      fallbackDate: today,
-    });
-    await enrollmentRef.set({
-      active: false,
-      status: "closed",
-      endDate: closePreview.closeDate,
-      payments: closePreview.retainedPayments,
-      closedAt: now,
-      ineligibility: {
-        markedAt: now,
-        markedBy: String((req.user as any)?.uid || ""),
-        source: "forms-intake",
-      },
-      updatedAt: now,
-    }, {merge: true});
-    await syncEnrollmentProjectionQueueItems({
-      orgId: targetOrg,
-      enrollmentId,
-      grantId: String(enrollment.grantId || "") || null,
-      customerId,
-      payments: closePreview.retainedPayments,
-    }).catch(() => undefined);
+    if (enrollmentId) {
+      const enrollmentRef = db.collection("customerEnrollments").doc(enrollmentId);
+      const enrollmentSnap = await enrollmentRef.get();
+      const enrollment = enrollmentSnap.data() || {};
+      if (!enrollmentSnap.exists || normId(enrollment.orgId) !== normId(targetOrg) || normId(enrollment.customerId) !== normId(customerId)) {
+        res.status(404).json({ok: false, error: "enrollment_not_found"});
+        return;
+      }
+      const closePreview = buildEnrollmentClosePreview({
+        payments: Array.isArray(enrollment.payments) ? enrollment.payments : [],
+        requestedCloseDate: today,
+        fallbackDate: today,
+      });
+      await enrollmentRef.set({
+        active: false,
+        status: "closed",
+        endDate: closePreview.closeDate,
+        payments: closePreview.retainedPayments,
+        closedAt: now,
+        ineligibility: {
+          markedAt: now,
+          markedBy: String((req.user as any)?.uid || ""),
+          source: "forms-intake",
+        },
+        updatedAt: now,
+      }, {merge: true});
+      await syncEnrollmentProjectionQueueItems({
+        orgId: targetOrg,
+        enrollmentId,
+        grantId: String(enrollment.grantId || "") || null,
+        customerId,
+        payments: closePreview.retainedPayments,
+      }).catch(() => undefined);
+    }
 
     const otherSnap = await db.collection("customerEnrollments").where("customerId", "==", customerId).limit(100).get();
     const hasOtherOpenEnrollment = otherSnap.docs.some((doc) => {
@@ -443,7 +451,7 @@ export const formsCustomerNotEligible_http = secureHandler(
       return normId(row.orgId) === normId(targetOrg) && row.deleted !== true && row.active !== false && String(row.status || "active") !== "closed";
     });
     if (!hasOtherOpenEnrollment) {
-      await db.collection("customers").doc(customerId).set({
+      await customerRef.set({
         active: false,
         status: "inactive",
         ineligibility: {
@@ -454,7 +462,7 @@ export const formsCustomerNotEligible_http = secureHandler(
         updatedAt: now,
       }, {merge: true});
     }
-    res.status(200).json({ok: true, enrollmentId, customerInactivated: !hasOtherOpenEnrollment});
+    res.status(200).json({ok: true, enrollmentId: enrollmentId || null, customerInactivated: !hasOtherOpenEnrollment});
   },
   {auth: "user", appCheck: false, methods: ["POST", "OPTIONS"]},
 );

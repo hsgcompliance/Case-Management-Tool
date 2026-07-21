@@ -35,9 +35,11 @@ export type CustomerDetail = {
   cwId: string | null;
   dob: string | null;
   caseManagerName: string | null;
+  caseManagerId: string | null;
   secondaryCaseManagerName: string | null;
   population: string | null;
   status: string | null;
+  tier: number | null;
   acuityScore: number | null;
   otherContacts: Array<{ name: string | null; role: string | null }>;
   linkedSubmissions: LinkedSubmission[];
@@ -61,4 +63,8 @@ export function getCustomerDetail(id: string, force = false): Promise<CustomerDe
     );
   }
   return cache.get(key)!;
+}
+
+export function clearCustomerDetailCache(id: string): void {
+  cache.delete(String(id || "").trim());
 }
