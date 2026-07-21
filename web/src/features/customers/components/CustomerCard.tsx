@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import type { Enrollment, TCustomerEntity } from "@types";
+import type { Enrollment, TCustomerEntity, TPayment } from "@types";
 import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
 import { CUSTOMER_CARD_ENROLLMENTS_LIMIT, useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
 import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
@@ -10,6 +10,7 @@ import { useMyTasksDue } from "@hooks/useInbox";
 import { useTasksDueModal } from "@entities/tasks/TasksDueModalController";
 import { currentMonthKey } from "@hooks/useMetrics";
 import { useGrant, useGrants } from "@hooks/useGrants";
+import { usePaymentsProjectionsAdjust, usePaymentsSpend, type PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
 import { useAuth } from "@app/auth/AuthProvider";
 import { Modal } from "@entities/ui/Modal";
 import { CustomerActionMenuBody, EnrollCustomerQuickModal, TIER_SELECTED_CLASS } from "./CustomerActionMenu";
@@ -26,6 +27,8 @@ import { normalizePayments, currency, todayISO, nextRentCertDue } from "./paymen
 import { customerContactRoleForUid } from "../contactCaseManagers";
 import { getCustomerDriveFolderLink, getCustomerWorkbookRef } from "../customerDriveFolder";
 import { WorkbookSheetModal } from "@entities/workbook/WorkbookSheetModal";
+import PaymentsProjectionsAdjustDialog from "@entities/dialogs/payments/PaymentsProjectionsAdjustDialog";
+import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
 import {
   enrollmentControlActionBody,
@@ -356,14 +359,16 @@ function budgetSummaryForGrant(grant: Record<string, unknown> | null | undefined
 
 function PaymentScheduleQuickModal({
   open,
-  customerId,
   enrollment,
   onClose,
+  onChanged,
+  onOpenGrant,
 }: {
   open: boolean;
-  customerId: string;
   enrollment: Enrollment | null;
   onClose: () => void;
+  onChanged: () => void;
+  onOpenGrant: (grantId: string) => void;
 }) {
   const { profile } = useAuth();
   const roleMode: CardRoleMode = isAdminLike(profile as any) ? "admin" : isViewerLike(profile as any) ? "viewer" : "user";
@@ -371,39 +376,87 @@ function PaymentScheduleQuickModal({
   const admin = roleMode === "admin";
   const grantId = String(enrollment?.grantId || "");
   const { data: grant = null } = useGrant(grantId, { enabled: open && !!grantId });
+  const spend = usePaymentsSpend();
+  const adjust = usePaymentsProjectionsAdjust();
   const [draftRows, setDraftRows] = React.useState<DraftPaymentRow[]>([]);
+  const [pendingPaymentId, setPendingPaymentId] = React.useState<string | null>(null);
+  const [adjustOpen, setAdjustOpen] = React.useState(false);
   const [rawOpen, setRawOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
     setDraftRows(toDraftPaymentRows(enrollment));
+    setPendingPaymentId(null);
+    setAdjustOpen(false);
     setRawOpen(false);
   }, [enrollment, open]);
 
   const budget = budgetSummaryForGrant(grant);
   const draftTotal = draftRows.reduce((sum, row) => sum + row.amount, 0);
 
-  const updateDraft = (id: string, patch: Partial<DraftPaymentRow>) => {
-    setDraftRows((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  const enrollmentId = String(enrollment?.id || "").trim();
+  const adjustmentEnrollments = React.useMemo(() => enrollmentId ? [{
+    id: enrollmentId,
+    label: formatEnrollmentLabel((enrollment || {}) as Record<string, unknown>),
+    grantId,
+    lineItemIds: Array.from(new Set(draftRows.map((row) => row.lineItemId).filter(Boolean))),
+    payments: (Array.isArray(enrollment?.payments) ? enrollment.payments : []) as TPayment[],
+  }] : [], [draftRows, enrollment, enrollmentId, grantId]);
+
+  const togglePaid = async (row: DraftPaymentRow, paid: boolean) => {
+    if (!editable || !enrollmentId || !row.id || spend.isPending) return;
+    setPendingPaymentId(row.id);
+    try {
+      await spend.mutateAsync({
+        body: {
+          enrollmentId,
+          paymentId: row.id,
+          reverse: !paid,
+          forceSync: false,
+        },
+      });
+      setDraftRows((rows) => rows.map((item) => item.id === row.id ? { ...item, paid } : item));
+      onChanged();
+      toast(paid ? "Payment marked paid." : "Payment marked unpaid.", { type: "success" });
+    } catch (error: unknown) {
+      toast(toApiError(error).error || "Failed to update paid state.", { type: "error" });
+    } finally {
+      setPendingPaymentId(null);
+    }
+  };
+
+  const applyAdjustments = async (payload: PaymentsProjectionsAdjustInput) => {
+    try {
+      await adjust.mutateAsync(payload);
+      setAdjustOpen(false);
+      onChanged();
+      toast("Payment schedule updated.", { type: "success" });
+    } catch (error: unknown) {
+      const message = toApiError(error).error || "Failed to apply payment/projection adjustments.";
+      toast(message, { type: "error" });
+      throw new Error(message);
+    }
   };
 
   return (
     <Modal
       isOpen={open}
       onClose={onClose}
+      disableEscClose={adjustOpen}
+      disableOverlayClose={adjustOpen}
       title="Payment Schedule"
       widthClass="max-w-5xl"
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           {editable ? (
-            <a className="btn btn-secondary btn-sm" href={`/customers/${customerId}?tab=payments`}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAdjustOpen(true)}>
               Edit Payments
-            </a>
+            </button>
           ) : null}
           {editable && grantId ? (
-            <a className="btn btn-secondary btn-sm" href={`/grants/${grantId}?tab=budget`}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpenGrant(grantId)}>
               Grant Spending
-            </a>
+            </button>
           ) : null}
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
             Close
@@ -412,9 +465,11 @@ function PaymentScheduleQuickModal({
       }
     >
       <div className="space-y-4">
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Local model only. Changes in this popup do not save.
-        </div>
+        {editable ? (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            Paid toggles save immediately. Use Edit Payments for amounts, dates, line items, and schedule changes.
+          </div>
+        ) : null}
 
         <div className="grid gap-3 md:grid-cols-4">
           {(budget.drawsDownBudget
@@ -456,15 +511,18 @@ function PaymentScheduleQuickModal({
                   </td>
                   <td className="px-3 py-2 select-text">{row.type}</td>
                   <td className="px-3 py-2 text-right tabular-nums">
-                    {editable ? (
-                      <input className="input h-8 w-28 text-right" type="number" step="0.01" value={String(row.amount)} onChange={(e) => updateDraft(row.id, { amount: Number(e.currentTarget.value) || 0 })} />
-                    ) : (
-                      <span>{currency(row.amount)}</span>
-                    )}
+                    <span>{currency(row.amount)}</span>
                   </td>
                   <td className="px-3 py-2">
                     {editable ? (
-                      <input type="checkbox" checked={row.paid} onChange={(e) => updateDraft(row.id, { paid: e.currentTarget.checked })} />
+                      <input
+                        type="checkbox"
+                        checked={row.paid}
+                        disabled={spend.isPending}
+                        aria-label={`${row.paid ? "Mark unpaid" : "Mark paid"}: ${row.type} due ${row.dueDate || "unknown"}`}
+                        title={pendingPaymentId === row.id ? "Saving..." : row.paid ? "Mark unpaid" : "Mark paid"}
+                        onChange={(event) => void togglePaid(row, event.currentTarget.checked)}
+                      />
                     ) : (
                       row.paid ? "Yes" : "No"
                     )}
@@ -491,6 +549,15 @@ function PaymentScheduleQuickModal({
           </details>
         ) : null}
       </div>
+
+      <PaymentsProjectionsAdjustDialog
+        open={adjustOpen}
+        busy={adjust.isPending}
+        enrollments={adjustmentEnrollments}
+        initialEnrollmentId={enrollmentId}
+        onCancel={() => setAdjustOpen(false)}
+        onApply={applyAdjustments}
+      />
     </Modal>
   );
 }
@@ -936,6 +1003,7 @@ function CustomerCardInner({
   const dragRef = React.useRef<{ startX: number; startSpan: number } | null>(null);
   const showEnrollmentSections = colSpan > 1;
   const [paymentPopupEnrollmentId, setPaymentPopupEnrollmentId] = React.useState<string | null>(null);
+  const [grantWorkspaceId, setGrantWorkspaceId] = React.useState<string | null>(null);
   const [enrollmentPopupId, setEnrollmentPopupId] = React.useState<string | null>(null);
   const [enrollOpen, setEnrollOpen] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<CustomerCardContextMenu | null>(null);
@@ -1132,7 +1200,7 @@ function CustomerCardInner({
         toast("No grant is linked to this enrollment.", { type: "warning" });
         return;
       }
-      window.open(`/grants/${encodeURIComponent(grantId)}`, "_blank", "noopener,noreferrer");
+      setGrantWorkspaceId(grantId);
     },
     [enrollmentById],
   );
@@ -1907,9 +1975,23 @@ function CustomerCardInner({
       {paymentPopupEnrollment ? (
         <PaymentScheduleQuickModal
           open
-          customerId={customer.id}
           enrollment={paymentPopupEnrollment}
           onClose={() => setPaymentPopupEnrollmentId(null)}
+          onChanged={() => {
+            void enrollmentsQuery.refetch();
+          }}
+          onOpenGrant={(grantId) => {
+            setPaymentPopupEnrollmentId(null);
+            setGrantWorkspaceId(grantId);
+          }}
+        />
+      ) : null}
+
+      {grantWorkspaceId ? (
+        <GrantWorkspaceModal
+          grantId={grantWorkspaceId}
+          onClose={() => setGrantWorkspaceId(null)}
+          canAdminDelete={isAdminLike(profile)}
         />
       ) : null}
 
