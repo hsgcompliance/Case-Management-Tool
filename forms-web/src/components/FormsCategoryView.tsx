@@ -67,6 +67,9 @@ type View = { kind: "list" } | { kind: "step"; idx: number } | { kind: "form"; f
 const HMIS_URL = "https://wscs.wellsky.com/montana/com.bowmansystems.sp5.core.ServicePoint/index.html";
 const EVICTION_ASSESSMENT_URL = "https://docs.google.com/spreadsheets/d/15oqPBUXZ450AsgSCQ8s5HmNWNMP5Vv9R/edit?rtpof=true";
 const TSS_HOUSING_ASSESSMENT_URL = "https://drive.google.com/file/d/1s-WjmM_FZd4HwfC2Tzeve4_mlsaTdxa0/view?usp=drive_link";
+const HQS_INSPECTION_URL = "https://drive.google.com/file/d/1WY57mEu6-RW9Ry2bpTJWYsYmWwyYDZNT/view";
+const HABITABILITY_INSPECTION_FORM_ID = "250648244597063";
+const PRIMARY_INTAKE_TYPES = new Set<IntakeTypeId>(["eviction-prevention", "hud-rental", "bridging-home"]);
 
 function GuidanceLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -79,7 +82,7 @@ function GuidanceLink({ href, children }: { href: string; children: ReactNode })
 
 function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] }) {
   const selected = new Set(intakeTypes);
-  const needsHmis = selected.has("hud-rental") || selected.has("path-housing");
+  const needsHmis = selected.has("hud-rental") || selected.has("bridging-home") || selected.has("path-housing");
   if (!selected.size) {
     return <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Return to Step 1 and select at least one intake program to see its requirements.</div>;
   }
@@ -98,6 +101,12 @@ function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] })
           <p className="mt-1 text-sm text-sky-900">Please verify that a Coordinated Entry (CE) entry exists with a MAP Assessment dated in the current month. Download a PDF of the MAP Assessment and save it in the customer file.</p>
         </section>
       ) : null}
+      {selected.has("bridging-home") ? (
+        <section className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-4">
+          <h3 className="font-semibold text-cyan-950">Bridging Home</h3>
+          <p className="mt-1 text-sm text-cyan-900">Please verify that a Coordinated Entry (CE) entry exists with a MAP Assessment dated in the current month. Download a PDF of the MAP Assessment and save it in the customer file.</p>
+        </section>
+      ) : null}
       {selected.has("path-housing") ? (
         <section className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">
           <h3 className="font-semibold text-emerald-950">PATH</h3>
@@ -114,6 +123,29 @@ function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] })
       ) : null}
     </div>
   );
+}
+
+function IntakeInspection({ intakeTypes, onSubmitted }: { intakeTypes: IntakeTypeId[]; onSubmitted: () => void }) {
+  if (intakeTypes.includes("eviction-prevention")) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Complete the Habitability Inspection for this Eviction Prevention intake.
+        </div>
+        <JotformEmbed formId={HABITABILITY_INSPECTION_FORM_ID} title="Habitability Inspection" onSubmitted={onSubmitted} />
+      </div>
+    );
+  }
+  if (intakeTypes.includes("hud-rental")) {
+    return (
+      <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4">
+        <h3 className="font-semibold text-sky-950">HQS Inspection</h3>
+        <p className="mt-1 text-sm text-sky-900">Schedule and complete an HQS inspection for this HUD Rental intake. Use the HQS inspection form linked below.</p>
+        <div className="mt-4 flex justify-center"><GuidanceLink href={HQS_INSPECTION_URL}>Open HQS Inspection Form</GuidanceLink></div>
+      </section>
+    );
+  }
+  return null;
 }
 
 export function FormsCategoryView({
@@ -155,7 +187,7 @@ export function FormsCategoryView({
   const [createOpen, setCreateOpen] = useState(false);
 
   // Resolve flow steps against the full catalog (flow forms may live in other categories).
-  const steps = useMemo<ResolvedStep[]>(() => {
+  const resolvedSteps = useMemo<ResolvedStep[]>(() => {
     if (!flowSteps?.length) return [];
     const byId = new Map((catalog ?? forms).map((f) => [f.id, f]));
     return flowSteps.map((s) => {
@@ -165,7 +197,7 @@ export function FormsCategoryView({
     });
   }, [flowSteps, catalog, forms]);
 
-  const flowIds = useMemo(() => new Set(steps.map((s) => s.formId).filter(Boolean)), [steps]);
+  const flowIds = useMemo(() => new Set(resolvedSteps.map((s) => s.formId).filter(Boolean)), [resolvedSteps]);
   const extraForms = useMemo(() => forms.filter((f) => !flowIds.has(f.id)), [forms, flowIds]);
 
   // Progress is persisted per active customer so the list doubles as a checklist.
@@ -216,6 +248,13 @@ export function FormsCategoryView({
       });
     },
     [storageKey]
+  );
+
+  const intakeTypes = progress.intakeTypes ?? [];
+  const inspectionRequired = intakeTypes.includes("hud-rental") || intakeTypes.includes("eviction-prevention");
+  const steps = useMemo(
+    () => resolvedSteps.filter((candidate) => !candidate.inspectionGate || inspectionRequired),
+    [resolvedSteps, inspectionRequired]
   );
 
   const setDone = useCallback(
@@ -325,7 +364,6 @@ export function FormsCategoryView({
 
   // Step 1 supports program combinations, except HUD Rental and Eviction
   // Prevention, which are mutually exclusive primary assistance paths.
-  const intakeTypes = progress.intakeTypes ?? [];
   const toggleIntakeType = (v: IntakeTypeId, stepKey: string) => {
     updateProgress((p) => {
       const current = new Set(p.intakeTypes ?? []);
@@ -357,10 +395,11 @@ export function FormsCategoryView({
   // its data/scroll) across the list, step, and form views of the flow.
   const flowFormIds = useMemo(() => {
     const ids = new Set(steps.map((s) => s.formId).filter((x): x is string => !!x));
+    if (intakeTypes.includes("eviction-prevention")) ids.add(HABITABILITY_INSPECTION_FORM_ID);
     // "Build household model" forms feed the sidebar too, wherever they live.
     for (const f of catalog ?? forms) if (f.buildHousehold) ids.add(f.id);
     return [...ids];
-  }, [steps, catalog, forms]);
+  }, [steps, catalog, forms, intakeTypes]);
   const withSidebar = (node: ReactNode) =>
     webhooksSidebar ? (
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -557,17 +596,17 @@ export function FormsCategoryView({
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
         {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} onSubmissionStateChange={handleRentCertSubmissionState} /> : null}
         {step.intakeGuidance ? <IntakeProgramGuidance intakeTypes={intakeTypes} /> : null}
+        {step.inspectionGate ? <IntakeInspection intakeTypes={intakeTypes} onSubmitted={handleSubmitted} /> : null}
         {step.intakeTypeGate ? (
           <div className="rounded-xl border border-indigo-200 bg-white px-6 py-8 text-center">
             <div className="text-base font-semibold text-slate-900">Which programs are part of this intake?</div>
             <p className="mx-auto mt-1 max-w-xl text-xs text-slate-500">
-              Select all that apply. PATH and TSS can accompany another program. HUD Rental and Eviction Prevention cannot be combined.
+              Select all that apply. PATH and TSS can accompany one primary program. HUD Rental, Bridging Home, and Eviction Prevention are mutually exclusive.
             </p>
             <div className="mx-auto mt-5 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
               {INTAKE_TYPES.map((t) => {
                 const selected = intakeTypes.includes(t.id);
-                const conflicts = (t.id === "hud-rental" && intakeTypes.includes("eviction-prevention")) ||
-                  (t.id === "eviction-prevention" && intakeTypes.includes("hud-rental"));
+                const conflicts = PRIMARY_INTAKE_TYPES.has(t.id) && intakeTypes.some((id) => id !== t.id && PRIMARY_INTAKE_TYPES.has(id));
                 return (
                   <button
                     key={t.id}
