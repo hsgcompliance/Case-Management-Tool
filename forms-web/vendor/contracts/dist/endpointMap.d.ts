@@ -415,9 +415,11 @@ export type GDriveCustomerFolderSyncResp = Ok<{
     sheetConfigured?: boolean;
     items?: TGDriveSyncReconcileItem[];
 }> | GDriveEndpointError;
-import type { TInboxListMyQuery, TInboxListMyResp, TInboxWorkloadListQuery, TInboxWorkloadListResp, TInboxMetricsMyQuery, TInboxMetricsMyResp, TInboxSendInviteBody, TInboxSendMonthlySummaryBody, TInboxEmailResp, TInboxDigestPreviewQuery, TInboxDigestPreviewResp, TInboxSendDigestNowBody, TInboxSendDigestNowResp, TInboxScheduleDigestBody, TInboxScheduleDigestResp, TInboxDigestSubsGetResp, TInboxDigestSubUpdateReq, TInboxDigestSubUpdateResp, TInboxDigestHtmlPreviewReq, TInboxDigestHtmlPreviewResp } from "./inbox.js";
+import type { TInboxListMyQuery, TInboxListMyResp, TInboxTasksDueListQuery, TInboxTasksDueListResp, TInboxWorkloadListQuery, TInboxWorkloadListResp, TInboxMetricsMyQuery, TInboxMetricsMyResp, TInboxSendInviteBody, TInboxSendMonthlySummaryBody, TInboxEmailResp, TInboxDigestPreviewQuery, TInboxDigestPreviewResp, TInboxSendDigestNowBody, TInboxSendDigestNowResp, TInboxScheduleDigestBody, TInboxScheduleDigestResp, TInboxDigestSubsGetResp, TInboxDigestSubUpdateReq, TInboxDigestSubUpdateResp, TInboxDigestHtmlPreviewReq, TInboxDigestHtmlPreviewResp } from "./inbox.js";
 export type InboxListMyQuery = TInboxListMyQuery;
 export type InboxListMyResp = TInboxListMyResp;
+export type InboxTasksDueListQuery = TInboxTasksDueListQuery;
+export type InboxTasksDueListResp = TInboxTasksDueListResp;
 export type InboxWorkloadListQuery = TInboxWorkloadListQuery;
 export type InboxWorkloadListResp = TInboxWorkloadListResp;
 export type InboxMetricsMyQuery = TInboxMetricsMyQuery;
@@ -1060,6 +1062,10 @@ export interface EndpointMap {
     inboxListMy: {
         req: InboxListMyQuery;
         resp: InboxListMyResp;
+    };
+    inboxTasksDueList: {
+        req: InboxTasksDueListQuery;
+        resp: InboxTasksDueListResp;
     };
     inboxWorkloadList: {
         req: InboxWorkloadListQuery;

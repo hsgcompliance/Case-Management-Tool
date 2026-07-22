@@ -5,7 +5,7 @@ import {
 import {
   TaskScheduleItem,
   TaskStats
-} from "./chunk-4O3BPXUB.js";
+} from "./chunk-BLKM4AOE.js";
 import {
   Population
 } from "./chunk-AGNAOSOI.js";
@@ -232,7 +232,7 @@ function enrollmentISO10(value) {
   return "";
 }
 function enrollmentPaymentDate(payment) {
-  return enrollmentISO10(payment.paidDate || payment.paidAt || payment.dueDate || payment.date);
+  return enrollmentISO10(payment.dueDate || payment.date || payment.paidDate || payment.paidAt);
 }
 function enrollmentMonthEnd(value) {
   const iso = enrollmentISO10(value);

@@ -99,6 +99,8 @@ __export(index_exports, {
   IdLike: () => IdLike,
   Ids: () => Ids,
   InboxItemSchema: () => InboxItemSchema,
+  InboxWorkItemKindEnum: () => InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema: () => InboxWorkflowRefSchema,
   InviteUserBody: () => InviteUserBody,
   JsonObj: () => JsonObj,
   JsonObjLike: () => JsonObjLike,
@@ -1797,6 +1799,7 @@ var TasksOtherCreateBody = import_zod2.z.object({
   dueDate: import_zod2.z.string().optional(),
   dueMonth: import_zod2.z.string().optional(),
   notify: import_zod2.z.boolean().optional().default(true),
+  customerId: import_zod2.z.string().nullish(),
   assign: import_zod2.z.object({
     group: OtherGroup.nullish(),
     uids: import_zod2.z.array(import_zod2.z.string()).max(20).nullish()
@@ -2024,7 +2027,7 @@ function enrollmentISO10(value) {
   return "";
 }
 function enrollmentPaymentDate(payment) {
-  return enrollmentISO10(payment.paidDate || payment.paidAt || payment.dueDate || payment.date);
+  return enrollmentISO10(payment.dueDate || payment.date || payment.paidDate || payment.paidAt);
 }
 function enrollmentMonthEnd(value) {
   const iso = enrollmentISO10(value);
@@ -3642,6 +3645,9 @@ __export(inbox_exports, {
   InboxSendMonthlySummaryBodySchema: () => InboxSendMonthlySummaryBodySchema,
   InboxSourceEnum: () => InboxSourceEnum,
   InboxStatusEnum: () => InboxStatusEnum,
+  InboxTasksDueListQuerySchema: () => InboxTasksDueListQuerySchema,
+  InboxWorkItemKindEnum: () => InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema: () => InboxWorkflowRefSchema,
   InboxWorkloadListQuerySchema: () => InboxWorkloadListQuerySchema
 });
 var InboxSourceEnum = import_zod2.z.enum([
@@ -3652,11 +3658,29 @@ var InboxSourceEnum = import_zod2.z.enum([
   "adminEnrollment",
   "other",
   "jotform",
+  "formsIntake",
   "otherTask"
   // back-compat alias written by old trigger versions
 ]);
 var InboxStatusEnum = import_zod2.z.enum(["open", "done"]);
 var InboxAssignedGroupEnum = import_zod2.z.enum(["admin", "casemanager", "compliance"]);
+var InboxWorkItemKindEnum = import_zod2.z.enum([
+  "task",
+  "assessment",
+  "compliance",
+  "payment",
+  "intake",
+  "referral",
+  "workflow"
+]);
+var InboxWorkflowRefSchema = import_zod2.z.object({
+  type: import_zod2.z.enum(["intake", "referral", "form"]),
+  instanceId: import_zod2.z.string().min(1),
+  stage: import_zod2.z.string().min(1),
+  customerId: import_zod2.z.string().nullish(),
+  enrollmentId: import_zod2.z.string().nullish(),
+  formId: import_zod2.z.string().nullish()
+});
 var YYYY_MM = import_zod2.z.string().regex(/^\d{4}-\d{2}$/);
 var UrlOrHash = import_zod2.z.union([import_zod2.z.url(), import_zod2.z.literal("#")]);
 var InboxDigestTypeSchema = import_zod2.z.enum(["caseload", "budget", "enrollments", "grantPrograms", "caseManagers", "rentalAssistance"]);
@@ -3688,13 +3712,20 @@ var InboxItemSchema = import_zod2.z.object({
   assignedToUid: import_zod2.z.string().nullable(),
   assignedToGroup: InboxAssignedGroupEnum.nullish(),
   cmUid: import_zod2.z.string().nullable(),
+  secondaryCmUid: import_zod2.z.string().nullable().default(null),
   // org scoping / projection
   orgId: import_zod2.z.string().nullish(),
   teamIds: import_zod2.z.array(import_zod2.z.string().min(1)).nullish(),
   notify: import_zod2.z.boolean().nullish(),
+  /** Lightweight notification meaning; this does not imply staff performance tracking. */
+  workItemKind: InboxWorkItemKindEnum.nullish(),
+  workflowRef: InboxWorkflowRefSchema.nullish(),
   title: import_zod2.z.string().default(""),
   subtitle: import_zod2.z.string().nullish(),
   labels: import_zod2.z.array(import_zod2.z.string().min(1)).nullish(),
+  /** Backend-owned deep link for workflow-backed reminders. */
+  actionUrl: import_zod2.z.url().nullish(),
+  actionLabel: import_zod2.z.string().max(120).nullish(),
   completedAtISO: IsoString.nullish()
 }).passthrough();
 var InboxItemEntitySchema = InboxItemSchema.extend({
@@ -3704,6 +3735,9 @@ var InboxListMyQuerySchema = import_zod2.z.object({
   month: YYYY_MM.optional(),
   includeOverdue: Boolish.optional(),
   includeGroup: Boolish.optional()
+}).partial();
+var InboxTasksDueListQuerySchema = import_zod2.z.object({
+  month: YYYY_MM.optional()
 }).partial();
 var InboxWorkloadListQuerySchema = import_zod2.z.object({
   month: YYYY_MM.optional(),
@@ -6332,6 +6366,8 @@ var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
   IdLike,
   Ids,
   InboxItemSchema,
+  InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema,
   InviteUserBody,
   JsonObj,
   JsonObjLike,

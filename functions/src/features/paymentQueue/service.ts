@@ -105,16 +105,34 @@ export function buildProjectionQueueItem(args: {
   const docId = projectionQueueDocId(context.enrollmentId, paymentId);
   const noteText = paymentNoteText(payment);
   const typeLabel = projectionLabel(payment);
-  const state = args.state ?? {
-    queueStatus: 'pending' as const,
-    ledgerEntryId: prev?.queueStatus === 'posted' ? prev.ledgerEntryId ?? null : null,
-    reversalEntryId: prev?.reversalEntryId ?? null,
-    postedAt: prev?.queueStatus === 'posted' ? prev.postedAt ?? null : null,
-    postedBy: prev?.queueStatus === 'posted' ? prev.postedBy ?? null : null,
-    reopenedAt: prev?.reopenedAt ?? null,
-    reopenedBy: prev?.reopenedBy ?? null,
-    reopenReason: prev?.reopenReason ?? null,
-  };
+  // If prev was posted, the WHOLE posted state must carry over together —
+  // never just ledgerEntryId/postedAt/postedBy while leaving queueStatus
+  // hardcoded back to 'pending'. That exact partial-carry produced a real
+  // production bug: a doc left with queueStatus:"pending" but a real
+  // ledgerEntryId, double-counted as both "projected" (pending queue) and
+  // "spent" (its ledger entry) in Grant Budget Manager rollups across
+  // multiple grants. See payment-workflow-hardening PROGRESS.md 2026-07-22.
+  const state = args.state ?? (prev?.queueStatus === 'posted'
+    ? {
+      queueStatus: 'posted' as const,
+      ledgerEntryId: prev.ledgerEntryId ?? null,
+      reversalEntryId: prev?.reversalEntryId ?? null,
+      postedAt: prev.postedAt ?? null,
+      postedBy: prev.postedBy ?? null,
+      reopenedAt: prev?.reopenedAt ?? null,
+      reopenedBy: prev?.reopenedBy ?? null,
+      reopenReason: prev?.reopenReason ?? null,
+    }
+    : {
+      queueStatus: 'pending' as const,
+      ledgerEntryId: null,
+      reversalEntryId: prev?.reversalEntryId ?? null,
+      postedAt: null,
+      postedBy: null,
+      reopenedAt: prev?.reopenedAt ?? null,
+      reopenedBy: prev?.reopenedBy ?? null,
+      reopenReason: prev?.reopenReason ?? null,
+    });
 
   return {
     id: docId,
@@ -616,6 +634,22 @@ export async function syncEnrollmentProjectionQueueItems(args: {
     const ref = db.collection(COLLECTION).doc(docId);
     const existing = existingMap.get(docId);
     const prev = existing?.exists ? (existing.data() as TPaymentQueueItem) : null;
+
+    // Never rebuild an already-posted doc. This sync runs off whatever
+    // `payments` snapshot triggered it — under concurrent writes to the same
+    // enrollment (e.g. two payments each getting marked paid moments apart),
+    // an in-flight run here can be working from a snapshot in which THIS
+    // payment still looks unpaid, racing against the paymentsSpend
+    // transaction that already posted it. Rebuilding would silently revert
+    // queueStatus back to pending — while buildProjectionQueueItem's own
+    // prev-carry-over still preserves the real ledgerEntryId, producing a
+    // doc that reads as both "pending" (double-counted as projected) and
+    // already-paid (its ledger entry still counts as spent). Confirmed in
+    // production across multiple grants — see payment-workflow-hardening
+    // PROGRESS.md 2026-07-22. Same invariant as the cleanup loop below
+    // ("posted = paid, leave it alone"), just also enforced here.
+    if (prev?.queueStatus === 'posted') continue;
+
     const doc = buildProjectionQueueItem({
       context: {
         orgId: args.orgId,

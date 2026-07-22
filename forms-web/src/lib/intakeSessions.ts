@@ -28,6 +28,29 @@ export type IntakeSession = {
 
 const KEY = "hdb:forms:intake-sessions";
 
+export function intakeProgressStorageKey(customerId: string | null): string {
+  return `hdb:forms:intake-progress:${customerId ?? "no-customer"}`;
+}
+
+export function readIntakeProgress(customerId: string | null): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(intakeProgressStorageKey(customerId)) || "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+export function removeIntakeProgress(customerId: string | null): void {
+  try { localStorage.removeItem(intakeProgressStorageKey(customerId)); } catch { /* ignore */ }
+}
+
+export function importRemoteIntakeSession(session: IntakeSession, progress: Record<string, unknown>): void {
+  const existing = listIntakeSessions().find((item) => item.customerId === session.customerId);
+  if (existing && String(existing.updatedAtISO || "") > String(session.updatedAtISO || "")) return;
+  try { localStorage.setItem(intakeProgressStorageKey(session.customerId), JSON.stringify(progress)); } catch { /* ignore */ }
+  upsertIntakeSession(session);
+}
+
 /** Same-tab change signal (the native "storage" event only fires cross-tab). */
 export const INTAKE_SESSIONS_EVENT = "hdb:intake-sessions-changed";
 

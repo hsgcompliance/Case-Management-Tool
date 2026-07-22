@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { INTAKE_TYPES, intakeTypesLabel, type FormDef, type IntakeFlowStep, type IntakeTypeId } from "@/lib/formsCatalog";
 import { removeIntakeSession, upsertIntakeSession } from "@/lib/intakeSessions";
 import { setCustomerTssStatus } from "@/lib/customersApi";
@@ -15,6 +15,7 @@ import { RentCertScheduleBuilder } from "./RentCertScheduleBuilder";
 import { ReferencePanel } from "./ReferencePanel";
 import { ExternalServiceIcon } from "./ui";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
+import { listRemoteIntakeFlows, saveRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
 
@@ -203,6 +204,7 @@ export function FormsCategoryView({
   // Progress is persisted per active customer so the list doubles as a checklist.
   const storageKey = `hdb:forms:intake-progress:${customer?.id ?? "no-customer"}`;
   const [progress, setProgressState] = useState<FlowProgress>(() => loadProgress(storageKey));
+  const [remoteReady, setRemoteReady] = useState(false);
   const keyRef = useRef(storageKey);
   useEffect(() => {
     if (keyRef.current === storageKey) return;
@@ -235,6 +237,27 @@ export function FormsCategoryView({
     }
     setProgressState(next);
   }, [storageKey, customer]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRemoteReady(false);
+    if (!customer?.id) return () => { cancelled = true; };
+    void listRemoteIntakeFlows()
+      .then((items) => {
+        if (cancelled) return;
+        const remote = items.find((item) => item.customerId === customer.id);
+        const local = loadProgress(storageKey);
+        const hasLocal = Object.keys(local.done).length > 0 || Object.keys(local.checks).length > 0 || !!local.intakeTypes?.length;
+        if (remote && !hasLocal) {
+          const imported = remote.progress as FlowProgress;
+          try { localStorage.setItem(storageKey, JSON.stringify(imported)); } catch { /* ignore */ }
+          setProgressState(imported);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setRemoteReady(true); });
+    return () => { cancelled = true; };
+  }, [customer?.id, storageKey]);
   const updateProgress = useCallback(
     (fn: (p: FlowProgress) => FlowProgress) => {
       setProgressState((p) => {
@@ -300,6 +323,27 @@ export function FormsCategoryView({
     });
   }, [progress, customer, steps.length, doneCount]);
 
+  useEffect(() => {
+    if (!remoteReady || !customer?.id || !steps.length) return;
+    const timer = window.setTimeout(() => {
+      const now = new Date().toISOString();
+      void saveRemoteIntakeFlow({
+        customerId: customer.id,
+        customerName: customer.name,
+        cwId: customer.cwId,
+        dob: customer.dob,
+        caseManagerName: customer.caseManagerName,
+        intakeType: progress.intakeTypes?.[0] ?? null,
+        intakeTypes: progress.intakeTypes ?? [],
+        doneCount,
+        totalSteps: steps.length,
+        startedAtISO: now,
+        updatedAtISO: now,
+      }, progress).catch(() => {});
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [remoteReady, customer, progress, doneCount, steps.length]);
+
   // Arriving via a "start intake" link (e.g. a completed referral) jumps
   // straight into the first unfinished step. Once per mount.
   const autoStarted = useRef(false);
@@ -317,6 +361,16 @@ export function FormsCategoryView({
   // right away instead of waiting for its next poll tick.
   const [webhookRefresh, setWebhookRefresh] = useState(0);
   const [webhookSnapshot, setWebhookSnapshot] = useState<IntakeWebhookSnapshot | null>(null);
+  const latestSubmissionByFormId = useMemo(() => {
+    const latest = new Map<string, NonNullable<IntakeWebhookSnapshot>["submissions"][number]>();
+    for (const submission of webhookSnapshot?.submissions ?? []) {
+      const current = latest.get(submission.formId);
+      if (!current || String(submission.receivedAtISO || "") > String(current.receivedAtISO || "")) {
+        latest.set(submission.formId, submission);
+      }
+    }
+    return latest;
+  }, [webhookSnapshot]);
   const [rentCertSubmitted, setRentCertSubmitted] = useState(false);
   const handleRentCertSubmissionState = useCallback((state: { submitted: boolean }) => {
     setRentCertSubmitted(state.submitted);
@@ -803,7 +857,10 @@ export function FormsCategoryView({
                   index={i}
                   done={!!progress.done[s.key]}
                   onOpen={() => setView({ kind: "step", idx: i })}
+                  onToggleDone={() => setDone(s.key, !progress.done[s.key])}
                   onSend={setSendForm}
+                  openUrl={s.form ? `https://form.jotform.com/${s.form.id}` : s.links?.[0] ? resolveHref(s.links[0].href) : null}
+                  submissionId={s.formId ? latestSubmissionByFormId.get(s.formId)?.submissionId ?? null : null}
                 />
               </div>
             ))}
@@ -859,16 +916,65 @@ function StepRow({
   index,
   done,
   onOpen,
+  onToggleDone,
   onSend,
+  openUrl,
+  submissionId,
 }: {
   step: ResolvedStep;
   index: number;
   done: boolean;
   onOpen: () => void;
+  onToggleDone: () => void;
   onSend: (f: FormDef) => void;
+  openUrl: string | null;
+  submissionId: string | null;
 }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  const showMenuAt = (x: number, y: number) => {
+    const width = 240;
+    const height = 260;
+    setMenu({
+      x: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
+    });
+  };
+  const openContextMenu = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showMenuAt(event.clientX, event.clientY);
+  };
+
+  const inboxUrl = step.form && submissionId
+    ? `https://www.jotform.com/inbox/${step.form.id}/${submissionId}`
+    : null;
+  const pdfUrl = submissionId ? `https://www.jotform.com/pdf-submission/${submissionId}` : null;
+  const editUrl = step.form ? `https://www.jotform.com/build/${step.form.id}` : null;
+  const menuItemClass = "block w-full rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700";
+
   return (
-    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40">
+    <div
+      onContextMenu={openContextMenu}
+      title="Right-click for step actions"
+      className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40"
+    >
       <span
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
           done ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"
@@ -908,9 +1014,65 @@ function StepRow({
           </span>
         </a>
       ) : null}
+      <button
+        type="button"
+        aria-label={`Actions for ${step.title}`}
+        aria-haspopup="menu"
+        aria-expanded={!!menu}
+        onClick={(event) => {
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          showMenuAt(rect.right - 220, rect.bottom + 4);
+        }}
+        className="shrink-0 rounded px-1.5 py-1 text-sm font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+      >
+        ⋯
+      </button>
       <button type="button" onClick={onOpen} className="shrink-0 text-xs font-semibold text-indigo-600">
         Open →
       </button>
+      {menu ? (
+        <div
+          role="menu"
+          aria-label={`Actions for ${step.title}`}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ left: menu.x, top: menu.y }}
+          className="fixed z-50 w-60 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { onToggleDone(); setMenu(null); }}
+            className={menuItemClass}
+          >
+            {done ? "Mark incomplete" : "Mark complete"}
+          </button>
+          {openUrl ? (
+            <a href={openUrl} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setMenu(null)} className={menuItemClass}>
+              Open in new tab ↗
+            </a>
+          ) : null}
+          {inboxUrl ? (
+            <a href={inboxUrl} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setMenu(null)} className={menuItemClass}>
+              Open submission in Inbox ↗
+            </a>
+          ) : step.form ? (
+            <span className="block cursor-not-allowed rounded px-3 py-2 text-sm text-slate-400" title="No intake submission is available for this form yet">
+              Open submission — none found
+            </span>
+          ) : null}
+          {pdfUrl ? (
+            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setMenu(null)} className={menuItemClass}>
+              Download submission PDF ↗
+            </a>
+          ) : null}
+          {editUrl ? (
+            <a href={editUrl} target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setMenu(null)} className={menuItemClass}>
+              Edit form ↗
+            </a>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

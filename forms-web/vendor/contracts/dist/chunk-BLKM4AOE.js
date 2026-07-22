@@ -200,6 +200,7 @@ var TasksOtherCreateBody = z.object({
   dueDate: z.string().optional(),
   dueMonth: z.string().optional(),
   notify: z.boolean().optional().default(true),
+  customerId: z.string().nullish(),
   assign: z.object({
     group: OtherGroup.nullish(),
     uids: z.array(z.string()).max(20).nullish()

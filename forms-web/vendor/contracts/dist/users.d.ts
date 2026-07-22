@@ -371,8 +371,8 @@ export declare const UserExtras: z.ZodObject<{
         updatedAt: z.ZodOptional<z.ZodUnknown>;
     }, z.core.$loose>>>;
     taskMode: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        viewer: "viewer";
         workflow: "workflow";
+        viewer: "viewer";
     }>>>;
     taskModeSetAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     taskModeSetBy: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
@@ -527,8 +527,8 @@ export declare const UpdateMeBody: z.ZodObject<{
             updatedAt: z.ZodOptional<z.ZodUnknown>;
         }, z.core.$loose>>>;
         taskMode: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            viewer: "viewer";
             workflow: "workflow";
+            viewer: "viewer";
         }>>>;
         taskModeSetAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         taskModeSetBy: z.ZodOptional<z.ZodNullable<z.ZodEnum<{

@@ -268,8 +268,20 @@ function enrollmentISO10(value: unknown): string {
   return "";
 }
 
+// dueDate/date (the service period a payment covers) must win over
+// paidDate/paidAt (when it was RECORDED as paid) — this function decides
+// whether a close date is chronologically consistent with an enrollment's
+// paid history, which is a question about service periods, not recording
+// timestamps. Prioritizing paidAt broke the instant a historical payment was
+// backfilled after the fact (reconciliation correction, late data entry):
+// the backfill's paidAt is today, which reads as "paid after the close
+// date" for any real historical close date, even though the payment's own
+// due date is squarely before it. Confirmed live: reconciling a customer's
+// April rent today, then trying to close their enrollment as of April/May,
+// failed with close_date_before_last_paid_payment citing today as the
+// "last paid date."
 export function enrollmentPaymentDate(payment: TEnrollmentClosePayment): string {
-  return enrollmentISO10(payment.paidDate || payment.paidAt || payment.dueDate || payment.date);
+  return enrollmentISO10(payment.dueDate || payment.date || payment.paidDate || payment.paidAt);
 }
 
 export function enrollmentMonthEnd(value: unknown): string {

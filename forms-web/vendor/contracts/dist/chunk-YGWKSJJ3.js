@@ -25,6 +25,9 @@ __export(inbox_exports, {
   InboxSendMonthlySummaryBodySchema: () => InboxSendMonthlySummaryBodySchema,
   InboxSourceEnum: () => InboxSourceEnum,
   InboxStatusEnum: () => InboxStatusEnum,
+  InboxTasksDueListQuerySchema: () => InboxTasksDueListQuerySchema,
+  InboxWorkItemKindEnum: () => InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema: () => InboxWorkflowRefSchema,
   InboxWorkloadListQuerySchema: () => InboxWorkloadListQuerySchema
 });
 var InboxSourceEnum = z.enum([
@@ -35,11 +38,29 @@ var InboxSourceEnum = z.enum([
   "adminEnrollment",
   "other",
   "jotform",
+  "formsIntake",
   "otherTask"
   // back-compat alias written by old trigger versions
 ]);
 var InboxStatusEnum = z.enum(["open", "done"]);
 var InboxAssignedGroupEnum = z.enum(["admin", "casemanager", "compliance"]);
+var InboxWorkItemKindEnum = z.enum([
+  "task",
+  "assessment",
+  "compliance",
+  "payment",
+  "intake",
+  "referral",
+  "workflow"
+]);
+var InboxWorkflowRefSchema = z.object({
+  type: z.enum(["intake", "referral", "form"]),
+  instanceId: z.string().min(1),
+  stage: z.string().min(1),
+  customerId: z.string().nullish(),
+  enrollmentId: z.string().nullish(),
+  formId: z.string().nullish()
+});
 var YYYY_MM = z.string().regex(/^\d{4}-\d{2}$/);
 var UrlOrHash = z.union([z.url(), z.literal("#")]);
 var InboxDigestTypeSchema = z.enum(["caseload", "budget", "enrollments", "grantPrograms", "caseManagers", "rentalAssistance"]);
@@ -71,13 +92,20 @@ var InboxItemSchema = z.object({
   assignedToUid: z.string().nullable(),
   assignedToGroup: InboxAssignedGroupEnum.nullish(),
   cmUid: z.string().nullable(),
+  secondaryCmUid: z.string().nullable().default(null),
   // org scoping / projection
   orgId: z.string().nullish(),
   teamIds: z.array(z.string().min(1)).nullish(),
   notify: z.boolean().nullish(),
+  /** Lightweight notification meaning; this does not imply staff performance tracking. */
+  workItemKind: InboxWorkItemKindEnum.nullish(),
+  workflowRef: InboxWorkflowRefSchema.nullish(),
   title: z.string().default(""),
   subtitle: z.string().nullish(),
   labels: z.array(z.string().min(1)).nullish(),
+  /** Backend-owned deep link for workflow-backed reminders. */
+  actionUrl: z.url().nullish(),
+  actionLabel: z.string().max(120).nullish(),
   completedAtISO: IsoString.nullish()
 }).passthrough();
 var InboxItemEntitySchema = InboxItemSchema.extend({
@@ -87,6 +115,9 @@ var InboxListMyQuerySchema = z.object({
   month: YYYY_MM.optional(),
   includeOverdue: Boolish.optional(),
   includeGroup: Boolish.optional()
+}).partial();
+var InboxTasksDueListQuerySchema = z.object({
+  month: YYYY_MM.optional()
 }).partial();
 var InboxWorkloadListQuerySchema = z.object({
   month: YYYY_MM.optional(),
@@ -159,11 +190,14 @@ export {
   InboxSourceEnum,
   InboxStatusEnum,
   InboxAssignedGroupEnum,
+  InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema,
   InboxDigestTypeSchema,
   InboxDigestSubRecordSchema,
   InboxItemSchema,
   InboxItemEntitySchema,
   InboxListMyQuerySchema,
+  InboxTasksDueListQuerySchema,
   InboxWorkloadListQuerySchema,
   InboxSendInviteBodySchema,
   InboxSendMonthlySummaryBodySchema,

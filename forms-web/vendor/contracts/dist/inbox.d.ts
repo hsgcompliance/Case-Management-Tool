@@ -8,6 +8,7 @@ export declare const InboxSourceEnum: z.ZodEnum<{
     userVerification: "userVerification";
     adminEnrollment: "adminEnrollment";
     jotform: "jotform";
+    formsIntake: "formsIntake";
     otherTask: "otherTask";
 }>;
 export type InboxSource = z.infer<typeof InboxSourceEnum>;
@@ -22,6 +23,30 @@ export declare const InboxAssignedGroupEnum: z.ZodEnum<{
     compliance: "compliance";
 }>;
 export type InboxAssignedGroup = z.infer<typeof InboxAssignedGroupEnum>;
+/** Semantic purpose of a userTasks row; `source` still identifies its producer. */
+export declare const InboxWorkItemKindEnum: z.ZodEnum<{
+    intake: "intake";
+    compliance: "compliance";
+    task: "task";
+    assessment: "assessment";
+    payment: "payment";
+    referral: "referral";
+    workflow: "workflow";
+}>;
+export type InboxWorkItemKind = z.infer<typeof InboxWorkItemKindEnum>;
+export declare const InboxWorkflowRefSchema: z.ZodObject<{
+    type: z.ZodEnum<{
+        intake: "intake";
+        referral: "referral";
+        form: "form";
+    }>;
+    instanceId: z.ZodString;
+    stage: z.ZodString;
+    customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    enrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    formId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>;
+export type TInboxWorkflowRef = z.infer<typeof InboxWorkflowRefSchema>;
 export declare const InboxDigestTypeSchema: z.ZodEnum<{
     budget: "budget";
     rentalAssistance: "rentalAssistance";
@@ -66,6 +91,7 @@ export declare const InboxItemSchema: z.ZodObject<{
         userVerification: "userVerification";
         adminEnrollment: "adminEnrollment";
         jotform: "jotform";
+        formsIntake: "formsIntake";
         otherTask: "otherTask";
     }>;
     status: z.ZodEnum<{
@@ -87,12 +113,36 @@ export declare const InboxItemSchema: z.ZodObject<{
         compliance: "compliance";
     }>>>;
     cmUid: z.ZodNullable<z.ZodString>;
+    secondaryCmUid: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     teamIds: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     notify: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    workItemKind: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        intake: "intake";
+        compliance: "compliance";
+        task: "task";
+        assessment: "assessment";
+        payment: "payment";
+        referral: "referral";
+        workflow: "workflow";
+    }>>>;
+    workflowRef: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        type: z.ZodEnum<{
+            intake: "intake";
+            referral: "referral";
+            form: "form";
+        }>;
+        instanceId: z.ZodString;
+        stage: z.ZodString;
+        customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        enrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        formId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$strip>>>;
     title: z.ZodDefault<z.ZodString>;
     subtitle: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     labels: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
+    actionUrl: z.ZodOptional<z.ZodNullable<z.ZodURL>>;
+    actionLabel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     completedAtISO: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$loose>;
 export type TInboxItem = z.infer<typeof InboxItemSchema>;
@@ -108,6 +158,7 @@ export declare const InboxItemEntitySchema: z.ZodObject<{
         userVerification: "userVerification";
         adminEnrollment: "adminEnrollment";
         jotform: "jotform";
+        formsIntake: "formsIntake";
         otherTask: "otherTask";
     }>;
     status: z.ZodEnum<{
@@ -129,12 +180,36 @@ export declare const InboxItemEntitySchema: z.ZodObject<{
         compliance: "compliance";
     }>>>;
     cmUid: z.ZodNullable<z.ZodString>;
+    secondaryCmUid: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     orgId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     teamIds: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
     notify: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    workItemKind: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        intake: "intake";
+        compliance: "compliance";
+        task: "task";
+        assessment: "assessment";
+        payment: "payment";
+        referral: "referral";
+        workflow: "workflow";
+    }>>>;
+    workflowRef: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        type: z.ZodEnum<{
+            intake: "intake";
+            referral: "referral";
+            form: "form";
+        }>;
+        instanceId: z.ZodString;
+        stage: z.ZodString;
+        customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        enrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        formId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    }, z.core.$strip>>>;
     title: z.ZodDefault<z.ZodString>;
     subtitle: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     labels: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;
+    actionUrl: z.ZodOptional<z.ZodNullable<z.ZodURL>>;
+    actionLabel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     completedAtISO: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     id: z.ZodString;
 }, z.core.$loose>;
@@ -147,6 +222,14 @@ export declare const InboxListMyQuerySchema: z.ZodObject<{
 export type TInboxListMyQuery = z.infer<typeof InboxListMyQuerySchema>;
 export type TInboxListMyResp = Ok<{
     items: TInboxItemEntity[];
+}>;
+export declare const InboxTasksDueListQuerySchema: z.ZodObject<{
+    month: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+}, z.core.$strip>;
+export type TInboxTasksDueListQuery = z.infer<typeof InboxTasksDueListQuerySchema>;
+export type TInboxTasksDueListResp = Ok<{
+    items: TInboxItemEntity[];
+    month: string;
 }>;
 export declare const InboxWorkloadListQuerySchema: z.ZodObject<{
     month: z.ZodOptional<z.ZodOptional<z.ZodString>>;

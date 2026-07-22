@@ -48,8 +48,10 @@ import {
 } from "./chunk-5YUCCDMW.js";
 import {
   InboxItemSchema,
+  InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema,
   inbox_exports
-} from "./chunk-UBZRZOSE.js";
+} from "./chunk-YGWKSJJ3.js";
 import {
   jotform_exports
 } from "./chunk-FX7IDERT.js";
@@ -76,7 +78,7 @@ import {
 } from "./chunk-MRVKWMM6.js";
 import {
   enrollments_exports
-} from "./chunk-UGDZ5TIT.js";
+} from "./chunk-B3IGPCRZ.js";
 import {
   payments_exports
 } from "./chunk-IZGYUEC2.js";
@@ -97,7 +99,7 @@ import {
   TasksUpdateStatusBody,
   TasksUpsertManualBody,
   tasks_exports
-} from "./chunk-4O3BPXUB.js";
+} from "./chunk-BLKM4AOE.js";
 import {
   FORM_CONTEXT_KEYS,
   FormPrefillSnapshot,
@@ -322,6 +324,8 @@ export {
   IdLike,
   Ids,
   InboxItemSchema,
+  InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema,
   InviteUserBody,
   JsonObj,
   JsonObjLike,

@@ -101,7 +101,7 @@ export function rowsToCsv(rows: unknown[][]): string {
   ).join("\r\n");
 }
 
-function findHeaderRow(rows: unknown[][], profiles: ReportSourceProfile[], sourceName: string) {
+export function findHeaderRow(rows: unknown[][], profiles: ReportSourceProfile[], sourceName: string) {
   let best = { index: 0, score: Number.NEGATIVE_INFINITY };
   rows.slice(0, MAX_HEADER_SCAN_ROWS).forEach((row, index) => {
     const candidates = detectLikelyReportProfiles(profiles, row, sourceName, 1);

@@ -83,10 +83,48 @@ export const onEnrollmentPaymentsChange = onDocumentWritten(
       await gRef.set(write, { merge: true });
     }
 
+    const enrollmentId = String(event.params.enrollmentId || "");
+
+    // Flag (never silently allow) a payment that just transitioned to paid
+    // with no ledger entry backing it. paymentsSpend always writes the
+    // ledger entry in the same transaction as the paid:true flip, so a
+    // missing ledger entry right after a paid transition means something
+    // else set `paid` directly (a bulk/admin script bypassing paymentsSpend
+    // is the known culprit — see payment-workflow-hardening docs). This
+    // makes that drift visible immediately via `auditFlags` instead of only
+    // discoverable months later via manual reconciliation.
+    const beforeById = new Map<string, any>(b.map((p: any) => [String(p?.id || ""), p]));
+    const newlyPaid = a.filter((p: any) => {
+      const id = String(p?.id || "");
+      if (!id || p?.paid !== true) return false;
+      const priorPayment = beforeById.get(id);
+      return !priorPayment || priorPayment.paid !== true;
+    });
+    if (newlyPaid.length) {
+      const ledgerSnap = await db.collection("ledger").where("enrollmentId", "==", enrollmentId).get();
+      const backedPaymentIds = new Set(
+        ledgerSnap.docs
+          .map((d) => d.data() as any)
+          .filter((l) => !l.reversalOf && Number(l.amountCents || 0) > 0)
+          .map((l) => String(l.paymentId || "")),
+      );
+      const unbacked = newlyPaid.filter((p: any) => !backedPaymentIds.has(String(p.id)));
+      if (unbacked.length) {
+        await db.collection("auditFlags").doc().set({
+          context: "payment_marked_paid_without_ledger",
+          enrollmentId,
+          grantId,
+          customerId: after.customerId ? String(after.customerId) : null,
+          customerName: after.customerName ? String(after.customerName) : null,
+          payments: unbacked.map((p: any) => ({ id: p.id, dueDate: p.dueDate || p.date || null, amount: p.amount ?? null, lineItemId: p.lineItemId || null })),
+          timestamp: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+
     // Keep paymentQueue projection items in sync with the enrollment's payment schedule.
     // This is the authoritative sync path — spend.ts and upsertProjections.ts no longer
     // call syncEnrollmentProjectionQueueItems directly; this trigger is the single writer.
-    const enrollmentId = String(event.params.enrollmentId || "");
     await syncEnrollmentProjectionQueueItems({
       orgId: after.orgId ? String(after.orgId) : null,
       enrollmentId,

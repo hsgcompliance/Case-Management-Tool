@@ -150,6 +150,16 @@ function rowCents(row: Record<string, unknown>) {
   return cents(row.amount ?? row.amountAbs);
 }
 
+// Signed version of rowCents — needed to net a reversal against the entry it
+// reverses (an original + its exact-negative reversal cancel to zero; the
+// absolute-value form above would instead sum their magnitudes).
+function rowCentsSigned(row: Record<string, unknown>) {
+  const amountCents = Number(row.amountCents);
+  if (Number.isFinite(amountCents)) return Math.round(amountCents);
+  const amount = normalizeAmount(row.amount ?? row.amountAbs);
+  return amount == null ? null : Math.round(amount * 100);
+}
+
 function monthKey(value: unknown) {
   return normalizeDate(value).slice(0, 7);
 }
@@ -194,6 +204,14 @@ function customerCaseworthyId(customer: Record<string, unknown>) {
 
 function customerDob(customer: Record<string, unknown>) {
   return normalizeDate(customer.dob ?? customer.dateOfBirth ?? customer.birthDate);
+}
+
+// Staff sometimes store a preferred/legal-name variant separately from the
+// canonical name (e.g. `name: "Harper (Byron) Raines"`, `alias: "Harper
+// Raines"`) — a report using the alias form should match just as cleanly as
+// one using the canonical name.
+function customerAlias(customer: Record<string, unknown>) {
+  return text(customer.alias);
 }
 
 function dateParts(value: string) {
@@ -313,6 +331,13 @@ function buildCustomerIndexes(customers: Array<Record<string, unknown>>) {
     const dob = customerDob(customer);
     if (name && dob) byNameDob.set(`${name}|${dob}`, customer);
     if (name) byName.set(name, [...(byName.get(name) ?? []), customer]);
+    // Index the alias exactly like a second name — same dedup/ambiguity
+    // handling applies if an alias happens to collide with someone else's name.
+    const alias = normalizeCustomerName(customerAlias(customer));
+    if (alias && alias !== name) {
+      if (dob) byNameDob.set(`${alias}|${dob}`, customer);
+      byName.set(alias, [...(byName.get(alias) ?? []), customer]);
+    }
   }
   return { byId, byCw, byCaseworthy, byHmis, byNameDob, byName, all: customers };
 }
@@ -370,9 +395,17 @@ function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof
   let fuzzy: Record<string, unknown> | null = null;
   for (const customer of indexes.all) {
     const customerParts = namePartsFromCustomer(customer);
-    const firstExact = recordParts.first && customerParts.first && recordParts.first === customerParts.first;
-    const lastExact = recordParts.last && customerParts.last && recordParts.last === customerParts.last;
-    if ((firstExact && !lastExact) || (lastExact && !firstExact)) continue;
+    // No asymmetric skip here (an earlier version only allowed the
+    // exact-last/close-first direction, reasoning that common first names
+    // risk false positives on an exact-first/close-last match) — real data
+    // disproved that asymmetry the same day it shipped: "Martha McMurrary"
+    // (report) vs "Martha Mcmurray" (dashboard, one extra "r") is exactly
+    // the exact-first/close-last shape and is unambiguously the same person.
+    // closeSpelling's tight edit-distance threshold on the SURNAME is the
+    // real safety net in both directions (a surname collision within
+    // distance 1-2 of a different real surname is rare), and the result is
+    // still capped at confidence <=0.5 and review-flagged below — never
+    // applied silently either way.
     const firstClose = closeSpelling(recordParts.first, customerParts.first);
     const lastClose = closeSpelling(recordParts.last, customerParts.last);
     if (firstClose && lastClose) {
@@ -391,8 +424,12 @@ function findCustomer(record: NormalizedReportRecord, indexes: ReturnType<typeof
   return { customer: null, confidence: 0, method: "" };
 }
 
+// Human-readable name first: report-side grant signals are always free text
+// ("Bridging Home"), and real enrollment docs always carry a non-null grantId,
+// so an id-first `??` chain never falls through to grantName/programName and
+// token-overlap matching against report text always misses.
 function enrollmentGrantKey(enrollment: Record<string, unknown>) {
-  return lower(enrollment.grantId ?? enrollment.programId ?? enrollment.projectId ?? enrollment.grantName ?? enrollment.programName);
+  return lower(enrollment.grantName ?? enrollment.programName ?? enrollment.grantId ?? enrollment.programId ?? enrollment.projectId);
 }
 
 function recordGrantKey(record: NormalizedReportRecord) {
@@ -478,8 +515,11 @@ function paymentRowVendor(row: Record<string, unknown>) {
   return text(row.vendor ?? row.merchant ?? row.payee ?? row.landlord ?? row.customerNameAtSpend ?? row.description ?? row.note ?? row.notes);
 }
 
+// Same id-vs-name precedence issue as enrollmentGrantKey: paymentQueue/ledger
+// rows always carry a non-null grantId, and ledger's human name lives under
+// grantNameAtSpend (a snapshot at posting time), not grantName.
 function paymentRowGrant(row: Record<string, unknown>) {
-  return text(row.grantId ?? row.grantName ?? row.program ?? row.project ?? row.lineItemName);
+  return text(row.grantName ?? row.grantNameAtSpend ?? row.program ?? row.project ?? row.lineItemName ?? row.grantId);
 }
 
 function paymentRowSource(row: Record<string, unknown>) {
@@ -692,8 +732,20 @@ function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<strin
   return { row, score, reasons, warnings, amountDiffCents: amount != null && itemAmount != null ? amount - itemAmount : null };
 }
 
+// A posted queue item and the ledger entry it was posted to both
+// independently qualify as candidates for the same report row (both carry
+// the right customer/amount/month), so they'd otherwise read as two
+// close-scoring, competing candidates and falsely trip the ambiguity check
+// below — they're the same real-world payment, not two. Once a ledger row
+// is present, drop any queue row whose `ledgerEntryId` points at it; the
+// ledger entry is authoritative once posted.
+function dedupeQueueLedgerSiblings(candidates: Array<Record<string, unknown>>) {
+  const ledgerIds = new Set(candidates.filter((c) => paymentRowSource(c) === "ledger").map((c) => text(c.id)));
+  return candidates.filter((c) => !(paymentRowSource(c) === "payment queue" && ledgerIds.has(text(c.ledgerEntryId))));
+}
+
 function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Array<Record<string, unknown>>, customerId?: string, schedule?: PaymentScheduleContext, excludeIds?: Set<string>) {
-  return paymentRows
+  const scored = paymentRows
     .filter((row) => !excludeIds?.has(text(row.id)))
     .map((row) => scorePaymentCandidate(record, row, customerId, schedule))
     .filter((candidate) => candidate.score >= 35)
@@ -706,6 +758,71 @@ function findPaymentCandidates(record: NormalizedReportRecord, paymentRows: Arra
       _matchSource: paymentRowSource(candidate.row),
       _amountDiffCents: candidate.amountDiffCents,
     }));
+  return dedupeQueueLedgerSiblings(scored);
+}
+
+const PAYMENT_CANDIDATE_AMBIGUITY_MARGIN = 20;
+
+// A recurring flat amount (monthly rent is the common case) routinely scores
+// several dashboard rows above the 35-point floor because of the schedule-
+// alignment bonus in scorePaymentCandidate, which rewards a name+amount pair
+// recurring across months on BOTH sides regardless of which specific month a
+// given candidate row is. Counting "more than one candidate cleared the
+// floor" as ambiguous buried real single-best matches (confirmed on a real
+// Bridge Home run: a customer's true same-month match scored 40+ points
+// above the next-best cross-month row, but still got bucketed as "4 possible
+// matches" instead of resolving). Only treat it as genuinely ambiguous when
+// the runner-up is within this margin of the top score.
+function isDecisivelyBestPaymentCandidate(candidates: Array<Record<string, unknown>>) {
+  if (candidates.length <= 1) return true;
+  const top = Number(candidates[0]._matchScore ?? 0);
+  const runnerUp = Number(candidates[1]._matchScore ?? 0);
+  return top - runnerUp >= PAYMENT_CANDIDATE_AMBIGUITY_MARGIN;
+}
+
+// Free-text signal that a report row is a forward-looking placeholder, not
+// evidence a payment actually happened yet ("Projected", "Planned", etc. in
+// an Invoice Status / Data Entry column). Used to gate the "post this to the
+// ledger" suggestion — applying it to an unrealized future month would mark
+// rent that hasn't happened yet as paid.
+const PROJECTED_REPORT_STATUS_RE = /\b(projected|forecast(ed)?|planned|estimated?|tentative|pending\s+submission)\b/i;
+function isProjectedReportStatus(record: NormalizedReportRecord) {
+  return PROJECTED_REPORT_STATUS_RE.test(record.paymentEvidence.invoice);
+}
+
+// Records with a genuine same-month-and-amount dashboard row available must
+// claim it before a record that only has a cross-month "settle" candidate is
+// allowed to try. Without this, greedy left-to-right consumption in CSV row
+// order can hand a same-month match to an earlier row sharing the same
+// recurring amount, mislabeling which specific month is actually missing
+// (confirmed on a real run: a customer's April charge was flagged "missing"
+// when the real gap was March — April's own ledger row got consumed by the
+// March row first, since March had no ledger row of its own to claim).
+// Must be scoped to the record's OWN resolved customer — otherwise a
+// different customer's coincidentally-same amount+month row falsely signals
+// "this record already has an exact match available" and defeats the whole
+// point of the reordering (confirmed: Daryl Ilano's real March $1,539 ledger
+// row was making Douglas Bigler's March row look "covered" too, since both
+// happen to be $1,539 in March).
+function hasExactMonthDashboardCandidate(customerId: string, record: NormalizedReportRecord, dashboardRows: Array<Record<string, unknown>>) {
+  const amount = cents(record.paymentEvidence.amount);
+  const month = record.paymentEvidence.serviceMonth || monthKey(record.paymentEvidence.transactionDate);
+  if (amount == null || !month) return false;
+  return dashboardRows.some((row) => rowCents(row) === amount && paymentRowMonth(row) === month && (!customerId || text(row.customerId) === customerId));
+}
+
+function orderRecordsForPaymentConsumption(
+  records: NormalizedReportRecord[],
+  dashboardRows: Array<Record<string, unknown>>,
+  customerIndexes: ReturnType<typeof buildCustomerIndexes>,
+) {
+  return [...records].sort((a, b) => {
+    const aCustomerId = text(findCustomer(a, customerIndexes).customer?.id);
+    const bCustomerId = text(findCustomer(b, customerIndexes).customer?.id);
+    const aExact = hasExactMonthDashboardCandidate(aCustomerId, a, dashboardRows) ? 0 : 1;
+    const bExact = hasExactMonthDashboardCandidate(bCustomerId, b, dashboardRows) ? 0 : 1;
+    return aExact - bExact;
+  });
 }
 
 function findingId(kind: ReconciliationFindingKind, record: NormalizedReportRecord, suffix: string) {
@@ -849,7 +966,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       findingCount: 0,
     };
     sourceSummaries.push(sourceSummary);
-    for (const record of packet.records) {
+    for (const record of orderRecordsForPaymentConsumption(packet.records, allDashboardPaymentRows, customerIndexes)) {
       const sourceSystem = sourceSystemFor(record.sourceType, record.recordKind);
       const sourceLabel = sourceSystemLabel(sourceSystem);
       const feClassification = sourceSystem === "financial_edge" && record.paymentEvidence.amount != null ? classifyFe(record) : null;
@@ -1210,7 +1327,10 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
             kind: "payment_missing_dashboard",
             sourceSystem,
             sourceSystemLabel: sourceLabel,
-            severity: record.recordKind === "financialEdgeTransaction" ? "error" : "warning",
+            // A row the report itself only "Projected" hasn't happened yet —
+            // of course it's not in the dashboard's actuals; that's expected,
+            // not a discrepancy, so it doesn't deserve warning/error noise.
+            severity: isProjectedReportStatus(record) ? "info" : record.recordKind === "financialEdgeTransaction" ? "error" : "warning",
             confidence: 0.7,
             sourceFile: record.sourceFile,
             sourceProfileId: packet.profileId,
@@ -1277,14 +1397,17 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
                 paymentCandidateCount: candidates.length,
               },
             });
-          } else if (candidates.length === 1) {
-            // Single clean match — but if the dashboard side is a queue item
-            // that is still pending, FE proves the payment went out and the
-            // item should be posted to the ledger.
+          } else if (isDecisivelyBestPaymentCandidate(candidates)) {
+            // Single (or decisively-best) clean match — but if the dashboard
+            // side is a queue item that is still pending, FE proves the
+            // payment went out and the item should be posted to the ledger.
             const bestRow = best as Record<string, unknown>;
             const bestSource = String(bestRow._matchSource || "");
             const bestPaid = lower(bestRow.queueStatus) === "posted" || bestRow.paid === true || text(bestRow.ledgerEntryId) !== "";
-            if (bestSource === "payment queue" && !bestPaid && lower(bestRow.queueStatus) !== "void") {
+            // A report row that is itself only "Projected"/planned is not
+            // proof a payment happened — never suggest posting a future,
+            // unrealized month to the ledger.
+            if (bestSource === "payment queue" && !bestPaid && lower(bestRow.queueStatus) !== "void" && !isProjectedReportStatus(record)) {
               findings.push({
                 id: findingId("payment_unpaid_dashboard", record, String(bestRow.id ?? "queue")),
                 kind: "payment_unpaid_dashboard",
@@ -1399,6 +1522,15 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
         .map(({ record }) => record.paymentEvidence.grant || record.enrollmentEvidence.projectName)
         .filter(Boolean),
     ));
+    // Candidate rows first (same filters as before), grouped by who|month —
+    // a correction (reversal + repost, sometimes an original + its reversal
+    // left over after the reposted amount was separately claimed) shows up
+    // as several unclaimed rows for the same customer/month that net to
+    // ~$0. Individually they read as N missing payments; together they're
+    // just adjustment history. Cluster first, then only emit one finding
+    // per group — full detail (never deleted, still in Firestore) stays
+    // attached for audits like this one.
+    const candidateRows: Array<{ row: Record<string, unknown>; amount: number; month: string; key: string; id: string }> = [];
     for (const row of allDashboardPaymentRows) {
       const id = text(row.id);
       if (id && consumedDashboardIds.has(id)) continue;
@@ -1408,38 +1540,87 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       const key = dashboardRowKey(row);
       if (key && coveredDashboardKeys.has(key)) continue;
       if (lower(row.queueStatus) === "void") continue;
-      const customer = customerIndexes.byId.get(text(row.customerId));
-      const rowGrant = paymentRowGrant(row);
-      // Rows whose grant never appears in the report are likely out of the
-      // report's scope (e.g. an ESG payment during a CoC reconciliation).
-      const grantInReportScope = !rowGrant || !reportGrants.length || reportGrants.some((grant) => hasTokenOverlap(grant, rowGrant));
-      findings.push({
-        id: `payment_missing_report::${paymentRowSource(row)}::${id || key || Math.random().toString(36).slice(2)}`,
-        kind: "payment_missing_report",
-        sourceSystem: "dashboard",
-        sourceSystemLabel: sourceSystemLabel("dashboard"),
-        severity: grantInReportScope ? "warning" : "info",
-        confidence: grantInReportScope ? 0.6 : 0.4,
-        sourceFile: "dashboard",
-        sourceRowNumber: null,
-        recordKind: paymentRowSource(row),
-        customerId: text(row.customerId) || undefined,
-        customerLabel: customer ? customerLabel(customer) : text(row.customerNameAtSpend ?? row.customerName) || undefined,
-        reportValue: "(no report row)",
-        dashboardValue: `${(amount / 100).toFixed(2)} ${month}`,
-        explanation: [
-          `Dashboard ${paymentRowSource(row)} row (${month}, $${(amount / 100).toFixed(2)}) was not claimed by any row of the uploaded payment report in the report's months. The payment may be unpaid, cancelled, or missing from the report.`,
-          ...(grantInReportScope ? [] : [`Row grant "${rowGrant}" does not appear in the uploaded report's grant signals — it may simply be outside this report's scope.`]),
-        ],
-        proposedAction: "Verify whether this scheduled/recorded payment actually went out; correct the queue/ledger row if it was cancelled or never paid.",
-        matchedPaymentCandidates: [row],
-        match: {
-          criteria: [
-            "The uploaded payment report is source of truth for payment reconciliation.",
-            "No kept report row matched this dashboard payment by customer/amount/month (1:1 assignment).",
+      candidateRows.push({ row, amount, month, key, id });
+    }
+
+    const clusterKey = (c: (typeof candidateRows)[number]) => `${paymentRowWho(c.row) || text(c.row.customerId)}|${c.month}`;
+    const clusters = new Map<string, typeof candidateRows>();
+    for (const candidate of candidateRows) {
+      const k = clusterKey(candidate);
+      clusters.set(k, [...(clusters.get(k) ?? []), candidate]);
+    }
+
+    for (const cluster of clusters.values()) {
+      const netCents = cluster.reduce((sum, c) => sum + (rowCentsSigned(c.row) ?? 0), 0);
+      const isNetZeroCluster = cluster.length > 1 && Math.abs(netCents) <= 1;
+
+      if (isNetZeroCluster) {
+        const first = cluster[0];
+        const customer = customerIndexes.byId.get(text(first.row.customerId));
+        const total = cluster.reduce((sum, c) => sum + c.amount, 0);
+        findings.push({
+          id: `payment_missing_report::net_zero_cluster::${clusterKey(first)}`,
+          kind: "payment_missing_report",
+          sourceSystem: "dashboard",
+          sourceSystemLabel: sourceSystemLabel("dashboard"),
+          severity: "info",
+          confidence: 0.3,
+          sourceFile: "dashboard",
+          sourceRowNumber: null,
+          recordKind: paymentRowSource(first.row),
+          customerId: text(first.row.customerId) || undefined,
+          customerLabel: customer ? customerLabel(customer) : text(first.row.customerNameAtSpend ?? first.row.customerName) || undefined,
+          reportValue: "(no report row)",
+          dashboardValue: `net $0.00 across ${cluster.length} rows, ${first.month}`,
+          explanation: [
+            `${cluster.length} unclaimed dashboard rows for ${first.month} (gross $${(total / 100).toFixed(2)} combined) net to $0.00 — almost always a payment correction (an entry reversed and reposted at the right amount), not a real discrepancy. Kept here for audit visibility; not worth investigating individually.`,
           ],
-        },
-      });
+          proposedAction: "No action expected. Only look closer if the net were nonzero.",
+          matchedPaymentCandidates: cluster.map((c) => c.row),
+          match: {
+            criteria: [
+              "The uploaded payment report is source of truth for payment reconciliation.",
+              `${cluster.length} same-customer/same-month dashboard rows were unclaimed but net to $0.00 — clustered as a single low-priority finding instead of ${cluster.length} individual ones.`,
+            ],
+          },
+        });
+        continue;
+      }
+
+      for (const { row, amount, month, key, id } of cluster) {
+        const customer = customerIndexes.byId.get(text(row.customerId));
+        const rowGrant = paymentRowGrant(row);
+        // Rows whose grant never appears in the report are likely out of the
+        // report's scope (e.g. an ESG payment during a CoC reconciliation).
+        const grantInReportScope = !rowGrant || !reportGrants.length || reportGrants.some((grant) => hasTokenOverlap(grant, rowGrant));
+        findings.push({
+          id: `payment_missing_report::${paymentRowSource(row)}::${id || key || Math.random().toString(36).slice(2)}`,
+          kind: "payment_missing_report",
+          sourceSystem: "dashboard",
+          sourceSystemLabel: sourceSystemLabel("dashboard"),
+          severity: grantInReportScope ? "warning" : "info",
+          confidence: grantInReportScope ? 0.6 : 0.4,
+          sourceFile: "dashboard",
+          sourceRowNumber: null,
+          recordKind: paymentRowSource(row),
+          customerId: text(row.customerId) || undefined,
+          customerLabel: customer ? customerLabel(customer) : text(row.customerNameAtSpend ?? row.customerName) || undefined,
+          reportValue: "(no report row)",
+          dashboardValue: `${(amount / 100).toFixed(2)} ${month}`,
+          explanation: [
+            `Dashboard ${paymentRowSource(row)} row (${month}, $${(amount / 100).toFixed(2)}) was not claimed by any row of the uploaded payment report in the report's months. The payment may be unpaid, cancelled, or missing from the report.`,
+            ...(grantInReportScope ? [] : [`Row grant "${rowGrant}" does not appear in the uploaded report's grant signals — it may simply be outside this report's scope.`]),
+          ],
+          proposedAction: "Verify whether this scheduled/recorded payment actually went out; correct the queue/ledger row if it was cancelled or never paid.",
+          matchedPaymentCandidates: [row],
+          match: {
+            criteria: [
+              "The uploaded payment report is source of truth for payment reconciliation.",
+              "No kept report row matched this dashboard payment by customer/amount/month (1:1 assignment).",
+            ],
+          },
+        });
+      }
     }
   }
 

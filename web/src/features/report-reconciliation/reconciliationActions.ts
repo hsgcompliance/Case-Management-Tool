@@ -11,6 +11,7 @@ export type ReconciliationActionKind =
   | "review_provider_mapping"
   | "create_payment_review_task"
   | "post_queue_payment"
+  | "post_schedule_payment"
   | "patch_queue_amount"
   | "void_queue_payment"
   | "patch_enrollment_dates";
@@ -187,19 +188,46 @@ export function buildActionPreviews(finding: ReconciliationFinding): Reconciliat
     });
   }
   if (finding.kind === "payment_unpaid_dashboard" && finding.paymentId) {
-    out.push({
-      id: `${finding.id}:post-queue-payment`,
-      kind: "post_queue_payment",
-      label: "Post queue item to ledger (mark paid)",
-      target: "paymentQueue",
-      targetId: finding.paymentId,
-      sourceValue: finding.reportValue || "",
-      currentValue: finding.dashboardValue || "pending",
-      proposedValue: "posted (ledger entry created)",
-      confidence: finding.confidence,
-      warning: "Creates a ledger entry and marks the queue item paid. Confirm the report evidence describes this exact payment.",
-      executable: true,
-    });
+    // paymentQueuePostToLedger throws `use_payments_spend_for_projection` for
+    // schedule-derived (source:"projection") queue rows — i.e. the normal
+    // case for any rental-assistance/enrollment-schedule payment. Those must
+    // go through paymentsSpend instead, which is the one path that keeps
+    // payments[].paid, the ledger entry, and the queue's posted status all
+    // in sync atomically (see PROGRESS.md 2026-07-22 entry).
+    const best = finding.matchedPaymentCandidates?.[0];
+    const isScheduleDerived = text(best?.source) === "projection";
+    const scheduleEnrollmentId = text(best?.enrollmentId);
+    const schedulePaymentId = text(best?.paymentId);
+    if (isScheduleDerived && scheduleEnrollmentId && schedulePaymentId) {
+      out.push({
+        id: `${finding.id}:post-schedule-payment`,
+        kind: "post_schedule_payment",
+        label: "Mark scheduled payment paid (creates ledger entry)",
+        target: "customerEnrollments",
+        targetId: scheduleEnrollmentId,
+        sourceValue: finding.reportValue || "",
+        currentValue: finding.dashboardValue || "pending",
+        proposedValue: "paid (ledger entry created)",
+        confidence: finding.confidence,
+        warning: "Marks the enrollment's scheduled payment paid and creates its ledger entry. Confirm the report evidence describes this exact payment.",
+        executable: true,
+        patch: { enrollmentId: scheduleEnrollmentId, paymentId: schedulePaymentId },
+      });
+    } else {
+      out.push({
+        id: `${finding.id}:post-queue-payment`,
+        kind: "post_queue_payment",
+        label: "Post queue item to ledger (mark paid)",
+        target: "paymentQueue",
+        targetId: finding.paymentId,
+        sourceValue: finding.reportValue || "",
+        currentValue: finding.dashboardValue || "pending",
+        proposedValue: "posted (ledger entry created)",
+        confidence: finding.confidence,
+        warning: "Creates a ledger entry and marks the queue item paid. Confirm the report evidence describes this exact payment.",
+        executable: true,
+      });
+    }
   }
   if (finding.kind === "payment_amount_mismatch" && record) {
     const best = finding.matchedPaymentCandidates?.[0];

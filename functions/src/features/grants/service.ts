@@ -17,6 +17,7 @@ import {
 } from "../../core";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
 import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
+import { computeGrantLineItemOverCap } from "@hdb/contracts";
 import { deleteEnrollmentsCore } from "../enrollments/delete";
 import {
   deriveMaxAssistanceSnapshot,
@@ -995,6 +996,25 @@ export async function patchGrants(
             : { total: 0, lineItems: [] },
           { ...prev, ...patch },
         );
+      }
+
+      // Recompute each line item's overCap against the NEW amount now, not
+      // just whenever a later payment write happens to touch that line item.
+      // Editing a budget amount up or down changes whether spent+projected
+      // exceeds it immediately — the flag should never be allowed to go
+      // stale relative to the amount that's actually on screen right after
+      // a save. spent/projected are preserved as-is above; only the flag
+      // itself is being refreshed here.
+      if (nextBudget && Array.isArray(nextBudget.lineItems)) {
+        const prospectiveGrant = { ...prev, ...patch, budget: nextBudget };
+        nextBudget = {
+          ...nextBudget,
+          lineItems: nextBudget.lineItems.map((li: any) => {
+            const overCap = computeGrantLineItemOverCap(prospectiveGrant, li);
+            const { overCap: _drop, ...rest } = li;
+            return overCap != null ? { ...rest, overCap } : rest;
+          }),
+        };
       }
 
       const data: Record<string, unknown> = {

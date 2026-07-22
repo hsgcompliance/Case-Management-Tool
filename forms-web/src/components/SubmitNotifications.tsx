@@ -6,9 +6,15 @@ import {
   listIntakeSessions,
   onIntakeSessionsChange,
   removeIntakeSession,
+  importRemoteIntakeSession,
+  readIntakeProgress,
+  removeIntakeProgress,
   sessionCustomer,
   type IntakeSession,
 } from "@/lib/intakeSessions";
+import { listRemoteIntakeFlows, transferIntakeFlow, type IntakeFlowProgress } from "@/lib/intakeFlowsApi";
+import { loadUsers, type FormsUser } from "@/lib/usersApi";
+import { useAuth } from "@/hooks/useAuth";
 import { intakeTypeLabel, intakeTypesLabel } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { useCatalog } from "@/hooks/useCatalog";
@@ -31,12 +37,16 @@ function shortDate(iso: string | null): string {
 }
 
 export function SubmitNotifications() {
+  const { user } = useAuth();
   const catalog = useCatalog();
   const navigate = useNavigate();
   const { setCustomer } = useCurrentCustomer();
   const [events, setEvents] = useState<WebhookEventItem[]>([]);
   const [sessions, setSessions] = useState<IntakeSession[]>([]);
   const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState<FormsUser[]>([]);
+  const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
+  const [transferring, setTransferring] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const notifyForms = useMemo(
@@ -47,8 +57,38 @@ export function SubmitNotifications() {
   useEffect(() => {
     const refresh = () => setSessions(listIntakeSessions());
     refresh();
+    void Promise.all([listRemoteIntakeFlows(), loadUsers()]).then(([flows, orgUsers]) => {
+      for (const flow of flows) importRemoteIntakeSession(flow.session, flow.progress);
+      setSessions(listIntakeSessions());
+      setUsers(orgUsers.filter((candidate) => candidate.uid !== user?.uid));
+    }).catch(() => {});
     return onIntakeSessionsChange(refresh);
-  }, []);
+  }, [user?.uid]);
+
+  const sendIntake = async (session: IntakeSession) => {
+    const key = session.customerId || "";
+    const targetUid = transferTargets[key];
+    if (!session.customerId || !targetUid) return;
+    const target = users.find((candidate) => candidate.uid === targetUid);
+    if (!window.confirm(`Send ${session.customerName || "this intake"}'s saved workflow to ${target?.name || "the selected user"}? It will leave your Active Intakes.`)) return;
+    setTransferring(key);
+    try {
+      const raw = readIntakeProgress(session.customerId);
+      const progress: IntakeFlowProgress = {
+        done: (raw.done as Record<string, boolean>) || {},
+        checks: (raw.checks as Record<string, number[]>) || {},
+        ...(raw.tssVariant === "payer" || raw.tssVariant === "nonpayer" ? { tssVariant: raw.tssVariant } : {}),
+        ...(Array.isArray(raw.intakeTypes) ? { intakeTypes: raw.intakeTypes.map(String) } : {}),
+      };
+      await transferIntakeFlow(targetUid, session, progress);
+      removeIntakeSession(session.customerId);
+      removeIntakeProgress(session.customerId);
+    } catch (error) {
+      window.alert(`Could not send workflow: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setTransferring(null);
+    }
+  };
 
   const incompleteIntakes = useMemo(
     () => sessions.filter((s) => s.doneCount < s.totalSteps).length,
@@ -159,6 +199,27 @@ export function SubmitNotifications() {
                         {intakeTypesLabel(s.intakeTypes) || intakeTypeLabel(s.intakeType) || "Intake"} · {shortDate(s.updatedAtISO)} · resume →
                       </div>
                     </button>
+                    {s.customerId && users.length ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <select
+                          aria-label={`Send ${s.customerName || "intake"} to user`}
+                          value={transferTargets[s.customerId] || ""}
+                          onChange={(event) => setTransferTargets((current) => ({ ...current, [s.customerId!]: event.currentTarget.value }))}
+                          className="max-w-24 rounded border border-slate-200 bg-white px-1 py-1 text-[10px] text-slate-600"
+                        >
+                          <option value="">Send to...</option>
+                          {users.map((candidate) => <option key={candidate.uid} value={candidate.uid}>{candidate.name}</option>)}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!transferTargets[s.customerId] || transferring === s.customerId}
+                          onClick={() => void sendIntake(s)}
+                          className="rounded bg-indigo-600 px-1.5 py-1 text-[10px] font-semibold text-white disabled:opacity-40"
+                        >
+                          {transferring === s.customerId ? "..." : "Send"}
+                        </button>
+                      </div>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => removeIntakeSession(s.customerId)}

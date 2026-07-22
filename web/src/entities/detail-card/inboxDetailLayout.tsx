@@ -83,6 +83,11 @@ function jotformDashboardHref(item: any): string {
   return `/reports/jotform-dashboard?formId=${encodeURIComponent(id)}`;
 }
 
+function workflowActionHref(item: any): string | null {
+  const href = String(item?.actionUrl || "").trim();
+  return /^https:\/\//i.test(href) ? href : null;
+}
+
 /** Top banner — replaces the old <DetailSection title="Header"> so the literal word "Header" never appears. */
 export function DetailUniversalHeader({ item }: { item: any }) {
   const overdue = isOverdue(item);
@@ -216,8 +221,9 @@ export function DetailAdvancedView({ item }: { item: any }) {
 
 function LinkBtn({ href, label }: { href: string | null; label: string }) {
   if (!href) return null;
+  const external = /^https:\/\//i.test(href);
   return (
-    <a className="btn btn-ghost btn-xs" href={href}>
+    <a className="btn btn-ghost btn-xs" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
       {label}
     </a>
   );
@@ -232,6 +238,7 @@ export function DetailQuickLinks({ item }: { item: any }) {
         <LinkBtn href={enrollmentHref(item)} label="Edit Enrollment" />
         <LinkBtn href={grantHref(item)} label="View in Budget" />
         <LinkBtn href={customerHref(item)} label="View Customer" />
+        <LinkBtn href={workflowActionHref(item)} label={String(item?.actionLabel || "Open workflow")} />
         {showJotform ? <LinkBtn href={jotformDigestHref(item)} label="Open Jotform Digest" /> : null}
         {showJotform ? <LinkBtn href={jotformDashboardHref(item)} label="Open Jotform Dashboard" /> : null}
         <LinkBtn href={budgetHref(item)} label="View Budget Tool" />

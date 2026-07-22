@@ -209,6 +209,7 @@ export declare const TasksOtherCreateBody: z.ZodObject<{
     dueDate: z.ZodOptional<z.ZodString>;
     dueMonth: z.ZodOptional<z.ZodString>;
     notify: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     assign: z.ZodOptional<z.ZodObject<{
         group: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<"admin">, z.ZodLiteral<"casemanager">, z.ZodLiteral<"compliance">]>>>;
         uids: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString>>>;

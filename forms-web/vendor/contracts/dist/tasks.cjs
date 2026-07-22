@@ -275,6 +275,7 @@ var TasksOtherCreateBody = import_zod2.z.object({
   dueDate: import_zod2.z.string().optional(),
   dueMonth: import_zod2.z.string().optional(),
   notify: import_zod2.z.boolean().optional().default(true),
+  customerId: import_zod2.z.string().nullish(),
   assign: import_zod2.z.object({
     group: OtherGroup.nullish(),
     uids: import_zod2.z.array(import_zod2.z.string()).max(20).nullish()

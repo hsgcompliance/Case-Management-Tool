@@ -10,6 +10,7 @@ import type { ExportColumn } from "@entities/ui/dashboardStyle/SmartExportButton
 import { usePaymentQueueItemsForMonths, usePatchPaymentQueueItem, usePostPaymentQueueToLedger, useVoidPaymentQueueItem } from "@hooks/usePaymentQueue";
 import type { PaymentQueuePatchReq } from "@client/paymentQueue";
 import { useLedgerEntriesForMonths } from "@hooks/useLedger";
+import { usePaymentsSpend } from "@hooks/usePayments";
 import { usePatchCustomers, useUpsertCustomers } from "@hooks/useCustomers";
 import { useEnrollmentsPatch } from "@hooks/useEnrollments";
 import DatabaseFilterPanel from "@entities/database-filters/DatabaseFilterPanel";
@@ -233,6 +234,7 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
   const upsertCustomers = useUpsertCustomers();
   const patchQueueItem = usePatchPaymentQueueItem();
   const postQueueItem = usePostPaymentQueueToLedger();
+  const postSchedulePayment = usePaymentsSpend();
   const voidQueueItem = useVoidPaymentQueueItem();
   const enrollmentsPatch = useEnrollmentsPatch();
   const queryClient = useQueryClient();
@@ -271,6 +273,14 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
         await postQueueItem.mutateAsync({ id: action.targetId });
         await refresh();
         toast("Queue item posted to ledger.", { type: "success" });
+      } else if (action.kind === "post_schedule_payment") {
+        const enrollmentId = textValue((action.patch as Record<string, unknown> | undefined)?.enrollmentId);
+        const paymentId = textValue((action.patch as Record<string, unknown> | undefined)?.paymentId);
+        if (!enrollmentId || !paymentId) throw new Error("Schedule payment action is missing its enrollment/payment id.");
+        if (!window.confirm(`Mark this scheduled payment paid and create its ledger entry?\n\nCurrent: ${action.currentValue}\nProposed: ${action.proposedValue}`)) return;
+        await postSchedulePayment.mutateAsync({ body: { enrollmentId, paymentId, reverse: false } });
+        await refresh();
+        toast("Scheduled payment marked paid and posted to ledger.", { type: "success" });
       } else if (action.kind === "patch_queue_amount") {
         if (!action.targetId || !action.patch) throw new Error("Queue amount action is missing its target or patch.");
         await patchQueueItem.mutateAsync({ id: action.targetId, body: action.patch as PaymentQueuePatchReq });
@@ -291,7 +301,7 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
   };
 
   if (!actions.length) return null;
-  const busy = patchCustomers.isPending || upsertCustomers.isPending || patchQueueItem.isPending || postQueueItem.isPending || voidQueueItem.isPending || enrollmentsPatch.isPending || Boolean(runningId);
+  const busy = patchCustomers.isPending || upsertCustomers.isPending || patchQueueItem.isPending || postQueueItem.isPending || postSchedulePayment.isPending || voidQueueItem.isPending || enrollmentsPatch.isPending || Boolean(runningId);
   return (
     <div className="mt-4 rounded border border-sky-200 bg-sky-50 p-3 dark:border-sky-900 dark:bg-sky-950/40">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Database actions</div>

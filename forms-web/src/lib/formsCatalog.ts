@@ -77,6 +77,8 @@ export const FORMS: FormDef[] = [
 
 /** The staff web app (customer documents + Google Drive folders live there). */
 export const WEB_APP_BASE = "https://housing-db-v2.web.app";
+const HOMELESSNESS_STATUS_CERTIFICATION_URL =
+  "https://drive.google.com/file/d/1BTNL1fNO6oRH_EMGjQIR0qENXPw94up6/view?usp=drive_link";
 
 /** Intake programs selected in step 1. PATH and TSS may accompany another path. */
 export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "bridging-home" | "path-housing" | "tss-deposit-fee";
@@ -212,6 +214,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
       { href: "https://drive.google.com/drive/folders/1VEr-0FOR85ssTezafSbvo4YWxvYk016q", label: "Income file form templates (Drive)" },
       { href: "https://drive.google.com/drive/folders/1VF1Q3DbZxHjunU_jrTBU5F5CO2CbdMxm", label: "Asset file form templates (Drive)" },
       { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
+      { href: HOMELESSNESS_STATUS_CERTIFICATION_URL, label: "Certification of Homelessness Status (PDF)" },
     ],
   },
   {
@@ -261,6 +264,7 @@ export const INTAKE_RESOURCES: { href: string; label: string }[] = [
   { href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" },
   { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
   { href: "https://www.jotform.com/boards/251318461516050", label: "Intake board (Jotform)" },
+  { href: HOMELESSNESS_STATUS_CERTIFICATION_URL, label: "Certification of Homelessness Status (PDF)" },
 ];
 
 export function formsByCategory(category: FormCategory): FormDef[] {
