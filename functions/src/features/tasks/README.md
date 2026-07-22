@@ -48,6 +48,24 @@ Conditional rules can also carry recurrence fields (`kind`, `frequency`, `every`
 - Keep compatibility readers tolerant of old `taskSchedule` records.
 - Rename frontend surfaces over time from "Tasks" to "Notes", "Reminders", or "Follow-ups" where the UI is no longer status-driven.
 
+## Forms workflow reminders
+
+Forms intake progress uses lightweight `userTasks` reminders rather than the
+deprecated enrollment task generator. Active rules live in
+`formSessions/workflowTaskRules.ts`:
+
+- saving an incomplete linked intake upserts one direct reminder for the flow owner;
+- completing the intake closes that reminder automatically;
+- an Eligibility Determination submission (intake step 13) creates a Compliance-bucket
+  handoff notification. Linked primary and secondary case managers retain visibility
+  and can take or receive the work.
+
+These are lightweight smart notifications for transparency and reminders, not
+staff-performance tracking. The same registry contains disabled placeholders for
+referral-to-intake, basic-intake-to-compliance, landlord contact, MOU follow-up, and
+MOU-complete payment-data transitions. Enable them only after their canonical source
+events are defined.
+
 ## Rent certification reminders
 
 Rent certification is now treated as payment-derived reminders, not a sequential task workflow. The payment schedule builder should emit paired one-off reminder definitions for each rent-cert event:

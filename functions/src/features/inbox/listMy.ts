@@ -40,6 +40,23 @@ export const inboxListMy = secureHandler(
     const mineSnap = await qMine.get();
     const mine = mineSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
+    // Linked case managers keep visibility when another desk owns the queue.
+    // This supports collaborative handoffs without treating the task as a mandate.
+    const linkedItems: any[] = [];
+    if (caseManager) {
+      const linkedSnaps = await Promise.all(
+        ["cmUid", "secondaryCmUid"].map(async (field) => {
+          let base: FirebaseFirestore.Query = inboxRef
+            .where(field, "==", uid)
+            .where("status", "==", "open");
+          if (month) base = base.where("dueMonth", "==", month);
+          const snap = await base.get();
+          return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        })
+      );
+      linkedSnaps.forEach((rows) => linkedItems.push(...rows));
+    }
+
     // 2) Optional group backlog (open + month filter)
     const groupItems: any[] = [];
     if (includeGroup && groupCandidates.length) {
@@ -72,7 +89,7 @@ export const inboxListMy = secureHandler(
     // Merge + dedupe (prefer utid; fall back to doc id)
     const seen = new Set<string>();
     const out: any[] = [];
-    for (const arr of [mine, overdue, groupItems]) {
+    for (const arr of [mine, overdue, linkedItems, groupItems]) {
       for (const it of arr) {
         const key = String((it as any).utid || (it as any).id || "");
         if (!key || seen.has(key)) continue;

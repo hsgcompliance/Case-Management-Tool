@@ -465,6 +465,8 @@ export type {
   InboxSource,
   InboxStatus,
   InboxAssignedGroup,
+  InboxWorkItemKind,
+  TInboxWorkflowRef,
   TInboxItem,
   TInboxItemEntity,
   TInboxListMyQuery,
@@ -485,7 +487,11 @@ export type {
   TInboxMetricsMyResp,
 } from "./inbox";
 
-export {InboxItemSchema} from "./inbox";
+export {
+  InboxItemSchema,
+  InboxWorkItemKindEnum,
+  InboxWorkflowRefSchema,
+} from "./inbox";
 
 // Ledger (local types + request bodies)
 export type {

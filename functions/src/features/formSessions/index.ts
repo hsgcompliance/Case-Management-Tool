@@ -20,3 +20,8 @@ export {
   formsRentCertApply_http as formsRentCertApply,
   formsCustomerNotEligible_http as formsCustomerNotEligible,
 } from "./rentCert";
+export {
+  formsIntakeFlowsList_http as formsIntakeFlowsList,
+  formsIntakeFlowSave_http as formsIntakeFlowSave,
+  formsIntakeFlowTransfer_http as formsIntakeFlowTransfer,
+} from "./intakeFlows";

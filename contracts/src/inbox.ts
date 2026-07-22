@@ -14,6 +14,7 @@ export const InboxSourceEnum = z.enum([
   "adminEnrollment",
   "other",
   "jotform",
+  "formsIntake",
   "otherTask", // back-compat alias written by old trigger versions
 ]);
 export type InboxSource = z.infer<typeof InboxSourceEnum>;
@@ -23,6 +24,28 @@ export type InboxStatus = z.infer<typeof InboxStatusEnum>;
 
 export const InboxAssignedGroupEnum = z.enum(["admin", "casemanager", "compliance"]);
 export type InboxAssignedGroup = z.infer<typeof InboxAssignedGroupEnum>;
+
+/** Semantic purpose of a userTasks row; `source` still identifies its producer. */
+export const InboxWorkItemKindEnum = z.enum([
+  "task",
+  "assessment",
+  "compliance",
+  "payment",
+  "intake",
+  "referral",
+  "workflow",
+]);
+export type InboxWorkItemKind = z.infer<typeof InboxWorkItemKindEnum>;
+
+export const InboxWorkflowRefSchema = z.object({
+  type: z.enum(["intake", "referral", "form"]),
+  instanceId: z.string().min(1),
+  stage: z.string().min(1),
+  customerId: z.string().nullish(),
+  enrollmentId: z.string().nullish(),
+  formId: z.string().nullish(),
+});
+export type TInboxWorkflowRef = z.infer<typeof InboxWorkflowRefSchema>;
 
 /* =============================================================================
    Helpers
@@ -81,9 +104,15 @@ export const InboxItemSchema = z
     teamIds: z.array(z.string().min(1)).nullish(),
 
     notify: z.boolean().nullish(),
+    /** Lightweight notification meaning; this does not imply staff performance tracking. */
+    workItemKind: InboxWorkItemKindEnum.nullish(),
+    workflowRef: InboxWorkflowRefSchema.nullish(),
     title: z.string().default(""),
     subtitle: z.string().nullish(),
     labels: z.array(z.string().min(1)).nullish(),
+    /** Backend-owned deep link for workflow-backed reminders. */
+    actionUrl: z.url().nullish(),
+    actionLabel: z.string().max(120).nullish(),
 
     completedAtISO: IsoString.nullish(),
   })

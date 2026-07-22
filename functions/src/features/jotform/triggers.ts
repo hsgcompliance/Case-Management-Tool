@@ -6,9 +6,11 @@ import {
 } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import { db, RUNTIME, isoNow } from "../../core";
+import { FORM_WORKFLOW_TASK_RULES } from "../formSessions/workflowTaskRules";
 
 const FN_JOTFORM_INDEXER = "onJotformSubmissionIndexer";
 const SPENDING_FORM_IDS = new Set(["251878265158166", "252674777246167"]);
+const ELIGIBILITY_DETERMINATION_FORM_ID = FORM_WORKFLOW_TASK_RULES.eligibilityReview.formId;
 
 type DigestTaskConfig = {
   enabled: boolean;
@@ -110,7 +112,8 @@ async function upsertJotformInboxItem(id: string, sub: any) {
 
   const isSpendingForm = SPENDING_FORM_IDS.has(formId);
   const digestTask = await loadDigestTaskConfig(sub);
-  const taskEnabled = isSpendingForm || digestTask.enabled;
+  const isEligibilityDetermination = formId === ELIGIBILITY_DETERMINATION_FORM_ID;
+  const taskEnabled = isSpendingForm || isEligibilityDetermination || digestTask.enabled;
 
   if (!taskEnabled) {
     await closeJotformInboxItem(id);
@@ -124,6 +127,7 @@ async function upsertJotformInboxItem(id: string, sub: any) {
   let customerName: string | null = null;
   let caseManagerName: string | null = null;
   let cmUid: string | null = null;
+  let secondaryCmUid: string | null = null;
   let enrollmentName: string | null = null;
   let grantName: string | null = null;
   let teamIds: string[] = orgId ? [orgId] : [];
@@ -137,6 +141,7 @@ async function upsertJotformInboxItem(id: string, sub: any) {
           String((enr as any).customerName || (enr as any).clientName || "") || null;
         caseManagerName = String((enr as any).caseManagerName || "") || null;
         cmUid = String((enr as any).caseManagerId || "") || null;
+        secondaryCmUid = String((enr as any).secondaryCaseManagerId || "") || null;
         enrollmentName = String((enr as any).name || "") || null;
         grantName = String((enr as any).grantName || "") || null;
         const enrTeamIds: string[] = Array.isArray((enr as any).teamIds)
@@ -148,6 +153,23 @@ async function upsertJotformInboxItem(id: string, sub: any) {
       }
     } catch (err) {
       logger.warn(FN_JOTFORM_INDEXER + "_enrollment_lookup_failed", { enrollmentId, err });
+    }
+  }
+
+  // A Forms intake can be customer-linked before an enrollment exists. Preserve
+  // case-manager visibility even though Compliance owns the default handoff queue.
+  if (customerId && !cmUid) {
+    try {
+      const customerSnap = await db.collection("customers").doc(customerId).get();
+      if (customerSnap.exists) {
+        const customer = customerSnap.data() || {};
+        customerName = customerName || String((customer as any).name || "") || null;
+        caseManagerName = String((customer as any).caseManagerName || "") || null;
+        cmUid = String((customer as any).caseManagerId || "") || null;
+        secondaryCmUid = String((customer as any).secondaryCaseManagerId || "") || null;
+      }
+    } catch (err) {
+      logger.warn(FN_JOTFORM_INDEXER + "_customer_lookup_failed", { customerId, err });
     }
   }
 
@@ -164,7 +186,9 @@ async function upsertJotformInboxItem(id: string, sub: any) {
     .filter(Boolean);
   const mappedTitleBase = mappedTitleParts.length ? mappedTitleParts.join(" - ") : "";
   const titlePrefix = digestTask.titlePrefix || formTitle;
-  const title = mappedTitleBase
+  const title = isEligibilityDetermination
+    ? `${FORM_WORKFLOW_TASK_RULES.eligibilityReview.title} - ${customerName || customerId || "New submission"}`
+    : mappedTitleBase
     ? `${titlePrefix}: ${mappedTitleBase}${amountStr}`
     : `${titlePrefix}${amountStr} - ${customerName || customerId || "New Submission"}`;
 
@@ -181,7 +205,9 @@ async function upsertJotformInboxItem(id: string, sub: any) {
 
   const due = String(sub?.jotformCreatedAt || sub?.createdAt || "").slice(0, 10) || null;
   const dueMonth = due ? due.slice(0, 7) : null;
-  const assignedToGroup = digestTask.enabled
+  const assignedToGroup = isEligibilityDetermination
+    ? "compliance"
+    : digestTask.enabled
     ? digestTask.assignedToGroup
     : isSpendingForm
       ? "compliance"
@@ -209,10 +235,27 @@ async function upsertJotformInboxItem(id: string, sub: any) {
       assignedToUid: null,
       assignedToGroup,
       cmUid,
+      secondaryCmUid,
       notify: true,
+      workItemKind: isEligibilityDetermination ? "intake" : "workflow",
+      workflowRef: isEligibilityDetermination
+        ? {
+            type: "intake",
+            instanceId: customerId || enrollmentId || id,
+            stage: "eligibility_follow_up",
+            customerId,
+            enrollmentId,
+            formId,
+          }
+        : null,
       title,
       subtitle,
-      labels: ["jotform", sub?.formAlias || ""].filter(Boolean),
+      labels: [
+        "jotform",
+        isEligibilityDetermination ? "intake-step-13" : "",
+        isEligibilityDetermination ? "compliance-handoff" : "",
+        sub?.formAlias || "",
+      ].filter(Boolean),
       // Only set these timestamps on creation; never overwrite on update
       ...(isNew ? { completedAtISO: null, createdAtISO: isoNow() } : {}),
       customerName,
