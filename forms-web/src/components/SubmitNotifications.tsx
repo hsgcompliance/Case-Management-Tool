@@ -204,7 +204,10 @@ export function SubmitNotifications() {
                         <select
                           aria-label={`Send ${s.customerName || "intake"} to user`}
                           value={transferTargets[s.customerId] || ""}
-                          onChange={(event) => setTransferTargets((current) => ({ ...current, [s.customerId!]: event.currentTarget.value }))}
+                          onChange={(event) => {
+                            const targetUserId = event.currentTarget.value;
+                            setTransferTargets((current) => ({ ...current, [s.customerId!]: targetUserId }));
+                          }}
                           className="max-w-24 rounded border border-slate-200 bg-white px-1 py-1 text-[10px] text-slate-600"
                         >
                           <option value="">Send to...</option>
