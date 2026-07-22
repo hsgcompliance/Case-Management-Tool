@@ -4,7 +4,7 @@ You are working in Households DB v2, a Firebase/Next.js operations app for custo
 
 > **Sync note:** This file is the canonical agent instruction source. If you update it, also update the relevant entries in the `.claude/` project memory (`~/.claude/projects/.../memory/`). The memory captures *why* and *context*; this file captures *what to do*.
 
-> **Local machine shortcut:** If you are operating on `AzureAD+GriffinSeyfried@HRDCL-Energy009` (MINGW64 / Windows dev workstation, `C:\Users\gseyfried\`), the graph is already built, the environment is already configured, and the full first-reads orientation below is optional - the live files are authoritative. You can skip straight to the relevant feature files identified via `graphify-out/GRAPH_REPORT.md`.
+> **Local machine shortcut:** If you are operating on `AzureAD+GriffinSeyfried@HRDCL-Energy009` (MINGW64 / Windows dev workstation, `C:\Users\gseyfried\`), the environment is already configured and a local graph may already be built. The full first-reads orientation below is optional - the live files are authoritative. When present, use the ignored local `graphify-out/GRAPH_REPORT.md` to identify relevant feature files.
 
 > **No emulators on this workstation:** This machine (`C:\Users\gseyfried\` / `AzureAD+GriffinSeyfried@HRDCL-Energy009`) cannot efficiently run the Firebase emulator suite + auth for a system this large (the full set of Cloud Functions). Do **not** run `npm run emulators` or local auth here for this project - it is slow, unstable, and not worth the time. Verify with builds/unit tests (see [Verification](#verification)) and test backend changes by deploying to a real Firebase environment via the safe deploy scripts instead.
 
@@ -13,7 +13,7 @@ You are working in Households DB v2, a Firebase/Next.js operations app for custo
 Before answering architecture questions or making non-trivial edits:
 
 1. Read `README.md`.
-2. Read `graphify-out/GRAPH_REPORT.md` and use it to identify the relevant feature community and high-centrality files. See `docs/PRIVACY_AND_REPO_HYGIENE.md` before regenerating graph outputs.
+2. If the ignored local `graphify-out/GRAPH_REPORT.md` exists, use it to identify the relevant feature community and high-centrality files. See `docs/PRIVACY_AND_REPO_HYGIENE.md` before regenerating graph outputs.
 3. Read `docs/MAINTAINER_HANDOFF.md`.
 4. Read `docs/ARCHITECTURE_SPINE.md` before changing routing, hooks, clients, backend feature modules, auth, cache, or UI primitives.
 5. Read `docs/CONTRACTS_WORKFLOW.md` before changing API payloads, shared schemas, or endpoint response shapes.
@@ -69,7 +69,7 @@ All deploy scripts live in `scripts/` and are wired to `npm run` aliases. They p
 ```powershell
 python -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
 ```
-Then commit `graphify-out/GRAPH_REPORT.md` and `graphify-out/graph.json` if meaningfully changed. Before committing graph outputs, scan for local paths, credentials, or dump content (see Knowledge Graph section below).
+Graphify output is local-only. Never add or commit anything under `graphify-out/`.
 
 ### Selective / recovery deploys
 ```powershell
@@ -112,15 +112,15 @@ Add `--apply --yes` to any of the above to commit changes. See `scripts/README.m
 
 ## Knowledge Graph
 
-This repo has a generated code graph at `graphify-out/`. The checked-in graph artifacts are intentional repo navigation aids for future agents.
+This repo can generate a local code graph at `graphify-out/`. The entire directory is ignored because converted inputs can contain private operational data.
 
 **Quick reference:**
-- God nodes (high-centrality files) are listed in `graphify-out/GRAPH_REPORT.md` - read it before broad edits.
+- God nodes (high-centrality files) are listed in the local `graphify-out/GRAPH_REPORT.md`, when present - read it before broad edits.
 - After code changes, run the incremental update (no LLM needed):
   ```powershell
   python -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
   ```
-- Before committing regenerated `graphify-out/graph.json`, `graphify-out/graph.html`, `graphify-out/GRAPH_REPORT.md`, or `graphify-out/manifest.json`, scan them for local-only, archive, generated dump, credential, or absolute machine paths.
+- Never force-add or commit generated Graphify files. Treat all `graphify-out/` content as local-only and potentially sensitive.
 
 ## Change Rules
 

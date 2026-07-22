@@ -64,8 +64,9 @@ web/.git/
 *credentials*.json
 scripts/env.config
 
-# Graphify cache and working files (rebuilt on demand)
-graphify-out/cache/
+# Graphify output is local-only and rebuilt on demand. It can include converted
+# source material, so no part of the generated directory may be committed.
+graphify-out/
 .graphify_*
 
 # Generated build output

@@ -66,7 +66,7 @@ Only commit archive material after reviewing it for:
 
 ## Graphify Outputs
 
-`graphify-out/GRAPH_REPORT.md` is useful for future agents. `graphify-out/cache/` is ignored and should stay ignored. If regenerating `graphify-out/graph.json`, `graphify-out/graph.html`, or `manifest.json`, ensure the graph input excludes private/generated directories before committing.
+The entire `graphify-out/` directory is ignored and local-only. Generated reports, graphs, manifests, caches, and converted inputs must never be force-added or committed because they can reproduce private source material. When regenerating locally, still exclude private/generated directories to reduce local exposure.
 
 ## Before Pushing
 

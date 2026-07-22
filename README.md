@@ -6,7 +6,7 @@ This repo is intended to be maintainable by a future developer or an AI coding a
 
 1. `AGENTS.md` for agent behavior and first reads.
 2. `scripts/README.md` for the script catalog.
-3. `graphify-out/GRAPH_REPORT.md` for the generated codebase map.
+3. A locally generated `graphify-out/GRAPH_REPORT.md`, when available, for the codebase map.
 4. `docs/MAINTAINER_HANDOFF.md` for app architecture, deploy notes, and common workflows.
 5. `docs/ARCHITECTURE_SPINE.md` and `docs/CONTRACTS_WORKFLOW.md` before changing core patterns or API shapes.
 6. `docs/DOC_REVIEW.md` to distinguish reviewed repo docs from `.local-only.md` background notes.
@@ -18,7 +18,7 @@ This repo is intended to be maintainable by a future developer or an AI coding a
 - `functions/` - Firebase Cloud Functions backend, feature services, HTTP handlers, triggers, auth, RBAC, and integrations.
 - `contracts/` - Shared Zod schemas, endpoint contracts, and types vendored into `web/` and `functions/`.
 - `scripts/` - deploy helpers, contract packaging, dry-run data maintenance scripts, and repo tooling.
-- `graphify-out/` - generated knowledge graph outputs for AI navigation.
+- `graphify-out/` - ignored, local-only generated knowledge graph outputs for AI navigation.
 - `docs/` - reviewed maintainer-facing docs. Files ending in `.local-only.md` are ignored background notes and should not be treated as repo-ready source of truth.
 - `archive/` - historical/migration material. Treat as private unless a file is explicitly reviewed and documented as safe.
 
@@ -63,7 +63,7 @@ For high-risk backend deploys, read `scripts/README.md` and the deploy script op
 Run this orientation loop:
 
 1. Read `AGENTS.md`.
-2. Read `graphify-out/GRAPH_REPORT.md` and find the relevant community or high-centrality files.
+2. If a local `graphify-out/GRAPH_REPORT.md` exists, use it to find the relevant community or high-centrality files.
 3. Read the feature README if one exists, for example under `functions/src/features/*/README.md` or `web/src/features/*/README.md`.
 4. Check contracts in `contracts/src/` before changing request or response shapes.
 5. Prefer existing scripts and service helpers over creating new one-off tools.

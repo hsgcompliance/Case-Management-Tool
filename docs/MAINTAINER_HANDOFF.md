@@ -86,7 +86,7 @@ Read `docs/ARCHITECTURE_SPINE.md` for the canonical route, hook, client, contrac
 ### Diagnose A Bug
 
 1. Identify the visible page/tool or backend endpoint.
-2. Read `graphify-out/GRAPH_REPORT.md` for related communities and central files.
+2. If a local `graphify-out/GRAPH_REPORT.md` exists, use it for related communities and central files.
 3. Trace from UI component to hook, client, contract, backend HTTP handler, service, and Firestore rules.
 4. Add or run the smallest test/build that exercises the change.
 
@@ -119,6 +119,6 @@ Use reset deploy scripts only after reading their flags and understanding the fu
 
 ## Graphify
 
-`graphify-out/GRAPH_REPORT.md` is the fastest map of the codebase. Use it before broad file searches. The checked-in graph artifacts are navigation aids, not source of truth. Source files, contracts, Firestore rules, Firebase config, and package scripts remain authoritative.
+The ignored local `graphify-out/GRAPH_REPORT.md`, when present, is the fastest map of the codebase. Use it before broad file searches. Graphify artifacts must remain local-only because converted inputs can contain private data. Source files, contracts, Firestore rules, Firebase config, and package scripts remain authoritative.
 
 Regenerate graph outputs after meaningful refactors. When regenerating, exclude private/generated data directories such as `.git`, `node_modules`, `.emulator-data`, `.firebase`, `artifacts`, `archive/migration/artifacts`, `scripts/out`, `scripts/prompts`, and local env/credential files.
