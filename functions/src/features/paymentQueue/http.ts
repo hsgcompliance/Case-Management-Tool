@@ -4,6 +4,7 @@ import {adminSyncPaymentQueueHandler} from './adminSyncPaymentQueue';
 import {
   PaymentQueueListBody,
   PaymentQueuePatchBody,
+  PaymentQueueAdminPatchBody,
   PaymentQueueBypassCloseBody,
   PaymentQueuePostToLedgerBody,
   PaymentQueueReopenBody,
@@ -15,6 +16,7 @@ import {
   listPaymentQueueItems,
   getPaymentQueueItem,
   patchPaymentQueueItem,
+  adminPatchPaymentQueueItem,
   bypassClosePaymentQueueItems,
   postPaymentQueueToLedger,
   reopenPaymentQueueItem,
@@ -78,6 +80,28 @@ export const paymentQueuePatch = secureHandler(async (req, res): Promise<void> =
   }
   res.json({ok: true, item: updated});
 }, {auth: 'user', methods: ['PATCH', 'POST', 'OPTIONS']});
+
+/* ============================================================================
+   PATCH /paymentQueueAdminPatch?id=… (admin-only, unrestricted field access —
+   for one-off data-integrity corrections; see adminPatchPaymentQueueItem)
+============================================================================ */
+
+export const paymentQueueAdminPatch = secureHandler(async (req, res): Promise<void> => {
+  const {id} = PaymentQueueItemParams.parse(req.query);
+  const body = PaymentQueueAdminPatchBody.parse(req.body || {});
+  const uid = requireUid(req as any);
+
+  try {
+    const updated = await adminPatchPaymentQueueItem(id, body, uid);
+    if (!updated) {
+      res.status(404).json({ok: false, error: 'not_found'});
+      return;
+    }
+    res.json({ok: true, item: updated});
+  } catch (err: any) {
+    res.status(400).json({ok: false, error: err.message || 'admin_patch_failed'});
+  }
+}, {auth: 'admin', methods: ['PATCH', 'POST', 'OPTIONS']});
 
 /* ============================================================================
    POST /paymentQueuePostToLedger?id=…

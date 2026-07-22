@@ -107,7 +107,64 @@ export type GrantBudgetRecomputeResult = {
   /** Reason when recomputed === false. */
   skipped?: "grant_not_found" | "not_spend_down_budget";
   totals?: Record<string, number>;
+  /** paymentQueue docs found desynced (queueStatus stuck pending despite a valid, non-reversal ledger entry) and auto-flipped to posted this run. */
+  queueDocsRepaired?: Array<{ queueId: string; ledgerEntryId: string }>;
 };
+
+/**
+ * A paymentQueue doc with queueStatus still "pending" but a ledgerEntryId
+ * already set is desynced: it double-counts (spent via the ledger row it
+ * points to, projected via its own pending status) — the bug found via
+ * report-reconciliation-workbench on 2026-07-22 (race between concurrent
+ * paymentsSpend calls and the projection-sync trigger; see
+ * payment-workflow-hardening/PROGRESS.md). A reversal ledger entry is never
+ * valid backing — reversals mean the payment was undone, not posted, so they
+ * are excluded rather than treated as confirmation.
+ */
+async function repairDesyncedQueueDocs(
+  queueDocs: FirebaseFirestore.QueryDocumentSnapshot[],
+): Promise<{ repaired: Array<{ queueId: string; ledgerEntryId: string }>; repairedIds: Set<string> }> {
+  const candidates = queueDocs.filter((d) => {
+    const row = d.data() as Record<string, unknown>;
+    return row.queueStatus === "pending" && !!row.ledgerEntryId;
+  });
+  if (!candidates.length) return { repaired: [], repairedIds: new Set() };
+
+  const ledgerIds = Array.from(new Set(candidates.map((d) => String((d.data() as Record<string, unknown>).ledgerEntryId))));
+  const ledgerSnaps = await db.getAll(...ledgerIds.map((id) => db.collection("ledger").doc(id)));
+  const ledgerById = new Map(ledgerSnaps.map((s) => [s.id, s.exists ? (s.data() as Record<string, unknown>) : null]));
+
+  const repaired: Array<{ queueId: string; ledgerEntryId: string }> = [];
+  const repairedIds = new Set<string>();
+  const now = isoNow();
+  let batch = db.batch();
+  let batchCount = 0;
+
+  for (const d of candidates) {
+    const row = d.data() as Record<string, unknown>;
+    const ledgerEntryId = String(row.ledgerEntryId || "");
+    const ledger = ledgerById.get(ledgerEntryId);
+    const validBacking = !!ledger && !ledger.reversalOf && Number(ledger.amountCents || 0) > 0;
+    if (!validBacking) continue;
+
+    repairedIds.add(d.id);
+    repaired.push({ queueId: d.id, ledgerEntryId });
+    batch.update(d.ref, {
+      queueStatus: "posted",
+      "system.lastWriter": "recomputeGrantBudgetFromLedger",
+      "system.lastWriteAt": now,
+      updatedAtISO: now,
+    });
+    batchCount += 1;
+    if (batchCount >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchCount = 0;
+    }
+  }
+  if (batchCount) await batch.commit();
+  return { repaired, repairedIds };
+}
 
 /**
  * Recompute and persist one grant's budget from ledger + pending queue.
@@ -138,6 +195,8 @@ export async function recomputeGrantBudgetFromLedger(
     db.collection("paymentQueue").where("grantId", "==", id).where("queueStatus", "==", "pending").get(),
   ]);
 
+  const { repaired: queueDocsRepaired, repairedIds } = await repairDesyncedQueueDocs(queueSnap.docs);
+
   const lineItemById = new Map(lineItems.map((li) => [String(li.id || ""), li]));
   const splitAccByLineId: Record<string, Record<string, { spentCents: number; projectedCents: number }>> = {};
   const spentByLineCents: Record<string, number> = {};
@@ -155,6 +214,7 @@ export async function recomputeGrantBudgetFromLedger(
 
   const projectedByLineCents: Record<string, number> = {};
   for (const d of queueSnap.docs) {
+    if (repairedIds.has(d.id)) continue; // now posted + already counted via ledgerSnap above
     const row = d.data() as Record<string, unknown>;
     if (!docBelongsToGrant(row, id, grantOrg)) continue;
     if (!rowInGrantWindow(row, grantData)) continue;
@@ -203,7 +263,7 @@ export async function recomputeGrantBudgetFromLedger(
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  return { grantId: id, recomputed: true, totals: newTotals };
+  return { grantId: id, recomputed: true, totals: newTotals, queueDocsRepaired };
 }
 
 /**

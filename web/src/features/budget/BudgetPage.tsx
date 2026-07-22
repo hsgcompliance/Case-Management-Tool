@@ -414,7 +414,9 @@ export function BudgetPage() {
     }
     try {
       const result = await reconcileGrantBudgets.mutateAsync({ grantIds: Array.from(selectedGrantIds) });
-      toast(`Reconciled ${result.affectedGrantIds.length} grant${result.affectedGrantIds.length === 1 ? "" : "s"}.`, { type: result.failed.length ? "warning" : "success" });
+      const repairedCount = result.queueDocsRepaired.length;
+      const repairedNote = repairedCount ? ` Fixed ${repairedCount} desynced payment queue item${repairedCount === 1 ? "" : "s"}.` : "";
+      toast(`Reconciled ${result.affectedGrantIds.length} grant${result.affectedGrantIds.length === 1 ? "" : "s"}.${repairedNote}`, { type: result.failed.length ? "warning" : "success" });
     } catch (error: unknown) {
       toast(toApiError(error, "Failed to reconcile grants.").error, { type: "error" });
     }

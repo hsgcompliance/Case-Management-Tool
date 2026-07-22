@@ -542,16 +542,20 @@ export async function reconcileGrantBudgetManager(orgId: string, grantIds: strin
   const affectedGrantIds: string[] = [];
   const skipped: Array<{ grantId: string; reason: string }> = [];
   const failed: Array<{ grantId: string; error: string }> = [];
+  const queueDocsRepaired: Array<{ grantId: string; queueId: string; ledgerEntryId: string }> = [];
   await loadGrantDocs(grantIds, orgId);
   for (const grantId of grantIds) {
     try {
       const res = await recomputeGrantBudgetFromLedger(grantId);
       if (res.recomputed) affectedGrantIds.push(grantId);
       else skipped.push({ grantId, reason: res.skipped || "not_recomputed" });
+      for (const repair of res.queueDocsRepaired || []) {
+        queueDocsRepaired.push({ grantId, ...repair });
+      }
     } catch (err) {
       failed.push({ grantId, error: err instanceof Error ? err.message : String(err) });
     }
   }
   const after = (await loadGrantBudgetManager(orgId, grantIds)).rollups;
-  return { ok: true, affectedGrantIds, before, after, skipped, failed };
+  return { ok: true, affectedGrantIds, before, after, skipped, failed, queueDocsRepaired };
 }

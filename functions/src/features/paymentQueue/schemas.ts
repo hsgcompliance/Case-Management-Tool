@@ -171,6 +171,13 @@ export const PaymentQueueItem = z.object({
   reopenedBy: z.string().nullable(),
   reopenReason: z.string().nullable(),
 
+  // ── Admin override audit (paymentQueueAdminPatch) ────────────────────────
+  adminModified: z.boolean().optional(),
+  adminModifiedAt: z.string().nullable().optional(),
+  adminModifiedBy: z.string().nullable().optional(),
+  adminModifiedFields: z.array(z.string()).optional(),
+  adminModificationReason: z.string().nullable().optional(),
+
   // ── Audit ─────────────────────────────────────────────────────────────────
   createdAtISO: z.string(),
   updatedAtISO: z.string(),
@@ -227,6 +234,85 @@ export const PaymentQueuePatchBody = z.object({
   localModificationReason: z.string().optional(),
 });
 export type TPaymentQueuePatchBody = z.infer<typeof PaymentQueuePatchBody>;
+
+// Admin-only escape hatch: unrestricted field access for one-off data-integrity
+// corrections (e.g. a queueStatus/ledgerEntryId desync). Deliberately excludes
+// ingestion identity/history fields (id, baseId, submissionId, formId, source,
+// orgId, createdAt*, rawStatus, rawAnswers, rawMeta, extraction*, system) —
+// those represent immutable ingestion provenance, not correctable state; a real
+// change to those belongs in a migration, not a hand-edit. `reason` is
+// mandatory so every override leaves an auditable trail (see adminModified*
+// on PaymentQueueItem above).
+export const PaymentQueueAdminPatchBody = z.object({
+  amount: z.number().optional(),
+  amountAbs: z.number().optional(),
+  direction: z.enum(['charge', 'return']).optional(),
+  dueDate: z.string().nullable().optional(),
+  month: z.string().optional(),
+
+  merchant: z.string().optional(),
+  expenseType: z.string().optional(),
+  program: z.string().optional(),
+  billedTo: z.string().optional(),
+  project: z.string().optional(),
+  purchasePath: z.enum(['customer', 'program', '']).optional(),
+  card: z.string().optional(),
+  cardBucket: z.enum(['Youth', 'Housing', 'MAD', '']).optional(),
+  purpose: z.string().optional(),
+  paymentMethod: z.string().optional(),
+  serviceType: z.string().optional(),
+  otherService: z.string().optional(),
+  serviceScope: z.string().optional(),
+  wex: z.string().optional(),
+  descriptor: z.string().optional(),
+
+  customer: z.string().optional(),
+  purchaser: z.string().optional(),
+  email: z.string().optional(),
+
+  notes: z.string().optional(),
+  note: z.string().optional(),
+
+  grantId: z.string().nullable().optional(),
+  lineItemId: z.string().nullable().optional(),
+  pipelineId: z.string().nullable().optional(),
+  customerId: z.string().nullable().optional(),
+  enrollmentId: z.string().nullable().optional(),
+  creditCardId: z.string().nullable().optional(),
+  ledgerEntryId: z.string().nullable().optional(),
+  reversalEntryId: z.string().nullable().optional(),
+
+  invoiceStatus: InvoiceStatus.optional(),
+  invoicedAt: z.string().nullable().optional(),
+  invoicedBy: z.string().nullable().optional(),
+  invoiceRef: z.string().nullable().optional(),
+
+  okUnassigned: z.boolean().optional(),
+  okUnassignedAt: z.string().nullable().optional(),
+  okUnassignedBy: z.string().nullable().optional(),
+  compliance: z.object({
+    hmisComplete: z.boolean().optional(),
+    caseworthyComplete: z.boolean().optional(),
+  }).optional(),
+
+  // Queue lifecycle — the exact fields the standard patchPaymentQueueItem path
+  // deliberately withholds. This is the whole point of this admin path.
+  queueStatus: PaymentQueueStatus.optional(),
+  voidedAt: z.string().nullable().optional(),
+  voidedBy: z.string().nullable().optional(),
+  postedAt: z.string().nullable().optional(),
+  postedBy: z.string().nullable().optional(),
+  closedBypassLedger: z.boolean().optional(),
+  closedBypassLedgerAt: z.string().nullable().optional(),
+  closedBypassLedgerBy: z.string().nullable().optional(),
+  closedBypassLedgerReason: z.string().nullable().optional(),
+  reopenedAt: z.string().nullable().optional(),
+  reopenedBy: z.string().nullable().optional(),
+  reopenReason: z.string().nullable().optional(),
+
+  reason: z.string().trim().min(1, 'reason_required'),
+});
+export type TPaymentQueueAdminPatchBody = z.infer<typeof PaymentQueueAdminPatchBody>;
 
 export const PaymentQueueBulkDesignateBody = z.object({
   items: z.array(z.object({

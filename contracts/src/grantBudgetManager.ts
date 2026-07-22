@@ -127,4 +127,6 @@ export type TGrantBudgetManagerReconcileResp = Ok<{
   after: TGrantBudgetManagerRollup[];
   skipped: Array<{ grantId: string; reason: string }>;
   failed: Array<{ grantId: string; error: string }>;
+  /** paymentQueue docs found desynced (posted-in-ledger but still queueStatus:pending) and auto-repaired during this reconcile run. */
+  queueDocsRepaired: Array<{ grantId: string; queueId: string; ledgerEntryId: string }>;
 }>;

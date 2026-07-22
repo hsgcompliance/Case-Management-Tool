@@ -3,6 +3,7 @@ export {
   paymentQueueList,
   paymentQueueGet,
   paymentQueuePatch,
+  paymentQueueAdminPatch,
   paymentQueuePostToLedger,
   paymentQueueBypassClose,
   paymentQueueReopen,

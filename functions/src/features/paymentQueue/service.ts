@@ -11,6 +11,7 @@ import {
   type TPaymentQueueBulkDesignateBody,
   type TPaymentQueueBypassCloseBody,
   type TPaymentQueuePatchBody,
+  type TPaymentQueueAdminPatchBody,
   type TPaymentQueuePostToLedgerBody,
   type TPaymentQueueReopenBody,
 } from './schemas';
@@ -439,6 +440,49 @@ export async function patchPaymentQueueItem(
     const grantIds = Array.from(new Set([String(prevItem.grantId || ''), String(update.grantId || '')].filter(Boolean)));
     await Promise.all(grantIds.map((gid) => recomputeCustomerSpendForGrant({grantId: gid}).catch(() => null)));
   }
+  const updated = await ref.get();
+  return docToItem(updated);
+}
+
+// Admin-only escape hatch: unlike patchPaymentQueueItem's allowlist, this
+// writes any field the caller sends (per PaymentQueueAdminPatchBody) straight
+// through, including queueStatus/ledgerEntryId/postedAt/postedBy — the fields
+// that make a queue doc "posted" — so a verified drift (queueStatus stuck
+// pending while a valid ledger entry already exists, e.g. from the 2026-07-22
+// batch-correction race — see payment-workflow-hardening/PROGRESS.md) can be
+// fixed directly instead of via a one-off script with the service-account key.
+// Mandatory `reason` + adminModified* audit trail keep this traceable.
+export async function adminPatchPaymentQueueItem(
+    id: string,
+    patch: TPaymentQueueAdminPatchBody,
+    actorUid?: string,
+): Promise<TPaymentQueueItem | null> {
+  const ref = db.collection(COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+
+  const {reason, ...fields} = patch;
+  const now = isoNow();
+  const update: Record<string, unknown> = {
+    'updatedAtISO': now,
+    'system.lastWriter': 'paymentQueueAdminPatch',
+    'system.lastWriteAt': now,
+  };
+  const changedFields: string[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    update[key] = value;
+    changedFields.push(key);
+  }
+  if (!changedFields.length) throw new Error('no_fields_to_update');
+
+  update.adminModified = true;
+  update.adminModifiedAt = now;
+  update.adminModifiedBy = actorUid ?? null;
+  update.adminModifiedFields = changedFields;
+  update.adminModificationReason = reason.trim();
+
+  await ref.update(removeUndefinedDeep(update) as any);
   const updated = await ref.get();
   return docToItem(updated);
 }
