@@ -18,7 +18,7 @@ export type JfAnswer = {
   pdf?: { download_url?: string };
 };
 
-export async function listForms(maxAgeDays = 30): Promise<JfForm[]> {
+export async function listForms(maxAgeDays: number | "all" = 30): Promise<JfForm[]> {
   const out = await getAuthed<{ ok: true; items: JfForm[] }>("jfFormsList", { maxAgeDays });
   return out.items ?? [];
 }

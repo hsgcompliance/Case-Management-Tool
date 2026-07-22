@@ -34,13 +34,15 @@ async function jfGet(path: string, params: Record<string, string | number> = {})
 
 export type JfForm = { id: string; title: string; count: number; status: string; updatedAt: string | null };
 
-// Hard cap: never list forms not edited in the last 2 years. Default look-back is
-// one month; advanced callers can widen up to the cap.
+// Default look-back for callers that want a recent-form picker. Passing null
+// returns the complete account form list for the Submission Manager search.
 const MAX_FORM_AGE_DAYS = 730;
 
-export async function listForms(maxAgeDays = 30): Promise<JfForm[]> {
-  const days = Math.max(1, Math.min(MAX_FORM_AGE_DAYS, Number(maxAgeDays) || 30));
-  const cutoff = Date.now() - days * 86_400_000;
+export async function listForms(maxAgeDays: number | null = 30): Promise<JfForm[]> {
+  const days = maxAgeDays == null
+    ? null
+    : Math.max(1, Math.min(MAX_FORM_AGE_DAYS, Number(maxAgeDays) || 30));
+  const cutoff = days == null ? null : Date.now() - days * 86_400_000;
   const content = (await jfGet("/user/forms", { limit: 1000, orderby: "updated_at" })) as Array<Record<string, unknown>> | null;
   return (content || [])
     .map((f) => ({
@@ -52,6 +54,7 @@ export async function listForms(maxAgeDays = 30): Promise<JfForm[]> {
     }))
     .filter((f) => isValidId(f.id))
     .filter((f) => {
+      if (cutoff == null) return true;
       // Keep if edited within the window; drop stale forms. Unknown dates kept.
       const t = f.updatedAt ? Date.parse(f.updatedAt) : NaN;
       return !Number.isFinite(t) || t >= cutoff;

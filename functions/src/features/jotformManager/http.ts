@@ -8,7 +8,8 @@ const JF_SECRETS = [JOTFORM_API_KEY_SECRET];
 export const jfFormsList_http = secureHandler(
   async (req, res) => {
     void req.user;
-    const maxAgeDays = Number((req.query as Record<string, unknown>)?.maxAgeDays) || 30;
+    const rawMaxAge = String((req.query as Record<string, unknown>)?.maxAgeDays || "").trim().toLowerCase();
+    const maxAgeDays = rawMaxAge === "all" ? null : Number(rawMaxAge) || 30;
     const items = await listForms(maxAgeDays);
     res.status(200).json({ ok: true, items, count: items.length });
   },

@@ -26,7 +26,7 @@ function FormPicker({ forms, value, onChange }: { forms: JfForm[]; value: JfForm
   }, []);
   const matches = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    return (ql ? forms.filter((f) => f.title.toLowerCase().includes(ql)) : forms).slice(0, 50);
+    return (ql ? forms.filter((f) => `${f.title} ${f.id}`.toLowerCase().includes(ql)) : forms).slice(0, 50);
   }, [forms, q]);
   return (
     <div ref={ref} className="relative min-w-0 flex-1 basis-[480px]">
@@ -56,7 +56,6 @@ export default function SubmissionManagerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedFormId = searchParams.get("formId")?.trim() || "";
   const [forms, setForms] = useState<JfForm[]>([]);
-  const [windowDays, setWindowDays] = useState(30);
   const [form, setForm] = useState<JfForm | null>(null);
   const [subs, setSubs] = useState<JfSubmission[]>([]);
   const [sel, setSel] = useState<JfSubmission | null>(null);
@@ -69,8 +68,8 @@ export default function SubmissionManagerPage() {
 
   useEffect(() => {
     setLoadingForms(true);
-    listForms(windowDays).then(setForms).catch((e: unknown) => setError((e as Error)?.message || "Failed to load forms.")).finally(() => setLoadingForms(false));
-  }, [windowDays]);
+    listForms("all").then(setForms).catch((e: unknown) => setError((e as Error)?.message || "Failed to load forms.")).finally(() => setLoadingForms(false));
+  }, []);
 
   useEffect(() => {
     if (!requestedFormId || loadingForms) return;
@@ -79,10 +78,7 @@ export default function SubmissionManagerPage() {
       setForm((current) => current?.id === requested.id ? current : requested);
       return;
     }
-    // The default month window can omit older forms. Expand once so a direct
-    // form link remains dependable without adding a separate page/API.
-    if (windowDays !== 730) setWindowDays(730);
-  }, [forms, loadingForms, requestedFormId, windowDays]);
+  }, [forms, loadingForms, requestedFormId]);
 
   const chooseForm = (next: JfForm) => {
     setForm(next);
@@ -136,19 +132,6 @@ export default function SubmissionManagerPage() {
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <FormPicker forms={forms} value={form} onChange={chooseForm} />
-          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs">
-            {([{ d: 30, l: "Month" }, { d: 365, l: "Year" }, { d: 730, l: "2yr" }] as const).map((o) => (
-              <button
-                key={o.d}
-                type="button"
-                onClick={() => setWindowDays(o.d)}
-                title="Limit to forms edited within this window"
-                className={`px-2.5 py-2 font-semibold ${windowDays === o.d ? "bg-indigo-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
-              >
-                {o.l}
-              </button>
-            ))}
-          </div>
           {form ? (
             <>
               <a
