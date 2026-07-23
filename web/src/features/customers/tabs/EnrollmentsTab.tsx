@@ -8,17 +8,16 @@ import { Modal } from "@entities/ui/Modal";
 import { EnrollmentMigrateDialog } from "@entities/dialogs/enrollment/EnrollmentMigrateDialog";
 import { EnrollmentCleanupDialog } from "@entities/dialogs/enrollment/EnrollmentCleanupDialog";
 import { useGrants } from "@hooks/useGrants";
-import { usePaymentsDeleteRows, usePaymentsSpend } from "@hooks/usePayments";
-import { useTasksDelete, useTasksUpdateStatus } from "@hooks/useTasks";
 import {
   useCustomerEnrollments,
   useEnrollCustomer,
   useEnrollmentActionsApply,
   useEnrollmentsAdminDelete,
+  useEnrollmentsClose,
   useEnrollmentsDelete,
   useEnrollmentsPatch,
+  useEnrollmentsReopen,
   useEnrollmentsUndoMigration,
-  useEnrollmentsVoidProjections,
 } from "@hooks/useEnrollments";
 import { toast } from "@lib/toast";
 import { fmtDateOrDash } from "@lib/formatters";
@@ -39,6 +38,7 @@ import {
 } from "@features/enrollments/enrollmentControls";
 import { defaultGrantDriveTemplateKeys, grantDriveTemplates } from "@features/grants/driveTemplates";
 import { useGDriveCopyGrantTemplates } from "@hooks/useGDrive";
+import { PriorEnrollmentNudge } from "@features/enrollments/PriorEnrollmentNudge";
 
 function isoToday(): string {
   return toISODate(new Date());
@@ -137,12 +137,9 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const softDelete = useEnrollmentsDelete();
   const adminDelete = useEnrollmentsAdminDelete();
   const undoMigration = useEnrollmentsUndoMigration();
-  const voidProjections = useEnrollmentsVoidProjections();
+  const closeEnrollmentMutation = useEnrollmentsClose();
+  const reopen = useEnrollmentsReopen();
   const copyGrantTemplates = useGDriveCopyGrantTemplates();
-  const paymentsSpend = usePaymentsSpend();
-  const paymentsDeleteRows = usePaymentsDeleteRows();
-  const tasksUpdateStatus = useTasksUpdateStatus();
-  const tasksDelete = useTasksDelete();
 
   const [grantId, setGrantId] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState<string>(isoToday());
@@ -165,6 +162,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const [closeDate, setCloseDate] = React.useState<string>(isoToday());
   const [closeTaskMode, setCloseTaskMode] = React.useState<"complete" | "delete">("complete");
   const [closePaymentMode, setClosePaymentMode] = React.useState<"spendUnpaid" | "deleteUnpaid">("deleteUnpaid");
+  const [reversePaidAfterClose, setReversePaidAfterClose] = React.useState(false);
 
   const ALLOW_MIGRATION_FOR_CLOSED_ROWS = true;
 
@@ -174,11 +172,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     softDelete.isPending ||
     adminDelete.isPending ||
     undoMigration.isPending ||
-    voidProjections.isPending ||
-    paymentsSpend.isPending ||
-    paymentsDeleteRows.isPending ||
-    tasksUpdateStatus.isPending ||
-    tasksDelete.isPending ||
+    closeEnrollmentMutation.isPending ||
+    reopen.isPending ||
     applyAction.isPending ||
     copyGrantTemplates.isPending;
 
@@ -254,6 +249,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     if (!closeTarget) return;
     setCloseTaskMode("complete");
     setClosePaymentMode("deleteUnpaid");
+    setReversePaidAfterClose(false);
     const suggested = buildEnrollmentClosePreview({
       payments: Array.isArray((closeTarget as any).payments) ? (closeTarget as any).payments : [],
       fallbackDate: today,
@@ -375,62 +371,24 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     }
   };
 
-  const confirmCloseEnrollment = async () => {
+  const confirmCloseEnrollment = async (options?: { reversePaidAfterClose?: boolean }) => {
     if (!closeTarget) return;
     setError(null);
     try {
-      if (!closePreview.canClose) {
-        throw new Error(`Close date must be on or after the last paid item (${closeLastPaymentDate || "unknown"}).`);
-      }
-
-      const futureTaskRows = closeFutureTasks.slice().sort((a: any, b: any) =>
-        String(a?.dueDate || "").localeCompare(String(b?.dueDate || "")),
-      );
-      if (closeTaskMode === "delete") {
-        for (const t of futureTaskRows) {
-          const taskId = String(t?.id || "").trim();
-          if (!taskId) continue;
-          await tasksDelete.mutateAsync({ enrollmentId: closeTarget.id, taskId } as any);
-        }
-      } else {
-        for (const t of futureTaskRows) {
-          const taskId = String(t?.id || "").trim();
-          if (!taskId) continue;
-          const status = String(t?.status || "").toLowerCase();
-          if (t?.completed || status === "done" || status === "verified") continue;
-          await tasksUpdateStatus.mutateAsync({ enrollmentId: closeTarget.id, taskId, action: "complete" } as any);
-        }
-      }
-
-      const futureUnpaid = closeFutureUnpaidPayments
-        .map((p: any) => ({ id: String(p?.id || "").trim(), dueDate: String(p?.dueDate || p?.date || "") }))
-        .filter((p) => p.id)
-        .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-      if (closePaymentMode === "spendUnpaid") {
-        for (const p of futureUnpaid) {
-          await paymentsSpend.mutateAsync({ body: { enrollmentId: closeTarget.id, paymentId: p.id } as any });
-        }
-      } else if (futureUnpaid.length) {
-        await paymentsDeleteRows.mutateAsync({
-          enrollmentId: closeTarget.id,
-          paymentIds: futureUnpaid.map((p) => p.id),
-          preservePaid: true,
-          updateBudgets: false,
-          removeSpends: true,
-          reverseLedger: false,
-        } as any);
-      }
-
-      await patchEnrollment(closeTarget.id, {
-        status: "closed",
-        active: false,
-        endDate: closePreview.closeDate,
+      const result = await closeEnrollmentMutation.mutateAsync({
+        id: closeTarget.id,
+        closeDate,
+        taskMode: closeTaskMode,
+        paymentMode: closePaymentMode,
+        reversePaidAfterClose: options?.reversePaidAfterClose,
       });
-
-      // Void paymentQueue projections. Non-fatal — enrollment is already closed.
-      await voidProjections.mutateAsync(closeTarget.id).catch(() => {});
-
-      toast("Enrollment closed.", { type: "success" });
+      const reversedCount = (result as any)?.reversedPaymentIds?.length || 0;
+      toast(
+        reversedCount
+          ? `Enrollment closed. ${reversedCount} paid item${reversedCount === 1 ? "" : "s"} after the close date reversed.`
+          : "Enrollment closed.",
+        { type: "success" },
+      );
       setCloseTarget(null);
     } catch (e: unknown) {
       const msg = toApiError(e).error || "Failed to close enrollment.";
@@ -522,17 +480,17 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const reopenEnrollment = async (row: Enrollment) => {
     setError(null);
     try {
-      await patchEnrollment(
-        row.id,
-        {
-          status: "active",
-          active: true,
-        },
-        ["endDate"],
-      );
-      toast("Enrollment reopened.", { type: "success" });
+      const result = await reopen.mutateAsync({ id: row.id });
+      if ((result as any)?.scheduleRebuildRecommended) {
+        toast("Enrollment reopened — no future schedule remains; use Adjust Schedule to rebuild it.", { type: "success" });
+      } else {
+        toast("Enrollment reopened.", { type: "success" });
+      }
     } catch (e: unknown) {
-      const msg = toApiError(e).error || "Failed to reopen enrollment.";
+      const conflicts = (e as any)?.meta?.response?.conflicts as Array<{ id: string }> | undefined;
+      const msg = conflicts?.length
+        ? `Cannot reopen — overlaps ${conflicts.length} other active enrollment${conflicts.length === 1 ? "" : "s"} for this customer/grant.`
+        : toApiError(e).error || "Failed to reopen enrollment.";
       setError(msg);
       toast(msg, { type: "error" });
     }
@@ -718,32 +676,11 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             {enroll.isPending ? "Creating..." : "Enroll"}
           </button>
         </div>
-        {priorEnrollmentsInSelectedGrant.length > 0 && (
-          <div className="mt-2 space-y-1 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200">
-            <div className="font-semibold">
-              This customer has {priorEnrollmentsInSelectedGrant.length} prior enrollment{priorEnrollmentsInSelectedGrant.length === 1 ? "" : "s"} in this grant:
-            </div>
-            {priorEnrollmentsInSelectedGrant.map((e) => (
-              <div key={e.id} className="flex flex-wrap items-center justify-between gap-2">
-                <span>
-                  {formatEnrollmentLabel(e as unknown as Record<string, unknown>)} — {String(e.status || "closed").trim()} · {fmtDateOrDash(e.startDate)}–{e.endDate ? fmtDateOrDash(e.endDate) : "open"}
-                </span>
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs"
-                  disabled={patch.isPending}
-                  onClick={() => void reopenEnrollment(e)}
-                >
-                  Reopen this one instead
-                </button>
-              </div>
-            ))}
-            <div className="text-[11px] text-sky-700 dark:text-sky-300">
-              Creating a new enrollment is fine for a separate assistance episode (e.g. a second crisis this
-              grant year) — just make sure the payment schedules don&apos;t cover the same months.
-            </div>
-          </div>
-        )}
+        <PriorEnrollmentNudge
+          priorEnrollments={priorEnrollmentsInSelectedGrant}
+          onReopen={(e) => void reopenEnrollment(e as Enrollment)}
+          reopening={reopen.isPending}
+        />
         <div className="mt-2 flex items-center gap-2">
           <input
             id="generateTaskSchedule"
@@ -859,8 +796,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             </button>
             <button
               className="btn btn-sm"
-              onClick={() => void confirmCloseEnrollment()}
-              disabled={busy || !closeTarget || !closePreview.canClose}
+              onClick={() => void confirmCloseEnrollment({ reversePaidAfterClose })}
+              disabled={busy || !closeTarget || (closePreview.paidAfterClose.length > 0 && !reversePaidAfterClose)}
             >
               {busy ? "Closing..." : "Close Enrollment"}
             </button>
@@ -911,12 +848,23 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
 
           <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
             <div>Last paid item: {closeLastPaymentDate || "None"}</div>
-            <div>Closing is blocked only when an already-paid item falls after the close date.</div>
             {closePreview.paidAfterClose.length > 0 ? (
-              <div className="mt-1 text-red-700">
-                {closePreview.paidAfterClose.length} paid item{closePreview.paidAfterClose.length === 1 ? " is" : "s are"} after {closePreview.closeDate}.
-              </div>
-            ) : null}
+              <>
+                <div className="mt-1 text-red-700">
+                  {closePreview.paidAfterClose.length} paid item{closePreview.paidAfterClose.length === 1 ? " is" : "s are"} after {closePreview.closeDate}.
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={reversePaidAfterClose}
+                    onChange={(e) => setReversePaidAfterClose(e.target.checked)}
+                  />
+                  Reverse {closePreview.paidAfterClose.length === 1 ? "that payment" : "those payments"} to allow closing
+                </label>
+              </>
+            ) : (
+              <div>Closing is blocked only when an already-paid item falls after the close date.</div>
+            )}
           </div>
         </div>
       </Modal>

@@ -849,6 +849,7 @@ export const EnrollmentsCloseBody = z.object({
   id: Id,
   closeDate: z.string().trim().min(1).optional(),
   taskMode: z.enum(["complete", "delete"]).optional(),
+  paymentMode: z.enum(["deleteUnpaid", "spendUnpaid"]).optional(),
   reversePaidAfterClose: z.boolean().optional(),
 });
 export type TEnrollmentsCloseBody = z.infer<typeof EnrollmentsCloseBody>;
@@ -858,6 +859,7 @@ export type TEnrollmentsCloseResp = Ok<{
   closeDate: string;
   retainedPaymentsCount: number;
   removedPaymentsCount: number;
+  spentPaymentIds: string[];
   reversedPaymentIds: string[];
   queueSyncConfirmed: boolean;
   payments: unknown;

@@ -5,12 +5,13 @@ import { createPortal } from "react-dom";
 import type { TCustomerEntity } from "@types";
 import { Modal } from "@entities/ui/Modal";
 import GrantSelect from "@entities/selectors/GrantSelect";
-import { useCustomerEnrollments, useEnrollCustomer } from "@hooks/useEnrollments";
+import { useCustomerEnrollments, useEnrollCustomer, useEnrollmentsReopen } from "@hooks/useEnrollments";
 import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
 import { toast } from "@lib/toast";
 import { toApiError } from "@client/api";
 import { todayISO } from "./paymentScheduleUtils";
 import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
+import { PriorEnrollmentNudge, isInactivePriorEnrollment } from "@features/enrollments/PriorEnrollmentNudge";
 
 // Selected-state colors for the Tier 1/2/3 mini-cards / pickers.
 // Tier 1 = highest risk (red) → Tier 3 = lowest (green).
@@ -51,14 +52,42 @@ export function EnrollCustomerQuickModal({
   onEnrolled: () => void;
 }) {
   const enrollCustomer = useEnrollCustomer();
+  const reopen = useEnrollmentsReopen();
   const [grantId, setGrantId] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState(todayISO());
+  const { data: enrollments = [] } = useCustomerEnrollments(customerId, { enabled: open });
 
   React.useEffect(() => {
     if (!open) return;
     setGrantId(null);
     setStartDate(todayISO());
   }, [open]);
+
+  const priorEnrollmentsForGrant = React.useMemo(() => {
+    const gid = String(grantId || "").trim();
+    if (!gid) return [];
+    return enrollments.filter((e) => String(e.grantId || "").trim() === gid && isInactivePriorEnrollment(e));
+  }, [enrollments, grantId]);
+
+  const reopenInstead = async (enrollmentId: string) => {
+    try {
+      const result = await reopen.mutateAsync({ id: enrollmentId });
+      toast(
+        (result as any)?.scheduleRebuildRecommended
+          ? "Enrollment reopened — no future schedule remains; use Adjust Schedule to rebuild it."
+          : "Enrollment reopened.",
+        { type: "success" },
+      );
+      onEnrolled();
+      onClose();
+    } catch (error: unknown) {
+      const conflicts = (error as any)?.meta?.response?.conflicts as Array<{ id: string }> | undefined;
+      const msg = conflicts?.length
+        ? `Cannot reopen — overlaps ${conflicts.length} other active enrollment${conflicts.length === 1 ? "" : "s"} for this customer/grant.`
+        : toApiError(error).error || "Failed to reopen enrollment.";
+      toast(msg, { type: "error" });
+    }
+  };
 
   const submit = async () => {
     const gid = String(grantId || "").trim();
@@ -119,6 +148,11 @@ export function EnrollCustomerQuickModal({
             disabled={enrollCustomer.isPending}
           />
         </label>
+        <PriorEnrollmentNudge
+          priorEnrollments={priorEnrollmentsForGrant}
+          onReopen={(e) => void reopenInstead(String(e.id))}
+          reopening={reopen.isPending}
+        />
         <label className="block space-y-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start Date</span>
           <input

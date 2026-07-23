@@ -552,7 +552,11 @@ import type {
   TEnrollmentsUndoMigrationBody,
   TEnrollmentsUndoMigrationResp,
   TEnrollmentsUpsertBody,
-  TEnrollmentsUpsertResp
+  TEnrollmentsUpsertResp,
+  TEnrollmentsCloseBody,
+  TEnrollmentsCloseResp,
+  TEnrollmentsReopenBody,
+  TEnrollmentsReopenResp
 } from "./enrollments";
 
 export type EnrollmentsAdminDeleteReq = TEnrollmentsAdminDeleteBody;
@@ -584,6 +588,12 @@ export type EnrollmentsVoidProjectionsResp = {
   ok: boolean;
   results: Array<{ id: string; ok?: true; skipped?: true; error?: string }>;
 };
+
+export type EnrollmentsCloseReq = TEnrollmentsCloseBody;
+export type EnrollmentsCloseResp = TEnrollmentsCloseResp;
+
+export type EnrollmentsReopenReq = TEnrollmentsReopenBody;
+export type EnrollmentsReopenResp = TEnrollmentsReopenResp;
 
 export type EnrollmentsEnrollCustomerReq = TEnrollmentsEnrollCustomerBody;
 export type EnrollmentsEnrollCustomerResp = TEnrollmentsEnrollCustomerResp;
@@ -1151,6 +1161,8 @@ export interface EndpointMap {
   enrollmentsAdminReverseLedgerEntry: { req: EnrollmentsAdminReverseLedgerEntryReq; resp: EnrollmentsAdminReverseLedgerEntryResp };
   enrollmentsVoidProjections: { req: EnrollmentsVoidProjectionsReq; resp: EnrollmentsVoidProjectionsResp };
   enrollmentActionsApply: { req: EnrollmentActionsApplyReq; resp: EnrollmentActionsApplyResp };
+  enrollmentsClose: { req: EnrollmentsCloseReq; resp: EnrollmentsCloseResp };
+  enrollmentsReopen: { req: EnrollmentsReopenReq; resp: EnrollmentsReopenResp };
 
   // GRANTS
   grantsUpsert: { req: GrantsUpsertReq; resp: GrantsUpsertResp };

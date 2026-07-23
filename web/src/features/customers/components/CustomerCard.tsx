@@ -3,7 +3,7 @@
 import React from "react";
 import type { Enrollment, TCustomerEntity, TPayment } from "@types";
 import { buildEnrollmentClosePreview, enrollmentMonthEnd } from "@hdb/contracts/enrollments";
-import { CUSTOMER_CARD_ENROLLMENTS_LIMIT, useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsDelete, useEnrollmentsPatch } from "@hooks/useEnrollments";
+import { CUSTOMER_CARD_ENROLLMENTS_LIMIT, useCustomerEnrollments, useEnrollmentActionsApply, useEnrollmentsClose, useEnrollmentsDelete, useEnrollmentsPatch, useEnrollmentsReopen } from "@hooks/useEnrollments";
 import { useSetCustomerActive, useSetCustomerTier } from "@hooks/useCustomers";
 import { useTasksForEnrollments, type TasksListItem } from "@hooks/useTasks";
 import { useMyTasksDue } from "@hooks/useInbox";
@@ -581,6 +581,8 @@ function EnrollmentQuickModal({
   const patch = useEnrollmentsPatch();
   const applyAction = useEnrollmentActionsApply();
   const deleteEnrollment = useEnrollmentsDelete();
+  const closeEnrollmentMutation = useEnrollmentsClose();
+  const reopen = useEnrollmentsReopen();
   const grantId = String(enrollment?.grantId || "");
   const { data: grant = null } = useGrant(grantId, { enabled: open && !!grantId });
   const [startDate, setStartDate] = React.useState("");
@@ -592,6 +594,7 @@ function EnrollmentQuickModal({
   const [rawOpen, setRawOpen] = React.useState(false);
   const [migrateOpen, setMigrateOpen] = React.useState(false);
   const [cleanupOpen, setCleanupOpen] = React.useState(false);
+  const [reversePaidAfterClose, setReversePaidAfterClose] = React.useState(false);
   const { data: grants = [] } = useGrants(
     { limit: 500 },
     { enabled: editable && migrateOpen, staleTime: 60_000 },
@@ -612,6 +615,7 @@ function EnrollmentQuickModal({
     setRawOpen(false);
     setMigrateOpen(false);
     setCleanupOpen(false);
+    setReversePaidAfterClose(false);
   }, [enrollment, open]);
 
   const enrollmentId = String(enrollment?.id || "");
@@ -630,7 +634,7 @@ function EnrollmentQuickModal({
       : status === "closed" || status === "inactive"
         ? "border-slate-200 bg-slate-100 text-slate-600"
         : "border-amber-200 bg-amber-50 text-amber-700";
-  const busy = patch.isPending || applyAction.isPending || deleteEnrollment.isPending;
+  const busy = patch.isPending || applyAction.isPending || deleteEnrollment.isPending || closeEnrollmentMutation.isPending || reopen.isPending;
 
   const patchEnrollment = async (patchData: Record<string, unknown>) => {
     if (!enrollmentId) return;
@@ -652,13 +656,47 @@ function EnrollmentQuickModal({
     });
   };
 
-  const closeEnrollment = () => {
-    if (!closePreview.canClose) return;
-    void patchEnrollment({
-      status: "closed",
-      active: false,
-      endDate: closePreview.closeDate,
-    });
+  const closeEnrollment = async () => {
+    if (!enrollmentId) return;
+    if (closePreview.paidAfterClose.length > 0 && !reversePaidAfterClose) return;
+    try {
+      const result = await closeEnrollmentMutation.mutateAsync({
+        id: enrollmentId,
+        closeDate,
+        reversePaidAfterClose,
+      });
+      const reversedCount = (result as any)?.reversedPaymentIds?.length || 0;
+      toast(
+        reversedCount
+          ? `Enrollment closed. ${reversedCount} paid item${reversedCount === 1 ? "" : "s"} after the close date reversed.`
+          : "Enrollment closed.",
+        { type: "success" },
+      );
+      setCloseEditorOpen(false);
+      onChanged();
+    } catch (error: unknown) {
+      toast(toApiError(error).error || "Failed to close enrollment.", { type: "error" });
+    }
+  };
+
+  const reopenEnrollment = async () => {
+    if (!enrollmentId) return;
+    try {
+      const result = await reopen.mutateAsync({ id: enrollmentId });
+      toast(
+        (result as any)?.scheduleRebuildRecommended
+          ? "Enrollment reopened — no future schedule remains; use Adjust Schedule to rebuild it."
+          : "Enrollment reopened.",
+        { type: "success" },
+      );
+      onChanged();
+    } catch (error: unknown) {
+      const conflicts = (error as any)?.meta?.response?.conflicts as Array<{ id: string }> | undefined;
+      const msg = conflicts?.length
+        ? `Cannot reopen — overlaps ${conflicts.length} other active enrollment${conflicts.length === 1 ? "" : "s"} for this customer/grant.`
+        : toApiError(error).error || "Failed to reopen enrollment.";
+      toast(msg, { type: "error" });
+    }
   };
 
   const controlDescriptors = React.useMemo(
@@ -814,18 +852,30 @@ function EnrollmentQuickModal({
                   <span className="block font-semibold text-slate-900">Edit dates</span>
                   <span className="block text-xs text-slate-500">Change start or end date.</span>
                 </button>
-                <button
-                  type="button"
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-amber-300 hover:bg-amber-50 disabled:opacity-50"
-                  onClick={() => {
-                    setCloseEditorOpen((value) => !value);
-                    setDateEditorOpen(false);
-                  }}
-                  disabled={busy}
-                >
-                  <span className="block font-semibold text-slate-900">Close enrollment</span>
-                  <span className="block text-xs text-slate-500">Set the end date and mark inactive.</span>
-                </button>
+                {status === "closed" || status === "inactive" ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50"
+                    onClick={() => void reopenEnrollment()}
+                    disabled={busy}
+                  >
+                    <span className="block font-semibold text-slate-900">Reopen enrollment</span>
+                    <span className="block text-xs text-slate-500">Restore to active status.</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-amber-300 hover:bg-amber-50 disabled:opacity-50"
+                    onClick={() => {
+                      setCloseEditorOpen((value) => !value);
+                      setDateEditorOpen(false);
+                    }}
+                    disabled={busy}
+                  >
+                    <span className="block font-semibold text-slate-900">Close enrollment</span>
+                    <span className="block text-xs text-slate-500">Set the end date and mark inactive.</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm transition hover:border-sky-300 hover:bg-sky-50 disabled:opacity-50"
@@ -883,11 +933,29 @@ function EnrollmentQuickModal({
                     <input className="input" type="date" value={closeDate} onChange={(e) => setCloseDate(enrollmentMonthEnd(e.currentTarget.value) || e.currentTarget.value)} />
                     <span className="block text-xs text-amber-800">Saved as month-end. {closePreview.futureUnpaidPayments.length} future unpaid payment{closePreview.futureUnpaidPayments.length === 1 ? "" : "s"} will be removed/voided.</span>
                     {closePreview.lastPaidDate ? <span className="block text-xs text-slate-600">Last paid item: {closePreview.lastPaidDate}</span> : null}
-                    {closePreview.paidAfterClose.length ? <span className="block text-xs font-semibold text-red-700">Move the close month after all paid items.</span> : null}
+                    {closePreview.paidAfterClose.length > 0 ? (
+                      <>
+                        <span className="block text-xs font-semibold text-red-700">
+                          {closePreview.paidAfterClose.length} paid item{closePreview.paidAfterClose.length === 1 ? " is" : "s are"} after {closePreview.closeDate}.
+                        </span>
+                        <label className="mt-1 flex items-center gap-2 text-xs text-amber-900">
+                          <input
+                            type="checkbox"
+                            checked={reversePaidAfterClose}
+                            onChange={(e) => setReversePaidAfterClose(e.target.checked)}
+                          />
+                          Reverse {closePreview.paidAfterClose.length === 1 ? "that payment" : "those payments"} to allow closing
+                        </label>
+                      </>
+                    ) : null}
                   </label>
                   <div className="flex items-end gap-2">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={closeEnrollment} disabled={busy || !closePreview.canClose}>
-
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void closeEnrollment()}
+                      disabled={busy || (closePreview.paidAfterClose.length > 0 && !reversePaidAfterClose)}
+                    >
                       Confirm Close
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCloseEditorOpen(false)} disabled={busy}>

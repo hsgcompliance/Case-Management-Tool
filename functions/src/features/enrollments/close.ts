@@ -31,17 +31,17 @@ function sleep(ms: number) {
 }
 
 /** Calls the real paymentsSpend handler in-process (same pattern as continuity.ts's invokeMigration). */
-async function reversePaymentViaSpend(user: Record<string, any>, enrollmentId: string, paymentId: string) {
+async function callPaymentsSpend(user: Record<string, any>, enrollmentId: string, paymentId: string, reverse: boolean) {
   let status = 200;
   let payload: any;
-  const req = { body: { enrollmentId, paymentId, reverse: true }, user } as any;
+  const req = { body: { enrollmentId, paymentId, reverse }, user, headers: {} } as any;
   const res = {
     status(code: number) { status = code; return this; },
     json(value: any) { payload = value; return this; },
   } as any;
   await paymentsSpendHandler(req, res);
   if (status >= 400 || payload?.ok === false) {
-    throw new Error(String(payload?.error || `reverse_failed_for_${paymentId}`));
+    throw new Error(String(payload?.error || `${reverse ? "reverse" : "spend"}_failed_for_${paymentId}`));
   }
   return payload;
 }
@@ -70,6 +70,26 @@ export async function closeEnrollmentCore(user: Record<string, any>, body: TEnro
     fallbackDate,
   });
 
+  // paymentMode: "deleteUnpaid" (default) keeps buildEnrollmentClosePreview's
+  // existing behavior (future-unpaid rows fall out of payments[] — confirmed
+  // acceptable, both close UIs preview the count first and the grant budget
+  // resyncs automatically). "spendUnpaid" instead marks each future-unpaid
+  // row paid before closing (matches EnrollmentsTab.tsx's pre-existing
+  // "spend future unpaid" option, preserved here rather than dropped).
+  const spentPaymentIds: string[] = [];
+  if (body.paymentMode === "spendUnpaid" && closePreview.futureUnpaid.length) {
+    for (const payment of closePreview.futureUnpaid) {
+      const paymentId = String((payment as any)?.id || "");
+      if (!paymentId) continue;
+      await callPaymentsSpend(user, body.id, paymentId, false);
+      spentPaymentIds.push(paymentId);
+    }
+    const freshSnap = await ref.get();
+    const freshExisting = freshSnap.data() || {};
+    currentPayments = Array.isArray(freshExisting.payments) ? freshExisting.payments : [];
+    closePreview = buildEnrollmentClosePreview({ payments: currentPayments, requestedCloseDate, fallbackDate });
+  }
+
   const reversedPaymentIds: string[] = [];
   if (closePreview.paidAfterClose.length) {
     if (!body.reversePaidAfterClose) {
@@ -80,7 +100,7 @@ export async function closeEnrollmentCore(user: Record<string, any>, body: TEnro
     for (const payment of closePreview.paidAfterClose) {
       const paymentId = String((payment as any)?.id || "");
       if (!paymentId) continue;
-      await reversePaymentViaSpend(user, body.id, paymentId);
+      await callPaymentsSpend(user, body.id, paymentId, true);
       reversedPaymentIds.push(paymentId);
     }
     // Re-read + recompute against the now-reversed payments — never assume the reversal calls' {ok:true} means the array is what we expect.
@@ -142,6 +162,7 @@ export async function closeEnrollmentCore(user: Record<string, any>, body: TEnro
     closeDate,
     retainedPaymentsCount: closePreview.retainedPayments.length,
     removedPaymentsCount: removedPaymentIds.length,
+    spentPaymentIds,
     reversedPaymentIds,
     queueSyncConfirmed,
     payments: verified.payments,

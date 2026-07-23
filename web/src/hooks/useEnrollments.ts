@@ -15,6 +15,8 @@ import type {
   EnrollmentsUndoMigrationReq,
   EnrollmentsAdminReverseLedgerEntryReq,
   EnrollmentActionsApplyReq,
+  EnrollmentsCloseReq,
+  EnrollmentsReopenReq,
   ReqOf,
 } from "@types";
 import { qk } from "./queryKeys";
@@ -574,6 +576,30 @@ export function useEnrollmentsVoidProjections() {
 export function useEnrollmentsCheckOverlaps() {
   return useMutation({
     mutationFn: (body: EnrollmentsCheckOverlapsReq) => EnrollmentsAPI.checkOverlaps(body),
+  });
+}
+
+export function useEnrollmentsClose() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root],
+    mutationFn: (body: EnrollmentsCloseReq) => EnrollmentsAPI.close(body),
+    onSuccess: async (_result, body) => {
+      await invalidateEnrollmentQueries(qc, { enrollmentIds: [String(body.id || "").trim()] });
+    },
+  });
+}
+
+export function useEnrollmentsReopen() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [qk.enrollments.root],
+    mutationFn: (body: EnrollmentsReopenReq) => EnrollmentsAPI.reopen(body),
+    onSuccess: async (_result, body) => {
+      await invalidateEnrollmentQueries(qc, { enrollmentIds: [String(body.id || "").trim()] });
+    },
   });
 }
 

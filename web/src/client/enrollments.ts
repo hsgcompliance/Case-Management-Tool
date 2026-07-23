@@ -30,6 +30,10 @@ import type {
   EnrollmentActionsApplyResp,
   EnrollmentsVoidProjectionsReq,
   EnrollmentsVoidProjectionsResp,
+  EnrollmentsCloseReq,
+  EnrollmentsCloseResp,
+  EnrollmentsReopenReq,
+  EnrollmentsReopenResp,
   EnrollmentsListQuery,
   TEnrollment,
   EnrollmentGetByIdQuery,
@@ -265,6 +269,20 @@ export const Enrollments = {
       idemKey({ scope: "enrollments", op: "voidProjections", body })
     );
   },
+
+  close: (body: EnrollmentsCloseReq): Promise<EnrollmentsCloseResp> =>
+    api.callIdem(
+      "enrollmentsClose",
+      body,
+      idemKey({ scope: "enrollments", op: "close", body })
+    ),
+
+  reopen: (body: EnrollmentsReopenReq): Promise<EnrollmentsReopenResp> =>
+    api.callIdem(
+      "enrollmentsReopen",
+      body,
+      idemKey({ scope: "enrollments", op: "reopen", body })
+    ),
 
   enrollCustomer: (body: EnrollmentsEnrollCustomerReq): Promise<EnrollmentsEnrollCustomerResp> =>
     api.callIdem(

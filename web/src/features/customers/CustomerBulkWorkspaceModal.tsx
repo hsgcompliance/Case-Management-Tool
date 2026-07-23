@@ -23,6 +23,7 @@ import { qk } from "@hooks/queryKeys";
 import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "./paymentScheduleBuildSummary";
 import { paymentScheduleGrantIds } from "./paymentScheduleEligibility";
 import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
+import { PriorEnrollmentNudge, isInactivePriorEnrollment } from "@features/enrollments/PriorEnrollmentNudge";
 
 type CustomerRow = TCustomerEntity & { id: string };
 
@@ -515,6 +516,12 @@ function BulkEnrollWorkspace({
               <tbody>
                 {pageRows.map((customer) => {
                   const activeEnrollment = (enrollmentsByCustomer[customer.id] || []).find(isActiveEnrollment);
+                  const effectiveGrantId = resolveGrantId(customer.id);
+                  const priorClosedForGrant = effectiveGrantId
+                    ? (enrollmentsByCustomer[customer.id] || []).filter(
+                        (e) => String(e.grantId || "").trim() === effectiveGrantId && isInactivePriorEnrollment(e),
+                      )
+                    : [];
                   return (
                     <tr key={customer.id} className="border-t border-slate-100 align-top">
                       <td className="px-5 py-4">
@@ -524,6 +531,11 @@ function BulkEnrollWorkspace({
                       <td className="px-5 py-4 text-slate-600">{formatDob(customer.dob)}</td>
                       <td className="px-5 py-4 text-slate-600">
                         {loading ? "Loading..." : activeEnrollment ? enrollmentLabel(activeEnrollment) : "No active enrollment"}
+                        {priorClosedForGrant.length ? (
+                          <div className="mt-1">
+                            <PriorEnrollmentNudge variant="badge" priorEnrollments={priorClosedForGrant} />
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-5 py-4">
                         <div className="min-w-[230px]">

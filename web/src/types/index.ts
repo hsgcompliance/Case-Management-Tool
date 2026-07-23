@@ -361,6 +361,12 @@ export type EnrollmentActionsApplyResp = RespOf<"enrollmentActionsApply">;
 export type EnrollmentsVoidProjectionsReq = ReqOf<"enrollmentsVoidProjections">;
 export type EnrollmentsVoidProjectionsResp = RespOf<"enrollmentsVoidProjections">;
 
+export type EnrollmentsCloseReq = ReqOf<"enrollmentsClose">;
+export type EnrollmentsCloseResp = RespOf<"enrollmentsClose">;
+
+export type EnrollmentsReopenReq = ReqOf<"enrollmentsReopen">;
+export type EnrollmentsReopenResp = RespOf<"enrollmentsReopen">;
+
 export type EnrollmentsListQuery = ReqOf<"enrollmentsList">;
 export type EnrollmentsListResp = RespOf<"enrollmentsList">;
 
