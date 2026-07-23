@@ -196,11 +196,22 @@ export function isDeterministicPaymentIdV2(id: any): boolean {
 /**
  * Strong deterministic ID from the identity key + sequence index.
  * Readable prefix, collision-resistant hash, stable across amount edits.
+ *
+ * `scopeId` (the owning enrollmentId, when known) is folded into the hash so
+ * two different enrollments sharing the same grant line item, month, type,
+ * and index never generate the literal same id string. Before this, two
+ * customers on the same grant/line item could get an identical payment id
+ * (found 2026-07-22: two YHDP PSH customers' July utility rows both hashed
+ * to `..._8d9bf457e211`) — harmless on its own since ids are always looked
+ * up scoped to one enrollment's own array, but a real footgun for anything
+ * that reasons about payment ids without also carrying enrollmentId (ledger
+ * lookups, manual reconciliation scripts). Omit scopeId only when no
+ * enrollmentId exists yet (the brand-new-enrollment schedule preview path).
  */
-export function buildIdFromKey(key: string, index: number) {
+export function buildIdFromKey(key: string, index: number, scopeId: string = "") {
   const [t, sub, m, li] = key.split("|");
   const liSlug = safeSlug(li, 8);
-  const h = shortHash(`${key}|${index}`, 12);
+  const h = shortHash(`${key}|${index}|${scopeId}`, 12);
   return `pay2_${t}_${sub}_${m}_${liSlug}_${index}_${h}`;
 }
 
@@ -214,7 +225,7 @@ export function buildIdFromKey(key: string, index: number) {
  * - if there are N existing payments with the same key, the first incoming with that key
  *   reuses the first existing id, etc.
  */
-export function ensurePaymentIds(incoming: any[] = [], existing: any[] = []) {
+export function ensurePaymentIds(incoming: any[] = [], existing: any[] = [], enrollmentId: string = "") {
   const existingIdsByKey = new Map<string, string[]>();
 
   // Preserve existing order within each key (enrollment doc order is the only stable truth we have).
@@ -258,12 +269,12 @@ export function ensurePaymentIds(incoming: any[] = [], existing: any[] = []) {
 
     // 3) generate deterministic new id for this key + index
     let idx = nUsed;
-    let id = buildIdFromKey(key, idx);
+    let id = buildIdFromKey(key, idx, enrollmentId);
 
     // just in case (extremely unlikely), keep bumping index until unique
     while (usedInBatch.has(id)) {
       idx += 1;
-      id = buildIdFromKey(key, idx);
+      id = buildIdFromKey(key, idx, enrollmentId);
     }
 
     seq.set(key, idx + 1);

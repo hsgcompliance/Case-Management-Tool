@@ -455,22 +455,33 @@ async function cascadeCustomerInactiveToEnrollments(customerId: string) {
   if (snaps.every((snap) => snap.empty)) return;
 
   const now = isoNow();
-  const batch = db.batch();
   const enrollmentIds: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string }> = [];
 
   const seen = new Set<string>();
-  for (const doc of snaps.flatMap((snap) => snap.docs)) {
-    if (seen.has(doc.ref.path)) continue;
+  const docsToClose = snaps.flatMap((snap) => snap.docs).filter((doc) => {
+    if (seen.has(doc.ref.path)) return false;
     seen.add(doc.ref.path);
-    const data = doc.data() as any;
-    if (!isActiveEnrollment(data)) continue;
+    return isActiveEnrollment(doc.data() as any);
+  });
+
+  // Re-read each enrollment fresh inside its own transaction right before
+  // computing closePreview/writing. The bulk query above is a point-in-time
+  // snapshot; a normal paymentsSpend call landing on one of these enrollments
+  // between that read and this write would otherwise get silently reverted
+  // by a `payments: closePreview.retainedPayments` write computed from the
+  // stale data — the same bug class fixed in syncContinuumRentCertReminders
+  // and cascadeGrantToEnrollments, 2026-07-22.
+  const results = await Promise.allSettled(docsToClose.map((doc) => db.runTransaction(async (trx) => {
+    const freshSnap = await trx.get(doc.ref);
+    if (!freshSnap.exists) return;
+    const data = freshSnap.data() as any;
+    if (!isActiveEnrollment(data)) return;
     const closePreview = buildEnrollmentClosePreview({
       payments: Array.isArray(data?.payments) ? data.payments : [],
       requestedCloseDate: null,
       fallbackDate: now.slice(0, 10),
     });
-
-    batch.set(
+    trx.set(
       doc.ref,
       {
         status: "closed",
@@ -483,20 +494,15 @@ async function cascadeCustomerInactiveToEnrollments(customerId: string) {
       },
       { merge: true }
     );
-
     enrollmentIds.push({
       id: doc.id,
       orgId: data?.orgId ?? null,
       grantId: data?.grantId ?? null,
       customerId: data?.customerId ?? customerId,
     });
-  }
-
-  try {
-    await batch.commit();
-  } catch (e: any) {
-    console.error(`[cascadeCustomerInactive] batch close failed for customer ${customerId}:`, e?.message || e);
-    return;
+  })));
+  for (const r of results) {
+    if (r.status === "rejected") console.error(`[cascadeCustomerInactive] close failed for customer ${customerId}:`, r.reason?.message || r.reason);
   }
 
   // Void paymentQueue projections for each closed enrollment.

@@ -199,7 +199,26 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
     eventsByEnrollment.set(event.enrollmentId, list);
   }
   await Promise.all(rows.map(async (row) => {
-    const existing = Array.isArray(row.taskSchedule) ? row.taskSchedule : [];
+    // Re-read this row's own doc fresh, transactionally, right before writing.
+    // `row` itself comes from the bulk resolveContinuum() read at the top of
+    // this function; by the time this per-row write runs, an unrelated
+    // paymentsSpend call on this SAME enrollment may have already committed a
+    // newer `payments` array (e.g. two payments marked paid back-to-back).
+    // Writing `row.payments`/`row.taskSchedule` straight through — as this
+    // used to — would silently clobber that newer array with the stale one,
+    // reverting an already-applied `paid:true` flip. Found 2026-07-22 when a
+    // second paymentsSpend call on the same enrollment landed, then vanished:
+    // this function's trigger-driven write (still holding the pre-second-call
+    // snapshot) landed after and stomped it back to unpaid. Re-reading inside
+    // a transaction here means Firestore itself retries this row if the doc
+    // changes between read and write, instead of blindly overwriting.
+    await db.runTransaction(async (trx) => {
+    const freshRef = db.collection("customerEnrollments").doc(row.id);
+    const freshSnap = await trx.get(freshRef);
+    if (!freshSnap.exists) return;
+    const fresh: Row = { id: freshSnap.id, ...(freshSnap.data() || {}) } as Row;
+
+    const existing = Array.isArray(fresh.taskSchedule) ? fresh.taskSchedule : [];
     const priorById = new Map(existing.map((task: any) => [String(task?.id || ""), task]));
     const legacyPrior = (targetDate: string, role: string) => existing.find((task: any) => {
       const id = String(task?.defId || task?.id || "").toLowerCase();
@@ -244,7 +263,7 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
           bucket: "compliance",
           managed: true,
           assignedToGroup: role,
-          assignedToUid: role === "casemanager" ? row.caseManagerId || null : null,
+          assignedToUid: role === "casemanager" ? fresh.caseManagerId || null : null,
           assignedAt: prior?.assignedAt || null,
           assignedBy: prior?.assignedBy || "system",
           rentCertPaymentId: event.paymentId,
@@ -254,7 +273,7 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
     }
     const next = [...keep, ...generated].sort((a, b) => String(a?.dueDate || "").localeCompare(String(b?.dueDate || "")));
     const eventByPaymentId = new Map((eventsByEnrollment.get(row.id) || []).map((event) => [event.paymentId, event]));
-    const payments = (Array.isArray(row.payments) ? row.payments : []).map((payment: any) => {
+    const payments = (Array.isArray(fresh.payments) ? fresh.payments : []).map((payment: any) => {
       const event = eventByPaymentId.get(String(payment?.id || ""));
       if (!event) return payment?.rentCert?.source === "calculated" ? { ...payment, rentCert: null } : payment;
       const ids = ["casemanager", "compliance"].map((role) => `payment_rent_cert_${event.paymentId}_${event.targetDate}_${role}`);
@@ -264,12 +283,13 @@ export async function syncContinuumRentCertReminders(seedEnrollmentId: string): 
       const status = event.status === "effective" ? "effective" : allDone ? "completed" : "due";
       return { ...payment, rentCert: { dueDate: event.dueDate, targetPaymentDate: event.targetDate, source: event.source, taskIds: ids, status } };
     });
-    await db.collection("customerEnrollments").doc(row.id).set({
+    trx.set(freshRef, {
       payments,
       taskSchedule: next,
       taskStats: summarize(next),
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
+    });
   }));
 }
 

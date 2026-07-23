@@ -180,7 +180,7 @@ export async function runEnrollmentProjectionsUpsert(
 
       // Normalize subtype tagging BEFORE id assignment so subtype identity is explicit/stable.
       const normalized = (nextPayments || []).map(ensureMonthlySubtypeTag);
-      const withIdsRaw = ensurePaymentIds(normalized, oldPayments);
+      const withIdsRaw = ensurePaymentIds(normalized, oldPayments, enrollmentId);
 
       const withIds = carryRentCertState(withIdsRaw, oldPayments).map((p: any) => {
         const dueDate = p?.dueDate || p?.date;

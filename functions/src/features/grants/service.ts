@@ -1103,44 +1103,63 @@ export async function cascadeGrantToEnrollments(
 
   if (!toProcess.length) return;
 
-  // --- WRITE: close or delete matching enrollments ---
-  const writer = newBulkWriter(2);
   const closedEnrollments: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string | null }> = [];
 
-  for (const doc of toProcess) {
-    const data = doc.data() as any;
-    const closePreview = buildEnrollmentClosePreview({
-      payments: Array.isArray(data?.payments) ? data.payments : [],
-      requestedCloseDate: null,
-      fallbackDate: closeEndDate,
-    });
-    const patch: Record<string, unknown> =
-      targetStatus === "closed"
-        ? {
-            status: "closed",
-            active: false,
-            endDate: closePreview.closeDate,
-            payments: closePreview.retainedPayments,
-            closedAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          }
-        : { status: "deleted", active: false, deleted: true, deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
-
-    writer.set(doc.ref, patch, { merge: true });
-
-    closedEnrollments.push({
-      id: doc.id,
-      orgId: data?.orgId ?? null,
-      grantId: data?.grantId ?? grantId,
-      customerId: data?.customerId ?? null,
-    });
-  }
-
-  try {
-    await writer.close();
-  } catch (e: any) {
-    console.error(`[cascadeGrant] batch write failed for grant ${grantId}:`, e?.message || e);
-    return;
+  if (targetStatus === "closed") {
+    // Re-read each enrollment fresh inside its own transaction right before
+    // computing closePreview/writing. `toProcess` comes from the bulk query
+    // above; between that read and this write, a normal paymentsSpend call
+    // could mark one of these enrollments' payments paid. Writing a
+    // `retainedPayments` array computed from the stale snapshot (as this used
+    // to, via a shared BulkWriter) would silently overwrite that paid flag —
+    // the same bug class fixed in syncContinuumRentCertReminders 2026-07-22.
+    const results = await Promise.allSettled(toProcess.map((doc) => db.runTransaction(async (trx) => {
+      const ref = doc.ref;
+      const freshSnap = await trx.get(ref);
+      if (!freshSnap.exists) return;
+      const data = freshSnap.data() as any;
+      const closePreview = buildEnrollmentClosePreview({
+        payments: Array.isArray(data?.payments) ? data.payments : [],
+        requestedCloseDate: null,
+        fallbackDate: closeEndDate,
+      });
+      trx.set(ref, {
+        status: "closed",
+        active: false,
+        endDate: closePreview.closeDate,
+        payments: closePreview.retainedPayments,
+        closedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      closedEnrollments.push({
+        id: doc.id,
+        orgId: data?.orgId ?? null,
+        grantId: data?.grantId ?? grantId,
+        customerId: data?.customerId ?? null,
+      });
+    })));
+    for (const r of results) {
+      if (r.status === "rejected") console.error(`[cascadeGrant] close failed for grant ${grantId}:`, r.reason?.message || r.reason);
+    }
+  } else {
+    // Deletion never touches `payments` — no race risk, bulk writer is fine.
+    const writer = newBulkWriter(2);
+    for (const doc of toProcess) {
+      const data = doc.data() as any;
+      writer.set(doc.ref, { status: "deleted", active: false, deleted: true, deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      closedEnrollments.push({
+        id: doc.id,
+        orgId: data?.orgId ?? null,
+        grantId: data?.grantId ?? grantId,
+        customerId: data?.customerId ?? null,
+      });
+    }
+    try {
+      await writer.close();
+    } catch (e: any) {
+      console.error(`[cascadeGrant] batch write failed for grant ${grantId}:`, e?.message || e);
+      return;
+    }
   }
 
   // --- VOID projections for all affected enrollments (non-fatal per-enrollment) ---

@@ -115,7 +115,7 @@ export async function paymentsBulkCopyScheduleHandler(req: Request, res: Respons
       next = next.map(ensureMonthlySubtypeTag);
 
       // deterministic IDs with reuse from existing
-      next = ensurePaymentIds(next, existing);
+      next = ensurePaymentIds(next, existing, eid);
 
       if (mode === "merge") {
         const merged = existing.slice();
