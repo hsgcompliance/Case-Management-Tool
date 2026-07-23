@@ -4,6 +4,7 @@ import {
   CustomerEntity,
   CustomerInputSchema,
   CustomerMeta,
+  CustomerNotesSchema,
   CustomerOtherContact,
   CustomerPatchBody,
   CustomerStatus,
@@ -19,7 +20,7 @@ import {
   CustomersPatchRow,
   CustomersUpsertBody,
   Population
-} from "./chunk-AGNAOSOI.js";
+} from "./chunk-EKSLJ3R2.js";
 import {
   toArray
 } from "./chunk-AXFMCCQR.js";
@@ -30,6 +31,7 @@ export {
   CustomerEntity,
   CustomerInputSchema,
   CustomerMeta,
+  CustomerNotesSchema,
   CustomerOtherContact,
   CustomerPatchBody,
   CustomerStatus,

@@ -27,6 +27,9 @@ function folderUrl(idOrUrl: unknown): string {
 export function getCustomerDriveFolderLink(customer: unknown): { url: string; label: string } | null {
   if (!customer || typeof customer !== "object") return null;
   const record = customer as Record<string, unknown>;
+  const customerDrive = record.customerDrive && typeof record.customerDrive === "object"
+    ? (record.customerDrive as Record<string, unknown>)
+    : {};
   const meta = record.meta && typeof record.meta === "object"
     ? (record.meta as Record<string, unknown>)
     : {};
@@ -34,18 +37,18 @@ export function getCustomerDriveFolderLink(customer: unknown): { url: string; la
     ...(Array.isArray(meta.driveFolders) ? (meta.driveFolders as DriveFolderLike[]) : []),
     ...(Array.isArray(record.driveFolders) ? (record.driveFolders as DriveFolderLike[]) : []),
   ];
-  // Card/list display still favors the legacy folder list because it can carry
-  // alias/name labels. New resolver work should align to the Google integrations
-  // order: customerDrive.folderId -> meta.driveFolderId -> meta.driveFolders[0].id.
   const folder = folders.find((item) => folderUrl(item?.url) || folderUrl(item?.id));
   const url =
+    folderUrl(customerDrive.folderUrl) ||
+    folderUrl(customerDrive.folderId) ||
+    folderUrl(meta.driveFolderId) ||
     folderUrl(folder?.url) ||
     folderUrl(folder?.id) ||
-    folderUrl(meta.driveFolderId) ||
     folderUrl(record.driveFolderId);
 
   if (!url) return null;
   const label =
+    String(customerDrive.folderAlias || customerDrive.folderName || "").trim() ||
     String(folder?.alias || folder?.name || "").trim() ||
     "Open Google Drive folder";
   return { url, label };

@@ -20,6 +20,13 @@ export const CustomerStatus = z
   .nullable();
 export type TCustomerStatus = z.infer<typeof CustomerStatus>;
 
+/** Timestamp-keyed customer note history: notes["2026-07-23T...Z"] = "..." */
+export const CustomerNotesSchema = z.record(
+  z.string().trim().min(1),
+  z.string().trim().min(1),
+);
+export type TCustomerNotes = z.infer<typeof CustomerNotesSchema>;
+
 /* ============================================================================
    Core schemas
 ============================================================================ */
@@ -60,7 +67,8 @@ export const CustomerMeta = z
     // Legacy primary folder pointer kept for backward compatibility. Prefer
     // customerDrive.folderId for new resolvers and mirror writes during migration.
     driveFolderId: z.string().nullish(),
-    notes: z.string().nullish(),
+    // Legacy location/shape. New notes belong at CustomerInputSchema.notes.
+    notes: z.union([z.string(), CustomerNotesSchema]).nullish(),
 
     // Household / family linking (Customer-Collection-Update). Denormalized
     // pointer to the canonical households/{id} doc this customer belongs to; the
@@ -136,6 +144,9 @@ export const CustomerInputSchema = z
     // Simple single-select acuity tier (1–3). Kept top-level (not nested under
     // acuity) so Firestore single-field indexes make it directly queryable.
     tier: z.number().int().min(1).max(3).nullish(),
+
+    // Canonical append-only staff notes, keyed by their ISO timestamp.
+    notes: CustomerNotesSchema.nullish(),
 
     // Drive folders + misc metadata. Drive fields here are compatibility
     // fallbacks; new structured Drive state belongs under customerDrive.

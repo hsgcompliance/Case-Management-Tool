@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { FormsCustomer } from "@/lib/customersApi";
-import { clearCustomerDetailCache, getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
-import { loadCustomers } from "@/lib/customersApi";
+import {
+  clearCustomerDetailCache,
+  getCustomerDetail,
+  subscribeCustomerDetail,
+  type CustomerDetail,
+} from "@/lib/customerDetailApi";
+import { addCustomerNote, loadCustomers } from "@/lib/customersApi";
 import { listIntakeSessions, onIntakeSessionsChange, removeIntakeSession, sessionCustomer } from "@/lib/intakeSessions";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { formatDob } from "@/lib/format";
 import { listEnrollmentsForCustomer, markCustomerNotEligible, type FormsEnrollment } from "@/lib/rentCertApi";
 import { CustomerEditPanel } from "./CustomerEditPanel";
 import { ExternalServiceIcon } from "./ui";
+import { useAuth } from "@/hooks/useAuth";
 
 // Tabbed customer header for the Intake / All forms pages.
 //   • Customer tab — the current customer sourced from the customer DOC (not the
@@ -65,6 +71,98 @@ function CustomerTab({ detail, fallback }: { detail: CustomerDetail | null; fall
   );
 }
 
+function CustomerNotes({
+  customerId,
+  notes,
+  onNoteAdded,
+}: {
+  customerId: string;
+  notes: Record<string, string>;
+  onNoteAdded: (savedCustomerId: string) => Promise<void>;
+}) {
+  const { user } = useAuth();
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const activeCustomerId = useRef(customerId);
+  activeCustomerId.current = customerId;
+  const entries = Object.entries(notes).sort(([a], [b]) => b.localeCompare(a));
+
+  useEffect(() => {
+    setDraft("");
+    setBusy(false);
+    setError(null);
+  }, [customerId]);
+
+  const save = async () => {
+    const note = draft.trim();
+    if (!note || busy) return;
+    const savedCustomerId = customerId;
+    const author =
+      user?.displayName?.trim() ||
+      user?.email?.trim() ||
+      user?.uid ||
+      "Staff";
+    const storedNote = `${author} - ${note}`;
+    setBusy(true);
+    setError(null);
+    try {
+      await addCustomerNote(savedCustomerId, storedNote);
+      if (activeCustomerId.current === savedCustomerId) setDraft("");
+      await onNoteAdded(savedCustomerId);
+    } catch (saveError) {
+      if (activeCustomerId.current === savedCustomerId) {
+        setError(saveError instanceof Error ? saveError.message : "Could not save the customer note.");
+      }
+    } finally {
+      if (activeCustomerId.current === savedCustomerId) setBusy(false);
+    }
+  };
+
+  return (
+    <section className="mt-3 rounded-lg border border-indigo-100 bg-white p-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Customer notes
+      </div>
+      {entries.length ? (
+        <div className="mb-3 max-h-32 space-y-1.5 overflow-auto">
+          {entries.map(([time, note]) => {
+            const date = new Date(time);
+            const label = Number.isNaN(date.getTime()) ? time : date.toLocaleString();
+            return (
+              <div key={time} className="rounded-md bg-slate-50 px-2.5 py-2">
+                <div className="whitespace-pre-wrap text-sm text-slate-700">{note}</div>
+                <div className="mt-1 text-[10px] text-slate-400">{label}</div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mb-2 text-xs text-slate-400">No customer notes yet.</div>
+      )}
+      <div className="flex items-end gap-2">
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          placeholder="Add a persistent customer note…"
+          rows={2}
+          maxLength={4000}
+          className="min-h-16 flex-1 resize-y rounded-md border border-slate-200 px-2.5 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+        />
+        <button
+          type="button"
+          disabled={!draft.trim() || busy}
+          onClick={save}
+          className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "Saving…" : "Add note"}
+        </button>
+      </div>
+      {error ? <div className="mt-2 text-xs font-medium text-rose-600">{error}</div> : null}
+    </section>
+  );
+}
+
 function HouseholdTab({ detail, loading }: { detail: CustomerDetail | null; loading: boolean }) {
   if (loading && !detail) return <div className="py-2 text-xs text-slate-400">Loading household…</div>;
   const hh = detail?.household;
@@ -111,18 +209,40 @@ function HouseholdTab({ detail, loading }: { detail: CustomerDetail | null; load
           </p>
         ) : (
           <div className="max-h-44 space-y-1 overflow-auto">
-            {hh.forms.map((g) => (
-              <div
-                key={g.formId || g.formName}
-                className="flex items-center justify-between gap-3 rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-slate-200"
-              >
-                <span className="min-w-0 truncate text-xs font-medium text-slate-700">{g.formName}</span>
-                <span className="shrink-0 text-[10px] text-slate-400">
-                  {g.count} {g.count === 1 ? "submission" : "submissions"}
-                  {g.latestLinkedAt ? ` · ${g.latestLinkedAt.slice(0, 10)}` : ""}
-                </span>
-              </div>
-            ))}
+            {hh.forms.map((g) => {
+              const inboxUrl = g.formId && g.latestSubmissionId
+                ? `https://www.jotform.com/inbox/${encodeURIComponent(g.formId)}/${encodeURIComponent(g.latestSubmissionId)}`
+                : null;
+              const content = (
+                <>
+                  <span className="min-w-0 truncate text-xs font-medium text-slate-700">{g.formName}</span>
+                  <span className="shrink-0 text-[10px] text-slate-400">
+                    {g.count} {g.count === 1 ? "submission" : "submissions"}
+                    {g.latestLinkedAt ? ` · ${g.latestLinkedAt.slice(0, 10)}` : ""}
+                    {inboxUrl ? " ↗" : ""}
+                  </span>
+                </>
+              );
+              return inboxUrl ? (
+                <a
+                  key={g.formId || g.formName}
+                  href={inboxUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-3 rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-slate-200 transition hover:bg-indigo-50 hover:ring-indigo-200"
+                  title={`Open the latest ${g.formName} submission in Jotform Inbox`}
+                >
+                  {content}
+                </a>
+              ) : (
+                <div
+                  key={g.formId || g.formName}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-white px-2.5 py-1.5 ring-1 ring-slate-200"
+                >
+                  {content}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -132,6 +252,8 @@ function HouseholdTab({ detail, loading }: { detail: CustomerDetail | null; load
 
 export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
   const { customer, setCustomer } = useCurrentCustomer();
+  const activeCustomerId = useRef<string | null>(customer?.id ?? null);
+  activeCustomerId.current = customer?.id ?? null;
   const [navList, setNavList] = useState<FormsCustomer[] | null>(null);
   const [tab, setTab] = useState<"customer" | "household">("customer");
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
@@ -159,11 +281,18 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
   useEffect(() => {
     if (!customer) { setDetail(null); return; }
     let alive = true;
+    setDetail(null);
     setLoading(true);
+    const unsubscribe = subscribeCustomerDetail(customer.id, (next) => {
+      if (alive) setDetail(next);
+    });
     getCustomerDetail(customer.id)
       .then((d) => { if (alive) setDetail(d); })
       .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
   }, [customer?.id]);
 
   useEffect(() => {
@@ -229,6 +358,12 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
     const nextCustomer = customers.find((item) => item.id === customer.id);
     if (nextCustomer) setCustomer(nextCustomer);
     setEditing(false);
+  };
+
+  const refreshAfterNote = async (savedCustomerId: string) => {
+    clearCustomerDetailCache(savedCustomerId);
+    const refreshed = await getCustomerDetail(savedCustomerId, true);
+    if (activeCustomerId.current === savedCustomerId) setDetail(refreshed);
   };
 
   if (!customer) {
@@ -333,7 +468,14 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
       {/* Tab content */}
       <div className="px-3 py-3">
         {tab === "customer" ? (
-          <CustomerTab detail={detail} fallback={customer} />
+          <>
+            <CustomerTab detail={detail} fallback={customer} />
+            <CustomerNotes
+              customerId={customer.id}
+              notes={detail?.notes ?? {}}
+              onNoteAdded={refreshAfterNote}
+            />
+          </>
         ) : (
           <HouseholdTab detail={detail} loading={loading} />
         )}

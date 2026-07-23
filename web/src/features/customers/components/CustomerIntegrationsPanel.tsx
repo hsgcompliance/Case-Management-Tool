@@ -1504,9 +1504,33 @@ function JotformEmbedFrame({
   onSubmitted: (submissionId: string) => void;
 }) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
+  const [frameHeight, setFrameHeight] = React.useState(520);
 
   React.useEffect(() => {
     const handler = (e: MessageEvent) => {
+      // Only accept messages from this Jotform iframe. Besides preventing another
+      // frame from resizing this one, this keeps submission detection scoped to
+      // the form the user is currently completing.
+      if (
+        e.source !== frameRef.current?.contentWindow ||
+        e.origin !== "https://form.jotform.com"
+      ) {
+        return;
+      }
+
+      // Jotform's supported iframe embed protocol sends plain-text resize
+      // messages such as "setHeight:1234".
+      if (typeof e.data === "string") {
+        const [action, value] = e.data.split(":");
+        if (action === "setHeight") {
+          const nextHeight = Number.parseInt(value, 10);
+          if (Number.isFinite(nextHeight) && nextHeight > 0) {
+            setFrameHeight(Math.max(400, Math.min(nextHeight, 50_000)));
+          }
+          return;
+        }
+      }
+
       try {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
         if (
@@ -1525,7 +1549,10 @@ function JotformEmbedFrame({
     return () => window.removeEventListener("message", handler);
   }, [formId, onSubmitted]);
 
-  const url = `https://form.jotform.com/${formId}?isIframe=1`;
+  // isIframeEmbed enables Jotform's height postMessage protocol. Keep internal
+  // scrolling enabled as a fallback for dynamic fields that grow after the last
+  // height message (uploads and conditional sections are common examples).
+  const url = `https://form.jotform.com/${formId}?isIframeEmbed=1&isIframe=1`;
 
   return (
     <iframe
@@ -1533,7 +1560,8 @@ function JotformEmbedFrame({
       src={url}
       title="Jotform"
       className="w-full rounded-xl border border-slate-200"
-      style={{ height: 520, minHeight: 400 }}
+      style={{ height: frameHeight, minHeight: 400 }}
+      scrolling="yes"
       allowFullScreen
       sandbox="allow-scripts allow-forms allow-same-origin allow-top-navigation allow-popups"
     />
@@ -1620,6 +1648,14 @@ function LinkedFormItem({
         <div className="border-t border-slate-100 px-3 pb-3 pt-2">
           <div className="mb-2 text-xs text-slate-500">
             Fill out and submit below. The submission will be automatically linked to this customer.
+          </div>
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <span className="font-semibold">Scroll stuck?</span>{" "}
+            Click the last visible field, then press{" "}
+            <kbd className="rounded border border-amber-300 bg-white px-1.5 py-0.5 font-mono text-[11px]">
+              Tab
+            </kbd>{" "}
+            to move to the next field.
           </div>
           <JotformEmbedFrame
             formId={form.formId}

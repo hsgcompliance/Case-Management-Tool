@@ -19,6 +19,9 @@ export declare const CustomerStatus: z.ZodNullable<z.ZodEnum<{
     deleted: "deleted";
 }>>;
 export type TCustomerStatus = z.infer<typeof CustomerStatus>;
+/** Timestamp-keyed customer note history: notes["2026-07-23T...Z"] = "..." */
+export declare const CustomerNotesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
+export type TCustomerNotes = z.infer<typeof CustomerNotesSchema>;
 export declare const CustomerAcuity: z.ZodOptional<z.ZodNullable<z.ZodObject<{
     templateId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     templateVersion: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
@@ -40,7 +43,7 @@ export declare const CustomerMeta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
     }, z.core.$strip>>>;
     driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
     householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$loose>>>;
@@ -110,6 +113,7 @@ export declare const CustomerInputSchema: z.ZodObject<{
         answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     }, z.core.$loose>>>;
     tier: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
     meta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -119,7 +123,7 @@ export declare const CustomerInputSchema: z.ZodObject<{
             kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
         householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
@@ -223,6 +227,7 @@ export declare const CustomerEntity: z.ZodObject<{
         answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     }, z.core.$loose>>>;
     tier: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
     meta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -232,7 +237,7 @@ export declare const CustomerEntity: z.ZodObject<{
             kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
         householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
@@ -332,6 +337,7 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     }, z.core.$loose>>>;
     tier: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
     meta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -341,7 +347,7 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
         householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
@@ -439,6 +445,7 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     }, z.core.$loose>>>;
     tier: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
     meta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -448,7 +455,7 @@ export declare const CustomersUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
         householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
@@ -551,6 +558,7 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     }, z.core.$loose>>>;
     tier: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
     meta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -560,7 +568,7 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
         householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
@@ -658,6 +666,7 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
     }, z.core.$loose>>>;
     tier: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>;
     meta: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -667,7 +676,7 @@ export declare const CustomerUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
         }, z.core.$strip>>>;
         driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
         householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$loose>>>;
@@ -769,6 +778,7 @@ export declare const CustomersPatchRow: z.ZodObject<{
             answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         }, z.core.$loose>>>>;
         tier: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodNumber>>>;
+        notes: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
         meta: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -778,7 +788,7 @@ export declare const CustomersPatchRow: z.ZodObject<{
                 kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-            notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
             householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
@@ -882,6 +892,7 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         }, z.core.$loose>>>>;
         tier: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodNumber>>>;
+        notes: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
         meta: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -891,7 +902,7 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                 kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-            notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
             householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
@@ -994,6 +1005,7 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         }, z.core.$loose>>>>;
         tier: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodNumber>>>;
+        notes: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
         meta: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -1003,7 +1015,7 @@ export declare const CustomersPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                 kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-            notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
             householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
@@ -1112,6 +1124,7 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         }, z.core.$loose>>>>;
         tier: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodNumber>>>;
+        notes: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
         meta: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -1121,7 +1134,7 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                 kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-            notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
             householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;
@@ -1224,6 +1237,7 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
             answers: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
         }, z.core.$loose>>>>;
         tier: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodNumber>>>;
+        notes: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodRecord<z.ZodString, z.ZodString>>>>;
         meta: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             driveFolders: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -1233,7 +1247,7 @@ export declare const CustomerPatchBody: z.ZodUnion<readonly [z.ZodObject<{
                 kind: z.ZodDefault<z.ZodLiteral<"gdrive">>;
             }, z.core.$strip>>>;
             driveFolderId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-            notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            notes: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodRecord<z.ZodString, z.ZodString>]>>>;
             householdId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             householdRelationship: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$loose>>>>;

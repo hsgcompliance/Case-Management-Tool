@@ -537,7 +537,13 @@ export type FormsLinkedSubmission = {
 };
 
 export type FormsHouseholdField = { key: string; label: string; value: string };
-export type FormsHouseholdFormGroup = { formId: string; formName: string; count: number; latestLinkedAt: string | null };
+export type FormsHouseholdFormGroup = {
+  formId: string;
+  formName: string;
+  count: number;
+  latestLinkedAt: string | null;
+  latestSubmissionId: string | null;
+};
 export type FormsHouseholdMember = { name: string; cwId: string | null; dob: string | null; relation: string };
 
 export type FormsHouseholdObject = {
@@ -559,6 +565,7 @@ export type FormsCustomerDetail = {
   lastName: string | null;
   cwId: string | null;
   dob: string | null;
+  email: string | null;
   caseManagerName: string | null;
   caseManagerId: string | null;
   secondaryCaseManagerName: string | null;
@@ -570,7 +577,15 @@ export type FormsCustomerDetail = {
   linkedSubmissions: FormsLinkedSubmission[];
   household: FormsHouseholdObject;
   /** Customer Drive folder (read order: customerDrive → meta.driveFolderId → meta.driveFolders[0]). */
+  driveFolderId: string | null;
   driveFolderUrl: string | null;
+  tssWorkbook: {
+    spreadsheetId: string;
+    spreadsheetUrl: string;
+    spreadsheetName: string | null;
+    variant: string | null;
+  } | null;
+  notes: Record<string, string>;
   tssPayerStatus: string | null;
 };
 
@@ -589,6 +604,7 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
   const name = [firstName, lastName].filter(Boolean).join(" ") || sTrim(r.fullName) || sTrim(r.name) || id;
   const cwId = sTrim(r.cwId);
   const dob = sTrim(r.dob);
+  const email = sTrim(r.email);
   const caseManagerName = sTrim(r.caseManagerName);
   const caseManagerId = sTrim(r.caseManagerId);
   const secondaryCaseManagerName = sTrim(r.secondaryCaseManagerName);
@@ -623,9 +639,15 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
       formName: l.formName || (l.formId ? `Form ${l.formId}` : "Form"),
       count: 0,
       latestLinkedAt: null as string | null,
+      latestSubmissionId: null as string | null,
     };
     g.count += 1;
-    if (l.linkedAt && (!g.latestLinkedAt || l.linkedAt > g.latestLinkedAt)) g.latestLinkedAt = l.linkedAt;
+    if (!g.latestSubmissionId || (l.linkedAt && (!g.latestLinkedAt || l.linkedAt > g.latestLinkedAt))) {
+      g.latestSubmissionId = l.submissionId;
+    }
+    if (l.linkedAt && (!g.latestLinkedAt || l.linkedAt > g.latestLinkedAt)) {
+      g.latestLinkedAt = l.linkedAt;
+    }
     byForm.set(key, g);
   }
   const forms = [...byForm.values()].sort((a, b) => (b.latestLinkedAt || "").localeCompare(a.latestLinkedAt || ""));
@@ -652,6 +674,20 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
     formCount: linkedSubmissions.length,
   };
 
+  const driveFolderId =
+    sTrim(r?.customerDrive?.folderId) ||
+    sTrim(r?.meta?.driveFolderId) ||
+    sTrim(r?.meta?.driveFolders?.[0]?.id);
+  const rawWorkbook = r?.customerDrive?.linkedWorkbooks?.tss;
+  const workbookId = sTrim(rawWorkbook?.spreadsheetId);
+  const notes = r?.notes && typeof r.notes === "object" && !Array.isArray(r.notes)
+    ? Object.fromEntries(
+        Object.entries(r.notes)
+          .map(([time, note]) => [sTrim(time), sTrim(note)])
+          .filter(([time, note]) => time && note),
+      )
+    : {};
+
   return {
     id,
     name,
@@ -659,6 +695,7 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
     lastName: lastName || null,
     cwId: cwId || null,
     dob: dob || null,
+    email: email || null,
     caseManagerName: caseManagerName || null,
     caseManagerId: caseManagerId || null,
     secondaryCaseManagerName: secondaryCaseManagerName || null,
@@ -669,13 +706,21 @@ export async function getCustomerDetailForForms(orgId: string, customerId: strin
     otherContacts,
     linkedSubmissions,
     household,
-    driveFolderUrl: (() => {
-      const folderId =
-        sTrim(r?.customerDrive?.folderId) ||
-        sTrim(r?.meta?.driveFolderId) ||
-        sTrim(r?.meta?.driveFolders?.[0]?.id);
-      return sTrim(r?.customerDrive?.folderUrl) || (folderId ? `https://drive.google.com/drive/folders/${folderId}` : null);
-    })(),
+    driveFolderId: driveFolderId || null,
+    driveFolderUrl:
+      sTrim(r?.customerDrive?.folderUrl) ||
+      (driveFolderId ? `https://drive.google.com/drive/folders/${driveFolderId}` : null),
+    tssWorkbook: workbookId
+      ? {
+          spreadsheetId: workbookId,
+          spreadsheetUrl:
+            sTrim(rawWorkbook?.spreadsheetUrl) ||
+            `https://docs.google.com/spreadsheets/d/${workbookId}/edit`,
+          spreadsheetName: sTrim(rawWorkbook?.spreadsheetName) || null,
+          variant: sTrim(rawWorkbook?.variant) || null,
+        }
+      : null,
+    notes,
     tssPayerStatus: sTrim(r?.tssPayerStatus) || null,
   };
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { INTAKE_TYPES, intakeTypesLabel, type FormDef, type IntakeFlowStep, type IntakeTypeId } from "@/lib/formsCatalog";
 import { removeIntakeSession, upsertIntakeSession } from "@/lib/intakeSessions";
-import { setCustomerTssStatus } from "@/lib/customersApi";
-import { getCustomerDetail } from "@/lib/customerDetailApi";
+import { loadCustomers, setCustomerTssStatus, type FormsCustomer } from "@/lib/customersApi";
+import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
+import { loadDriveReadinessInputs, type DriveFolderIndexEntry, type FormsDriveConfig } from "@/lib/driveReadinessApi";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { JotformEmbed } from "./JotformEmbed";
 import { SendToCustomerModal } from "./SendToCustomerModal";
@@ -12,6 +13,10 @@ import { CreditCardCards } from "./CreditCardCards";
 import { CustomerDetailsHeader } from "./CustomerDetailsHeader";
 import { MissingIntakeInfoBuilder } from "./MissingIntakeInfoBuilder";
 import { RentCertScheduleBuilder } from "./RentCertScheduleBuilder";
+import { DriveSetupPanel } from "./DriveSetupPanel";
+import { TssWorkbookModal } from "./TssWorkbookModal";
+import { LandlordPrefillPanel } from "./LandlordPrefillPanel";
+import { MouSendPanel } from "./MouSendPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { ExternalServiceIcon } from "./ui";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
@@ -83,7 +88,11 @@ function GuidanceLink({ href, children }: { href: string; children: ReactNode })
 
 function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] }) {
   const selected = new Set(intakeTypes);
-  const needsHmis = selected.has("hud-rental") || selected.has("bridging-home") || selected.has("path-housing");
+  const needsHmis =
+    selected.has("hud-rental") ||
+    selected.has("bridging-home") ||
+    selected.has("path-housing") ||
+    selected.has("ryan-white-housing");
   if (!selected.size) {
     return <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Return to Step 1 and select at least one intake program to see its requirements.</div>;
   }
@@ -112,6 +121,12 @@ function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] })
         <section className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">
           <h3 className="font-semibold text-emerald-950">PATH</h3>
           <p className="mt-1 text-sm text-emerald-900">Please open HMIS and make sure the customer is enrolled in PATH Supportive Services and/or Outreach Services.</p>
+        </section>
+      ) : null}
+      {selected.has("ryan-white-housing") ? (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+          <h3 className="font-semibold text-emerald-950">Ryan White Housing Assistance</h3>
+          <p className="mt-1 text-sm text-emerald-900">Follow the PATH Housing Intake flow: open HMIS and confirm the applicable supportive-services and/or outreach enrollment.</p>
         </section>
       ) : null}
       {needsHmis ? <div className="flex justify-center py-2"><GuidanceLink href={HMIS_URL}>Open HMIS (ServicePoint)</GuidanceLink></div> : null}
@@ -186,6 +201,13 @@ export function FormsCategoryView({
   const [view, setView] = useState<View>({ kind: "list" });
   const [sendForm, setSendForm] = useState<FormDef | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [workbookOpen, setWorkbookOpen] = useState(false);
+  const [driveDetail, setDriveDetail] = useState<CustomerDetail | null>(null);
+  const [driveConfig, setDriveConfig] = useState<FormsDriveConfig | null>(null);
+  const [driveFolders, setDriveFolders] = useState<DriveFolderIndexEntry[]>([]);
+  const [driveCustomers, setDriveCustomers] = useState<FormsCustomer[]>([]);
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [driveLoadError, setDriveLoadError] = useState<string | null>(null);
 
   // Resolve flow steps against the full catalog (flow forms may live in other categories).
   const resolvedSteps = useMemo<ResolvedStep[]>(() => {
@@ -292,7 +314,15 @@ export function FormsCategoryView({
       const cur = new Set(p.checks[stepKey] ?? []);
       if (cur.has(itemIdx)) cur.delete(itemIdx);
       else cur.add(itemIdx);
-      return { ...p, checks: { ...p.checks, [stepKey]: [...cur].sort((a, b) => a - b) } };
+      const checked = [...cur].sort((a, b) => a - b);
+      const target = resolvedSteps.find((candidate) => candidate.key === stepKey);
+      return {
+        ...p,
+        checks: { ...p.checks, [stepKey]: checked },
+        ...(target?.autoCompleteChecklist
+          ? { done: { ...p.done, [stepKey]: checked.length === (target.checklist?.length ?? 0) } }
+          : {}),
+      };
     });
   };
 
@@ -356,6 +386,45 @@ export function FormsCategoryView({
 
   const step = view.kind === "step" ? steps[view.idx] : null;
   const stepKey = step?.key ?? null;
+  const driveStepIndex = steps.findIndex((candidate) => candidate.driveSetup);
+
+  const refreshDriveReadiness = useCallback(async (force = false) => {
+    setDriveLoading(true);
+    setDriveLoadError(null);
+    try {
+      const [inputs, customerRows, detail] = await Promise.all([
+        loadDriveReadinessInputs(force),
+        loadCustomers(force),
+        customer?.id ? getCustomerDetail(customer.id, force) : Promise.resolve(null),
+      ]);
+      setDriveConfig(inputs.config);
+      setDriveFolders(inputs.folders);
+      setDriveCustomers(customerRows);
+      setDriveDetail(detail);
+    } catch (error) {
+      setDriveLoadError((error as Error)?.message || "Could not check the organization Drive index.");
+    } finally {
+      setDriveLoading(false);
+    }
+  }, [customer?.id]);
+
+  useEffect(() => {
+    setDriveDetail(null);
+    setWorkbookOpen(false);
+  }, [customer?.id]);
+
+  // Begin the potentially slow customer/index reads on Step 8 so Step 9's
+  // duplicate and repair recommendation is normally ready before it opens.
+  useEffect(() => {
+    if (driveStepIndex < 0 || view.kind !== "step" || view.idx < Math.max(0, driveStepIndex - 1)) return;
+    void refreshDriveReadiness();
+  }, [driveStepIndex, refreshDriveReadiness, view]);
+
+  useEffect(() => {
+    const driveStep = steps.find((candidate) => candidate.driveSetup);
+    if (!driveStep || !customer || !driveDetail?.driveFolderId || !driveDetail.tssWorkbook?.spreadsheetId) return;
+    if (!progress.done[driveStep.key]) setDone(driveStep.key, true);
+  }, [customer, driveDetail, progress.done, setDone, steps]);
 
   // Bumped when the embed detects a submit → the Webhooks sidebar refetches
   // right away instead of waiting for its next poll tick.
@@ -386,19 +455,7 @@ export function FormsCategoryView({
   const resolveHref = (href: string): string =>
     customer ? href.replace("{customerId}", customer.id) : href.replace(/\/\{customerId\}/, "");
 
-  // Customer Drive folder URL (from the customer doc) for "Open customer folder" buttons.
-  const [folderUrl, setFolderUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    if (!customer) {
-      setFolderUrl(null);
-      return;
-    }
-    getCustomerDetail(customer.id).then((d) => {
-      if (alive) setFolderUrl(d?.driveFolderUrl ?? null);
-    });
-    return () => { alive = false; };
-  }, [customer]);
+  const folderUrl = driveDetail?.driveFolderUrl ?? null;
 
   // TSS gate selection: persist locally, and push onto the customer doc as soon
   // as one exists (covers select-after-link AND select-before-link via merge).
@@ -577,6 +634,20 @@ export function FormsCategoryView({
             </div>
           )
         ) : null}
+        {step.driveSetup ? (
+          <DriveSetupPanel
+            customer={customer}
+            detail={driveDetail}
+            customers={driveCustomers}
+            folders={driveFolders}
+            config={driveConfig}
+            variant={tssVariant ?? "nonpayer"}
+            loading={driveLoading}
+            loadError={driveLoadError}
+            onRefresh={() => refreshDriveReadiness(true)}
+            onCreateCustomer={() => setCreateOpen(true)}
+          />
+        ) : null}
         {step.checklist?.length || step.links?.length || step.customerFolderLink ? (
           <div className="space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             {step.customerFolderLink ? (
@@ -648,6 +719,45 @@ export function FormsCategoryView({
           </div>
         ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
+        {step.workbookModal ? (
+          <section className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-5 text-center">
+            {driveDetail?.tssWorkbook ? (
+              <>
+                <div className="text-sm font-semibold text-indigo-950">{driveDetail.tssWorkbook.spreadsheetName || "Linked TSS workbook"}</div>
+                <p className="mt-1 text-xs text-indigo-700">Open the workbook and budget without leaving this intake flow.</p>
+                <button
+                  type="button"
+                  onClick={() => setWorkbookOpen(true)}
+                  className="mt-4 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-7 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-500"
+                >
+                  <ExternalServiceIcon href={driveDetail.tssWorkbook.spreadsheetUrl} className="h-5 w-5" />
+                  Open TSS workbook
+                </button>
+              </>
+            ) : driveLoading ? (
+              <div className="text-sm text-indigo-700">Loading the linked TSS workbook…</div>
+            ) : (
+              <>
+                <div className="text-sm font-semibold text-amber-900">No TSS workbook is linked yet</div>
+                <p className="mt-1 text-xs text-amber-700">Return to Step 9 to link an indexed workbook or create one in the customer folder.</p>
+                {driveStepIndex >= 0 ? (
+                  <button type="button" onClick={() => setView({ kind: "step", idx: driveStepIndex })} className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500">
+                    Go to Step 9
+                  </button>
+                ) : null}
+              </>
+            )}
+          </section>
+        ) : null}
+        {step.landlordPrefill ? <LandlordPrefillPanel snapshot={webhookSnapshot} /> : null}
+        {step.mouSend ? (
+          <MouSendPanel
+            customer={customer}
+            detail={driveDetail}
+            snapshot={webhookSnapshot}
+            intakeTypes={intakeTypes}
+          />
+        ) : null}
         {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} onSubmissionStateChange={handleRentCertSubmissionState} /> : null}
         {step.intakeGuidance ? <IntakeProgramGuidance intakeTypes={intakeTypes} /> : null}
         {step.inspectionGate ? <IntakeInspection intakeTypes={intakeTypes} onSubmitted={handleSubmitted} /> : null}
@@ -774,6 +884,14 @@ export function FormsCategoryView({
         )}
         {nav}
         {createModal}
+        {workbookOpen && driveDetail?.tssWorkbook ? (
+          <TssWorkbookModal
+            spreadsheetId={driveDetail.tssWorkbook.spreadsheetId}
+            spreadsheetUrl={driveDetail.tssWorkbook.spreadsheetUrl}
+            spreadsheetName={driveDetail.tssWorkbook.spreadsheetName}
+            onClose={() => setWorkbookOpen(false)}
+          />
+        ) : null}
       </div>
     );
   }

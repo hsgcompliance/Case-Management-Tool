@@ -53,3 +53,20 @@ export async function postAuthed<T>(name: string, body: unknown = {}): Promise<T
   }
   return json as T;
 }
+
+export async function patchAuthed<T>(name: string, body: unknown = {}): Promise<T> {
+  const tok = await idToken();
+  if (!tok) throw new ApiError("not_signed_in", 401);
+
+  const resp = await fetch(`${functionsBase()}/${name}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+    body: JSON.stringify(body ?? {}),
+  });
+  const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!resp.ok || json.ok === false) {
+    const msg = String(json.error ?? `HTTP ${resp.status}`);
+    throw new ApiError(msg, resp.status, typeof json.code === "number" ? json.code : undefined);
+  }
+  return json as T;
+}

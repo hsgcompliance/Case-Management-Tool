@@ -13,6 +13,7 @@ import { useGrant, useGrants } from "@hooks/useGrants";
 import { usePaymentsProjectionsAdjust, usePaymentsSpend, type PaymentsProjectionsAdjustInput } from "@hooks/usePayments";
 import { useAuth } from "@app/auth/AuthProvider";
 import { Modal } from "@entities/ui/Modal";
+import { ExternalServiceIcon } from "@entities/gdrive/FileTypeIcon";
 import { CustomerActionMenuBody, EnrollCustomerQuickModal, TIER_SELECTED_CLASS } from "./CustomerActionMenu";
 import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
 import { EnrollmentMigrateDialog } from "@entities/dialogs/enrollment/EnrollmentMigrateDialog";
@@ -1446,7 +1447,8 @@ function CustomerCardInner({
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
             >
-              Folder
+              <ExternalServiceIcon service="drive" className="mr-1 h-4 w-4" />
+              GDrive
             </a>
           ) : null}
           {workbookRef ? (

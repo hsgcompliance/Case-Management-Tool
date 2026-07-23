@@ -25,6 +25,7 @@ __export(customers_exports, {
   CustomerEntity: () => CustomerEntity,
   CustomerInputSchema: () => CustomerInputSchema,
   CustomerMeta: () => CustomerMeta,
+  CustomerNotesSchema: () => CustomerNotesSchema,
   CustomerOtherContact: () => CustomerOtherContact,
   CustomerPatchBody: () => CustomerPatchBody,
   CustomerStatus: () => CustomerStatus,
@@ -112,6 +113,10 @@ function toArray(x) {
 // src/customers.ts
 var Population = import_zod2.z.enum(["Youth", "Individual", "Family"]).nullable();
 var CustomerStatus = import_zod2.z.enum(["active", "inactive", "deleted"]).nullable();
+var CustomerNotesSchema = import_zod2.z.record(
+  import_zod2.z.string().trim().min(1),
+  import_zod2.z.string().trim().min(1)
+);
 var CustomerAcuity = import_zod2.z.object({
   templateId: Id.nullish(),
   templateVersion: import_zod2.z.number().int().nullish(),
@@ -139,7 +144,8 @@ var CustomerMeta = import_zod2.z.object({
   // Legacy primary folder pointer kept for backward compatibility. Prefer
   // customerDrive.folderId for new resolvers and mirror writes during migration.
   driveFolderId: import_zod2.z.string().nullish(),
-  notes: import_zod2.z.string().nullish(),
+  // Legacy location/shape. New notes belong at CustomerInputSchema.notes.
+  notes: import_zod2.z.union([import_zod2.z.string(), CustomerNotesSchema]).nullish(),
   // Household / family linking (Customer-Collection-Update). Denormalized
   // pointer to the canonical households/{id} doc this customer belongs to; the
   // member list itself lives on the household doc. Scalar = one primary
@@ -187,6 +193,8 @@ var CustomerInputSchema = import_zod2.z.object({
   // Simple single-select acuity tier (1–3). Kept top-level (not nested under
   // acuity) so Firestore single-field indexes make it directly queryable.
   tier: import_zod2.z.number().int().min(1).max(3).nullish(),
+  // Canonical append-only staff notes, keyed by their ISO timestamp.
+  notes: CustomerNotesSchema.nullish(),
   // Drive folders + misc metadata. Drive fields here are compatibility
   // fallbacks; new structured Drive state belongs under customerDrive.
   meta: CustomerMeta,
@@ -332,6 +340,7 @@ var CustomersBackfillAssistanceLengthBody = import_zod2.z.object({
   CustomerEntity,
   CustomerInputSchema,
   CustomerMeta,
+  CustomerNotesSchema,
   CustomerOtherContact,
   CustomerPatchBody,
   CustomerStatus,

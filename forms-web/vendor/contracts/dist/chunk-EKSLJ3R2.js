@@ -19,6 +19,7 @@ __export(customers_exports, {
   CustomerEntity: () => CustomerEntity,
   CustomerInputSchema: () => CustomerInputSchema,
   CustomerMeta: () => CustomerMeta,
+  CustomerNotesSchema: () => CustomerNotesSchema,
   CustomerOtherContact: () => CustomerOtherContact,
   CustomerPatchBody: () => CustomerPatchBody,
   CustomerStatus: () => CustomerStatus,
@@ -38,6 +39,10 @@ __export(customers_exports, {
 });
 var Population = z.enum(["Youth", "Individual", "Family"]).nullable();
 var CustomerStatus = z.enum(["active", "inactive", "deleted"]).nullable();
+var CustomerNotesSchema = z.record(
+  z.string().trim().min(1),
+  z.string().trim().min(1)
+);
 var CustomerAcuity = z.object({
   templateId: Id.nullish(),
   templateVersion: z.number().int().nullish(),
@@ -65,7 +70,8 @@ var CustomerMeta = z.object({
   // Legacy primary folder pointer kept for backward compatibility. Prefer
   // customerDrive.folderId for new resolvers and mirror writes during migration.
   driveFolderId: z.string().nullish(),
-  notes: z.string().nullish(),
+  // Legacy location/shape. New notes belong at CustomerInputSchema.notes.
+  notes: z.union([z.string(), CustomerNotesSchema]).nullish(),
   // Household / family linking (Customer-Collection-Update). Denormalized
   // pointer to the canonical households/{id} doc this customer belongs to; the
   // member list itself lives on the household doc. Scalar = one primary
@@ -113,6 +119,8 @@ var CustomerInputSchema = z.object({
   // Simple single-select acuity tier (1–3). Kept top-level (not nested under
   // acuity) so Firestore single-field indexes make it directly queryable.
   tier: z.number().int().min(1).max(3).nullish(),
+  // Canonical append-only staff notes, keyed by their ISO timestamp.
+  notes: CustomerNotesSchema.nullish(),
   // Drive folders + misc metadata. Drive fields here are compatibility
   // fallbacks; new structured Drive state belongs under customerDrive.
   meta: CustomerMeta,
@@ -255,6 +263,7 @@ var CustomersBackfillAssistanceLengthBody = z.object({
 export {
   Population,
   CustomerStatus,
+  CustomerNotesSchema,
   CustomerAcuity,
   CustomerMeta,
   AssistanceLength,

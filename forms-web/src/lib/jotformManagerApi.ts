@@ -4,7 +4,10 @@ export type JfForm = { id: string; title: string; count: number; status: string;
 export type JfSubmission = {
   id: string;
   form_id?: string;
+  formId?: string;
+  formTitle?: string | null;
   created_at?: string;
+  createdAt?: string | null;
   status?: string;
   answers?: Record<string, JfAnswer>;
 };
@@ -26,6 +29,14 @@ export async function listForms(maxAgeDays: number | "all" = 30): Promise<JfForm
 export async function listSubmissions(formId: string): Promise<JfSubmission[]> {
   const out = await getAuthed<{ ok: true; content: JfSubmission[] }>("jfSubmissionsList", { formId });
   return out.content ?? [];
+}
+
+/** Fetch one authoritative submission when a linked-submission row is expanded. */
+export async function getSubmission(submissionId: string): Promise<JfSubmission> {
+  const out = await getAuthed<{ ok: true; submission: JfSubmission }>("jotformApiSubmissionGet", {
+    id: submissionId,
+  });
+  return out.submission;
 }
 
 export async function cloneSubmission(formId: string, submissionId: string): Promise<{ newSubmissionId: string; editUrl: string }> {

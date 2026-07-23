@@ -6,6 +6,15 @@ import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
 import { formById } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { matchName, type NameMatch } from "@/lib/nameMatch";
+import {
+  cacheLinkedSubmission,
+  getCustomerDetail,
+  subscribeCustomerDetail,
+  type CustomerDetail,
+  type LinkedSubmission,
+} from "@/lib/customerDetailApi";
+import { getSubmission, type JfSubmission } from "@/lib/jotformManagerApi";
+import { AnswerView } from "./AnswerView";
 
 // Right-hand "Webhooks" sidebar for the intake flow. Two tabs:
 //   Structured — ONE continuously-merged household model built across every
@@ -285,6 +294,11 @@ export function WebhooksSidebar({
   const autoLinkTried = useRef(new Set<string>());
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [showUnmatched, setShowUnmatched] = useState(false);
+  const [customerDetail, setCustomerDetail] = useState<CustomerDetail | null>(null);
+  const [expandedLinked, setExpandedLinked] = useState<Set<string>>(new Set());
+  const [linkedDetails, setLinkedDetails] = useState<Record<string, JfSubmission>>({});
+  const [linkedDetailLoading, setLinkedDetailLoading] = useState<Set<string>>(new Set());
+  const [linkedDetailErrors, setLinkedDetailErrors] = useState<Record<string, string>>({});
 
   // The sidebar starts blank each browser-tab session and builds out from the
   // forms submitted DURING it (older webhook traffic stays hidden). Survives
@@ -308,6 +322,47 @@ export function WebhooksSidebar({
   const [manualInc, setManualInc] = useState<Set<string>>(() => loadSessionSet(INCLUDE_KEY));
   const [manualExc, setManualExc] = useState<Set<string>>(() => loadSessionSet(EXCLUDE_KEY));
   const [showExcluded, setShowExcluded] = useState(false);
+  const previousCustomerId = useRef(customer?.id ?? "");
+
+  useEffect(() => {
+    const customerId = customer?.id ?? "";
+    if (previousCustomerId.current === customerId) return;
+    previousCustomerId.current = customerId;
+    // Keep the session webhook cache, but remove the previous customer's view
+    // state and overrides so their rows cannot leak into the active model.
+    setExpanded(new Set());
+    setExpandedLinked(new Set());
+    setShowExcluded(false);
+    setManualInc(new Set());
+    setManualExc(new Set());
+    try {
+      sessionStorage.removeItem(INCLUDE_KEY);
+      sessionStorage.removeItem(EXCLUDE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [customer?.id]);
+
+  useEffect(() => {
+    if (!customer) {
+      setCustomerDetail(null);
+      return;
+    }
+    let alive = true;
+    setCustomerDetail(null);
+    const unsubscribe = subscribeCustomerDetail(customer.id, (next) => {
+      if (alive) setCustomerDetail(next);
+    });
+    // Customer switches always reconcile against the canonical linked list;
+    // subsequent sidebar work remains cache-backed and optimistic.
+    void getCustomerDetail(customer.id, true).then((next) => {
+      if (alive) setCustomerDetail(next);
+    });
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [customer?.id]);
 
   const setAnchorManually = (name: string | null) => {
     try {
@@ -425,8 +480,14 @@ export function WebhooksSidebar({
       return { ...r, anchorMatch, inModel };
     });
   }, [rows, anchor, manualInc, manualExc]);
-  const modelRows = useMemo(() => anchored.filter((r) => r.inModel), [anchored]);
-  const excludedRows = useMemo(() => anchored.filter((r) => !r.inModel), [anchored]);
+  const visibleRows = useMemo(
+    () => customer
+      ? anchored.filter((r) => r.linkedToCurrent || r.anchorMatch !== "none")
+      : anchored,
+    [anchored, customer],
+  );
+  const modelRows = useMemo(() => visibleRows.filter((r) => r.inModel), [visibleRows]);
+  const excludedRows = useMemo(() => visibleRows.filter((r) => !r.inModel), [visibleRows]);
 
   const toggleInModel = (evId: string, currentlyIn: boolean) => {
     setManualInc((cur) => {
@@ -467,6 +528,16 @@ export function WebhooksSidebar({
           };
           return { ...cur, [ev.formId]: forForm };
         });
+        const linkedAt = new Date().toISOString();
+        cacheLinkedSubmission(customer.id, {
+          formId: ev.formId,
+          formName: formById(ev.formId)?.title || `Form ${ev.formId}`,
+          submissionId: ev.submissionId,
+          alias: null,
+          cwId: customer.cwId,
+          linkedAt,
+          linkedBy: null,
+        });
       } finally {
         setLinkingId(null);
       }
@@ -494,6 +565,57 @@ export function WebhooksSidebar({
     () => extractHousehold(modelRows.map((r) => r.ev), (id) => formById(id)?.title || `Form ${id}`),
     [modelRows]
   );
+
+  const linkedSubmissions = useMemo(
+    () => [...(customerDetail?.linkedSubmissions ?? [])].sort(
+      (a, b) => (b.linkedAt || "").localeCompare(a.linkedAt || ""),
+    ),
+    [customerDetail],
+  );
+
+  const loadLinkedSubmission = useCallback(async (linked: LinkedSubmission, force = false) => {
+    if (!force && linkedDetails[linked.submissionId]) return;
+    setLinkedDetailLoading((current) => new Set(current).add(linked.submissionId));
+    setLinkedDetailErrors((current) => {
+      const next = { ...current };
+      delete next[linked.submissionId];
+      return next;
+    });
+    try {
+      const submission = await getSubmission(linked.submissionId);
+      setLinkedDetails((current) => ({ ...current, [linked.submissionId]: submission }));
+    } catch (error) {
+      setLinkedDetailErrors((current) => ({
+        ...current,
+        [linked.submissionId]: error instanceof Error ? error.message : "Could not load submission.",
+      }));
+    } finally {
+      setLinkedDetailLoading((current) => {
+        const next = new Set(current);
+        next.delete(linked.submissionId);
+        return next;
+      });
+    }
+  }, [linkedDetails]);
+
+  const toggleLinkedSubmission = (linked: LinkedSubmission) => {
+    const opening = !expandedLinked.has(linked.submissionId);
+    setExpandedLinked((current) => {
+      const next = new Set(current);
+      if (opening) next.add(linked.submissionId);
+      else next.delete(linked.submissionId);
+      return next;
+    });
+    if (opening) void loadLinkedSubmission(linked);
+  };
+
+  const refreshAll = () => {
+    load();
+    if (customer) void getCustomerDetail(customer.id, true);
+    for (const linked of linkedSubmissions) {
+      if (expandedLinked.has(linked.submissionId)) void loadLinkedSubmission(linked, true);
+    }
+  };
 
   useEffect(() => {
     onSnapshot?.({
@@ -629,8 +751,8 @@ export function WebhooksSidebar({
       >
         <span className="text-sm">⟨</span>
         <span className="text-[11px] font-semibold [writing-mode:vertical-rl]">Webhooks</span>
-        {rows.length ? (
-          <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{rows.length}</span>
+        {visibleRows.length ? (
+          <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{visibleRows.length}</span>
         ) : null}
       </button>
     );
@@ -648,7 +770,7 @@ export function WebhooksSidebar({
             <button
               type="button"
               onClick={exportSession}
-              disabled={!rows.length}
+              disabled={!visibleRows.length}
               title="Export this session as JSON — normalized values, raw fields with their mappings, and form/submission ids"
               className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-indigo-600 disabled:opacity-40"
             >
@@ -664,8 +786,8 @@ export function WebhooksSidebar({
             </button>
             <button
               type="button"
-              onClick={load}
-              title="Refresh now"
+              onClick={refreshAll}
+              title="Refresh webhooks, linked submissions, and any expanded submission details"
               className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600"
             >
               ↻
@@ -691,7 +813,7 @@ export function WebhooksSidebar({
                 tab === t ? "border-indigo-500 text-indigo-700" : "border-transparent text-slate-400 hover:text-slate-600"
               }`}
             >
-              {t}{t === "raw" && rows.length ? ` (${rows.length})` : ""}
+              {t}{t === "raw" && visibleRows.length ? ` (${visibleRows.length})` : ""}
             </button>
           ))}
         </div>
@@ -779,9 +901,6 @@ export function WebhooksSidebar({
                 </div>
               ) : null}
 
-              <SlotGroup title="Household" rows={household.household} />
-              <SlotGroup title="Housing" rows={household.housing} />
-
               <div>
                 <SectionTitle>Members ({household.members.length})</SectionTitle>
                 {household.members.length ? (
@@ -794,6 +913,69 @@ export function WebhooksSidebar({
                   <div className="text-sm text-slate-300">—</div>
                 )}
               </div>
+
+              <div>
+                <SectionTitle>Linked submissions ({linkedSubmissions.length})</SectionTitle>
+                {linkedSubmissions.length ? (
+                  <div className="mt-1.5 space-y-1.5">
+                    {linkedSubmissions.map((linked) => {
+                      const isOpen = expandedLinked.has(linked.submissionId);
+                      const detail = linkedDetails[linked.submissionId];
+                      const isLoading = linkedDetailLoading.has(linked.submissionId);
+                      const detailError = linkedDetailErrors[linked.submissionId];
+                      const title = linked.alias || linked.formName || formById(linked.formId)?.title || `Form ${linked.formId}`;
+                      return (
+                        <div key={linked.submissionId} className="rounded-lg border border-slate-200 bg-white">
+                          <button
+                            type="button"
+                            onClick={() => toggleLinkedSubmission(linked)}
+                            className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left hover:bg-indigo-50"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-semibold text-slate-800">{title}</span>
+                              <span className="block truncate text-[10px] text-slate-400">
+                                #{linked.submissionId.slice(-8)}
+                                {linked.linkedAt ? ` · linked ${linked.linkedAt.slice(0, 10)}` : ""}
+                              </span>
+                            </span>
+                            <span className="shrink-0 text-[10px] text-slate-400">
+                              {isLoading ? "loading…" : isOpen ? "▲" : "▼"}
+                            </span>
+                          </button>
+                          {isOpen ? (
+                            <div className="border-t border-slate-100 p-2.5">
+                              <div className="mb-2 flex justify-end">
+                                <a
+                                  href={`https://www.jotform.com/inbox/${encodeURIComponent(linked.formId)}/${encodeURIComponent(linked.submissionId)}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] font-semibold text-indigo-600 hover:underline"
+                                >
+                                  Open in Jotform Inbox ↗
+                                </a>
+                              </div>
+                              {detailError ? (
+                                <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs text-rose-700">
+                                  {detailError}
+                                </div>
+                              ) : detail ? (
+                                <AnswerView sub={detail} />
+                              ) : (
+                                <div className="py-3 text-center text-xs text-slate-400">Loading submission…</div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-slate-300">No submissions linked to this customer yet.</div>
+                )}
+              </div>
+
+              <SlotGroup title="Household" rows={household.household} />
+              <SlotGroup title="Housing" rows={household.housing} />
 
               <div className="border-t border-slate-100 pt-2">
                 <button
@@ -836,13 +1018,14 @@ export function WebhooksSidebar({
             </div>
           ) : (
             <div className="space-y-2">
-              {!rows.length ? (
+              {!visibleRows.length ? (
                 <div className="py-6 text-center text-xs text-slate-400">
-                  Blank session (since {shortTime(sessionStartISO) || "start"}) — webhooks appear here as you submit
-                  the intake forms.
+                  {customer
+                    ? `No cached webhooks match ${customer.name}. Linked submissions remain available in Structured.`
+                    : `Blank session (since ${shortTime(sessionStartISO) || "start"}) — webhooks appear here as you submit the intake forms.`}
                 </div>
               ) : (
-                anchored.map(({ ev, match, link, linkedToCurrent, inModel }) => {
+                visibleRows.map(({ ev, match, link, linkedToCurrent, inModel }) => {
                   const isOpen = expanded.has(ev.id);
                   return (
                     <div key={ev.id} className={`rounded-lg border ${inModel ? "border-slate-200" : "border-amber-200 bg-amber-50/40"}`}>

@@ -10,6 +10,12 @@ import { listWebhookEventDetails } from "@/lib/webhookDetailsApi";
 import { extractHousehold } from "@/lib/householdExtract";
 import { INTAKE_FLOW, formById } from "@/lib/formsCatalog";
 import { ApiError } from "@/lib/api";
+import {
+  linkIndexedFolder,
+  loadDriveReadinessInputs,
+  matchingFolders,
+  type DriveFolderIndexEntry,
+} from "@/lib/driveReadinessApi";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { ExternalServiceIcon } from "./ui";
@@ -155,6 +161,7 @@ export function CreateCustomerModal({
   const [contacts, setContacts] = useState<ContactRow[]>([]);
 
   const [all, setAll] = useState<FormsCustomer[] | null>(null);
+  const [indexedFolders, setIndexedFolders] = useState<DriveFolderIndexEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsForce, setNeedsForce] = useState(false);
@@ -173,6 +180,9 @@ export function CreateCustomerModal({
         if (me) setCmUid((cur) => cur || me.uid);
       }
     });
+    loadDriveReadinessInputs()
+      .then((inputs) => { if (alive) setIndexedFolders(inputs.folders); })
+      .catch(() => {});
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -227,6 +237,19 @@ export function CreateCustomerModal({
       .slice(0, 5);
   }, [all, first, last, cwId]);
 
+  const folderMatches = useMemo(() => {
+    if (!first.trim() || !last.trim()) return [];
+    const draft: FormsCustomer = {
+      id: "",
+      name: `${first.trim()} ${last.trim()}`,
+      caseManagerName: null,
+      cwId: cwId.trim() || null,
+      dob: dob.trim() || null,
+    };
+    return matchingFolders(draft, null, indexedFolders);
+  }, [dob, first, indexedFolders, last, cwId]);
+  const indexedFolder = folderMatches[0] ?? null;
+
   const link = (c: FormsCustomer) => {
     setCustomer(c);
     onClose();
@@ -247,6 +270,7 @@ export function CreateCustomerModal({
     try {
       const primary = usersById.get(cmUid);
       const secondary = usersById.get(cm2Uid);
+      const reuseIndexedFolder = buildDrive ? indexedFolder : null;
       const resp = await createCustomer({
         firstName: first.trim(),
         lastName: last.trim(),
@@ -264,12 +288,34 @@ export function CreateCustomerModal({
             role: c.role.trim() || undefined,
           })),
         medicaid,
-        buildDrive,
+        buildDrive: buildDrive && !reuseIndexedFolder,
         force,
       });
+      if (reuseIndexedFolder) {
+        const variant = medicaid === "yes" ? "payer" : "nonpayer";
+        try {
+          await linkIndexedFolder(resp.customer.id, reuseIndexedFolder, variant);
+          resp.drive = {
+            built: true,
+            reused: true,
+            folderUrl: reuseIndexedFolder.url,
+            folderName: reuseIndexedFolder.name,
+            workbookLinked: !!reuseIndexedFolder.tssWorkbookId,
+          };
+        } catch (linkError) {
+          resp.drive = {
+            built: false,
+            reused: true,
+            folderUrl: reuseIndexedFolder.url,
+            folderName: reuseIndexedFolder.name,
+            linkError: (linkError as Error)?.message || "folder_link_failed",
+          };
+        }
+      }
       setCreated(resp);
       setCustomer(resp.customer);
       void loadCustomers(true); // refresh the cached index in the background
+      void loadDriveReadinessInputs(true);
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 409) {
         setNeedsForce(true);
@@ -304,7 +350,7 @@ export function CreateCustomerModal({
             </div>
             {created.drive.built ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                Drive folder <b>{created.drive.folderName}</b> built
+                Drive folder <b>{created.drive.folderName}</b> {created.drive.reused ? "reused from the organization index" : "built"}
                 {created.drive.linkError ? " (linking failed — fix from the web app)" : " and linked"}
                 {created.drive.workbookLinked ? " (TSS workbook linked)" : ""}.{" "}
                 {created.drive.folderUrl ? (
@@ -397,6 +443,15 @@ export function CreateCustomerModal({
                 </label>
               ) : null}
             </div>
+
+            {buildDrive && folderMatches.length ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                <b>Existing Drive folder found:</b> {indexedFolder?.name}.
+                Creating the customer will reuse and link this indexed folder
+                {indexedFolder?.tssWorkbookId ? " and its TSS workbook" : ""}, avoiding a duplicate.
+                {folderMatches.length > 1 ? ` ${folderMatches.length} matching folders were found; the first active match will be used.` : ""}
+              </div>
+            ) : null}
 
             {matches.length > 0 ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-2">

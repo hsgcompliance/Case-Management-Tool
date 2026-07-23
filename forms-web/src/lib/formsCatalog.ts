@@ -81,13 +81,20 @@ const HOMELESSNESS_STATUS_CERTIFICATION_URL =
   "https://drive.google.com/file/d/1BTNL1fNO6oRH_EMGjQIR0qENXPw94up6/view?usp=drive_link";
 
 /** Intake programs selected in step 1. PATH and TSS may accompany another path. */
-export type IntakeTypeId = "eviction-prevention" | "hud-rental" | "bridging-home" | "path-housing" | "tss-deposit-fee";
+export type IntakeTypeId =
+  | "eviction-prevention"
+  | "hud-rental"
+  | "bridging-home"
+  | "path-housing"
+  | "ryan-white-housing"
+  | "tss-deposit-fee";
 
 export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] = [
   { id: "eviction-prevention", label: "Eviction Prevention Intake", hint: "Assessment is a spreadsheet, not a form" },
   { id: "hud-rental", label: "HUD Rental Intake", hint: "Requires Coordinated Entry Assessment in HMIS" },
   { id: "bridging-home", label: "Bridging Home Intake", hint: "HUD workflow without an inspection" },
   { id: "path-housing", label: "PATH Housing Intake", hint: "Requires HMIS entry" },
+  { id: "ryan-white-housing", label: "Ryan White Housing Assistance", hint: "Same HMIS workflow as PATH Housing Intake" },
   { id: "tss-deposit-fee", label: "TSS Deposit & Application Fee Only", hint: "Deposit / application fee assistance only" },
 ];
 
@@ -148,6 +155,16 @@ export type IntakeFlowStep = {
   intakeGuidance?: boolean;
   /** Conditional inspection step: HQS for HUD, Habitability for Eviction Prevention. */
   inspectionGate?: boolean;
+  /** Resolve the customer doc, indexed Drive folder, and linked TSS workbook. */
+  driveSetup?: boolean;
+  /** Open the linked TSS workbook inside the forms app. */
+  workbookModal?: boolean;
+  /** Display webhook-prefilled landlord data before opening Jotform prefill. */
+  landlordPrefill?: boolean;
+  /** Keep completion synchronized to all checklist items. */
+  autoCompleteChecklist?: boolean;
+  /** Review customer/landlord recipients and choose the program-specific MOU. */
+  mouSend?: boolean;
 };
 
 /**
@@ -186,11 +203,11 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   {
     title: "Create customer document & Google folder",
-    note: "The customer usually doesn't exist in the database yet — create them here (this also builds + links their Google Drive folder), or link them if they already exist.",
+    note: "Check the database and organization Drive index, then create or repair only the missing customer document, folder, or TSS workbook.",
     customerSetup: true,
+    driveSetup: true,
     links: [
       { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
-      { href: "https://drive.google.com", label: "Open Google Drive" },
     ],
   },
   {
@@ -202,11 +219,13 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     title: "Collect documents",
     note: "File everything in the CUSTOMER'S Google Drive folder. Zero income/assets? Use the Jotform self-declarations below, or a blank file-form template from the Drive folders.",
     customerFolderLink: true,
+    autoCompleteChecklist: true,
     checklist: [
       "Photo ID for ALL household members",
       "Income documents (or zero-income self-declaration)",
       "Asset documents (or zero-assets self-declaration)",
       "Copy of eviction notice (if applicable)",
+      "Copy of Homeless Certification (if applicable)",
     ],
     links: [
       { href: "https://form.jotform.com/260347030470043", label: "Self-Dec: Zero Income (Jotform)" },
@@ -219,17 +238,23 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   {
     title: "Complete workbook and budget",
-    note: "Fill out the customer's TSS workbook and budget — the customer's page in the web app links both directly.",
+    workbookModal: true,
+    note: "Open the linked TSS workbook here and complete the workbook and budget.",
     links: [
       { href: `${WEB_APP_BASE}/customers/{customerId}`, label: "Open customer in web app" },
       { href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" },
     ],
     prominentLinks: true,
   },
-  { formId: "251001226310030", title: "Eligibility Determination Request" },
+  {
+    formId: "251001226310030",
+    title: "Eligibility Determination Request",
+    note: "Collect landlord / company name, mailing address, phone, and email here. The submitted values flow into Steps 14 and 17.",
+  },
   {
     title: "Create Landlord Verification prefill",
-    note: "Use the Landlord Verification prefill page directly. The old Initiate Landlord Verification Process form is not reliable enough for this workflow.",
+    landlordPrefill: true,
+    note: "Review the landlord information collected in Step 13, then use it on the Landlord Verification prefill page.",
     links: [
       { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
     ],
@@ -252,9 +277,8 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   },
   {
     title: "Memorandum of Understanding",
-    note: "Send the MOU for signature, then file the signed copy in the customer's Drive folder.",
-    links: [{ href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" }],
-    prominentLinks: true,
+    note: "For housholds with multiple adults the form must be edited to include all lease signees",
+    mouSend: true,
   },
 ];
 

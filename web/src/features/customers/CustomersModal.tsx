@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@entities/ui/Modal";
 import { HelpButton } from "@entities/help/HelpButton";
+import { ExternalServiceIcon } from "@entities/gdrive/FileTypeIcon";
 import { useAuth } from "@app/auth/AuthProvider";
 import { isViewerLike } from "@lib/roles";
 import { useCustomer, useSetCustomerActive, useSoftDeleteCustomers, useUpsertCustomers } from "@hooks/useCustomers";
@@ -409,7 +410,8 @@ export function CustomersModal(props: {
                 aria-label={driveFolderLink.label}
                 onClick={(event) => event.stopPropagation()}
               >
-                google
+                <ExternalServiceIcon service="drive" className="mr-1 h-4 w-4" />
+                GDrive
               </a>
             ) : null}
           </div>
@@ -509,6 +511,19 @@ export function CustomersModal(props: {
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {!creating && driveFolderLink ? (
+                <a
+                  href={driveFolderLink.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-semibold text-sky-800 transition hover:border-sky-300 hover:bg-sky-100"
+                  title={driveFolderLink.label}
+                  aria-label={driveFolderLink.label}
+                >
+                  <ExternalServiceIcon service="drive" className="h-4 w-4" />
+                  GDrive
+                </a>
+              ) : null}
               {statusToggleButton}
               {canEditDetails && onDelete ? (
                 <button

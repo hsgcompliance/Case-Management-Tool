@@ -1,4 +1,4 @@
-import { getAuthed, postAuthed } from "./authedApi";
+import { getAuthed, patchAuthed, postAuthed } from "./authedApi";
 
 export type FormsCustomer = {
   id: string;
@@ -42,6 +42,7 @@ export type CreateCustomerResp = {
   customer: FormsCustomer;
   drive: {
     built: boolean;
+    reused?: boolean;
     folderUrl?: string;
     folderName?: string;
     workbookLinked?: boolean;
@@ -73,6 +74,17 @@ export type UpdateFormsCustomerBody = {
 /** Reuse the canonical Dashboard customer patch endpoint from the Forms editor. */
 export function updateFormsCustomer(customerId: string, patch: UpdateFormsCustomerBody): Promise<{ ok: true; ids: string[] }> {
   return postAuthed("formsCustomerUpdate", { customerId, ...patch });
+}
+
+export function addCustomerNote(
+  customerId: string,
+  note: string,
+): Promise<{ ok: true; customerId: string; time: string; note: string }> {
+  const time = new Date().toISOString();
+  return patchAuthed<{ ok: true; ids: string[] }>("customersPatch", {
+    id: customerId,
+    patch: { notes: { [time]: note } },
+  }).then(() => ({ ok: true, customerId, time, note }));
 }
 
 export function filterCustomers(list: FormsCustomer[], q: string, limit = 12): FormsCustomer[] {
