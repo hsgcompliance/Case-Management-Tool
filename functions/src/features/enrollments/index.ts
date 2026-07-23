@@ -15,6 +15,8 @@ export { migrateEnrollment, enrollmentsMigrate } from "./migrate";
 export { undoEnrollmentMigration } from "./migrate";
 export { adminReverseLedgerEntry } from "./adminReverseLedgerEntry";
 export { enrollmentsVoidProjections } from "./voidProjections";
+export { enrollmentsClose } from "./close";
+export { enrollmentsReopen } from "./reopen";
 export { enrollmentActionsApply } from "./actionsApply";
 export {
   enrollmentsContinuumSummary,

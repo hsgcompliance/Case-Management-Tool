@@ -1775,6 +1775,33 @@ export type TEnrollmentsUndoMigrationResp = Ok<{
     fromGrantId: string;
     toGrantId: string | null;
 }>;
+export declare const EnrollmentsCloseBody: z.ZodObject<{
+    id: z.ZodString;
+    closeDate: z.ZodOptional<z.ZodString>;
+    taskMode: z.ZodOptional<z.ZodEnum<{
+        complete: "complete";
+        delete: "delete";
+    }>>;
+    reversePaidAfterClose: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>;
+export type TEnrollmentsCloseBody = z.infer<typeof EnrollmentsCloseBody>;
+export type TEnrollmentsCloseResp = Ok<{
+    id: string;
+    closeDate: string;
+    retainedPaymentsCount: number;
+    removedPaymentsCount: number;
+    reversedPaymentIds: string[];
+    queueSyncConfirmed: boolean;
+    payments: unknown;
+}>;
+export declare const EnrollmentsReopenBody: z.ZodObject<{
+    id: z.ZodString;
+}, z.core.$strip>;
+export type TEnrollmentsReopenBody = z.infer<typeof EnrollmentsReopenBody>;
+export type TEnrollmentsReopenResp = Ok<{
+    id: string;
+    scheduleRebuildRecommended: boolean;
+}>;
 export declare const EnrollmentsAdminReverseLedgerEntryBody: z.ZodObject<{
     ledgerId: z.ZodString;
     mode: z.ZodOptional<z.ZodEnum<{

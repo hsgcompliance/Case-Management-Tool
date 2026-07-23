@@ -53,11 +53,27 @@ export async function createCustomerEnrollment(
     .where("grantId", "==", grantId)
     .limit(10)
     .get();
-  const open = existing.docs.find((doc) => {
-    const row = doc.data() || {};
-    return row.deleted !== true && row.active !== false && String(row.status || "active") !== "closed";
-  });
-  if (open) return {id: open.id, created: false};
+  const isOpen = (row: Record<string, any>) =>
+    row.deleted !== true && row.active !== false && String(row.status || "active") !== "closed";
+  const open = existing.docs.find((doc) => isOpen(doc.data() || {}));
+  if (open) return {id: open.id, created: false, priorClosedEnrollments: [] as Array<{id: string; status: string; startDate: unknown; endDate: unknown}>};
+
+  // Not blocking — closed/deleted enrollments for this customer+grant are
+  // surfaced so the caller can offer "reopen this instead" rather than
+  // silently creating a duplicate alongside them (see
+  // docs/active-projects.local/report-reconciliation-workbench/
+  // root-cause-2026-07-21-duplicate-enrollment.md).
+  const priorClosedEnrollments = existing.docs
+    .filter((doc) => !isOpen(doc.data() || {}))
+    .map((doc) => {
+      const row = doc.data() || {};
+      return {
+        id: doc.id,
+        status: String(row.status || (row.deleted ? "deleted" : "closed")),
+        startDate: row.startDate ?? null,
+        endDate: row.endDate ?? null,
+      };
+    });
 
   const extra = stripReservedFields(sanitizeNestedObject(input.extra || {}));
   const enrollmentExtra = applyGrantEnrollmentDefaults(extra as Record<string, any>, grant as Record<string, any>);
@@ -78,7 +94,7 @@ export async function createCustomerEnrollment(
       preserveCompletedManaged: true, pinCompletedManaged: true,
     }, user).catch(() => undefined);
   }
-  return {id, created: true};
+  return {id, created: true, priorClosedEnrollments};
 }
 
 export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
@@ -91,7 +107,12 @@ export const enrollmentsEnrollCustomer = secureHandler(async (req, res) => {
   const user = (req as any).user || {};
   try {
     const result = await createCustomerEnrollment(user, parsed.data);
-    res.status(result.created ? 201 : 200).json({ok: true, id: result.id, existed: !result.created});
+    res.status(result.created ? 201 : 200).json({
+      ok: true,
+      id: result.id,
+      existed: !result.created,
+      priorClosedEnrollments: result.priorClosedEnrollments,
+    });
   } catch (error: unknown) {
     const message = String((error as {message?: unknown})?.message || error || "enrollment_failed");
     const status = message.endsWith("_not_found") ? 404 : message.startsWith("forbidden_") ? 403 : 400;

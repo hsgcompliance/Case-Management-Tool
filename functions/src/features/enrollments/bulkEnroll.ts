@@ -85,7 +85,11 @@ export const enrollmentsBulkEnroll = secureHandler(async (req, res) => {
 
         const snap = await q.get();
         if (!snap.empty) {
-          results.push({customerId, existed: true, enrollmentId: snap.docs[0].id});
+          const existingRow = snap.docs[0].data() || {};
+          const existingStatus = existingRow.deleted === true
+            ? "deleted"
+            : String(existingRow.status || (existingRow.active === false ? "closed" : "active"));
+          results.push({customerId, existed: true, enrollmentId: snap.docs[0].id, existingStatus});
           continue;
         }
       }

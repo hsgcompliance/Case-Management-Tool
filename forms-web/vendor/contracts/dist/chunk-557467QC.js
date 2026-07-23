@@ -51,6 +51,7 @@ __export(enrollments_exports, {
   EnrollmentsBulkEnrollBody: () => EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery: () => EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery: () => EnrollmentsCheckOverlapsQuery,
+  EnrollmentsCloseBody: () => EnrollmentsCloseBody,
   EnrollmentsContinuumSummaryQuery: () => EnrollmentsContinuumSummaryQuery,
   EnrollmentsCycleRolloverPreviewBody: () => EnrollmentsCycleRolloverPreviewBody,
   EnrollmentsCycleRolloverRunBody: () => EnrollmentsCycleRolloverRunBody,
@@ -64,6 +65,7 @@ __export(enrollments_exports, {
   EnrollmentsMigrateBody: () => EnrollmentsMigrateBody,
   EnrollmentsPatchBody: () => EnrollmentsPatchBody,
   EnrollmentsPatchRow: () => EnrollmentsPatchRow,
+  EnrollmentsReopenBody: () => EnrollmentsReopenBody,
   EnrollmentsUndoMigrationBody: () => EnrollmentsUndoMigrationBody,
   EnrollmentsUpsertBody: () => EnrollmentsUpsertBody,
   ScheduleMeta: () => ScheduleMeta,
@@ -528,6 +530,15 @@ var EnrollmentsLinkedProgramsReconcileBody = z.object({
 var EnrollmentsUndoMigrationBody = z.object({
   migrationId: Id
 }).passthrough();
+var EnrollmentsCloseBody = z.object({
+  id: Id,
+  closeDate: z.string().trim().min(1).optional(),
+  taskMode: z.enum(["complete", "delete"]).optional(),
+  reversePaidAfterClose: z.boolean().optional()
+});
+var EnrollmentsReopenBody = z.object({
+  id: Id
+});
 var EnrollmentsAdminReverseLedgerEntryBody = z.object({
   ledgerId: Id,
   mode: z.enum(["ledger", "budget", "both"]).optional(),
@@ -579,6 +590,8 @@ export {
   EnrollmentsCycleRolloverRunBody,
   EnrollmentsLinkedProgramsReconcileBody,
   EnrollmentsUndoMigrationBody,
+  EnrollmentsCloseBody,
+  EnrollmentsReopenBody,
   EnrollmentsAdminReverseLedgerEntryBody,
   enrollments_exports
 };

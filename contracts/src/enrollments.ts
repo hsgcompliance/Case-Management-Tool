@@ -843,6 +843,36 @@ export type TEnrollmentsUndoMigrationResp = Ok<{
   toGrantId: string | null;
 }>;
 
+// ---- Close / Reopen (dedicated lifecycle endpoints) -------------------------
+
+export const EnrollmentsCloseBody = z.object({
+  id: Id,
+  closeDate: z.string().trim().min(1).optional(),
+  taskMode: z.enum(["complete", "delete"]).optional(),
+  reversePaidAfterClose: z.boolean().optional(),
+});
+export type TEnrollmentsCloseBody = z.infer<typeof EnrollmentsCloseBody>;
+
+export type TEnrollmentsCloseResp = Ok<{
+  id: string;
+  closeDate: string;
+  retainedPaymentsCount: number;
+  removedPaymentsCount: number;
+  reversedPaymentIds: string[];
+  queueSyncConfirmed: boolean;
+  payments: unknown;
+}>;
+
+export const EnrollmentsReopenBody = z.object({
+  id: Id,
+});
+export type TEnrollmentsReopenBody = z.infer<typeof EnrollmentsReopenBody>;
+
+export type TEnrollmentsReopenResp = Ok<{
+  id: string;
+  scheduleRebuildRecommended: boolean;
+}>;
+
 // ---- Reverse ledger entry (admin) ------------------------------------------
 
 export const EnrollmentsAdminReverseLedgerEntryBody = z

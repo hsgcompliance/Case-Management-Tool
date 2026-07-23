@@ -40,6 +40,8 @@ export const EnrollmentsUndoMigrationBody = E.EnrollmentsUndoMigrationBody;
 export const EnrollmentsAdminReverseLedgerEntryBody =
   E.EnrollmentsAdminReverseLedgerEntryBody;
 export const EnrollmentActionsApplyBody = E.EnrollmentActionsApplyBody;
+export const EnrollmentsCloseBody = E.EnrollmentsCloseBody;
+export const EnrollmentsReopenBody = E.EnrollmentsReopenBody;
 
 // helper (runtime)
 export function toArray<T>(x: T | T[] | undefined | null): T[] {
@@ -68,4 +70,6 @@ export type {
   TEnrollmentsUndoMigrationBody,
   TEnrollmentsAdminReverseLedgerEntryBody,
   TEnrollmentActionsApplyBody,
+  TEnrollmentsCloseBody,
+  TEnrollmentsReopenBody,
 } from "@hdb/contracts/enrollments";

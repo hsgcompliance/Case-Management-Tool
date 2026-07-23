@@ -13,6 +13,7 @@ import { EnrollmentsPatchBody, toArray } from "./schemas";
 import { deriveEnrollmentNames } from "./derive";
 import { summarize } from "../tasks/utils";
 import { buildEnrollmentClosePreview } from "@hdb/contracts/enrollments";
+import { closeFutureTasksAfterEndDate, deleteFutureTasksAfterEndDate, capEndDateToGrant } from "./closeHelpers";
 
 const ALWAYS_IMMUTABLE = new Set([
   "id",
@@ -48,47 +49,6 @@ function err(message: string, code: number, meta?: Record<string, unknown>) {
   e.code = code;
   if (meta) e.meta = meta;
   return e;
-}
-
-function closeFutureTasksAfterEndDate(schedule: any[], endDateISO: string, actor = "system") {
-  const nowIso = new Date().toISOString();
-  let changed = false;
-  const next = (Array.isArray(schedule) ? schedule : []).map((t: any) => {
-    const due = String(t?.dueDate || "").slice(0, 10);
-    if (!due || due <= endDateISO) return t;
-    if (t?.status === "verified") return t;
-    if (t?.completed === true || t?.status === "done") return t;
-    changed = true;
-    return {
-      ...t,
-      completed: true,
-      completedAt: t?.completedAt || nowIso,
-      status: "done",
-      notes: [String(t?.notes || "").trim(), `Auto-closed after enrollment end ${endDateISO}`]
-        .filter(Boolean)
-        .join(" | ")
-        .slice(0, 2000),
-      updatedAt: nowIso,
-      updatedBy: actor,
-    };
-  });
-  return { changed, next };
-}
-
-function deleteFutureTasksAfterEndDate(schedule: any[], endDateISO: string) {
-  if (!Array.isArray(schedule)) return { changed: false, next: schedule };
-  const next = schedule.filter((t: any) => {
-    const due = String(t?.dueDate || "").slice(0, 10);
-    return !due || due <= endDateISO;
-  });
-  return { changed: next.length !== schedule.length, next };
-}
-
-function capEndDateToGrant(endDate: unknown, grantEndDate: unknown) {
-  const end = String(endDate || "").slice(0, 10);
-  const grantEnd = String(grantEndDate || "").slice(0, 10);
-  if (!end || !grantEnd) return end;
-  return end > grantEnd ? grantEnd : end;
 }
 
 export const enrollmentsPatch = secureHandler(

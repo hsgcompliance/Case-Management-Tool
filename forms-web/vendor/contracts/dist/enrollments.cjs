@@ -43,6 +43,7 @@ __export(enrollments_exports, {
   EnrollmentsBulkEnrollBody: () => EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery: () => EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery: () => EnrollmentsCheckOverlapsQuery,
+  EnrollmentsCloseBody: () => EnrollmentsCloseBody,
   EnrollmentsContinuumSummaryQuery: () => EnrollmentsContinuumSummaryQuery,
   EnrollmentsCycleRolloverPreviewBody: () => EnrollmentsCycleRolloverPreviewBody,
   EnrollmentsCycleRolloverRunBody: () => EnrollmentsCycleRolloverRunBody,
@@ -56,6 +57,7 @@ __export(enrollments_exports, {
   EnrollmentsMigrateBody: () => EnrollmentsMigrateBody,
   EnrollmentsPatchBody: () => EnrollmentsPatchBody,
   EnrollmentsPatchRow: () => EnrollmentsPatchRow,
+  EnrollmentsReopenBody: () => EnrollmentsReopenBody,
   EnrollmentsUndoMigrationBody: () => EnrollmentsUndoMigrationBody,
   EnrollmentsUpsertBody: () => EnrollmentsUpsertBody,
   ScheduleMeta: () => ScheduleMeta,
@@ -1369,6 +1371,15 @@ var EnrollmentsLinkedProgramsReconcileBody = import_zod2.z.object({
 var EnrollmentsUndoMigrationBody = import_zod2.z.object({
   migrationId: Id
 }).passthrough();
+var EnrollmentsCloseBody = import_zod2.z.object({
+  id: Id,
+  closeDate: import_zod2.z.string().trim().min(1).optional(),
+  taskMode: import_zod2.z.enum(["complete", "delete"]).optional(),
+  reversePaidAfterClose: import_zod2.z.boolean().optional()
+});
+var EnrollmentsReopenBody = import_zod2.z.object({
+  id: Id
+});
 var EnrollmentsAdminReverseLedgerEntryBody = import_zod2.z.object({
   ledgerId: Id,
   mode: import_zod2.z.enum(["ledger", "budget", "both"]).optional(),
@@ -1399,6 +1410,7 @@ var EnrollmentsAdminReverseLedgerEntryBody = import_zod2.z.object({
   EnrollmentsBulkEnrollBody,
   EnrollmentsCheckDualQuery,
   EnrollmentsCheckOverlapsQuery,
+  EnrollmentsCloseBody,
   EnrollmentsContinuumSummaryQuery,
   EnrollmentsCycleRolloverPreviewBody,
   EnrollmentsCycleRolloverRunBody,
@@ -1412,6 +1424,7 @@ var EnrollmentsAdminReverseLedgerEntryBody = import_zod2.z.object({
   EnrollmentsMigrateBody,
   EnrollmentsPatchBody,
   EnrollmentsPatchRow,
+  EnrollmentsReopenBody,
   EnrollmentsUndoMigrationBody,
   EnrollmentsUpsertBody,
   ScheduleMeta,

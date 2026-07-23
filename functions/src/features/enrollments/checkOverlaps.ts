@@ -1,13 +1,6 @@
 // functions/src/features/enrollments/checkOverlaps.ts
 import { db, secureHandler, requireOrg, toDate} from "../../core";
-
-const openEnd = new Date("9999-12-31");
-
-function overlaps(aS: Date, aE: Date | null, bS: Date, bE: Date | null) {
-  const aEnd = aE ?? openEnd;
-  const bEnd = bE ?? openEnd;
-  return aS.getTime() <= bEnd.getTime() && bS.getTime() <= aEnd.getTime();
-}
+import { overlapsWindow } from "./overlap";
 
 /**
  * POST/GET /enrollmentsCheckOverlaps
@@ -64,7 +57,7 @@ export const enrollmentsCheckOverlaps = secureHandler(async (req, res) => {
     const aList = mat.filter((m) => String(m.grantId) === A);
     const bList = mat.filter((m) => String(m.grantId) === B);
     for (const a of aList) for (const b of bList) {
-      if (overlaps(a._s!, a._e, b._s!, b._e)) {
+      if (overlapsWindow(a._s!, a._e, b._s!, b._e)) {
         if (wStart && a._e && a._e < wStart) continue;
         if (wEnd && b._s && b._s > wEnd) continue;
         out.push({
@@ -77,7 +70,7 @@ export const enrollmentsCheckOverlaps = secureHandler(async (req, res) => {
     for (let i = 0; i < mat.length; i++) {
       for (let j = i + 1; j < mat.length; j++) {
         const a = mat[i], b = mat[j];
-        if (overlaps(a._s!, a._e, b._s!, b._e)) {
+        if (overlapsWindow(a._s!, a._e, b._s!, b._e)) {
           if (wStart && a._e && a._e < wStart) continue;
           if (wEnd && b._s && b._s > wEnd) continue;
           out.push({
