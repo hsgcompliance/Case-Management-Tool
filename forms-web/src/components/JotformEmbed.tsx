@@ -21,6 +21,9 @@ function asText(data: unknown): string {
   try { return JSON.stringify(data); } catch { return String(data); }
 }
 
+const FORM_BOTTOM_BUFFER_PX = 240;
+const MAX_FORM_HEIGHT_PX = 12_000;
+
 export function JotformEmbed({
   formId,
   title,
@@ -31,7 +34,7 @@ export function JotformEmbed({
   onSubmitted?: (raw: string) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(900);
+  const [height, setHeight] = useState(900 + FORM_BOTTOM_BUFFER_PX);
   const [submitted, setSubmitted] = useState(false);
   const [submission, setSubmission] = useState<JfSubmission | null>(null);
   const [loadingSubmission, setLoadingSubmission] = useState(false);
@@ -81,7 +84,9 @@ export function JotformEmbed({
       const h = /setHeight:(\d+)/.exec(text);
       if (h) {
         const px = Number(h[1]);
-        if (Number.isFinite(px) && px > 0) setHeight(Math.min(4000, px + 24));
+        if (Number.isFinite(px) && px > 0) {
+          setHeight(Math.min(MAX_FORM_HEIGHT_PX, px + FORM_BOTTOM_BUFFER_PX));
+        }
       }
 
       // Best-effort submission detection (cross-origin, so heuristic).
@@ -138,6 +143,9 @@ export function JotformEmbed({
           scrolling="no"
         />
       </div>
+      <p className="px-1 text-center text-xs text-slate-500">
+        If scrolling breaks, tap into the bottom field and press Tab.
+      </p>
     </div>
   );
 }

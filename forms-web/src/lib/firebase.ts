@@ -1,8 +1,8 @@
-// forms-web Firebase — Auth only, for the staff (form-submission access) side.
+// forms-web Firebase — Auth + App Check for the staff side.
 // Customer token routes (/checkout, /invoice, …) do NOT use this; they stay
-// public + token-gated. No App Check / Firestore here to keep the bundle light;
-// staff data is read over authed HTTP (Authorization: Bearer <idToken>).
+// public + token-gated. Staff data is read over authenticated HTTP.
 import { initializeApp } from "firebase/app";
+import type { AppCheck } from "firebase/app-check";
 import {
   getAuth,
   setPersistence,
@@ -20,6 +20,7 @@ const AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || `${PROJECT_ID}.
 const STORAGE_BUCKET = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || `${PROJECT_ID}.appspot.com`;
 const MSG_SENDER_ID = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "000000000000";
 const APP_ID = import.meta.env.VITE_FIREBASE_APP_ID || "emu-app-id";
+const APPCHECK_KEY = import.meta.env.VITE_FIREBASE_APPCHECK_KEY || "";
 
 export const app = initializeApp({
   apiKey: API_KEY,
@@ -37,4 +38,22 @@ export const googleProvider = new GoogleAuthProvider();
 
 if (USE_EMU) {
   try { connectAuthEmulator(auth, "http://localhost:5005", { disableWarnings: true }); } catch {}
+}
+
+export let appCheck: AppCheck | null = null;
+export let appCheckReadyPromise: Promise<void> = Promise.resolve();
+
+if (typeof window !== "undefined" && !USE_EMU && APPCHECK_KEY) {
+  appCheckReadyPromise = (async () => {
+    try {
+      const { initializeAppCheck, ReCaptchaV3Provider, getToken } = await import("firebase/app-check");
+      appCheck = initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider(APPCHECK_KEY),
+        isTokenAutoRefreshEnabled: true,
+      });
+      await getToken(appCheck).catch(() => {});
+    } catch {
+      appCheck = null;
+    }
+  })();
 }

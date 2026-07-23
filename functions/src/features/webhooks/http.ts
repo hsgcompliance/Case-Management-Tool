@@ -164,7 +164,12 @@ export const listWebhookEventDetails_http = secureHandler(
     });
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  {
+    auth: "user",
+    appCheck: false,
+    methods: ["GET", "OPTIONS"],
+    memory: "512MiB",
+  }
 );
 
 /** GET /listWebhookEvents — authed staff view of recent webhook captures. */
