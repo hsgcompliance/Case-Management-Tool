@@ -1,7 +1,6 @@
 // functions/src/features/formSessions/rentCert.ts
 // -----------------------------------------------------------------------------
-// Forms-app rent-cert schedule endpoints (staff-authed, appCheck:false — the
-// lightweight forms surface has no App Check registration).
+// Forms-app rent-cert schedule endpoints (staff-authed).
 //
 //   GET  /formsEnrollmentsList?customerId=   → the customer's enrollments with
 //        grant/line-item context + a payment summary (for conflict preview and
@@ -206,7 +205,7 @@ export const formsEnrollmentsList_http = secureHandler(
     ]);
     res.status(200).json({ ok: true, items, programs, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] },
+  { auth: "user", methods: ["GET", "OPTIONS"] },
 );
 
 /* ───────────────────────────── schedule apply ───────────────────────────── */
@@ -383,7 +382,7 @@ export const formsRentCertApply_http = secureHandler(
 
     res.status(200).json({ ok: true, created, results });
   },
-  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] },
+  { auth: "user", methods: ["POST", "OPTIONS"] },
 );
 
 const CustomerNotEligibleBody = z.object({
@@ -464,5 +463,5 @@ export const formsCustomerNotEligible_http = secureHandler(
     }
     res.status(200).json({ok: true, enrollmentId: enrollmentId || null, customerInactivated: !hasOtherOpenEnrollment});
   },
-  {auth: "user", appCheck: false, methods: ["POST", "OPTIONS"]},
+  {auth: "user", methods: ["POST", "OPTIONS"]},
 );

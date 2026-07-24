@@ -39,11 +39,7 @@ export const createFormSession_http = secureHandler(
   { auth: "user", methods: ["POST", "OPTIONS"] }
 );
 
-/**
- * GET /listFormSessions — authed staff (form-submission access). Org-scoped.
- * App Check disabled so the lightweight Forms surface need not register App Check;
- * still requires a valid Firebase ID token + org claim.
- */
+/** GET /listFormSessions — authed staff (form-submission access). Org-scoped. */
 export const listFormSessions_http = secureHandler(
   async (req, res) => {
     const caller = req.user!;
@@ -57,7 +53,7 @@ export const listFormSessions_http = secureHandler(
     void caller;
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 /** GET /formsCustomerSearch — authed staff; org-scoped customer list for the search bar. */
@@ -70,7 +66,7 @@ export const formsCustomerSearch_http = secureHandler(
     const items = await listCustomersForForms(targetOrg, Number(query.limit) || 5000);
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 /**
@@ -92,7 +88,7 @@ export const formsCustomerDetail_http = secureHandler(
     }
     res.status(200).json({ ok: true, detail });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 /** GET /formsCreditCardsSummary — authed staff; org credit-card spend cards (reuses budget summary). */
@@ -108,7 +104,7 @@ export const formsCreditCardsSummary_http = secureHandler(
     });
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 /**

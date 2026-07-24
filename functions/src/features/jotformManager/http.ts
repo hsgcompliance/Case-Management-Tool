@@ -13,7 +13,7 @@ export const jfFormsList_http = secureHandler(
     const items = await listForms(maxAgeDays);
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"], secrets: JF_SECRETS }
+  { auth: "user", methods: ["GET", "OPTIONS"], secrets: JF_SECRETS }
 );
 
 /** GET /jfSubmissionsList?formId= — authed staff; all submissions for a form. */
@@ -24,7 +24,7 @@ export const jfSubmissionsList_http = secureHandler(
     const content = await listSubmissions(formId);
     res.status(200).json({ ok: true, content, count: content.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"], timeoutSeconds: 120, secrets: JF_SECRETS }
+  { auth: "user", methods: ["GET", "OPTIONS"], timeoutSeconds: 120, secrets: JF_SECRETS }
 );
 
 /** POST /jfCloneSubmission — authed staff; clone a submission → editable new one. */
@@ -35,13 +35,13 @@ export const jfCloneSubmission_http = secureHandler(
     const out = await cloneSubmission(normStr(body.formId), normStr(body.submissionId));
     res.status(200).json({ ok: true, ...out });
   },
-  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"], secrets: JF_SECRETS }
+  { auth: "user", methods: ["POST", "OPTIONS"], secrets: JF_SECRETS }
 );
 
 /**
  * POST /customerLinkSubmission — authed staff; link a Jotform submission to a
  * customer. Canonical store is customers.meta.linkedSubmissions[] (read by the web
- * customer modal); a derived reverse index is also written. appCheck:false for forms-web.
+ * customer modal); a derived reverse index is also written.
  */
 export const customerLinkSubmission_http = secureHandler(
   async (req, res) => {
@@ -60,7 +60,7 @@ export const customerLinkSubmission_http = secureHandler(
     });
     res.status(200).json({ ok: true });
   },
-  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
+  { auth: "user", methods: ["POST", "OPTIONS"] }
 );
 
 /** GET /submissionLinksGet?formId= — authed staff; existing submission→customer links. */
@@ -71,5 +71,5 @@ export const submissionLinksGet_http = secureHandler(
     const links = await listSubmissionLinks(orgIdFromClaims(caller), formId);
     res.status(200).json({ ok: true, links });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );

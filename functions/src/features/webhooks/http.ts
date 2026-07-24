@@ -102,7 +102,7 @@ export const formsWebhookConfig_http = secureHandler(
     ];
     res.status(200).json({ ok: true, destinations, hasToken: !!token });
   },
-  { auth: "user", appCheck: false, requireOrg: true, methods: ["GET", "OPTIONS"] }
+  { auth: "user", requireOrg: true, methods: ["GET", "OPTIONS"] }
 );
 
 /** GET /formSchema?formId= — authed staff; normalized field list for a form (render-engine foundation). */
@@ -114,7 +114,7 @@ export const formSchema_http = secureHandler(
     const fields = await getFormSchema(formId);
     res.status(200).json({ ok: true, formId, fields, count: fields.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
+  { auth: "user", methods: ["GET", "OPTIONS"], secrets: [JOTFORM_API_KEY_SECRET] }
 );
 
 /** GET /formsAuthInfo — authed; tells the UI whether the caller is an admin. */
@@ -123,7 +123,7 @@ export const formsAuthInfo_http = secureHandler(
     const caller = req.user!;
     res.status(200).json({ ok: true, isAdmin: hasLevel(caller, "admin") });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 /** POST /formsRegistryUpdate — admin only. Title / category / customer-sendable overrides. */
@@ -143,7 +143,7 @@ export const formsRegistryUpdate_http = secureHandler(
     });
     res.status(200).json({ ok: true, formId });
   },
-  { auth: "admin", appCheck: false, methods: ["POST", "OPTIONS"] }
+  { auth: "admin", methods: ["POST", "OPTIONS"] }
 );
 
 /** GET /listFormsRegistry — authed staff. Forms auto-discovered from webhook traffic. */
@@ -154,7 +154,7 @@ export const listFormsRegistry_http = secureHandler(
     const items = await listFormsRegistry();
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 /**
@@ -182,7 +182,6 @@ export const listWebhookEventDetails_http = secureHandler(
   },
   {
     auth: "user",
-    appCheck: false,
     requireOrg: true,
     methods: ["GET", "OPTIONS"],
     memory: "512MiB",
@@ -199,5 +198,5 @@ export const listWebhookEvents_http = secureHandler(
     });
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );

@@ -25,7 +25,7 @@ export const renderFormCreate_http = secureHandler(
     });
     res.status(201).json({ ok: true, ...out });
   },
-  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
+  { auth: "user", methods: ["POST", "OPTIONS"] }
 );
 
 /** GET/POST /renderFormResolve — public, token-gated. Returns the form's field schema + state. */

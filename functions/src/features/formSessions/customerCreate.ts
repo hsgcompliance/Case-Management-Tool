@@ -88,7 +88,7 @@ export const formsUsersList_http = secureHandler(
       .sort((a, b) => a.name.localeCompare(b.name));
     res.status(200).json({ ok: true, items, count: items.length });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", methods: ["GET", "OPTIONS"] }
 );
 
 const FormsCustomerTssStatusBody = z.object({
@@ -123,7 +123,7 @@ export const formsCustomerSetTssStatus_http = secureHandler(
     );
     res.status(200).json({ ok: true, customerId: body.customerId, status: body.status });
   },
-  { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] }
+  { auth: "user", methods: ["POST", "OPTIONS"] }
 );
 
 const FormsCustomerUpdateBody = z.object({
@@ -161,7 +161,7 @@ export const formsCustomerUpdate_http = secureHandler(
     }, req.user!);
     res.status(200).json({ok: true, ...out});
   },
-  {auth: "user", appCheck: false, methods: ["POST", "OPTIONS"]},
+  {auth: "user", methods: ["POST", "OPTIONS"]},
 );
 
 export const formsCustomerCreate_http = secureHandler(
@@ -338,7 +338,6 @@ export const formsCustomerCreate_http = secureHandler(
   },
   {
     auth: "user",
-    appCheck: false,
     methods: ["POST", "OPTIONS"],
     secrets: [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN],
     // googleapis barrel OOMs under 256MiB (see gdriveBuildCustomerFolder).

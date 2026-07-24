@@ -130,7 +130,7 @@ export const formsIntakeFlowsList_http = secureHandler(async (req, res) => {
     .filter((item) => normId(item.orgId) === orgId)
     .sort((a, b) => String(b.updatedAtISO || "").localeCompare(String(a.updatedAtISO || "")));
   res.status(200).json({ ok: true, items });
-}, { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] });
+}, { auth: "user", methods: ["GET", "OPTIONS"] });
 
 export const formsIntakeFlowSave_http = secureHandler(async (req, res) => {
   const body = SaveBody.parse(req.body || {});
@@ -144,7 +144,7 @@ export const formsIntakeFlowSave_http = secureHandler(async (req, res) => {
     upsertIntakeTask({ orgId, ownerUid: uid, session: body.session }),
   ]);
   res.status(200).json({ ok: true, id: ref.id });
-}, { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] });
+}, { auth: "user", methods: ["POST", "OPTIONS"] });
 
 export const formsIntakeFlowTransfer_http = secureHandler(async (req, res) => {
   const body = TransferBody.parse(req.body || {});
@@ -170,4 +170,4 @@ export const formsIntakeFlowTransfer_http = secureHandler(async (req, res) => {
   });
   await upsertIntakeTask({ orgId, ownerUid: body.targetUid, session: body.session });
   res.status(200).json({ ok: true, id: target.id });
-}, { auth: "user", appCheck: false, methods: ["POST", "OPTIONS"] });
+}, { auth: "user", methods: ["POST", "OPTIONS"] });
