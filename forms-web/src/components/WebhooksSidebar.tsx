@@ -288,6 +288,10 @@ export function WebhooksSidebar({
   const [events, setEvents] = useState<WebhookEventDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false);
+  const cursorRef = useRef<string | null>(null);
+  const loadScopeRef = useRef("");
+  const requestIdRef = useRef(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // formId → submissionId → link (loaded lazily per form that has events)
   const [links, setLinks] = useState<Record<string, Record<string, SubmissionLink>>>({});
@@ -387,6 +391,15 @@ export function WebhooksSidebar({
   };
 
   const formIdsKey = formIds.join(",");
+  const loadScope = `${formIdsKey}|${sessionStartISO}`;
+
+  useEffect(() => {
+    loadScopeRef.current = loadScope;
+    cursorRef.current = null;
+    loadingRef.current = false;
+    requestIdRef.current += 1;
+    setEvents(null);
+  }, [loadScope]);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -396,13 +409,47 @@ export function WebhooksSidebar({
   };
 
   const load = useCallback(() => {
-    if (!formIdsKey) return;
+    if (!formIdsKey || loadingRef.current) return;
+    const requestedScope = loadScope;
+    const afterISO = cursorRef.current;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    loadingRef.current = true;
     setLoading(true);
-    listWebhookEventDetails(formIdsKey.split(","), 60)
-      .then((items) => { setEvents(items); setError(null); })
-      .catch((e: unknown) => setError((e as Error)?.message || "Failed to load webhooks."))
-      .finally(() => setLoading(false));
-  }, [formIdsKey]);
+    listWebhookEventDetails(formIdsKey.split(","), 60, {
+      sinceISO: afterISO ? undefined : sessionStartISO,
+      afterISO: afterISO ?? undefined,
+    })
+      .then((items) => {
+        if (loadScopeRef.current !== requestedScope) return;
+        setEvents((current) => {
+          const byId = new Map((current ?? []).map((event) => [event.id, event]));
+          for (const item of items) byId.set(item.id, item);
+          return [...byId.values()].sort((a, b) =>
+            String(b.createdAtISO || b.receivedAtISO || "").localeCompare(
+              String(a.createdAtISO || a.receivedAtISO || ""),
+            ),
+          );
+        });
+        const newestCursor = items.reduce<string | null>((latest, item) => {
+          const candidate = item.createdAtISO;
+          return candidate && (!latest || candidate > latest) ? candidate : latest;
+        }, cursorRef.current);
+        cursorRef.current = newestCursor;
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (loadScopeRef.current === requestedScope) {
+          setError((e as Error)?.message || "Failed to load webhooks.");
+        }
+      })
+      .finally(() => {
+        if (requestIdRef.current === requestId) {
+          loadingRef.current = false;
+          if (loadScopeRef.current === requestedScope) setLoading(false);
+        }
+      });
+  }, [formIdsKey, loadScope, sessionStartISO]);
 
   // Poll while expanded so the sidebar grows as forms come in.
   useEffect(() => {

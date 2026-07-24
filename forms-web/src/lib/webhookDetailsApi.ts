@@ -8,15 +8,22 @@ export type WebhookEventDetail = {
   submissionId: string;
   submitterName: string;
   receivedAtISO: string | null;
+  createdAtISO: string | null;
   pretty: string;
   fields: WebhookEventFieldRow[];
 };
 
 /** Flattened label/value fields per webhook event (for the Webhooks sidebar). */
-export async function listWebhookEventDetails(formIds: string[], limit = 50): Promise<WebhookEventDetail[]> {
+export async function listWebhookEventDetails(
+  formIds: string[],
+  limit = 50,
+  range: { sinceISO?: string; afterISO?: string } = {},
+): Promise<WebhookEventDetail[]> {
   const out = await getAuthed<{ ok: true; items: WebhookEventDetail[] }>("listWebhookEventDetails", {
     formIds: formIds.join(","),
     limit,
+    since: range.sinceISO,
+    after: range.afterISO,
   });
   return out.items ?? [];
 }

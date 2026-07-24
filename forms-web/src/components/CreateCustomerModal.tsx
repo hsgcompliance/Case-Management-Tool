@@ -192,10 +192,10 @@ export function CreateCustomerModal({
   useEffect(() => {
     let alive = true;
     const flowIds = INTAKE_FLOW.map((s) => s.formId).filter((x): x is string => !!x);
-    listWebhookEventDetails(flowIds, 60)
+    const start = sessionStartISO();
+    listWebhookEventDetails(flowIds, 60, { sinceISO: start })
       .then((events) => {
         if (!alive) return;
-        const start = sessionStartISO();
         const session = events.filter((e) => (e.receivedAtISO || "") >= start);
         if (!session.length) return;
         const hh = extractHousehold(session, (id) => formById(id)?.title || `Form ${id}`);

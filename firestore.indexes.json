@@ -574,6 +574,17 @@
         { "fieldPath": "date",          "order": "DESCENDING" },
         { "fieldPath": "createdAt",     "order": "DESCENDING" }
       ]
+    },
+
+    // ── webhook sidebar — org-scoped form events, newest first ───────────────
+    {
+      "collectionGroup": "jotformWebhookEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orgId",     "order": "ASCENDING" },
+        { "fieldPath": "formId",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -215,7 +215,7 @@ export type BudgetPipelineDeleteResp = Ok<{
 }>;
 export type BudgetPipelinePreviewReq = TBudgetPipelinePreviewBody;
 export type BudgetPipelinePreviewResp = Ok<TBudgetPipelinePreviewResult>;
-import type { TEnrollmentEntity, TEnrollmentActionsApplyBody, TEnrollmentActionsApplyResp, TEnrollmentGetByIdQuery, TEnrollmentGetByIdResp, TEnrollmentsAdminDeleteBody, TEnrollmentsAdminDeleteResp, TEnrollmentsAdminReverseLedgerEntryBody, TEnrollmentsAdminReverseLedgerEntryResp, TEnrollmentsBulkEnrollBody, TEnrollmentsBulkEnrollResp, TEnrollmentsCheckDualQuery, TEnrollmentsCheckDualResp, TEnrollmentsCheckOverlapsQuery, TEnrollmentsCheckOverlapsResp, TEnrollmentsBackfillNamesBody, TEnrollmentsBackfillNamesResp, TEnrollmentsDeleteBody, TEnrollmentsDeleteResp, TEnrollmentsEnrollCustomerBody, TEnrollmentsEnrollCustomerResp, TEnrollmentsListQuery, TEnrollmentsListResp, TEnrollmentsMigrateBody, TEnrollmentsMigrateResp, TEnrollmentsContinuumSummaryQuery, TEnrollmentsContinuumSummaryResp, TEnrollmentsAllocationSetBody, TEnrollmentsAllocationSetResp, TEnrollmentsCycleRolloverPreviewBody, TEnrollmentsCycleRolloverPreviewResp, TEnrollmentsCycleRolloverRunBody, TEnrollmentsCycleRolloverRunResp, TEnrollmentsLinkedProgramsReconcileBody, TEnrollmentsLinkedProgramsReconcileResp, TEnrollmentsPatchBody, TEnrollmentsPatchRow, TEnrollmentsPatchResp, TEnrollmentsUndoMigrationBody, TEnrollmentsUndoMigrationResp, TEnrollmentsUpsertBody, TEnrollmentsUpsertResp } from "./enrollments.js";
+import type { TEnrollmentEntity, TEnrollmentActionsApplyBody, TEnrollmentActionsApplyResp, TEnrollmentGetByIdQuery, TEnrollmentGetByIdResp, TEnrollmentsAdminDeleteBody, TEnrollmentsAdminDeleteResp, TEnrollmentsAdminReverseLedgerEntryBody, TEnrollmentsAdminReverseLedgerEntryResp, TEnrollmentsBulkEnrollBody, TEnrollmentsBulkEnrollResp, TEnrollmentsCheckDualQuery, TEnrollmentsCheckDualResp, TEnrollmentsCheckOverlapsQuery, TEnrollmentsCheckOverlapsResp, TEnrollmentsBackfillNamesBody, TEnrollmentsBackfillNamesResp, TEnrollmentsDeleteBody, TEnrollmentsDeleteResp, TEnrollmentsEnrollCustomerBody, TEnrollmentsEnrollCustomerResp, TEnrollmentsListQuery, TEnrollmentsListResp, TEnrollmentsMigrateBody, TEnrollmentsMigrateResp, TEnrollmentsContinuumSummaryQuery, TEnrollmentsContinuumSummaryResp, TEnrollmentsAllocationSetBody, TEnrollmentsAllocationSetResp, TEnrollmentsCycleRolloverPreviewBody, TEnrollmentsCycleRolloverPreviewResp, TEnrollmentsCycleRolloverRunBody, TEnrollmentsCycleRolloverRunResp, TEnrollmentsLinkedProgramsReconcileBody, TEnrollmentsLinkedProgramsReconcileResp, TEnrollmentsPatchBody, TEnrollmentsPatchRow, TEnrollmentsPatchResp, TEnrollmentsUndoMigrationBody, TEnrollmentsUndoMigrationResp, TEnrollmentsUpsertBody, TEnrollmentsUpsertResp, TEnrollmentsCloseBody, TEnrollmentsCloseResp, TEnrollmentsReopenBody, TEnrollmentsReopenResp } from "./enrollments.js";
 export type EnrollmentsAdminDeleteReq = TEnrollmentsAdminDeleteBody;
 export type EnrollmentsAdminDeleteResp = TEnrollmentsAdminDeleteResp;
 export type EnrollmentsAdminReverseLedgerEntryReq = TEnrollmentsAdminReverseLedgerEntryBody;
@@ -246,6 +246,10 @@ export type EnrollmentsVoidProjectionsResp = {
         error?: string;
     }>;
 };
+export type EnrollmentsCloseReq = TEnrollmentsCloseBody;
+export type EnrollmentsCloseResp = TEnrollmentsCloseResp;
+export type EnrollmentsReopenReq = TEnrollmentsReopenBody;
+export type EnrollmentsReopenResp = TEnrollmentsReopenResp;
 export type EnrollmentsEnrollCustomerReq = TEnrollmentsEnrollCustomerBody;
 export type EnrollmentsEnrollCustomerResp = TEnrollmentsEnrollCustomerResp;
 export type EnrollmentGetByIdQuery = TEnrollmentGetByIdQuery;
@@ -802,6 +806,14 @@ export interface EndpointMap {
     enrollmentActionsApply: {
         req: EnrollmentActionsApplyReq;
         resp: EnrollmentActionsApplyResp;
+    };
+    enrollmentsClose: {
+        req: EnrollmentsCloseReq;
+        resp: EnrollmentsCloseResp;
+    };
+    enrollmentsReopen: {
+        req: EnrollmentsReopenReq;
+        resp: EnrollmentsReopenResp;
     };
     grantsUpsert: {
         req: GrantsUpsertReq;

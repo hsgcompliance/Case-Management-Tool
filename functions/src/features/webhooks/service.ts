@@ -4,7 +4,7 @@
 // it to `jotformWebhookEvents` and log it; richer routing/normalization comes later.
 import Busboy from "busboy";
 import type { Request } from "express";
-import { db, FieldValue, isoNow, normId } from "../../core";
+import { db, FieldValue, Timestamp, isoNow, normId } from "../../core";
 
 const COLLECTION = "jotformWebhookEvents";
 const REGISTRY = "formsRegistry";
@@ -126,7 +126,7 @@ export function extractSubmitterName(apiSubmission: Record<string, unknown> | nu
 
 export async function storeJotformWebhookEvent(
   fields: Record<string, string>,
-  meta: { ip?: string | null; contentType?: string | null; kind?: string | null }
+  meta: { ip?: string | null; contentType?: string | null; kind?: string | null; orgId?: string | null }
 ): Promise<{ id: string; formId: string; submissionId: string }> {
   const formId = String(fields.formID || fields.formId || "").trim();
   const submissionId = String(fields.submissionID || fields.submissionId || "").trim();
@@ -139,11 +139,15 @@ export async function storeJotformWebhookEvent(
   const apiSubmission = await fetchJotformSubmission(submissionId);
 
   const submitterName = extractSubmitterName(apiSubmission, fields);
+  const normalizedFields = fieldsFromEvent({
+    apiSubmission,
+    answers,
+  });
 
   const doc = {
     source: "jotform-webhook",
     kind: String(meta.kind || "general"),
-    orgId: null as string | null, // experimental: unscoped; derive later from form→grant
+    orgId: normId(meta.orgId) || null,
     formId,
     submissionId,
     submitterName: String(submitterName || "").slice(0, 200),
@@ -154,6 +158,9 @@ export async function storeJotformWebhookEvent(
     // Authoritative API pull (source of truth). `apiPulled` flags whether it landed.
     apiPulled: !!apiSubmission,
     apiSubmission: apiSubmission ? capForStorage(apiSubmission) : null,
+    // Compact read model used by the live sidebar. Raw payloads remain above
+    // for explicit detail retrieval and troubleshooting.
+    normalizedFields,
     ip: meta.ip ?? null,
     contentType: meta.contentType ?? null,
     receivedAtISO: isoNow(),
@@ -379,6 +386,7 @@ export type WebhookEventDetailItem = {
   submissionId: string;
   submitterName: string;
   receivedAtISO: string | null;
+  createdAtISO: string | null;
   pretty: string;
   fields: WebhookEventFieldRow[];
 };
@@ -439,31 +447,86 @@ function fieldsFromEvent(r: Record<string, unknown>): WebhookEventFieldRow[] {
 }
 
 export async function listWebhookEventDetails(
-  opts: { formIds?: string[]; limit?: number; callerOrg?: string | null } = {}
+  opts: {
+    formIds?: string[];
+    limit?: number;
+    callerOrg?: string | null;
+    sinceISO?: string | null;
+    afterISO?: string | null;
+  } = {}
 ): Promise<WebhookEventDetailItem[]> {
   const limit = Math.max(1, Math.min(100, Number(opts.limit || 50)));
   const org = normId(opts.callerOrg);
-  const wanted = new Set((opts.formIds ?? []).filter(isValidFormId));
+  const wanted = [...new Set((opts.formIds ?? []).filter(isValidFormId))];
+  if (!org || !wanted.length) return [];
 
-  // Scan the latest events and filter in memory (same index-free pattern as
-  // listWebhookEvents; formId-in + orderBy would need a composite index).
-  const snap = await db.collection(COLLECTION).orderBy("createdAt", "desc").limit(300).get();
+  const sinceDate = opts.sinceISO ? new Date(opts.sinceISO) : null;
+  const since =
+    sinceDate && Number.isFinite(sinceDate.getTime())
+      ? Timestamp.fromDate(sinceDate)
+      : null;
+  const afterDate = opts.afterISO ? new Date(opts.afterISO) : null;
+  const after =
+    afterDate && Number.isFinite(afterDate.getTime())
+      ? Timestamp.fromDate(afterDate)
+      : null;
+
+  // Firestore permits at most 30 values in an `in` filter. Query each chunk
+  // against the same orgId + formId + createdAt composite index, then merge.
+  // Unlike the former 300-document scan, only relevant documents enter memory.
+  const chunks: string[][] = [];
+  for (let i = 0; i < wanted.length; i += 30) chunks.push(wanted.slice(i, i + 30));
+  const snapshots = await Promise.all(
+    chunks.map((formIds) => {
+      let query: FirebaseFirestore.Query = db
+        .collection(COLLECTION)
+        .where("orgId", "==", org)
+        .where("formId", "in", formIds)
+        .orderBy("createdAt", "desc")
+        .select(
+          "orgId",
+          "formId",
+          "submissionId",
+          "submitterName",
+          "receivedAtISO",
+          "createdAt",
+          "pretty",
+          "normalizedFields"
+        );
+      if (after) query = query.where("createdAt", ">", after);
+      else if (since) query = query.where("createdAt", ">=", since);
+      return query.limit(limit).get();
+    })
+  );
+
+  const docsById = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+  for (const snap of snapshots) {
+    for (const doc of snap.docs) docsById.set(doc.id, doc);
+  }
+  const docs = [...docsById.values()]
+    .sort((a, b) => {
+      const aMillis = (a.get("createdAt") as FirebaseFirestore.Timestamp | null)?.toMillis?.() ?? 0;
+      const bMillis = (b.get("createdAt") as FirebaseFirestore.Timestamp | null)?.toMillis?.() ?? 0;
+      return bMillis - aMillis;
+    })
+    .slice(0, limit);
+
   const out: WebhookEventDetailItem[] = [];
-  for (const d of snap.docs) {
-    if (out.length >= limit) break;
+  for (const d of docs) {
     const r = { id: d.id, ...(d.data() || {}) } as Record<string, unknown>;
-    const ro = normId(r.orgId);
-    if (ro && org && ro !== org) continue;
     const formId = String(r.formId || "");
-    if (wanted.size && !wanted.has(formId)) continue;
     out.push({
       id: String(r.id),
       formId,
       submissionId: String(r.submissionId || ""),
       submitterName: String(r.submitterName || ""),
       receivedAtISO: (r.receivedAtISO as string | null) ?? null,
+      createdAtISO:
+        (r.createdAt as FirebaseFirestore.Timestamp | null)?.toDate?.().toISOString() ?? null,
       pretty: String(r.pretty || "").slice(0, 4000),
-      fields: fieldsFromEvent(r),
+      fields: Array.isArray(r.normalizedFields)
+        ? (r.normalizedFields as WebhookEventFieldRow[])
+        : [],
     });
   }
   return out;

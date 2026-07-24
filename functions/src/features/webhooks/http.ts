@@ -40,6 +40,10 @@ export const jotformWebhook_http = secureHandler(
 
     const rawKind = String((req.query?.kind ?? "") || "").trim().toLowerCase();
     const kind = ALLOWED_KINDS.has(rawKind) ? rawKind : "general";
+    const orgId = normStr(req.query?.orgId);
+    if (!orgId) {
+      logger.warn("jotform_webhook_missing_org", { kind });
+    }
 
     let fields: Record<string, string> = {};
     try {
@@ -52,6 +56,7 @@ export const jotformWebhook_http = secureHandler(
       ip: (req.ip as string) || null,
       contentType: String(req.headers["content-type"] || "") || null,
       kind,
+      orgId,
     });
 
     // Auto-register the form under its category (payment/intake) if not already.
@@ -75,20 +80,29 @@ export const jotformWebhook_http = secureHandler(
 export const formsWebhookConfig_http = secureHandler(
   async (req, res) => {
     const caller = req.user!;
-    void caller;
+    const orgId = orgIdFromClaims(caller);
+    if (!orgId) {
+      res.status(400).json({ ok: false, error: "missing_org" });
+      return;
+    }
     const token = String(process.env.JOTFORM_WEBHOOK_TOKEN || "").trim();
     const project = String(process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "housing-db-v2");
     const base = `https://us-central1-${project}.cloudfunctions.net/jotformWebhook`;
-    const q = token ? `?token=${encodeURIComponent(token)}` : "";
-    const sep = q ? "&" : "?";
+    const destination = (kind?: "payment" | "intake") => {
+      const params = new URLSearchParams();
+      if (token) params.set("token", token);
+      params.set("orgId", orgId);
+      if (kind) params.set("kind", kind);
+      return `${base}?${params.toString()}`;
+    };
     const destinations = [
-      { label: "All forms (general)", kind: "general", url: `${base}${q}` },
-      { label: "Payment forms (CC / invoice)", kind: "payment", url: `${base}${q}${sep}kind=payment` },
-      { label: "Intake forms", kind: "intake", url: `${base}${q}${sep}kind=intake` },
+      { label: "All forms (general)", kind: "general", url: destination() },
+      { label: "Payment forms (CC / invoice)", kind: "payment", url: destination("payment") },
+      { label: "Intake forms", kind: "intake", url: destination("intake") },
     ];
     res.status(200).json({ ok: true, destinations, hasToken: !!token });
   },
-  { auth: "user", appCheck: false, methods: ["GET", "OPTIONS"] }
+  { auth: "user", appCheck: false, requireOrg: true, methods: ["GET", "OPTIONS"] }
 );
 
 /** GET /formSchema?formId= — authed staff; normalized field list for a form (render-engine foundation). */
@@ -161,12 +175,15 @@ export const listWebhookEventDetails_http = secureHandler(
       formIds,
       limit: Number(q.limit) || 50,
       callerOrg: orgIdFromClaims(caller),
+      sinceISO: typeof q.since === "string" ? q.since : null,
+      afterISO: typeof q.after === "string" ? q.after : null,
     });
     res.status(200).json({ ok: true, items, count: items.length });
   },
   {
     auth: "user",
     appCheck: false,
+    requireOrg: true,
     methods: ["GET", "OPTIONS"],
     memory: "512MiB",
   }

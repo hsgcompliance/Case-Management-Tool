@@ -2337,6 +2337,7 @@ var EnrollmentsCloseBody = import_zod2.z.object({
   id: Id,
   closeDate: import_zod2.z.string().trim().min(1).optional(),
   taskMode: import_zod2.z.enum(["complete", "delete"]).optional(),
+  paymentMode: import_zod2.z.enum(["deleteUnpaid", "spendUnpaid"]).optional(),
   reversePaidAfterClose: import_zod2.z.boolean().optional()
 });
 var EnrollmentsReopenBody = import_zod2.z.object({

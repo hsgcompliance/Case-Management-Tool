@@ -534,6 +534,7 @@ var EnrollmentsCloseBody = z.object({
   id: Id,
   closeDate: z.string().trim().min(1).optional(),
   taskMode: z.enum(["complete", "delete"]).optional(),
+  paymentMode: z.enum(["deleteUnpaid", "spendUnpaid"]).optional(),
   reversePaidAfterClose: z.boolean().optional()
 });
 var EnrollmentsReopenBody = z.object({

@@ -1782,6 +1782,10 @@ export declare const EnrollmentsCloseBody: z.ZodObject<{
         complete: "complete";
         delete: "delete";
     }>>;
+    paymentMode: z.ZodOptional<z.ZodEnum<{
+        spendUnpaid: "spendUnpaid";
+        deleteUnpaid: "deleteUnpaid";
+    }>>;
     reversePaidAfterClose: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export type TEnrollmentsCloseBody = z.infer<typeof EnrollmentsCloseBody>;
@@ -1790,6 +1794,7 @@ export type TEnrollmentsCloseResp = Ok<{
     closeDate: string;
     retainedPaymentsCount: number;
     removedPaymentsCount: number;
+    spentPaymentIds: string[];
     reversedPaymentIds: string[];
     queueSyncConfirmed: boolean;
     payments: unknown;
