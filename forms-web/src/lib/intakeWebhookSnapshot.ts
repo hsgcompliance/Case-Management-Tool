@@ -67,6 +67,17 @@ function isoDate(value: string): string {
   return "";
 }
 
+/** AMI tool-widget prefill: only fields already extracted elsewhere (household size, monthly income). */
+export function extractAmiPrefill(snapshot: IntakeWebhookSnapshot | null): { hh?: string; income?: string } {
+  if (!snapshot) return {};
+  const hh = slotValue(snapshot.household.household, "hhSize");
+  const income = money(slotValue(snapshot.household.household, "totalIncome"));
+  return {
+    ...(hh && /^\d{1,2}$/.test(hh) ? { hh } : {}),
+    ...(income ? { income } : {}),
+  };
+}
+
 export function extractAssistancePrefill(snapshot: IntakeWebhookSnapshot | null): AssistancePrefill {
   if (!snapshot) return EMPTY_PREFILL;
   const fields = snapshot.household.trace.flatMap((event) => event.fields);

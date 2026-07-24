@@ -19,7 +19,9 @@ import { LandlordPrefillPanel } from "./LandlordPrefillPanel";
 import { MouSendPanel } from "./MouSendPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { ExternalServiceIcon } from "./ui";
+import { ToolWidget } from "./ToolWidget";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
+import { extractAmiPrefill } from "@/lib/intakeWebhookSnapshot";
 import { listRemoteIntakeFlows, saveRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
@@ -103,6 +105,7 @@ function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] })
           <h3 className="font-semibold text-amber-950">Eviction Prevention</h3>
           <p className="mt-1 text-sm text-amber-900">Complete the Eviction Prevention Assessment in the Google Sheet.</p>
           <div className="mt-4 flex justify-center"><GuidanceLink href={EVICTION_ASSESSMENT_URL}>Open Eviction Prevention Assessment</GuidanceLink></div>
+          <div className="mt-4"><ToolWidget id="fmr" /></div>
         </section>
       ) : null}
       {selected.has("hud-rental") ? (
@@ -718,6 +721,17 @@ export function FormsCategoryView({
             ) : null}
           </div>
         ) : null}
+        {step.toolWidgets?.length ? (
+          <div className="space-y-2">
+            {step.toolWidgets.map((toolId) => (
+              <ToolWidget
+                key={toolId}
+                id={toolId}
+                prefill={toolId === "ami" ? extractAmiPrefill(webhookSnapshot) : undefined}
+              />
+            ))}
+          </div>
+        ) : null}
         {step.manualInfoBuilder ? <MissingIntakeInfoBuilder /> : null}
         {step.workbookModal ? (
           <section className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-5 text-center">
@@ -758,6 +772,7 @@ export function FormsCategoryView({
             intakeTypes={intakeTypes}
           />
         ) : null}
+        {step.rentCertBuilder ? <ToolWidget id="fmr" /> : null}
         {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} onSubmissionStateChange={handleRentCertSubmissionState} /> : null}
         {step.intakeGuidance ? <IntakeProgramGuidance intakeTypes={intakeTypes} /> : null}
         {step.inspectionGate ? <IntakeInspection intakeTypes={intakeTypes} onSubmitted={handleSubmitted} /> : null}

@@ -2,6 +2,8 @@
 // (enabled forms with >=10 submissions, per the "pipe in high-volume forms" plan).
 // `category` drives the Purchases / Intake tabs; "All forms" shows everything.
 
+import type { ToolWidgetId } from "./toolWidgets";
+
 export type FormCategory = "purchases" | "intake" | "referral" | "other";
 
 export type FormDef = {
@@ -165,6 +167,8 @@ export type IntakeFlowStep = {
   autoCompleteChecklist?: boolean;
   /** Review customer/landlord recipients and choose the program-specific MOU. */
   mouSend?: boolean;
+  /** Optional eligibility-calculator tools, shown collapsed/expandable. */
+  toolWidgets?: ToolWidgetId[];
 };
 
 /**
@@ -220,6 +224,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     note: "File everything in the CUSTOMER'S Google Drive folder. Zero income/assets? Use the Jotform self-declarations below, or a blank file-form template from the Drive folders.",
     customerFolderLink: true,
     autoCompleteChecklist: true,
+    toolWidgets: ["ami", "esg-asset-limit", "income"],
     checklist: [
       "Photo ID for ALL household members",
       "Income documents (or zero-income self-declaration)",

@@ -7,6 +7,12 @@ import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { CustomerSearchBar } from "./CustomerSearchBar";
 import { SubmitNotifications } from "./SubmitNotifications";
 import { RENT_DETERMINATION_FORM_ID } from "@/lib/rentCertExtract";
+import { TOOL_WIDGETS, openToolWindow, type ToolWidgetId } from "@/lib/toolWidgets";
+
+// Small, always-available calculator launchers — same widgets embedded in the
+// intake flow, opened here as a popup window since there's no per-customer
+// context (or active step) to expand them inline against.
+const CALCULATOR_IDS: ToolWidgetId[] = ["ami", "esg-asset-limit", "income", "fmr"];
 
 // Primary tabs are the day-to-day surfaces. Configuration and operational
 // utilities stay grouped under Tools.
@@ -34,6 +40,8 @@ export function StaffLayout() {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [calcMenuOpen, setCalcMenuOpen] = useState(false);
+  const calcMenuRef = useRef<HTMLDivElement>(null);
 
   const menuTabs = isAdmin ? [...MENU_TABS, { to: "/staff/admin", label: "Admin" }] : MENU_TABS;
   const activeMenuTab = menuTabs.find((tab) => {
@@ -46,13 +54,17 @@ export function StaffLayout() {
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (calcMenuRef.current && !calcMenuRef.current.contains(e.target as Node)) setCalcMenuOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  // Navigating anywhere closes the menu.
-  useEffect(() => setMenuOpen(false), [location.pathname]);
+  // Navigating anywhere closes the menus.
+  useEffect(() => {
+    setMenuOpen(false);
+    setCalcMenuOpen(false);
+  }, [location.pathname]);
 
   return (
     <div className="flex min-h-full flex-col bg-slate-50">
@@ -128,6 +140,36 @@ export function StaffLayout() {
                     >
                       {t.label}
                     </NavLink>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div ref={calcMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setCalcMenuOpen((v) => !v)}
+                title="Eligibility calculators (opens in a small window)"
+                className="flex items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-2.5 py-2 text-sm font-medium text-slate-500 transition hover:text-slate-700 sm:px-3"
+              >
+                <span>Calculators</span>
+                <span aria-hidden className="text-[10px] leading-none">{calcMenuOpen ? "▲" : "▼"}</span>
+              </button>
+              {calcMenuOpen ? (
+                <div className="absolute left-0 z-30 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                  {CALCULATOR_IDS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        openToolWindow(id);
+                        setCalcMenuOpen(false);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      {TOOL_WIDGETS[id].title}
+                      <span className="ml-1 text-[11px] font-normal text-slate-400">↗ new window</span>
+                    </button>
                   ))}
                 </div>
               ) : null}

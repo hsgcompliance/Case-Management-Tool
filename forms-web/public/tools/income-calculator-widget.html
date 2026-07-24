@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annualized Income Calculator Widget</title>
+  <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+  <style>
+    :root{--ink:#17211d;--muted:#66736d;--line:#d8e1dc;--gold:#9a650f;--gold-light:#fff3d9;--green:#146b4a;--green-light:#e6f4ed;--purple:#65558f;--purple-light:#f0ecf8;--red:#a23b32;--red-light:#fbeceb}
+    *{box-sizing:border-box}body{margin:0;padding:14px;color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f8f6}.widget{max-width:1040px;margin:auto;padding:20px;background:#fff;border:1px solid var(--line);border-top:5px solid var(--gold);border-radius:14px}
+    .head,.actions,.output-row,.stub-head,.ami-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px}.head h1{margin:0;font-size:22px}.head p{margin:3px 0 0;color:var(--muted);font-size:12px}.badge{padding:4px 7px;color:#6f4b12;background:var(--gold-light);border-radius:6px;font-size:10px;font-weight:800}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}.grid.two{grid-template-columns:1fr 1fr}.full{grid-column:1/-1}label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700}label small{color:var(--muted);font-weight:500}select,input,textarea{width:100%;min-height:40px;padding:7px;border:1px solid #b8c6bf;border-radius:8px;background:#fff;font:inherit}textarea{resize:vertical}
+    .period{margin-top:10px;padding:8px 10px;color:#5f5546;background:var(--gold-light);border-radius:8px;font-size:12px}.stub-section{margin-top:14px;padding:12px;background:#f8faf9;border:1px solid var(--line);border-radius:10px}.stub-head strong{font-size:13px}.stub-head span{color:var(--muted);font-size:11px}
+    .table-wrap{overflow-x:auto}table{width:100%;min-width:980px;margin-top:8px;border-collapse:collapse}th{color:var(--muted);font-size:9px;letter-spacing:.04em;text-align:left;text-transform:uppercase}th,td{padding:4px}td input,td select{min-width:108px}.include-cell{width:54px;text-align:center}.include-cell input{width:18px;min-width:18px;min-height:18px}.note-input{min-width:145px}.remove{padding:4px 8px;color:var(--red);background:var(--red-light);border-color:#efd0cd}
+    button{padding:7px 10px;color:#6f4b12;background:var(--gold-light);border:1px solid #ead9b7;border-radius:7px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.add{margin-top:8px}.actions{justify-content:flex-start;margin-top:12px;flex-wrap:wrap}
+    .results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}.output{padding:12px;background:#f7faf8;border:1px solid var(--line);border-radius:9px}.output.primary{color:#fff;background:var(--green);border-color:var(--green)}.output span,.output small{display:block;color:var(--muted);font-size:10px}.output.primary span,.output.primary small{color:#cce5d9}.output strong{display:block;margin:3px 0;font-size:21px}.output-row strong{font-size:30px}.secondary-results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+    .formula-card{margin-top:8px;padding:10px 12px;color:#4f493d;background:#fffaf0;border:1px solid #ead9b7;border-radius:8px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}.warnings{margin-top:10px}.warning{margin:5px 0;padding:8px 10px;color:#74480a;background:var(--gold-light);border-left:4px solid var(--gold);border-radius:6px;font-size:11px}.warning.strong{color:#7d2d27;background:var(--red-light);border-color:var(--red)}
+    .ami-section{margin-top:14px;padding:12px;background:#faf9fc;border:1px solid #ddd6eb;border-radius:10px}.ami-toggle{flex-direction:row;justify-content:flex-start;color:#4e4074;font-weight:800}.ami-toggle input{width:18px;min-height:18px}.ami-fields[hidden]{display:none}.ami-results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.ami-results div{padding:9px;background:#fff;border:1px solid #ddd6eb;border-radius:8px}.ami-results span,.ami-results small{display:block;color:var(--muted);font-size:10px}.ami-results strong{display:block;margin:2px 0;font-size:18px}.pass{color:var(--green)}.fail{color:var(--red)}
+    details{margin-top:14px;border-top:1px solid var(--line)}summary{padding-top:12px;color:#6f4b12;font-weight:800;cursor:pointer}.details{padding-top:8px;color:#46534c;font-size:12px}.details ul{padding-left:18px}.payload{margin-top:10px;padding:8px;color:var(--muted);background:#f7faf8;border-radius:7px;font:10px ui-monospace,monospace;overflow-wrap:anywhere}
+    @media(max-width:760px){.grid,.grid.two,.results,.secondary-results,.ami-results{grid-template-columns:1fr}.full{grid-column:auto}.widget{padding:14px}}@media print{body{padding:0;background:#fff}.widget{border:0}.no-print{display:none!important}}
+  </style>
+</head>
+<body>
+  <main class="widget">
+    <header class="head">
+      <div><h1>Annualized Income Calculator</h1><p>Project annual, average monthly, and 30-day income from available representative paystubs</p></div>
+      <span class="badge">INCOME</span>
+    </header>
+
+    <div class="grid">
+      <label>Household member<input id="person" type="text" maxlength="60" placeholder="Name or initials"></label>
+      <label>Employer / income source<input id="employer" type="text" maxlength="80" placeholder="Employer"></label>
+      <label>Pay frequency<select id="frequency"><option value="weekly">Weekly</option><option value="biweekly" selected>Bi-weekly</option><option value="semimonthly">Semi-monthly</option><option value="monthly">Monthly</option></select></label>
+      <label>30-day income basis<select id="basis"><option value="annualized">Annualized 30-day estimate</option><option value="actualReceived">Actual received in prior 30 days</option></select></label>
+      <label>Calculation as-of date<input id="asOf" type="date"></label>
+      <label>Other projected monthly income <small>optional</small><input id="otherMonthly" type="number" min="0" step=".01" placeholder="0.00"></label>
+      <label>Other income received in prior 30 days <small>optional</small><input id="otherActual30" type="number" min="0" step=".01" placeholder="0.00"></label>
+      <label>Prepared by <small>optional</small><input id="preparedBy" type="text" maxlength="60" placeholder="Staff name or initials"></label>
+    </div>
+    <div id="period" class="period">Choose an as-of date</div>
+
+    <section class="stub-section">
+      <div class="stub-head"><strong>Paystub evidence</strong><span id="coverage">Enter available paystubs</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Use</th><th>Work start</th><th>Work end</th><th>Pay date</th><th>Gross pay</th><th>Classification</th><th>Audit note</th><th class="no-print"></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <button id="add" class="add no-print" type="button">+ Add paystub</button>
+    </section>
+
+    <section class="results">
+      <div class="output"><span>ANNUALIZED INCOME</span><strong id="annual">$0.00</strong><small>Average included check × annual pay periods</small></div>
+      <div class="output"><span>AVERAGE MONTHLY INCOME</span><strong id="monthly">$0.00</strong><small>Annualized income ÷ 12</small></div>
+      <div class="output primary"><span>30-DAY INCOME USED</span><div class="output-row"><strong id="primary30">$0.00</strong><button id="copy" class="no-print" disabled>Copy number</button></div><small id="primaryBasis">Annualized income × 30 ÷ 365</small></div>
+    </section>
+    <div id="formula" class="formula-card">Enter at least one included paystub to calculate.</div>
+
+    <section class="secondary-results">
+      <div class="output"><span>ANNUALIZED 30-DAY ESTIMATE</span><strong id="estimate30">$0.00</strong><small>Annualized income × 30 ÷ 365</small></div>
+      <div class="output"><span>ACTUAL RECEIVED IN PRIOR 30 DAYS</span><strong id="received">$0.00</strong><small>All entered checks with pay dates in the window</small></div>
+      <div class="output"><span>ACTUAL EARNED IN PRIOR 30 DAYS</span><strong id="earned">$0.00</strong><small>All entered checks prorated by work-period overlap</small></div>
+    </section>
+
+    <div id="warnings" class="warnings" aria-live="polite"></div>
+
+    <section class="ami-section">
+      <label class="ami-toggle"><input id="enableAmi" type="checkbox"> Include optional AMI calculation</label>
+      <div id="amiFields" class="ami-fields" hidden>
+        <div class="grid two">
+          <label>County<select id="county"><option value="">Select county</option><option>Gallatin</option><option>Park</option><option>Meagher</option></select></label>
+          <label>Household size<input id="householdSize" type="number" min="1" max="8" step="1" placeholder="1–8"></label>
+        </div>
+        <div class="ami-results">
+          <div><span>PERCENT OF AMI</span><strong id="amiPercent">—</strong><small id="amiStatus">Complete AMI inputs</small></div>
+          <div><span>30% AMI MONTHLY LIMIT</span><strong id="ami30">—</strong><small id="amiBasis">Compared with projected average monthly income</small></div>
+          <div><span>100% AMI MONTHLY VALUE</span><strong id="ami100">—</strong><small>May 2026 matrix</small></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid two">
+      <label class="full">Calculation notes <small>optional</small><textarea id="calculationNotes" rows="3" maxlength="600" placeholder="Explain employment changes, stale evidence, excluded checks, or program-specific decisions."></textarea></label>
+    </div>
+
+    <div class="actions no-print">
+      <button id="copyPayload" type="button" disabled>Copy auditable field value</button>
+      <button id="pdf" type="button">Export formatted PDF</button>
+      <button id="json" type="button">Export JSON</button>
+    </div>
+
+    <details>
+      <summary>Calculation and audit details</summary>
+      <div class="details">
+        <p><strong>Annualized basis:</strong> average all included representative gross checks, multiply by annual pay periods, then convert the annualized result into an average month and an estimated 30-day period.</p>
+        <ul><li>Weekly: average check × 52</li><li>Bi-weekly: average check × 26</li><li>Semi-monthly: average check × 24</li><li>Monthly: average check × 12</li></ul>
+        <p><strong>Actual prior-30-day basis:</strong> count all entered checks with pay dates inside the as-of-date window, plus other income explicitly entered as received during that window.</p>
+        <p>Older paystubs remain usable for projection. The widget reports their age and warns staff to confirm continued employment or wage changes. Both basis results and the historical earned amount remain in the audit record regardless of the selected primary basis.</p>
+        <p>Optional AMI uses <strong>average monthly projected income</strong> when the annualized basis is selected, or the <strong>actual prior-30-day received amount</strong> as the monthly proxy when that basis is selected.</p>
+        <div class="payload"><strong>Single Jotform field value:</strong> <span id="payload">Enter at least one included paystub</span></div>
+      </div>
+    </details>
+  </main>
+
+  <template id="rowTemplate">
+    <tr>
+      <td class="include-cell"><input data-f="included" type="checkbox" aria-label="Include in annual projection"></td>
+      <td><input data-f="workStart" type="date" aria-label="Work period start"></td>
+      <td><input data-f="workEnd" type="date" aria-label="Work period end"></td>
+      <td><input data-f="payDate" type="date" aria-label="Pay date"></td>
+      <td><input data-f="gross" type="number" min="0" step=".01" placeholder="0.00" aria-label="Gross pay"></td>
+      <td><select data-f="classification" aria-label="Paystub classification"><option value="regular">Regular complete period</option><option value="partial">Partial period</option><option value="overtime">Includes overtime</option><option value="bonus">Includes bonus</option><option value="leave">Leave / reduced hours</option><option value="final">Final check</option><option value="other">Other irregular pay</option></select></td>
+      <td><input class="note-input" data-f="note" type="text" maxlength="100" placeholder="Reason or verification" aria-label="Audit note"></td>
+      <td class="no-print"><button class="remove" type="button" aria-label="Remove paystub">×</button></td>
+    </tr>
+  </template>
+
+  <script>
+    const FREQUENCIES={weekly:{label:"Weekly",periods:52,minimum:4,expected:"4–5"},biweekly:{label:"Bi-weekly",periods:26,minimum:2,expected:"2–3"},semimonthly:{label:"Semi-monthly",periods:24,minimum:2,expected:"2"},monthly:{label:"Monthly",periods:12,minimum:1,expected:"1"}};
+    const AMI_TABLE={Gallatin:[7600,8683,9767,10850,11725,12592,13458,14325],Park:[5583,6375,7175,7967,8608,9242,9883,10517],Meagher:[5308,6067,6825,7583,8192,8800,9408,10017]};
+    const CALC_VERSION="3.0",MATRIX_VERSION="05-2026";
+    let stubs=[],result={},summary="",jfReady=false;
+    const $=id=>document.getElementById(id);
+    const money=n=>Number(n||0).toLocaleString("en-US",{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2});
+    const clean=value=>String(value||"").replace(/[|;{}\[\]\\]/g,"/").replace(/\s+/g," ").trim();
+    function localToday(){const now=new Date(),offset=now.getTimezoneOffset()*60000;return new Date(now-offset).toISOString().slice(0,10)}
+    function parseDate(value){if(!value)return null;const [year,month,day]=value.split("-").map(Number);return new Date(Date.UTC(year,month-1,day))}
+    function addDays(value,amount){const next=new Date(value);next.setUTCDate(next.getUTCDate()+amount);return next}
+    function inclusiveDays(start,end){return start&&end&&start<=end?Math.floor((end-start)/86400000)+1:0}
+    function overlapDays(aStart,aEnd,bStart,bEnd){return inclusiveDays(new Date(Math.max(aStart,bStart)),new Date(Math.min(aEnd,bEnd)))}
+    function ageInDays(older,newer){return older&&newer?Math.floor((newer-older)/86400000):null}
+    function addStub(data={}){
+      stubs.push({id:Date.now()+Math.random(),included:true,workStart:"",workEnd:"",payDate:"",gross:"",classification:"regular",note:"",...data});
+      renderRows();calculate();
+    }
+    function renderRows(){
+      const body=$("rows");body.innerHTML="";
+      stubs.forEach(stub=>{
+        const fragment=$("rowTemplate").content.cloneNode(true),row=fragment.querySelector("tr");
+        row.querySelectorAll("[data-f]").forEach(input=>{
+          const field=input.dataset.f;
+          if(input.type==="checkbox")input.checked=Boolean(stub[field]);else input.value=stub[field];
+          input.addEventListener("input",()=>{stub[field]=input.type==="checkbox"?input.checked:input.value;calculate()});
+        });
+        row.querySelector(".remove").addEventListener("click",()=>{stubs=stubs.filter(item=>item.id!==stub.id);if(!stubs.length)addStub();else{renderRows();calculate()}});
+        body.appendChild(fragment);
+      });
+    }
+    function calculate(){
+      const asOf=parseDate($("asOf").value),windowStart=asOf?addDays(asOf,-29):null,frequency=FREQUENCIES[$("frequency").value],basis=$("basis").value,otherMonthly=Math.max(0,Number($("otherMonthly").value)||0),otherActual30=Math.max(0,Number($("otherActual30").value)||0);
+      let received30=otherActual30,earned30=otherActual30,fallbackCount=0;
+      const detailed=stubs.map((stub,index)=>{
+        const gross=Math.max(0,Number(stub.gross)||0),payDate=parseDate(stub.payDate),workStart=parseDate(stub.workStart),workEnd=parseDate(stub.workEnd);
+        const paidInWindow=Boolean(payDate&&windowStart&&payDate>=windowStart&&payDate<=asOf);
+        let earnedAmount=0,overlap=0,totalWorkDays=0,fallback=false;
+        if(workStart&&workEnd&&workStart<=workEnd&&windowStart){
+          totalWorkDays=inclusiveDays(workStart,workEnd);overlap=overlapDays(workStart,workEnd,windowStart,asOf);earnedAmount=gross*overlap/totalWorkDays;
+        }else if(paidInWindow){earnedAmount=gross;fallback=true;fallbackCount++}
+        if(paidInWindow)received30+=gross;earned30+=earnedAmount;
+        return{number:index+1,included:Boolean(stub.included),workStart:stub.workStart,workEnd:stub.workEnd,payDate:stub.payDate,gross:Number(gross.toFixed(2)),classification:stub.classification,note:stub.note,received30:Number((paidInWindow?gross:0).toFixed(2)),earned30:Number(earnedAmount.toFixed(2)),overlapDays:overlap,totalWorkDays,fallback};
+      });
+      const included=detailed.filter(stub=>stub.included&&stub.gross>0),averageCheck=included.length?included.reduce((sum,stub)=>sum+stub.gross,0)/included.length:0;
+      const annualizedPay=averageCheck*frequency.periods,annualized=annualizedPay+otherMonthly*12,averageMonthly=annualized/12,estimated30=annualized*30/365,incomeUsed30=basis==="actualReceived"?received30:estimated30,amiMonthlyIncome=basis==="actualReceived"?received30:averageMonthly;
+      const dated=detailed.filter(stub=>stub.payDate&&stub.gross>0),payDates=dated.map(stub=>parseDate(stub.payDate)),mostRecentPayDate=payDates.length?new Date(Math.max(...payDates)) : null,oldestPayDate=payDates.length?new Date(Math.min(...payDates)) : null;
+      const mostRecentAge=asOf&&mostRecentPayDate?ageInDays(mostRecentPayDate,asOf):null;
+      const warnings=[];
+      if(detailed.some(stub=>stub.gross>0)&&included.length<frequency.minimum)warnings.push({strong:false,text:`Only ${included.length} included check(s). Typical ${frequency.label.toLowerCase()} documentation is ${frequency.expected}; the calculation is still shown from available evidence.`});
+      if(mostRecentAge!=null&&mostRecentAge>30)warnings.push({strong:mostRecentAge>60,text:`The most recent paystub is ${mostRecentAge} days before the as-of date. Confirm continued employment, pay frequency, and wage rate.`});
+      if(mostRecentAge!=null&&mostRecentAge<0)warnings.push({strong:true,text:"A pay date occurs after the calculation as-of date."});
+      if(fallbackCount)warnings.push({strong:false,text:`${fallbackCount} historical earned-income amount(s) used the full check because valid work dates were unavailable.`});
+      const irregularIncluded=included.filter(stub=>stub.classification!=="regular");
+      if(irregularIncluded.length)warnings.push({strong:false,text:`${irregularIncluded.length} included check(s) are classified as irregular. Confirm that including them is representative of expected income.`});
+      const excluded=detailed.filter(stub=>!stub.included&&stub.gross>0);
+      if(excluded.length)warnings.push({strong:false,text:`${excluded.length} entered check(s) are excluded from the annual projection; their values and notes remain in the audit record.`});
+      if(basis==="actualReceived"&&received30===otherActual30)warnings.push({strong:false,text:"No entered paychecks have pay dates inside the prior-30-day window. The selected actual-received basis contains only separately entered other income, if any."});
+
+      let ami=null;
+      if($("enableAmi").checked){
+        const county=$("county").value,householdSize=Math.floor(Number($("householdSize").value)),table=AMI_TABLE[county];
+        if(table&&householdSize>=1&&householdSize<=8){
+          const ami100=table[householdSize-1],ami30=ami100*.3,percent=amiMonthlyIncome/ami100*100;
+          ami={county,householdSize,monthlyIncomeUsed:amiMonthlyIncome,ami100,ami30,percent,status:percent<=30?"AtOrBelow30":"Above30"};
+        }
+      }
+      result={version:CALC_VERSION,matrixVersion:MATRIX_VERSION,asOf:$("asOf").value,periodStart:windowStart?windowStart.toISOString().slice(0,10):"",periodEnd:$("asOf").value,person:$("person").value,employer:$("employer").value,frequency:$("frequency").value,frequencyLabel:frequency.label,periodsPerYear:frequency.periods,basis,basisLabel:basis==="actualReceived"?"Actual received in prior 30 days":"Annualized 30-day estimate",otherProjectedMonthly:otherMonthly,otherActual30,stubs:detailed,stubsEntered:detailed.filter(stub=>stub.gross>0).length,stubsIncluded:included.length,averageCheck,annualizedPay,annualized,averageMonthly,estimated30,actualReceived30:received30,actualEarned30:earned30,incomeUsed30,amiMonthlyIncome,oldestPayDate:oldestPayDate?oldestPayDate.toISOString().slice(0,10):"",mostRecentPayDate:mostRecentPayDate?mostRecentPayDate.toISOString().slice(0,10):"",mostRecentPaystubAgeDays:mostRecentAge,warnings:warnings.map(warning=>warning.text),ami,preparedBy:$("preparedBy").value,calculationNotes:$("calculationNotes").value};
+
+      $("period").textContent=windowStart?`As of ${result.periodEnd} • historical comparison window ${result.periodStart} through ${result.periodEnd}`:"Choose an as-of date";
+      $("annual").textContent=money(annualized);$("monthly").textContent=money(averageMonthly);$("primary30").textContent=money(incomeUsed30);$("primaryBasis").textContent=basis==="actualReceived"?"Checks paid in the prior 30 days + other actual income":"Annualized income × 30 ÷ 365";$("estimate30").textContent=money(estimated30);$("received").textContent=money(received30);$("earned").textContent=money(earned30);
+      const annualFormula=included.length?`(${included.map(stub=>money(stub.gross)).join(" + ")} ÷ ${included.length}) × ${frequency.periods} + (${money(otherMonthly)} × 12) = ${money(annualized)} annual; ${money(annualized)} × 30 ÷ 365 = ${money(estimated30)} estimated 30-day income.`:"No included paystubs are available for annualization.";
+      $("formula").textContent=basis==="actualReceived"?`Selected basis: paychecks received ${result.periodStart} through ${result.periodEnd} + ${money(otherActual30)} other actual income = ${money(received30)}. Annualized comparison: ${annualFormula}`:annualFormula;
+      $("coverage").textContent=`${included.length} included of ${result.stubsEntered} entered check(s) • typical ${frequency.label.toLowerCase()} coverage ${frequency.expected}`;
+      $("warnings").innerHTML=warnings.map(warning=>`<div class="warning${warning.strong?" strong":""}">⚠ ${escapeHTML(warning.text)}</div>`).join("");
+      $("copy").disabled=!included.length;$("copyPayload").disabled=!included.length;
+
+      if(ami){
+        $("amiPercent").textContent=`${ami.percent.toFixed(1)}%`;$("ami30").textContent=money(ami.ami30);$("ami100").textContent=money(ami.ami100);
+        $("amiStatus").textContent=ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI";$("amiStatus").className=ami.status==="AtOrBelow30"?"pass":"fail";$("amiBasis").textContent=basis==="actualReceived"?"Compared with actual prior-30-day income":"Compared with projected average monthly income";
+      }else{$("amiPercent").textContent="—";$("ami30").textContent="—";$("ami100").textContent="—";$("amiStatus").textContent=$("enableAmi").checked?"Complete county and household size":"AMI not enabled";$("amiStatus").className=""}
+
+      const stubAudit=detailed.filter(stub=>stub.gross>0).map(stub=>`#${stub.number}{Use:${stub.included?"Y":"N"},Work:${stub.workStart||"NA"}-${stub.workEnd||"NA"},Pay:${stub.payDate||"NA"},Gross:${stub.gross.toFixed(2)},Class:${stub.classification},Note:${clean(stub.note)||"None"}}`).join(";");
+      const flags=warnings.length?warnings.map((warning,index)=>`W${index+1}:${clean(warning.text)}`).join("~"):"None";
+      const amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:${basis},MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
+      summary=included.length&&asOf?`CalcV:${CALC_VERSION}|AsOf:${result.asOf}|Person:${clean(result.person)||"NA"}|Employer:${clean(result.employer)||"NA"}|Frequency:${result.frequency}|PeriodsPerYear:${result.periodsPerYear}|Method:AverageIncludedChecksAnnualized|Basis:${basis}|StubsEntered:${result.stubsEntered}|StubsIncluded:${result.stubsIncluded}|StubAudit:[${stubAudit}]|AverageCheck:${averageCheck.toFixed(2)}|OtherProjectedMonthly:${otherMonthly.toFixed(2)}|OtherActual30:${otherActual30.toFixed(2)}|Annualized:${annualized.toFixed(2)}|AverageMonthly:${averageMonthly.toFixed(2)}|Estimated30Day:${estimated30.toFixed(2)}|Actual30Received:${received30.toFixed(2)}|Actual30Earned:${earned30.toFixed(2)}|IncomeUsed30:${incomeUsed30.toFixed(2)}|EvidencePayDates:${result.oldestPayDate||"NA"}-${result.mostRecentPayDate||"NA"}|MostRecentAgeDays:${mostRecentAge==null?"NA":mostRecentAge}|PreparedBy:${clean(result.preparedBy)||"NA"}|Flags:${flags}|Notes:${clean(result.calculationNotes)||"None"}${amiOutput}`:"";
+      $("payload").textContent=summary||"Enter an as-of date and at least one included paystub";
+      if(jfReady)JFCustomWidget.sendData(summary);
+    }
+    function escapeHTML(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]))}
+    function reportHTML(){
+      const ami=result.ami,warningList=result.warnings.length?`<ul>${result.warnings.map(warning=>`<li>${escapeHTML(warning)}</li>`).join("")}</ul>`:"<p>No calculation warnings.</p>";
+      const rows=result.stubs.filter(stub=>stub.gross>0).map(stub=>`<tr><td>${stub.number}</td><td>${stub.included?"Included":"Excluded"}</td><td>${escapeHTML(stub.workStart||"—")} – ${escapeHTML(stub.workEnd||"—")}</td><td>${escapeHTML(stub.payDate||"—")}</td><td class="num">${money(stub.gross)}</td><td>${escapeHTML(stub.classification)}</td><td>${escapeHTML(stub.note||"—")}</td></tr>`).join("");
+      return `<!doctype html><html><head><meta charset="utf-8"><title>Income Calculation Report</title><style>@page{size:letter;margin:.5in}*{box-sizing:border-box}body{margin:0;color:#17211d;font:11px/1.4 Arial,sans-serif}header{padding-bottom:14px;border-bottom:3px solid #146b4a}h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:#66736d}.meta,.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.meta div,.card{padding:8px;border:1px solid #d8e1dc;border-radius:6px}.meta span,.card span{display:block;color:#66736d;font-size:8px;font-weight:bold;text-transform:uppercase}.card strong{display:block;margin-top:3px;font-size:16px}.primary{color:white;background:#146b4a}.primary span{color:#d7eee3}h2{margin:16px 0 6px;font-size:13px;color:#0e4d36}table{width:100%;border-collapse:collapse}th,td{padding:5px;border-bottom:1px solid #d8e1dc;text-align:left;vertical-align:top}th{font-size:8px;text-transform:uppercase}.num{text-align:right}.formula{padding:8px;background:#fff7e5;border:1px solid #ead9b7;border-radius:5px;font:9px Consolas,monospace}.ami{padding:9px;background:#f0ecf8;border-radius:6px}.payload{margin-top:10px;padding:7px;color:#59655f;background:#f5f7f6;border-radius:5px;font:7px Consolas,monospace;overflow-wrap:anywhere}footer{margin-top:14px;padding-top:8px;color:#66736d;border-top:1px solid #d8e1dc;font-size:8px}</style></head><body><header><h1>Income Calculation</h1><p>Eviction Prevention Eligibility Worksheet • Calculation version ${CALC_VERSION}</p></header><section class="meta"><div><span>Household member</span>${escapeHTML(result.person||"Not entered")}</div><div><span>Employer / source</span>${escapeHTML(result.employer||"Not entered")}</div><div><span>Calculation as of</span>${escapeHTML(result.asOf)}</div><div><span>Frequency</span>${escapeHTML(result.frequencyLabel)} (${result.periodsPerYear}/year)</div><div><span>30-day basis selected</span>${escapeHTML(result.basisLabel)}</div><div><span>Prepared by</span>${escapeHTML(result.preparedBy||"Not entered")}</div><div><span>Evidence pay dates</span>${escapeHTML(result.oldestPayDate||"—")} – ${escapeHTML(result.mostRecentPayDate||"—")}</div></section><section class="cards"><div class="card"><span>Annualized income</span><strong>${money(result.annualized)}</strong></div><div class="card"><span>Average monthly</span><strong>${money(result.averageMonthly)}</strong></div><div class="card primary"><span>30-day income used</span><strong>${money(result.incomeUsed30)}</strong></div></section><h2>Calculation</h2><div class="formula">${escapeHTML($("formula").textContent)}</div><h2>Paystub audit</h2><table><thead><tr><th>#</th><th>Projection</th><th>Work period</th><th>Pay date</th><th class="num">Gross</th><th>Classification</th><th>Note</th></tr></thead><tbody>${rows||'<tr><td colspan="7">No paystubs entered.</td></tr>'}</tbody></table><h2>30-day basis comparison</h2><section class="cards"><div class="card"><span>Annualized estimate</span><strong>${money(result.estimated30)}</strong></div><div class="card"><span>Actual received</span><strong>${money(result.actualReceived30)}</strong></div><div class="card"><span>Actual earned</span><strong>${money(result.actualEarned30)}</strong></div><div class="card"><span>Other actual 30-day income</span><strong>${money(result.otherActual30)}</strong></div><div class="card"><span>Most recent stub age</span><strong>${result.mostRecentPaystubAgeDays==null?"—":`${result.mostRecentPaystubAgeDays} days`}</strong></div></section>${ami?`<h2>Optional AMI calculation</h2><div class="ami"><strong>${ami.percent.toFixed(1)}% of AMI — ${ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI"}</strong><br>${escapeHTML(result.basisLabel)} supplied ${money(ami.monthlyIncomeUsed)} as the monthly AMI income input. The 100% AMI value is ${money(ami.ami100)} and the 30% monthly threshold is ${money(ami.ami30)}.</div>`:""}<h2>Warnings and review notes</h2>${warningList}${result.calculationNotes?`<p><strong>Calculation notes:</strong> ${escapeHTML(result.calculationNotes)}</p>`:""}<div class="payload"><strong>Jotform audit value:</strong><br>${escapeHTML(summary)}</div><footer>Matrix version ${MATRIX_VERSION}. This report documents the calculation; confirm applicable program rules and source verification before eligibility approval.</footer></body></html>`;
+    }
+    function exportFormattedPDF(){
+      if(!result.stubsIncluded){alert("Enter at least one included paystub before exporting.");return}
+      const report=window.open("","_blank","width=900,height=900");
+      if(!report){alert("Allow pop-ups to export the formatted PDF.");return}
+      report.document.open();report.document.write(reportHTML());report.document.close();
+      setTimeout(()=>{report.focus();report.print()},300);
+    }
+    function exportJSON(){
+      if(!result.stubsIncluded){alert("Enter at least one included paystub before exporting.");return}
+      const data={exportedAt:new Date().toISOString(),widget:"Annualized Income Calculator",...result,jotformValue:summary};
+      const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));link.download=`income-calculation-${result.asOf||"undated"}.json`;link.click();URL.revokeObjectURL(link.href);
+    }
+    $("asOf").value=localToday();
+    ["person","employer","frequency","basis","asOf","otherMonthly","otherActual30","preparedBy","county","householdSize","calculationNotes"].forEach(id=>$(id).addEventListener("input",calculate));
+    $("enableAmi").addEventListener("input",()=>{$("amiFields").hidden=!$("enableAmi").checked;calculate()});
+    $("add").addEventListener("click",()=>addStub());
+    $("copy").addEventListener("click",()=>navigator.clipboard?.writeText(result.incomeUsed30?.toFixed(2)||""));
+    $("copyPayload").addEventListener("click",()=>navigator.clipboard?.writeText(summary));
+    $("pdf").addEventListener("click",exportFormattedPDF);$("json").addEventListener("click",exportJSON);
+    addStub();addStub();
+    if(window.JFCustomWidget){
+      JFCustomWidget.subscribe("ready",()=>{jfReady=true;calculate();JFCustomWidget.requestFrameResize({height:1180})});
+      JFCustomWidget.subscribe("submit",()=>JFCustomWidget.sendSubmit({valid:!!summary,value:summary}));
+    }
+  </script>
+</body>
+</html>
