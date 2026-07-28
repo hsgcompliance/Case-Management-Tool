@@ -48,7 +48,15 @@ function explicitOrgFromReq(req: AuthedRequest, src: unknown): string {
   return fromBody || fromQuery;
 }
 
-/** Resolve target org for org-scoped ops. */
+/**
+ * Resolve target org for org-scoped ops.
+ * TODO(multi-org): the explicit-org override below only fires when the
+ * caller has NO org of their own (org-less internal dev/tooling accounts) —
+ * it does NOT let a normal org-scoped super_dev view a *different* org while
+ * signed into their own (unlike paymentQueueList/ledgerList's override, see
+ * functions/src/features/paymentQueue/http.ts). One org in production today;
+ * reconcile this asymmetry when multi-org reconciliation is built.
+ */
 function getTargetOrg(req: AuthedRequest, src: unknown): string {
   const caller = req.user || {};
   const callerOrg = orgIdFromClaims(caller);

@@ -395,6 +395,17 @@ export type GrantBudgetManagerReconcileReq = TGrantBudgetManagerReconcileBody;
 export type GrantBudgetManagerReconcileResp = TGrantBudgetManagerReconcileResp;
 
 /* ============================================================================
+   Reconciliation Audit Scan
+============================================================================ */
+import type {
+  TReconciliationAuditScanBody,
+  TReconciliationAuditScanResp,
+} from "./reconciliationAudit";
+
+export type ReconciliationAuditScanReq = TReconciliationAuditScanBody;
+export type ReconciliationAuditScanResp = TReconciliationAuditScanResp;
+
+/* ============================================================================
    Jotform
 ============================================================================ */
 import type {
@@ -1181,6 +1192,8 @@ export interface EndpointMap {
   grantBudgetManagerLoad: { req: GrantBudgetManagerLoadReq; resp: GrantBudgetManagerLoadResp };
   grantBudgetManagerSave: { req: GrantBudgetManagerSaveReq; resp: GrantBudgetManagerSaveResp };
   grantBudgetManagerReconcile: { req: GrantBudgetManagerReconcileReq; resp: GrantBudgetManagerReconcileResp };
+
+  reconciliationAuditScan: { req: ReconciliationAuditScanReq; resp: ReconciliationAuditScanResp };
 
   // JOTFORM
   jotformSubmissionsUpsert: { req: JotformSubmissionsUpsertReq; resp: JotformSubmissionsUpsertResp };

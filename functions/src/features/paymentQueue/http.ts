@@ -28,6 +28,12 @@ import {
    GET|POST /paymentQueueList
 ============================================================================ */
 
+// TODO(multi-org): this endpoint (and ledgerList) already support a dev/
+// super_dev explicit-org override below, gated by isDev(caller) — but
+// customersList/enrollmentsList do NOT have the equivalent yet (see the
+// TODO there). One org in production today; wire the override into the
+// reconciliation tool's UI (and add it to customers/enrollments) when
+// multi-org reconciliation is actually built.
 export const paymentQueueList = secureHandler(async (req, res): Promise<void> => {
   const src = req.method === 'GET' ? req.query : req.body;
   const body = PaymentQueueListBody.parse(src || {});

@@ -33,6 +33,7 @@ export * as gdrive from "./gdrive";
 export * as google from "./google";
 export * as grants from "./grants";
 export * as grantBudgetManager from "./grantBudgetManager";
+export * as reconciliationAudit from "./reconciliationAudit";
 export * as inbox from "./inbox";
 export * as jotform from "./jotform";
 export * as ledger from "./ledger";
@@ -83,6 +84,13 @@ export {
   GrantBudgetManagerSaveBody,
   GrantBudgetManagerReconcileBody,
 } from "./grantBudgetManager";
+
+export {
+  ReconciliationAuditEnrollmentSummary,
+  ReconciliationAuditDuplicateFinding,
+  ReconciliationAuditOrphanFinding,
+  ReconciliationAuditScanBody,
+} from "./reconciliationAudit";
 
 // Assessments (local types)
 export type {
@@ -213,6 +221,14 @@ export type {
   TGrantBudgetManagerReconcileBody,
   TGrantBudgetManagerReconcileResp,
 } from "./grantBudgetManager";
+
+export type {
+  TReconciliationAuditEnrollmentSummary,
+  TReconciliationAuditDuplicateFinding,
+  TReconciliationAuditOrphanFinding,
+  TReconciliationAuditScanBody,
+  TReconciliationAuditScanResp,
+} from "./reconciliationAudit";
 
 // Enrollments
 export type {

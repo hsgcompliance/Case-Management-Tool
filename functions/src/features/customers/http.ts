@@ -229,6 +229,10 @@ export const customersList = secureHandler(
       ? (normDel as "exclude" | "only" | "include")
       : "exclude";
 
+    // TODO(multi-org): hard single-org scope, no explicit-org override for
+    // dev/super_dev like paymentQueueList/ledgerList already have (see
+    // functions/src/features/paymentQueue/http.ts). One org in production
+    // today so this is fine; revisit when multi-org reconciliation is built.
     const orgId = requireOrgId(req);
 
     let q: FirebaseFirestore.Query = db

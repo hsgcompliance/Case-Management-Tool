@@ -31,6 +31,10 @@ export const enrollmentsList = secureHandler(async (req, res) => {
       ? false
       : undefined;
 
+  // TODO(multi-org): hard single-org scope, no explicit-org override for
+  // dev/super_dev like paymentQueueList/ledgerList already have (see
+  // functions/src/features/paymentQueue/http.ts). One org in production
+  // today so this is fine; revisit when multi-org reconciliation is built.
   const user = ((req as AuthedRequest).user ?? {}) as Record<string, unknown>;
   const orgId = requireOrg(user);
 

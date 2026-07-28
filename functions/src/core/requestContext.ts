@@ -142,6 +142,14 @@ export function canAccessDoc(
  * Legacy docs without orgId remain accessible.
  *
  * NOTE: This mirrors the current assertOrgAccess behavior but adds a 403 code.
+ *
+ * TODO(multi-org): only two access modes exist today — same org, or
+ * super_dev bypasses everything. There is no "team spans multiple orgs,
+ * docs shared to members of that team" sharing model (no team/org-sharing
+ * collection or field anywhere in firestore.rules or here) — a regular
+ * admin can only ever see their own org's docs. One org in production
+ * today so this is fine; design the sharing model here when multi-org
+ * reconciliation is actually built.
  */
 export function assertOrgAccess(
   src: Request | AuthContext | Claims,

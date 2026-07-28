@@ -20,6 +20,7 @@ export * from "./features/inbox";
 export * from "./features/gdrive";
 export * from "./features/grants";
 export * from "./features/grantBudgetManager";
+export * from "./features/reconciliationAudit";
 export * from "./features/enrollments";
 export * from "./features/payments";
 export * from "./features/ledger";
