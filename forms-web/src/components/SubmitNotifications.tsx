@@ -12,7 +12,12 @@ import {
   sessionCustomer,
   type IntakeSession,
 } from "@/lib/intakeSessions";
-import { listRemoteIntakeFlows, transferIntakeFlow, type IntakeFlowProgress } from "@/lib/intakeFlowsApi";
+import {
+  deleteRemoteIntakeFlow,
+  listRemoteIntakeFlows,
+  transferIntakeFlow,
+  type IntakeFlowProgress,
+} from "@/lib/intakeFlowsApi";
 import { loadUsers, type FormsUser } from "@/lib/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { intakeTypeLabel, intakeTypesLabel } from "@/lib/formsCatalog";
@@ -20,8 +25,8 @@ import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { useCatalog } from "@/hooks/useCatalog";
 
 // Header notification bell. Two sections:
-//   • Active intakes — my in-progress intake sessions (local registry; click to
-//     resume, ✕ to drop, Clear to wipe — nothing is persisted server-side).
+//   • Active intakes — my in-progress intake sessions (local cache backed by
+//     resumable server flows; removing an item clears both queue projections).
 //   • Watched submissions — forms flagged "Notify on submit" (Forms admin),
 //     last 7 days, with quick links into the Jotform inbox.
 
@@ -47,6 +52,8 @@ export function SubmitNotifications() {
   const [users, setUsers] = useState<FormsUser[]>([]);
   const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
   const [transferring, setTransferring] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
+  const [clearingAll, setClearingAll] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const notifyForms = useMemo(
@@ -87,6 +94,45 @@ export function SubmitNotifications() {
       window.alert(`Could not send workflow: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setTransferring(null);
+    }
+  };
+
+  const removeSession = async (session: IntakeSession) => {
+    const key = session.customerId || "no-customer";
+    setRemoving((current) => new Set(current).add(key));
+    try {
+      if (session.customerId) await deleteRemoteIntakeFlow(session.customerId);
+      removeIntakeSession(session.customerId);
+    } catch (error) {
+      window.alert(`Could not remove intake from the queue: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setRemoving((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const clearAllSessions = async () => {
+    if (!window.confirm("Clear ALL intake sessions from this list? Step progress is kept.")) return;
+    setClearingAll(true);
+    try {
+      await Promise.all(
+        sessions
+          .map((session) => session.customerId)
+          .filter((customerId): customerId is string => !!customerId)
+          .map(deleteRemoteIntakeFlow),
+      );
+      clearIntakeSessions();
+    } catch (error) {
+      window.alert(`Could not clear every intake: ${error instanceof Error ? error.message : "unknown error"}`);
+      void listRemoteIntakeFlows().then((flows) => {
+        clearIntakeSessions();
+        for (const flow of flows) importRemoteIntakeSession(flow.session, flow.progress);
+      }).catch(() => {});
+    } finally {
+      setClearingAll(false);
     }
   };
 
@@ -157,14 +203,11 @@ export function SubmitNotifications() {
             {sessions.length > 0 ? (
               <button
                 type="button"
-                onClick={() => {
-                  if (window.confirm("Clear ALL intake sessions from this list? (Step progress itself is kept.)")) {
-                    clearIntakeSessions();
-                  }
-                }}
+                disabled={clearingAll}
+                onClick={() => void clearAllSessions()}
                 className="text-[10px] font-semibold text-slate-400 hover:text-rose-600"
               >
-                Clear all
+                {clearingAll ? "Clearing…" : "Clear all"}
               </button>
             ) : null}
           </div>
@@ -225,11 +268,12 @@ export function SubmitNotifications() {
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => removeIntakeSession(s.customerId)}
-                      title="Remove from active intakes (keeps step progress)"
+                      disabled={removing.has(s.customerId || "no-customer")}
+                      onClick={() => void removeSession(s)}
+                      title="Remove from active intakes everywhere (keeps local step progress)"
                       className="shrink-0 rounded px-1 text-xs font-bold text-slate-300 hover:bg-rose-50 hover:text-rose-600"
                     >
-                      ✕
+                      {removing.has(s.customerId || "no-customer") ? "…" : "✕"}
                     </button>
                   </div>
                 );

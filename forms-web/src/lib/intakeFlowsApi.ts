@@ -29,3 +29,7 @@ export function saveRemoteIntakeFlow(session: IntakeSession, progress: IntakeFlo
 export function transferIntakeFlow(targetUid: string, session: IntakeSession, progress: IntakeFlowProgress) {
   return postAuthed<{ ok: true; id: string }>("formsIntakeFlowTransfer", { targetUid, session, progress });
 }
+
+export function deleteRemoteIntakeFlow(customerId: string) {
+  return postAuthed<{ ok: true; deleted: boolean }>("formsIntakeFlowDelete", { customerId });
+}

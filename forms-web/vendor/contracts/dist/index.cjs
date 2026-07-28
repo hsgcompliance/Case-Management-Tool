@@ -120,6 +120,10 @@ __export(index_exports, {
   PipelineOperator: () => PipelineOperator,
   PipelineRuleNode: () => PipelineRuleNode,
   PipelineStatus: () => PipelineStatus,
+  ReconciliationAuditDuplicateFinding: () => ReconciliationAuditDuplicateFinding,
+  ReconciliationAuditEnrollmentSummary: () => ReconciliationAuditEnrollmentSummary,
+  ReconciliationAuditOrphanFinding: () => ReconciliationAuditOrphanFinding,
+  ReconciliationAuditScanBody: () => ReconciliationAuditScanBody,
   RecordCaseNoteSuggestionDecisionBodySchema: () => RecordCaseNoteSuggestionDecisionBodySchema,
   ResendInviteBody: () => ResendInviteBody,
   RevokeSessionsBody: () => RevokeSessionsBody,
@@ -206,6 +210,7 @@ __export(index_exports, {
   normalizeGrantFinancialConfig: () => normalizeGrantFinancialConfig,
   parseGrantMaxAssistanceMonths: () => parseGrantMaxAssistanceMonths,
   payments: () => payments_exports,
+  reconciliationAudit: () => reconciliationAudit_exports,
   shouldRetainGrantBudget: () => shouldRetainGrantBudget,
   tasks: () => tasks_exports,
   toArray: () => toArray,
@@ -3647,6 +3652,51 @@ var GrantBudgetManagerReconcileBody = import_zod2.z.object({
   grantIds: import_zod2.z.array(import_zod2.z.string().min(1)).min(1).max(50)
 });
 
+// src/reconciliationAudit.ts
+var reconciliationAudit_exports = {};
+__export(reconciliationAudit_exports, {
+  ReconciliationAuditDuplicateFinding: () => ReconciliationAuditDuplicateFinding,
+  ReconciliationAuditEnrollmentSummary: () => ReconciliationAuditEnrollmentSummary,
+  ReconciliationAuditOrphanFinding: () => ReconciliationAuditOrphanFinding,
+  ReconciliationAuditScanBody: () => ReconciliationAuditScanBody
+});
+var ReconciliationAuditEnrollmentSummary = import_zod2.z.object({
+  id: import_zod2.z.string(),
+  status: import_zod2.z.string().nullable().optional(),
+  startDate: import_zod2.z.string().nullable().optional(),
+  endDate: import_zod2.z.string().nullable().optional(),
+  paidCount: import_zod2.z.number().int().nonnegative(),
+  paidTotal: import_zod2.z.number(),
+  pendingQueueCount: import_zod2.z.number().int().nonnegative()
+});
+var ReconciliationAuditDuplicateFinding = import_zod2.z.object({
+  type: import_zod2.z.literal("duplicate_enrollment_schedule"),
+  severity: import_zod2.z.literal("error"),
+  customerId: import_zod2.z.string(),
+  customerName: import_zod2.z.string().nullable().optional(),
+  grantId: import_zod2.z.string(),
+  grantName: import_zod2.z.string().nullable().optional(),
+  enrollments: import_zod2.z.array(ReconciliationAuditEnrollmentSummary).min(2)
+});
+var ReconciliationAuditOrphanFinding = import_zod2.z.object({
+  type: import_zod2.z.literal("orphaned_ledger_or_queue"),
+  severity: import_zod2.z.literal("error"),
+  source: import_zod2.z.enum(["ledger", "paymentQueue"]),
+  enrollmentId: import_zod2.z.string(),
+  enrollmentStatus: import_zod2.z.string().nullable().optional(),
+  customerId: import_zod2.z.string().nullable().optional(),
+  customerName: import_zod2.z.string().nullable().optional(),
+  grantId: import_zod2.z.string().nullable().optional(),
+  grantName: import_zod2.z.string().nullable().optional(),
+  paymentId: import_zod2.z.string().nullable().optional(),
+  netAmount: import_zod2.z.number().nullable().optional(),
+  queueStatus: import_zod2.z.string().nullable().optional(),
+  rowIds: import_zod2.z.array(import_zod2.z.string())
+});
+var ReconciliationAuditScanBody = import_zod2.z.object({
+  grantIds: import_zod2.z.array(import_zod2.z.string().min(1)).max(50).optional()
+});
+
 // src/inbox.ts
 var inbox_exports = {};
 __export(inbox_exports, {
@@ -6407,6 +6457,10 @@ var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
   PipelineOperator,
   PipelineRuleNode,
   PipelineStatus,
+  ReconciliationAuditDuplicateFinding,
+  ReconciliationAuditEnrollmentSummary,
+  ReconciliationAuditOrphanFinding,
+  ReconciliationAuditScanBody,
   RecordCaseNoteSuggestionDecisionBodySchema,
   ResendInviteBody,
   RevokeSessionsBody,
@@ -6493,6 +6547,7 @@ var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
   normalizeGrantFinancialConfig,
   parseGrantMaxAssistanceMonths,
   payments,
+  reconciliationAudit,
   shouldRetainGrantBudget,
   tasks,
   toArray,

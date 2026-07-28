@@ -157,6 +157,9 @@ export type GrantBudgetManagerSaveReq = TGrantBudgetManagerSaveBody;
 export type GrantBudgetManagerSaveResp = TGrantBudgetManagerSaveResp;
 export type GrantBudgetManagerReconcileReq = TGrantBudgetManagerReconcileBody;
 export type GrantBudgetManagerReconcileResp = TGrantBudgetManagerReconcileResp;
+import type { TReconciliationAuditScanBody, TReconciliationAuditScanResp } from "./reconciliationAudit.js";
+export type ReconciliationAuditScanReq = TReconciliationAuditScanBody;
+export type ReconciliationAuditScanResp = TReconciliationAuditScanResp;
 import type { TJotformSubmissionsUpsertBody, TJotformSubmissionsUpsertResp, TJotformSubmissionsPatchBody, TJotformSubmissionsPatchResp, TJotformSubmissionsDeleteBody, TJotformSubmissionsDeleteResp, TJotformSubmissionsAdminDeleteBody, TJotformSubmissionsAdminDeleteResp, TJotformSubmissionsListQuery, TJotformSubmissionsListResp, TJotformSubmissionsGetQuery, TJotformSubmissionsGetResp, TJotformSubmissionsStructureResp, TJotformFormsListQuery, TJotformFormsListResp, TJotformFormQuestionsGetQuery, TJotformFormQuestionsGetResp, TJotformLinkSubmissionBody, TJotformLinkSubmissionResp, TJotformSyncSelectionBody, TJotformSyncSelectionResp, TJotformDigestUpsertBody, TJotformDigestUpsertResp, TJotformDigestGetQuery, TJotformDigestGetResp, TJotformDigestListQuery, TJotformDigestListResp, TJotformSyncBody, TJotformSyncResp, TJotformApiListQuery, TJotformApiListResp, TJotformApiGetQuery, TJotformApiGetResp } from "./jotform.js";
 export type JotformSubmissionsUpsertReq = TJotformSubmissionsUpsertBody;
 export type JotformSubmissionsUpsertResp = TJotformSubmissionsUpsertResp;
@@ -874,6 +877,10 @@ export interface EndpointMap {
     grantBudgetManagerReconcile: {
         req: GrantBudgetManagerReconcileReq;
         resp: GrantBudgetManagerReconcileResp;
+    };
+    reconciliationAuditScan: {
+        req: ReconciliationAuditScanReq;
+        resp: ReconciliationAuditScanResp;
     };
     jotformSubmissionsUpsert: {
         req: JotformSubmissionsUpsertReq;

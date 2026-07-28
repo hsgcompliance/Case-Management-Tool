@@ -25,6 +25,7 @@ const Session = z.object({
 
 const SaveBody = z.object({ session: Session, progress: Progress });
 const TransferBody = SaveBody.extend({ targetUid: z.string().trim().min(1).max(200) });
+const DeleteBody = z.object({ customerId: z.string().trim().min(1).max(200) });
 
 function orgFor(caller: Record<string, unknown>): string {
   return normId(orgIdFromClaims(caller) || requireOrg(caller));
@@ -170,4 +171,37 @@ export const formsIntakeFlowTransfer_http = secureHandler(async (req, res) => {
   });
   await upsertIntakeTask({ orgId, ownerUid: body.targetUid, session: body.session });
   res.status(200).json({ ok: true, id: target.id });
+}, { auth: "user", methods: ["POST", "OPTIONS"] });
+
+export const formsIntakeFlowDelete_http = secureHandler(async (req, res) => {
+  const body = DeleteBody.parse(req.body || {});
+  const caller = req.user! as Record<string, unknown>;
+  const uid = String(caller.uid || "");
+  const orgId = orgFor(caller);
+  const flowRef = db.collection("formsIntakeFlows").doc(flowId(uid, body.customerId));
+  const taskRef = db.collection("userTasks").doc(intakeTaskId(body.customerId));
+
+  const deleted = await db.runTransaction(async (tx) => {
+    const [flowSnap, taskSnap] = await Promise.all([tx.get(flowRef), tx.get(taskRef)]);
+    if (!flowSnap.exists) return false;
+    const flow = flowSnap.data() || {};
+    if (normId(flow.orgId) !== orgId || String(flow.ownerUid || "") !== uid) {
+      const err = new Error("intake_flow_not_found") as Error & { code?: number };
+      err.code = 404;
+      throw err;
+    }
+    tx.delete(flowRef);
+    const task = taskSnap.data() || {};
+    if (
+      taskSnap.exists &&
+      normId(task.orgId) === orgId &&
+      String(task.source || "") === "formsIntake" &&
+      String(task.assignedToUid || "") === uid
+    ) {
+      tx.delete(taskRef);
+    }
+    return true;
+  });
+
+  res.status(200).json({ ok: true, deleted });
 }, { auth: "user", methods: ["POST", "OPTIONS"] });

@@ -13,7 +13,7 @@ import {
   type CustomerDetail,
   type LinkedSubmission,
 } from "@/lib/customerDetailApi";
-import { getSubmission, type JfSubmission } from "@/lib/jotformManagerApi";
+import { getSubmission, type JfAnswer, type JfSubmission } from "@/lib/jotformManagerApi";
 import { AnswerView } from "./AnswerView";
 
 // Right-hand "Webhooks" sidebar for the intake flow. Two tabs:
@@ -34,6 +34,72 @@ const ANCHOR_KEY = "hdb:forms:webhooks-anchor";
 const INCLUDE_KEY = "hdb:forms:webhooks-include";
 const EXCLUDE_KEY = "hdb:forms:webhooks-exclude";
 const POLL_MS = 20_000;
+
+function answerValue(answer: JfAnswer): string {
+  const value = answer.answer;
+  if (value == null || value === "") return String(answer.prettyFormat || "").trim();
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean).join(", ");
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const name = [record.first, record.middle, record.last]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .join(" ");
+    if (name) return name;
+    return Object.values(record).map((item) => String(item ?? "").trim()).filter(Boolean).join(" · ");
+  }
+  return String(value);
+}
+
+function frontendEventFromSubmission(submission: JfSubmission): WebhookEventDetail {
+  const answers = Object.values(submission.answers ?? {})
+    .filter((answer) => !["control_head", "control_button", "control_pagebreak", "control_divider", "control_text"].includes(String(answer.type || "")))
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const fields = answers
+    .map((answer) => ({
+      label: String(answer.text || answer.name || "").trim().slice(0, 200),
+      value: answerValue(answer).slice(0, 2000),
+    }))
+    .filter((field) => field.label && field.value);
+  const nameAnswer = answers.find((answer) => answer.type === "control_fullname")
+    ?? answers.find((answer) => /\bname\b/i.test(`${answer.name || ""} ${answer.text || ""}`));
+  const receivedAtISO = new Date().toISOString();
+  const formId = String(submission.form_id || submission.formId || "");
+  return {
+    id: `frontend:${formId}:${submission.id}`,
+    formId,
+    submissionId: submission.id,
+    submitterName: nameAnswer ? answerValue(nameAnswer) : "",
+    receivedAtISO,
+    createdAtISO: receivedAtISO,
+    pretty: "",
+    fields,
+  };
+}
+
+function mergeEvents(
+  current: WebhookEventDetail[] | null,
+  incoming: WebhookEventDetail[],
+): WebhookEventDetail[] {
+  const bySubmission = new Map<string, WebhookEventDetail>();
+  for (const event of current ?? []) {
+    bySubmission.set(`${event.formId}:${event.submissionId || event.id}`, event);
+  }
+  for (const event of incoming) {
+    const key = `${event.formId}:${event.submissionId || event.id}`;
+    const existing = bySubmission.get(key);
+    // The persisted webhook row replaces the optimistic browser row once it lands.
+    if (!existing || !event.id.startsWith("frontend:") || existing.id.startsWith("frontend:")) {
+      bySubmission.set(key, event);
+    }
+  }
+  return [...bySubmission.values()].sort((a, b) =>
+    String(b.createdAtISO || b.receivedAtISO || "").localeCompare(
+      String(a.createdAtISO || a.receivedAtISO || ""),
+    ),
+  );
+}
 
 // ── concurrent-intake guard ─────────────────────────────────────────────────
 // Two staff running intakes at once share the org-wide webhook stream, so the
@@ -274,10 +340,12 @@ export function WebhooksSidebar({
   formIds,
   /** Bump to trigger near-term refreshes (e.g. when the embed detects a submit). */
   refreshKey = 0,
+  receivedSubmission,
   onSnapshot,
 }: {
   formIds: string[];
   refreshKey?: number;
+  receivedSubmission?: JfSubmission | null;
   onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
 }) {
   const { customer } = useCurrentCustomer();
@@ -286,6 +354,7 @@ export function WebhooksSidebar({
   });
   const [tab, setTab] = useState<"structured" | "raw">("structured");
   const [events, setEvents] = useState<WebhookEventDetail[] | null>(null);
+  const [browserSubmissionIds, setBrowserSubmissionIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const loadingRef = useRef(false);
@@ -303,6 +372,7 @@ export function WebhooksSidebar({
   const [linkedDetails, setLinkedDetails] = useState<Record<string, JfSubmission>>({});
   const [linkedDetailLoading, setLinkedDetailLoading] = useState<Set<string>>(new Set());
   const [linkedDetailErrors, setLinkedDetailErrors] = useState<Record<string, string>>({});
+  const [rebuildingLinked, setRebuildingLinked] = useState(false);
 
   // The sidebar starts blank each browser-tab session and builds out from the
   // forms submitted DURING it (older webhook traffic stays hidden). Survives
@@ -339,6 +409,7 @@ export function WebhooksSidebar({
     setShowExcluded(false);
     setManualInc(new Set());
     setManualExc(new Set());
+    setBrowserSubmissionIds(new Set());
     try {
       sessionStorage.removeItem(INCLUDE_KEY);
       sessionStorage.removeItem(EXCLUDE_KEY);
@@ -388,6 +459,7 @@ export function WebhooksSidebar({
     setManualAnchor(null);
     setManualInc(new Set());
     setManualExc(new Set());
+    setBrowserSubmissionIds(new Set());
   };
 
   const formIdsKey = formIds.join(",");
@@ -422,15 +494,7 @@ export function WebhooksSidebar({
     })
       .then((items) => {
         if (loadScopeRef.current !== requestedScope) return;
-        setEvents((current) => {
-          const byId = new Map((current ?? []).map((event) => [event.id, event]));
-          for (const item of items) byId.set(item.id, item);
-          return [...byId.values()].sort((a, b) =>
-            String(b.createdAtISO || b.receivedAtISO || "").localeCompare(
-              String(a.createdAtISO || a.receivedAtISO || ""),
-            ),
-          );
-        });
+        setEvents((current) => mergeEvents(current, items));
         const newestCursor = items.reduce<string | null>((latest, item) => {
           const candidate = item.createdAtISO;
           return candidate && (!latest || candidate > latest) ? candidate : latest;
@@ -467,6 +531,21 @@ export function WebhooksSidebar({
     const t2 = setTimeout(load, 9_000);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [refreshKey, load]);
+
+  // Populate the browser model as soon as Jotform's authoritative submission
+  // read succeeds. Firestore polling later swaps in the durable webhook row.
+  useEffect(() => {
+    if (!receivedSubmission) return;
+    const event = frontendEventFromSubmission(receivedSubmission);
+    if (!event.formId || !event.submissionId) return;
+    setBrowserSubmissionIds((current) => {
+      if (current.has(event.submissionId)) return current;
+      const next = new Set(current);
+      next.add(event.submissionId);
+      return next;
+    });
+    setEvents((current) => mergeEvents(current, [event]));
+  }, [receivedSubmission]);
 
   // Load link state for every form that has events (linked badges + auto-link).
   useEffect(() => {
@@ -517,7 +596,10 @@ export function WebhooksSidebar({
   const anchored = useMemo(() => {
     return rows.map((r) => {
       const anchorMatch: NameMatch | null = anchor ? eventAnchorMatch(r.ev, anchor) : null;
-      const inModel = !anchor
+      const receivedInBrowser = browserSubmissionIds.has(r.ev.submissionId);
+      const inModel = receivedInBrowser
+        ? true
+        : !anchor
         ? true
         : manualExc.has(r.ev.id)
           ? false
@@ -526,12 +608,14 @@ export function WebhooksSidebar({
             : anchorMatch !== "none";
       return { ...r, anchorMatch, inModel };
     });
-  }, [rows, anchor, manualInc, manualExc]);
+  }, [rows, anchor, manualInc, manualExc, browserSubmissionIds]);
   const visibleRows = useMemo(
     () => customer
-      ? anchored.filter((r) => r.linkedToCurrent || r.anchorMatch !== "none")
+      ? anchored.filter(
+        (r) => browserSubmissionIds.has(r.ev.submissionId) || r.linkedToCurrent || r.anchorMatch !== "none",
+      )
       : anchored,
-    [anchored, customer],
+    [anchored, customer, browserSubmissionIds],
   );
   const modelRows = useMemo(() => visibleRows.filter((r) => r.inModel), [visibleRows]);
   const excludedRows = useMemo(() => visibleRows.filter((r) => !r.inModel), [visibleRows]);
@@ -656,11 +740,59 @@ export function WebhooksSidebar({
     if (opening) void loadLinkedSubmission(linked);
   };
 
-  const refreshAll = () => {
+  const refreshAll = async () => {
     load();
-    if (customer) void getCustomerDetail(customer.id, true);
-    for (const linked of linkedSubmissions) {
-      if (expandedLinked.has(linked.submissionId)) void loadLinkedSubmission(linked, true);
+    if (!customer || rebuildingLinked) return;
+    setRebuildingLinked(true);
+    setError(null);
+    try {
+      const refreshedDetail = await getCustomerDetail(customer.id, true);
+      const linked = refreshedDetail?.linkedSubmissions ?? [];
+      if (!linked.length) return;
+
+      const results = await Promise.allSettled(
+        linked.map(async (item) => {
+          const submission = await getSubmission(item.submissionId);
+          const enriched: JfSubmission = {
+            ...submission,
+            formId: String(submission.formId || submission.form_id || item.formId),
+            formTitle: submission.formTitle || item.formName,
+          };
+          return { item, submission: enriched, event: frontendEventFromSubmission(enriched) };
+        }),
+      );
+      const rebuilt = results
+        .filter((result): result is PromiseFulfilledResult<{
+          item: LinkedSubmission;
+          submission: JfSubmission;
+          event: WebhookEventDetail;
+        }> => result.status === "fulfilled")
+        .map((result) => result.value);
+      const failedCount = results.length - rebuilt.length;
+      const rebuiltIds = new Set(rebuilt.map(({ item }) => item.submissionId));
+
+      setLinkedDetails((current) => {
+        const next = { ...current };
+        for (const { item, submission } of rebuilt) next[item.submissionId] = submission;
+        return next;
+      });
+      setBrowserSubmissionIds((current) => {
+        const next = new Set(current);
+        for (const id of rebuiltIds) next.add(id);
+        return next;
+      });
+      setEvents((current) => mergeEvents(
+        (current ?? []).filter((event) => !rebuiltIds.has(event.submissionId)),
+        rebuilt.map(({ event }) => event),
+      ));
+      setLinkedDetailErrors({});
+      if (failedCount) {
+        setError(`Rebuilt from ${rebuilt.length} linked submission${rebuilt.length === 1 ? "" : "s"}; ${failedCount} could not be loaded.`);
+      }
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "Could not rebuild linked submissions.");
+    } finally {
+      setRebuildingLinked(false);
     }
   };
 
@@ -833,11 +965,12 @@ export function WebhooksSidebar({
             </button>
             <button
               type="button"
-              onClick={refreshAll}
-              title="Refresh webhooks, linked submissions, and any expanded submission details"
+              disabled={rebuildingLinked}
+              onClick={() => void refreshAll()}
+              title="Refresh webhooks and rebuild the household model from every linked submission"
               className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600"
             >
-              ↻
+              {rebuildingLinked ? "…" : "↻"}
             </button>
             <button
               type="button"

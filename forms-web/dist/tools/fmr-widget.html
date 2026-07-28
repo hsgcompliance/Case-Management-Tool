@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FMR Calculator Widget</title>
+  <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+  <style>
+    :root{--ink:#17211d;--muted:#66736d;--line:#d8e1dc;--green:#146b4a;--light:#e6f4ed}
+    *{box-sizing:border-box}body{margin:0;padding:14px;color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f8f6}
+    .widget{max-width:620px;margin:auto;padding:20px;background:#fff;border:1px solid var(--line);border-top:5px solid var(--green);border-radius:14px}
+    .head,.actions,.output-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.head h1{margin:0;font-size:21px}.head p{margin:3px 0 0;color:var(--muted);font-size:12px}.badge{padding:4px 7px;color:#0e4d36;background:var(--light);border-radius:6px;font-size:10px;font-weight:800}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700}select{width:100%;min-height:42px;padding:8px;border:1px solid #b8c6bf;border-radius:8px;background:#fff;font:inherit}
+    .output{margin-top:14px;padding:15px;background:#f7faf8;border:1px solid var(--line);border-radius:10px}.output>span,.output small{display:block;color:var(--muted);font-size:11px}.output strong{font-size:34px;letter-spacing:-1px}
+    button{padding:7px 10px;color:#0e4d36;background:var(--light);border:1px solid #c5ded2;border-radius:7px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.actions{justify-content:flex-start;margin-top:12px;flex-wrap:wrap}
+    details{margin-top:14px;border-top:1px solid var(--line)}summary{padding-top:12px;color:#0e4d36;font-weight:800;cursor:pointer}.details{padding-top:8px;color:#46534c;font-size:12px}dl{margin:0}dl div{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}dd{margin:0;font-weight:700}.payload{margin-top:12px;padding:8px;color:var(--muted);background:#f7faf8;border-radius:7px;font:10px ui-monospace,monospace;overflow-wrap:anywhere}
+    @media(max-width:480px){.grid{grid-template-columns:1fr}}@media print{body{padding:0;background:#fff}.widget{border:0}.no-print{display:none!important}}
+  </style>
+</head>
+<body>
+  <main class="widget">
+    <header class="head">
+      <div><h1>Fair Market Rent</h1><p>Monthly FMR by county and unit size</p></div>
+      <span class="badge">FMR</span>
+    </header>
+    <div class="grid">
+      <label>County<select id="county"><option value="">Select county</option><option>Gallatin</option><option>Park</option><option>Meagher</option></select></label>
+      <label>Unit size<select id="size"><option value="">Select unit size</option><option value="Studio">Studio</option><option value="1BR">1 bedroom</option><option value="2BR">2 bedrooms</option><option value="3BR">3 bedrooms</option><option value="4BR">4 bedrooms</option></select></label>
+    </div>
+    <section class="output" aria-live="polite">
+      <span>MONTHLY FMR</span>
+      <div class="output-row"><strong id="result">—</strong><button id="copy" class="no-print" disabled>Copy number</button></div>
+      <small id="context">Select county and unit size</small>
+    </section>
+    <div class="actions no-print"><button id="pdf">Export formatted PDF</button><button id="json">Export JSON</button></div>
+    <details>
+      <summary>Details explained</summary>
+      <div class="details">
+        <p>The value is looked up at the intersection of the selected county and unit size.</p>
+        <dl><div><dt>County</dt><dd id="dCounty">—</dd></div><div><dt>Unit size</dt><dd id="dSize">—</dd></div><div><dt>Monthly FMR</dt><dd id="dValue">—</dd></div></dl>
+        <p>Updated FMR matrix • version 05-2026</p>
+        <div class="payload"><strong>Jotform field value:</strong> <span id="payload">Complete the required selections</span></div>
+      </div>
+    </details>
+  </main>
+  <script>
+    const TABLE={Gallatin:{Studio:1485,"1BR":1642,"2BR":2154,"3BR":2996,"4BR":3537},Park:{Studio:1107,"1BR":1385,"2BR":1605,"3BR":2232,"4BR":2692},Meagher:{Studio:1044,"1BR":1087,"2BR":1393,"3BR":1925,"4BR":2252}};
+    let value=null,summary="",jfReady=false;
+    const $=id=>document.getElementById(id),money=n=>n==null?"—":n.toLocaleString("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0});
+    function calculate(){const c=$("county").value,s=$("size").value;value=c&&s?TABLE[c][s]:null;summary=value==null?"":`County:${c}|Size:${s}|FMR:${value}`;
+      $("result").textContent=money(value);$("context").textContent=value==null?"Select county and unit size":`${c} County • ${s}`;$("dCounty").textContent=c||"—";$("dSize").textContent=s||"—";$("dValue").textContent=money(value);$("payload").textContent=summary||"Complete the required selections";$("copy").disabled=value==null;if(jfReady)JFCustomWidget.sendData(summary)}
+    function exportJSON(){download({widget:"FMR",version:"05-2026",county:$("county").value,unitSize:$("size").value,fmr:value,jotformValue:summary})}
+    function download(data){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download="fmr-widget-result.json";a.click();URL.revokeObjectURL(a.href)}
+    function exportPDF(){if(value==null){alert("Select county and unit size before exporting.");return}const c=$("county").value,s=$("size").value,report=window.open("","_blank","width=800,height=800");if(!report){alert("Allow pop-ups to export the formatted PDF.");return}report.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>FMR Calculation</title><style>@page{size:letter;margin:.6in}body{color:#17211d;font:12px/1.5 Arial,sans-serif}header{padding-bottom:14px;border-bottom:3px solid #146b4a}h1{margin:0;font-size:24px}header p{color:#66736d}.result{margin:25px 0;padding:22px;color:white;background:#146b4a;border-radius:8px}.result span{display:block;font-size:10px;font-weight:bold}.result strong{font-size:38px}.facts{display:grid;grid-template-columns:1fr 1fr;gap:10px}.facts div{padding:12px;border:1px solid #d8e1dc;border-radius:6px}.facts span{display:block;color:#66736d;font-size:9px;text-transform:uppercase}.payload{margin-top:20px;padding:8px;background:#f5f7f6;font:9px Consolas,monospace;overflow-wrap:anywhere}footer{margin-top:25px;color:#66736d;font-size:9px}</style></head><body><header><h1>Fair Market Rent Calculation</h1><p>Eviction Prevention Eligibility Worksheet</p></header><section class="result"><span>MONTHLY FMR</span><strong>${money(value)}</strong></section><section class="facts"><div><span>County</span>${c}</div><div><span>Unit size</span>${s}</div></section><p>The monthly value was selected from the May 2026 FMR matrix at the intersection of county and unit size.</p><div class="payload"><strong>Jotform audit value:</strong><br>${summary}</div><footer>Matrix version 05-2026. Confirm applicable program rules before eligibility approval.</footer></body></html>`);report.document.close();setTimeout(()=>{report.focus();report.print()},300)}
+    $("county").addEventListener("input",calculate);$("size").addEventListener("input",calculate);$("copy").onclick=()=>navigator.clipboard?.writeText(String(value));$("pdf").onclick=exportPDF;$("json").onclick=exportJSON;
+    (function applyPrefill(){try{const p=new URLSearchParams(location.search);["county","size"].forEach(id=>{const v=p.get(id);if(v!=null&&$(id))$(id).value=v})}catch(e){}})();
+    calculate();
+    if(window.JFCustomWidget){JFCustomWidget.subscribe("ready",()=>{jfReady=true;calculate();JFCustomWidget.requestFrameResize({height:520})});JFCustomWidget.subscribe("submit",()=>JFCustomWidget.sendSubmit({valid:!!summary,value:summary}))}
+  </script>
+</body>
+</html>

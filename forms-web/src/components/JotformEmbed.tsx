@@ -21,6 +21,14 @@ function asText(data: unknown): string {
   try { return JSON.stringify(data); } catch { return String(data); }
 }
 
+function requestsPageScroll(text: string): boolean {
+  return /scrollIntoView|page(?:Change|Changed|Navigation)|showPage|goToPage|nextPage|prev(?:ious)?Page|formPageChanged/i.test(text);
+}
+
+function scrollHostToTop(): void {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 const FORM_BOTTOM_BUFFER_PX = 240;
 const MAX_FORM_HEIGHT_PX = 12_000;
 
@@ -28,10 +36,13 @@ export function JotformEmbed({
   formId,
   title,
   onSubmitted,
+  onSubmissionReceived,
 }: {
   formId: string;
   title: string;
   onSubmitted?: (raw: string) => void;
+  /** Supplies the authoritative submission to the in-browser webhook model. */
+  onSubmissionReceived?: (submission: JfSubmission) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(900 + FORM_BOTTOM_BUFFER_PX);
@@ -62,7 +73,12 @@ export function JotformEmbed({
           });
           const found = exact || recent;
           if (found) {
-            setSubmission(found);
+            const resolved = {
+              ...found,
+              formId: String(found.formId || found.form_id || formId),
+            };
+            setSubmission(resolved);
+            onSubmissionReceived?.(resolved);
             setLoadingSubmission(false);
             return;
           }
@@ -80,6 +96,11 @@ export function JotformEmbed({
       // eslint-disable-next-line no-console
       console.log("[forms][jotform]", formId, text);
 
+      // Jotform requests scrollIntoView when a multi-page form advances,
+      // including submit → signature transitions. Ignore resize-only messages
+      // so expanding fields do not unexpectedly move the host page.
+      if (requestsPageScroll(text)) scrollHostToTop();
+
       // Auto-resize: Jotform posts "setHeight:<px>:<formId>".
       const h = /setHeight:(\d+)/.exec(text);
       if (h) {
@@ -96,6 +117,7 @@ export function JotformEmbed({
         // eslint-disable-next-line no-console
         console.log("[forms][SUBMITTED]", { formId, raw: text });
         setSubmitted(true);
+        scrollHostToTop();
         onSubmitted?.(text);
         void resolveSubmission(text);
       }
@@ -103,7 +125,7 @@ export function JotformEmbed({
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [embedKey, formId, onSubmitted]);
+  }, [embedKey, formId, onSubmitted, onSubmissionReceived]);
 
   // Defensive: Jotform form ids are numeric. Never inject anything else into src.
   if (!/^\d{6,24}$/.test(formId)) {

@@ -23,6 +23,7 @@ import { ToolWidget } from "./ToolWidget";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
 import { extractAmiPrefill } from "@/lib/intakeWebhookSnapshot";
 import { listRemoteIntakeFlows, saveRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
+import type { JfSubmission } from "@/lib/jotformManagerApi";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
 
@@ -144,14 +145,27 @@ function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] })
   );
 }
 
-function IntakeInspection({ intakeTypes, onSubmitted }: { intakeTypes: IntakeTypeId[]; onSubmitted: () => void }) {
+function IntakeInspection({
+  intakeTypes,
+  onSubmitted,
+  onSubmissionReceived,
+}: {
+  intakeTypes: IntakeTypeId[];
+  onSubmitted: () => void;
+  onSubmissionReceived: (submission: JfSubmission) => void;
+}) {
   if (intakeTypes.includes("eviction-prevention")) {
     return (
       <div className="space-y-3">
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Complete the Habitability Inspection for this Eviction Prevention intake.
         </div>
-        <JotformEmbed formId={HABITABILITY_INSPECTION_FORM_ID} title="Habitability Inspection" onSubmitted={onSubmitted} />
+        <JotformEmbed
+          formId={HABITABILITY_INSPECTION_FORM_ID}
+          title="Habitability Inspection"
+          onSubmitted={onSubmitted}
+          onSubmissionReceived={onSubmissionReceived}
+        />
       </div>
     );
   }
@@ -230,6 +244,8 @@ export function FormsCategoryView({
   const storageKey = `hdb:forms:intake-progress:${customer?.id ?? "no-customer"}`;
   const [progress, setProgressState] = useState<FlowProgress>(() => loadProgress(storageKey));
   const [remoteReady, setRemoteReady] = useState(false);
+  const lastRemoteProgressRef = useRef<string | null>(null);
+  const flowStartedAtRef = useRef(new Date().toISOString());
   const keyRef = useRef(storageKey);
   useEffect(() => {
     if (keyRef.current === storageKey) return;
@@ -272,6 +288,8 @@ export function FormsCategoryView({
         if (cancelled) return;
         const remote = items.find((item) => item.customerId === customer.id);
         const local = loadProgress(storageKey);
+        lastRemoteProgressRef.current = remote ? JSON.stringify(remote.progress) : null;
+        flowStartedAtRef.current = remote?.session.startedAtISO || new Date().toISOString();
         const hasLocal = Object.keys(local.done).length > 0 || Object.keys(local.checks).length > 0 || !!local.intakeTypes?.length;
         if (remote && !hasLocal) {
           const imported = remote.progress as FlowProgress;
@@ -356,27 +374,6 @@ export function FormsCategoryView({
     });
   }, [progress, customer, steps.length, doneCount]);
 
-  useEffect(() => {
-    if (!remoteReady || !customer?.id || !steps.length) return;
-    const timer = window.setTimeout(() => {
-      const now = new Date().toISOString();
-      void saveRemoteIntakeFlow({
-        customerId: customer.id,
-        customerName: customer.name,
-        cwId: customer.cwId,
-        dob: customer.dob,
-        caseManagerName: customer.caseManagerName,
-        intakeType: progress.intakeTypes?.[0] ?? null,
-        intakeTypes: progress.intakeTypes ?? [],
-        doneCount,
-        totalSteps: steps.length,
-        startedAtISO: now,
-        updatedAtISO: now,
-      }, progress).catch(() => {});
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [remoteReady, customer, progress, doneCount, steps.length]);
-
   // Arriving via a "start intake" link (e.g. a completed referral) jumps
   // straight into the first unfinished step. Once per mount.
   const autoStarted = useRef(false);
@@ -433,6 +430,7 @@ export function FormsCategoryView({
   // right away instead of waiting for its next poll tick.
   const [webhookRefresh, setWebhookRefresh] = useState(0);
   const [webhookSnapshot, setWebhookSnapshot] = useState<IntakeWebhookSnapshot | null>(null);
+  const [receivedSubmission, setReceivedSubmission] = useState<JfSubmission | null>(null);
   const latestSubmissionByFormId = useMemo(() => {
     const latest = new Map<string, NonNullable<IntakeWebhookSnapshot>["submissions"][number]>();
     for (const submission of webhookSnapshot?.submissions ?? []) {
@@ -454,6 +452,45 @@ export function FormsCategoryView({
     if (stepKey) setDone(stepKey, true);
     setWebhookRefresh((n) => n + 1);
   }, [stepKey, setDone]);
+  const handleSubmissionReceived = useCallback((submission: JfSubmission) => {
+    setReceivedSubmission(submission);
+  }, []);
+
+  // Backend writes are resume checkpoints, not the live source of truth. Save
+  // once when Steps 7, 13, and 17 are reached, and only when progress changed.
+  const resumeCheckpoint =
+    rentCertSubmitted ? 17
+      : steps[12] && progress.done[steps[12].key] ? 13
+        : steps[6] && progress.done[steps[6].key] ? 7
+          : 0;
+  const latestProgressRef = useRef(progress);
+  const latestDoneCountRef = useRef(doneCount);
+  latestProgressRef.current = progress;
+  latestDoneCountRef.current = doneCount;
+  useEffect(() => {
+    if (!remoteReady || !customer?.id || !steps.length || !resumeCheckpoint) return;
+    const currentProgress = latestProgressRef.current;
+    const signature = JSON.stringify(currentProgress);
+    if (signature === lastRemoteProgressRef.current) return;
+    const now = new Date().toISOString();
+    lastRemoteProgressRef.current = signature;
+    void saveRemoteIntakeFlow({
+      customerId: customer.id,
+      customerName: customer.name,
+      cwId: customer.cwId,
+      dob: customer.dob,
+      caseManagerName: customer.caseManagerName,
+      intakeType: currentProgress.intakeTypes?.[0] ?? null,
+      intakeTypes: currentProgress.intakeTypes ?? [],
+      doneCount: latestDoneCountRef.current,
+      totalSteps: steps.length,
+      startedAtISO: flowStartedAtRef.current,
+      updatedAtISO: now,
+    }, currentProgress).catch(() => {
+      // Allow a later checkpoint to retry the same changed state.
+      if (lastRemoteProgressRef.current === signature) lastRemoteProgressRef.current = null;
+    });
+  }, [remoteReady, customer, resumeCheckpoint, steps.length]);
 
   const resolveHref = (href: string): string =>
     customer ? href.replace("{customerId}", customer.id) : href.replace(/\/\{customerId\}/, "");
@@ -518,7 +555,12 @@ export function FormsCategoryView({
     webhooksSidebar ? (
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">{node}</div>
-        <WebhooksSidebar formIds={flowFormIds} refreshKey={webhookRefresh} onSnapshot={setWebhookSnapshot} />
+        <WebhooksSidebar
+          formIds={flowFormIds}
+          refreshKey={webhookRefresh}
+          receivedSubmission={receivedSubmission}
+          onSnapshot={setWebhookSnapshot}
+        />
       </div>
     ) : (
       <>{node}</>
@@ -775,7 +817,13 @@ export function FormsCategoryView({
         {step.rentCertBuilder ? <ToolWidget id="fmr" /> : null}
         {step.rentCertBuilder ? <RentCertScheduleBuilder webhookSnapshot={webhookSnapshot} onSubmissionStateChange={handleRentCertSubmissionState} /> : null}
         {step.intakeGuidance ? <IntakeProgramGuidance intakeTypes={intakeTypes} /> : null}
-        {step.inspectionGate ? <IntakeInspection intakeTypes={intakeTypes} onSubmitted={handleSubmitted} /> : null}
+        {step.inspectionGate ? (
+          <IntakeInspection
+            intakeTypes={intakeTypes}
+            onSubmitted={handleSubmitted}
+            onSubmissionReceived={handleSubmissionReceived}
+          />
+        ) : null}
         {step.intakeTypeGate ? (
           <div className="rounded-xl border border-indigo-200 bg-white px-6 py-8 text-center">
             <div className="text-base font-semibold text-slate-900">Which programs are part of this intake?</div>
@@ -878,6 +926,7 @@ export function FormsCategoryView({
                   }
                   title={step.title}
                   onSubmitted={handleSubmitted}
+                  onSubmissionReceived={handleSubmissionReceived}
                 />
               </div>
               {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}

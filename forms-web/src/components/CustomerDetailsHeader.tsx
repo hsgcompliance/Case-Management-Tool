@@ -11,6 +11,7 @@ import { listIntakeSessions, onIntakeSessionsChange, removeIntakeSession, sessio
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { formatDob } from "@/lib/format";
 import { listEnrollmentsForCustomer, markCustomerNotEligible, type FormsEnrollment } from "@/lib/rentCertApi";
+import { deleteRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
 import { CustomerEditPanel } from "./CustomerEditPanel";
 import { ExternalServiceIcon } from "./ui";
 import { useAuth } from "@/hooks/useAuth";
@@ -324,6 +325,7 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
         ? `${enrollment ? "Enrollment closed; " : ""}customer marked inactive.`
         : "Enrollment closed; customer remains active because another enrollment is open.");
       if (result.customerInactivated) {
+        await deleteRemoteIntakeFlow(customer.id);
         removeIntakeSession(customer.id);
         try { localStorage.removeItem(`hdb:forms:rent-cert-draft:${customer.id}`); } catch { /* ignore */ }
         setCustomer(null);
@@ -411,10 +413,10 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
           type="button"
           onClick={() => setNotEligibleOpen((value) => !value)}
           disabled={notEligibleBusy}
-          title={openEnrollments.length ? "Close an ineligible program enrollment" : "Mark this customer inactive"}
+          title={openEnrollments.length ? "Close the selected program enrollment as ineligible" : "Mark this customer inactive"}
           className="shrink-0 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Customer not eligible
+          {openEnrollments.length ? "Close ineligible enrollment" : "Mark customer inactive"}
         </button>
         <button
           type="button"
@@ -450,7 +452,7 @@ export function CustomerDetailsHeader({ nav = false }: { nav?: boolean }) {
             </select>
           </label> : <div className="min-w-56 flex-1 text-xs text-slate-600">No open enrollment. Confirming will mark the customer inactive.</div>}
           <button type="button" onClick={markNotEligible} disabled={(openEnrollments.length > 0 && !notEligibleEnrollmentId) || notEligibleBusy} className="rounded-md bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-40">
-            {notEligibleBusy ? "Updating…" : openEnrollments.length ? "Confirm not eligible" : "Confirm inactive"}
+            {notEligibleBusy ? "Updating…" : openEnrollments.length ? "Close as ineligible" : "Mark inactive"}
           </button>
         </div>
       ) : null}
