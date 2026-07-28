@@ -13,7 +13,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
-import { acquireDeployCheckouts } from "./lib/deployCheckouts.mjs";
+import { acquireDeployCheckouts, reportActiveConflictsAndShouldStop } from "./lib/deployCheckouts.mjs";
 
 const PROJECT = process.argv[2] || "housing-db-v2";
 const DEPLOY_HOSTING = process.argv.includes("--hosting");
@@ -201,6 +201,13 @@ function deploy() {
     console.log("Deploying hosting...");
     run("firebase", ["deploy", "--only", "hosting", "--project", PROJECT]);
   }
+}
+
+// This is a destructive reset (deletes deployed functions before
+// redeploying) — fail fast and loud if another deploy already holds the
+// target rather than silently queueing behind it.
+if (reportActiveConflictsAndShouldStop(checkoutKeys, {})) {
+  process.exit(1);
 }
 
 const releaseDeployTargets = acquireDeployCheckouts(checkoutKeys, {

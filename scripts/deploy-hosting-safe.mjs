@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
-import { withDeployCheckouts } from "./lib/deployCheckouts.mjs";
+import { reportActiveConflictsAndShouldStop, withDeployCheckouts } from "./lib/deployCheckouts.mjs";
 
 const { shouldPush, commitMsg } = parsePushArgs();
 const DEPLOY_ALL_HOSTING = process.argv.includes("--all");
@@ -31,6 +31,18 @@ if (!["web", "mobile", "forms"].includes(TARGET)) {
   throw new Error(`Unsupported hosting target: ${TARGET}. Expected web, mobile, or forms.`);
 }
 
+// Exit code is thrown, not applied directly with process.exit() — that
+// would skip withDeployCheckouts' finally-block release below and leave a
+// stale lock file behind (confirmed happening: a killed/failed deploy left
+// hosting:web + functions:ssrhousingdbv2 checked out under a dead pid,
+// blocking every retry until manually cleared).
+class DeployExitError extends Error {
+  constructor(code) {
+    super(`deploy command failed with exit code ${code}`);
+    this.exitCode = code;
+  }
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
@@ -41,13 +53,13 @@ function run(command, args) {
   if (result.error) {
     if (result.error.code === "ETIMEDOUT") {
       console.error(`Command timed out after ${Math.round(COMMAND_TIMEOUT_MS / 60000)} minutes: ${command} ${args.join(" ")}`);
-      process.exit(124);
+      throw new DeployExitError(124);
     }
     throw result.error;
   }
 
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    throw new DeployExitError(result.status ?? 1);
   }
 }
 
@@ -68,16 +80,34 @@ function clearWebNextCache() {
   }
 }
 
-// Firebase Hosting's pinTag flow currently conflicts with the generated
-// SSR Cloud Run service for this app, so make deploys opt out consistently.
-withDeployCheckouts(getCheckoutKeys(), { root: ROOT, description: `firebase deploy --only ${defaultOnlyTarget}` }, () => {
-  if (TARGET === "web" || DEPLOY_ALL_HOSTING) clearWebNextCache();
-  if (BUILD && TARGET !== "web" && !DEPLOY_ALL_HOSTING) {
-    run("npm", ["run", `build:${TARGET}`]);
-  }
-  run("firebase", ["experiments:disable", "pintags"]);
-  run("firebase", hasExplicitOnly ? ["deploy", ...deployArgs] : ["deploy", "--only", defaultOnlyTarget, ...deployArgs]);
-});
+const checkoutKeys = getCheckoutKeys();
+
+// Fast pre-flight: report a real conflict in seconds, before spending
+// minutes on a Next.js build only to find out the target was already
+// checked out (previously this only surfaced after acquireDeployCheckouts'
+// silent, multi-hour wait — or, worse, after the build, since there was no
+// pre-check at all on this script).
+if (reportActiveConflictsAndShouldStop(checkoutKeys, { root: ROOT })) {
+  process.exit(1);
+}
+
+try {
+  // Firebase Hosting's pinTag flow currently conflicts with the generated
+  // SSR Cloud Run service for this app, so make deploys opt out consistently.
+  withDeployCheckouts(checkoutKeys, { root: ROOT, description: `firebase deploy --only ${defaultOnlyTarget}` }, () => {
+    if (TARGET === "web" || DEPLOY_ALL_HOSTING) clearWebNextCache();
+    if (BUILD && TARGET !== "web" && !DEPLOY_ALL_HOSTING) {
+      run("npm", ["run", `build:${TARGET}`]);
+    }
+    run("firebase", ["experiments:disable", "pintags"]);
+    run("firebase", hasExplicitOnly ? ["deploy", ...deployArgs] : ["deploy", "--only", defaultOnlyTarget, ...deployArgs]);
+  });
+} catch (error) {
+  // withDeployCheckouts' own finally has already released the checkout by
+  // the time we get here — safe to exit now.
+  if (error instanceof DeployExitError) process.exit(error.exitCode);
+  throw error;
+}
 
 if (shouldPush) {
   pushCurrentBranchToGithub({ commitMsg });

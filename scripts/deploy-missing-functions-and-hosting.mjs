@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pushCurrentBranchToGithub, parsePushArgs } from "./lib/githubPush.mjs";
-import { acquireDeployCheckouts, withDeployCheckouts } from "./lib/deployCheckouts.mjs";
+import { acquireDeployCheckouts, reportActiveConflictsAndShouldStop, withDeployCheckouts } from "./lib/deployCheckouts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -117,6 +117,9 @@ if (missing.length) {
 if (WITH_HOSTING) {
   const hostingTarget = DEPLOY_ALL_HOSTING ? "hosting" : "hosting:web";
   const checkoutKeys = DEPLOY_ALL_HOSTING ? ["hosting:all", "functions:ssrhousingdbv2"] : ["hosting:web", "functions:ssrhousingdbv2"];
+  if (reportActiveConflictsAndShouldStop(checkoutKeys, { root: ROOT })) {
+    process.exit(1);
+  }
   console.log(`Deploying ${hostingTarget}...`);
   withDeployCheckouts(checkoutKeys, { root: ROOT, description: `firebase deploy --only ${hostingTarget}` }, () => {
     run("firebase", ["deploy", "--only", hostingTarget, "--project", PROJECT]);

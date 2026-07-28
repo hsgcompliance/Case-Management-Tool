@@ -165,6 +165,47 @@ export function listDeployCheckouts(root) {
   return listRawCheckouts(root).sort((a, b) => String(a.key).localeCompare(String(b.key)));
 }
 
+/**
+ * Like listDeployCheckouts, but prunes dead/expired entries first (same rule
+ * findConflicts uses) so callers see genuinely active deploys, not stale
+ * lock files left behind by a process that was killed rather than exited
+ * (e.g. process.exit() called inside a withDeployCheckouts callback skips
+ * its finally-block cleanup).
+ */
+export function listActiveDeployCheckouts(root, options = {}) {
+  const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
+  const releaseMutex = acquireMutex(root);
+  try {
+    const active = [];
+    for (const checkout of listRawCheckouts(root)) {
+      if (!checkout.key) continue;
+      if (removeDeadOrExpired(checkout, staleMs)) continue;
+      active.push(checkout);
+    }
+    return active.sort((a, b) => String(a.key).localeCompare(String(b.key)));
+  } finally {
+    releaseMutex();
+  }
+}
+
+/**
+ * Fast pre-flight check: prints any active (non-stale) conflicting deploy
+ * checkouts for `keys` and returns true if the caller should stop, instead
+ * of silently blocking on acquireDeployCheckouts's multi-hour wait. Meant to
+ * run BEFORE expensive build steps so a real conflict is reported in
+ * seconds, not after a multi-minute build.
+ */
+export function reportActiveConflictsAndShouldStop(keys, options = {}) {
+  const conflicts = getDeployCheckoutConflicts(keys, options);
+  if (!conflicts.length) return false;
+  console.log(`Another deploy already has this target checked out — not starting a competing one:`);
+  for (const checkout of conflicts) {
+    console.log(`  ${describeCheckout(checkout)}`);
+  }
+  console.log(`Run "npm run deploy:status" to see all active deploy checkouts.`);
+  return true;
+}
+
 export function describeDeployCheckout(checkout) {
   return describeCheckout(checkout);
 }

@@ -1,10 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listDeployCheckouts } from "./lib/deployCheckouts.mjs";
+import { listActiveDeployCheckouts } from "./lib/deployCheckouts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
-const checkouts = listDeployCheckouts(ROOT);
+// Prunes dead/expired entries first so this never reports a deploy that was
+// actually killed (not exited cleanly) as still "active".
+const checkouts = listActiveDeployCheckouts(ROOT);
 
 if (!checkouts.length) {
   console.log("No active deploy checkouts.");
