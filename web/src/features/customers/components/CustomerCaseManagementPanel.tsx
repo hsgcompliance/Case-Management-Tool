@@ -63,7 +63,7 @@ export default function CustomerCaseManagementPanel({ customerId }: Props) {
           active: user.active !== false && user.disabled !== true,
           roles: Array.isArray(user.roles) ? user.roles.map((role) => String(role)) : [],
         }))
-        .filter((user) => !!user.uid && user.active !== false),
+        .filter((user) => !!user.uid),
     [users],
   );
   const userLabelById = React.useMemo(

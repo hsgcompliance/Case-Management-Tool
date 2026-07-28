@@ -440,6 +440,7 @@ export function NewCustomerFlow({ onClose }: { onClose: () => void }) {
         uid: String(user.uid),
         email: user.email ? String(user.email) : null,
         label: labelFor(user),
+        active: user.active !== false && user.disabled !== true,
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [users]);

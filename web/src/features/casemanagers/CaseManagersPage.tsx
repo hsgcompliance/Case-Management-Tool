@@ -116,6 +116,7 @@ export function CasemanagersPage() {
         uid: String(u.uid),
         email: "email" in u && u.email ? String(u.email) : null,
         label: cmLabel(u),
+        active: u.active !== false && u.disabled !== true,
       })),
     [allCaseManagers]
   );
@@ -147,6 +148,7 @@ export function CasemanagersPage() {
               options={caseManagerOptions}
               includeAll
               allLabel="All case managers"
+              onlyActive={false}
               className="min-w-[220px]"
               tourId="casemanagers-filter-cm"
             />

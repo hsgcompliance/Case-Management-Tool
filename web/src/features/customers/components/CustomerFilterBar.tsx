@@ -298,6 +298,7 @@ export function CustomerFilterBar({
             options={caseManagerOptions}
             includeAll
             allLabel="All"
+            onlyActive={false}
           />
         </div>
         <EnrollmentGrantFilter

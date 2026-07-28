@@ -17,6 +17,7 @@ import { toast } from "@lib/toast";
 import { topRoleNormalized, normalizeRole, isDevLike } from "@lib/roles";
 import { useAuth } from "@app/auth/AuthProvider";
 import Inbox from "@client/inbox";
+import { isPendingUserApproval } from "./userApproval";
 
 const PAGE_SIZE = 50;
 const TAGS = ["casemanager", "compliance"] as const;
@@ -54,13 +55,6 @@ function normalizeTags(input: unknown): Tag[] {
 
 function topRoleOf(u: CompositeUser): "admin" | "user" | "unverified" | "public_user" | string {
   return topRoleNormalized(u, "unverified");
-}
-
-function isPendingApproval(u: CompositeUser): boolean {
-  const top = topRoleOf(u);
-  if (top === "unverified" || top === "public_user") return true;
-  if (!u.active) return true;
-  return false;
 }
 
 function roleBadgeClass(topRole: string) {
@@ -169,7 +163,10 @@ export default function AdminUsersPage() {
     });
   }, [items]);
 
-  const pendingUsers = React.useMemo(() => items.filter(isPendingApproval), [items]);
+  const pendingUsers = React.useMemo(
+    () => items.filter((user) => isPendingUserApproval(topRoleOf(user))),
+    [items],
+  );
   const selectedUser = React.useMemo(
     () => (detailUser ? items.find((u) => u.uid === detailUser.uid) || detailUser : null),
     [detailUser, items]

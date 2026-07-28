@@ -356,6 +356,7 @@ export function CustomersPage() {
         uid: String(u.uid),
         email: u.email ? String(u.email) : null,
         label: labelFor(u),
+        active: u.active !== false && u.disabled !== true,
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [users]);

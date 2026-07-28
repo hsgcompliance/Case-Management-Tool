@@ -4,6 +4,7 @@ import React from "react";
 import { useUsers, type CompositeUser } from "@hooks/useUsers";
 import { hasAnyRole, normalizeRoles, topRoleNormalized } from "@lib/roles";
 import { EntitySelect, entitySelectInputClassName, resolveEntityPlaceholder } from "./shared";
+import { formatUserOptionLabel, isUserOptionVisible } from "./userOptionState";
 
 export type UserOption = {
   uid: string;
@@ -67,10 +68,10 @@ export default function UserSelect({
 
     return base
       .filter((u) => !!u.uid)
-      .filter((u) => (onlyActive ? u.active !== false : true))
+      .filter((u) => isUserOptionVisible(u, onlyActive, value))
       .filter((u) => includesRole(u, roleIncludes))
       .sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")));
-  }, [options, usersQ.data, onlyActive, roleIncludes]);
+  }, [options, usersQ.data, onlyActive, roleIncludes, value]);
 
   const isLoading = !options && usersQ.isLoading;
   const isDisabled = Boolean(disabled || isLoading);
@@ -90,7 +91,7 @@ export default function UserSelect({
       onChange={onChange}
       options={opts.map((u) => ({
         value: u.uid,
-        label: `${u.label}${u.email ? ` (${u.email})` : ""}`,
+        label: formatUserOptionLabel(u),
       }))}
       placeholderOption={includeUnassigned ? placeholder : undefined}
       placeholderDisabled={!includeUnassigned}
