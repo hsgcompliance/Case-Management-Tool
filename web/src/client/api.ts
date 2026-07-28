@@ -154,6 +154,7 @@ export const endpointsStrict = {
   grantBudgetManagerLoad:      { method: 'POST', path: 'grantBudgetManagerLoad' },
   grantBudgetManagerSave:      { method: 'POST', path: 'grantBudgetManagerSave' },
   grantBudgetManagerReconcile: { method: 'POST', path: 'grantBudgetManagerReconcile' },
+  reconciliationAuditScan:     { method: 'POST', path: 'reconciliationAuditScan' },
 
   // JOTFORM
   jotformSubmissionsUpsert: { method: 'POST', path: 'jotformSubmissionsUpsert' },

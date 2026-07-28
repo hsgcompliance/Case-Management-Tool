@@ -2,6 +2,11 @@
 
 import React from "react";
 
+// TODO(multi-org): the only consumer of this today is /dev/org-manager
+// (OrgManagerTool.tsx), a dev-only admin surface. There's no general-purpose
+// org switcher for regular tools (e.g. reconciliation) to reuse yet. One org
+// in production today; if/when other tools need to target a specific org,
+// this component (or its selection pattern) is the natural starting point.
 export type OrgSelectorOrg = {
   id: string;
   name?: string;

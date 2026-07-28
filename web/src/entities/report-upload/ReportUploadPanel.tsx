@@ -5,6 +5,7 @@ import {
   collectReportGrantSignals,
   defaultExcludeRulesForProfile,
   deriveHeadersAndRows,
+  FIELD_KEY_DESCRIPTIONS,
   filterReportRows,
   matchProfileHeaders,
   normalizeExcludeRules,
@@ -349,6 +350,13 @@ const EXCLUDE_OPERATOR_LABELS: Record<ReportExcludeOperator, string> = {
 };
 
 const EXCLUDE_OPERATORS = Object.keys(EXCLUDE_OPERATOR_LABELS) as ReportExcludeOperator[];
+
+const CONFIG_TOOL_DESCRIPTIONS: Record<"header" | "fields" | "grants" | "excludes", string> = {
+  header: "Pick which row in the file is the real column header — needed when a report has title/prompt rows above the data.",
+  fields: "Map each field this report type needs to a column in your file. Auto-detected from column names; override any that guessed wrong.",
+  grants: "Confirm which grant/provider each row belongs to. Parsed automatically from the file when possible — add or correct matches here.",
+  excludes: "Rows matching any enabled rule here are dropped before matching runs (e.g. blank names, summary/total rows, zero-amount rows).",
+};
 
 function ExcludeRulesEditor({
   profile,
@@ -898,12 +906,14 @@ function SelectedConfigureTab({
                         ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
                         : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:text-slate-300",
                     ].join(" ")}
+                    title={CONFIG_TOOL_DESCRIPTIONS[key]}
                     onClick={() => setConfigTool(key)}
                   >
                     {label}
                   </button>
                 ))}
               </div>
+              <div className="mt-1 text-[11px] text-slate-500">{CONFIG_TOOL_DESCRIPTIONS[configTool]}</div>
               <div className="mt-2 text-[11px] text-slate-500">
                 {filterCounts.included} included / {filterCounts.excluded} excluded after filters.
               </div>
@@ -956,7 +966,7 @@ function SelectedConfigureTab({
                 const example = match.sourceIndex != null ? sampleValue(match.sourceIndex) : "";
                 return (
                   <div key={match.fieldKey} className="flex items-center gap-2 text-xs">
-                    <div className="w-32 shrink-0">
+                    <div className="w-32 shrink-0" title={FIELD_KEY_DESCRIPTIONS[match.fieldKey]}>
                       <span className="font-medium text-slate-700 dark:text-slate-200">{match.fieldKey}</span>
                       {field?.required ? <span className="ml-1 text-red-500">*</span> : null}
                       {field?.type ? <span className="ml-1 text-[10px] text-slate-400">{field.type}</span> : null}
@@ -983,7 +993,19 @@ function SelectedConfigureTab({
           {configTool === "grants" ? (
           <div>
             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Grants parsed &amp; matched ({grantRows.length})</div>
-            <div className="mb-2 flex gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <GrantSelect
+                value={null}
+                onChange={(grantId) => {
+                  if (!grantId) return;
+                  const grant = grants.find((item) => item.id === grantId);
+                  setManualGrantMatch(grant?.name || grantId, grantId);
+                }}
+                mode="grant"
+                placeholderLabel="Match to a known grant"
+                className="h-8 min-w-52 flex-1 text-xs"
+              />
+              <span className="text-[11px] text-slate-400">or type a custom signal:</span>
               <input
                 className="input h-8 flex-1 px-2 text-xs"
                 value={manualGrantDraft}
@@ -995,6 +1017,7 @@ function SelectedConfigureTab({
                   }
                 }}
                 placeholder="Add grant/provider context for this upload"
+                title="For a grant/provider label not yet in the system, or context text that isn't a grant name itself."
               />
               <button type="button" className="btn btn-primary btn-xs" onClick={addManualGrantSignal}>Add grant</button>
             </div>

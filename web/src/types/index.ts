@@ -253,6 +253,10 @@ export type GrantBudgetManagerSaveResp = RespOf<"grantBudgetManagerSave">;
 export type GrantBudgetManagerReconcileReq = ReqOf<"grantBudgetManagerReconcile">;
 export type GrantBudgetManagerReconcileResp = RespOf<"grantBudgetManagerReconcile">;
 
+export type ReconciliationAuditScanReq = ReqOf<"reconciliationAuditScan">;
+export type ReconciliationAuditScanResp = RespOf<"reconciliationAuditScan">;
+export type { TReconciliationAuditDuplicateFinding, TReconciliationAuditOrphanFinding } from "@hdb/contracts";
+
 // Credit Cards
 export type CreditCardsUpsertReq = ReqOf<"creditCardsUpsert">;
 export type CreditCardsUpsertResp = RespOf<"creditCardsUpsert">;

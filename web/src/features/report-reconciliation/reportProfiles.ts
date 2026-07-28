@@ -11,6 +11,57 @@ export type ReportFieldProfile = {
   notes?: string;
 };
 
+/**
+ * One-line explanation of what each canonical field key is used for in
+ * matching, keyed by the field key itself rather than per-profile — most
+ * keys (customerName, amount, dob, ...) repeat across several profiles with
+ * the same meaning, so one shared dictionary covers the field-map UI's
+ * tooltips instead of authoring near-duplicate `notes` on every profile.
+ * Not every field a profile defines has an entry here; the UI falls back to
+ * no tooltip rather than a generic filler line.
+ */
+export const FIELD_KEY_DESCRIPTIONS: Record<string, string> = {
+  customerId: "Dashboard customer document id, if the report already carries it. Skips name/DOB matching when present and correct.",
+  clientId: "The report's own client identifier — matched against the customer's HMIS ID or Caseworthy ID, not the dashboard's internal customer id.",
+  cwId: "Caseworthy client id, matched against the customer's cwId/caseworthyId field.",
+  caseworthyId: "Caseworthy client id, matched against the customer's cwId/caseworthyId field.",
+  hmisId: "HMIS client identifier, matched against the customer's hmisId field.",
+  customerName: "Full name (or Last, First) used to match this row to a dashboard customer when no ID is available or the ID doesn't match.",
+  firstName: "First name, combined with last name for identity matching.",
+  lastName: "Last name, combined with first name for identity matching.",
+  dob: "Date of birth — disambiguates same-name customers when a report has no ID column.",
+  grant: "Grant/provider/program label for this row, matched against dashboard grant names and aliases.",
+  enrollment: "Enrollment/project label, matched the same way as grant when a report distinguishes the two.",
+  program: "Program name, matched against dashboard grant names and aliases (same role as grant/providerId in other profiles).",
+  providerId: "Provider/project identifier or name, matched against dashboard grant names and aliases.",
+  serviceProvider: "Service provider label, matched against dashboard grant names and aliases.",
+  region: "Region/site label — informational context, not matched against a dashboard field.",
+  entryDate: "Enrollment entry/start date, compared against the dashboard enrollment's entry date.",
+  exitDate: "Enrollment exit/end date, compared against the dashboard enrollment's exit date.",
+  serviceStartDate: "Service start date, compared against the dashboard enrollment's entry date.",
+  serviceEndDate: "Service end date, compared against the dashboard enrollment's exit date.",
+  serviceDate: "Date this service/payment occurred — drives which month it's compared against on the dashboard schedule.",
+  transactionDate: "Date this transaction posted — drives which month it's compared against on the dashboard schedule/ledger.",
+  dueDate: "Scheduled due date for this payment row.",
+  assessmentDate: "Date an assessment was completed — informational, not matched against a dashboard field.",
+  dateIdentified: "Date this person was identified/enrolled in the source system — informational, not matched against a dashboard field.",
+  lastContactDate: "Most recent contact date — informational, not matched against a dashboard field.",
+  amount: "Dollar amount, matched (within a small tolerance) against payment queue/ledger rows.",
+  vendor: "Vendor/payee name — shown for context and used to help disambiguate close amount/date matches.",
+  reference: "Free-text reference/memo, parsed for staff/type/vendor/month signals (Financial Edge rows) or shown for context.",
+  invoice: "Invoice/payment status text — used to detect placeholder rows (e.g. \"Unposted\") and projected/future months.",
+  dataEntry: "Data-entry/compliance status text from the source system — informational, not matched against a dashboard field.",
+  includeRow: "Marks whether this row is active/should be included — rows where this reads false-like are excluded before matching.",
+  serviceCode: "Internal service code from the source system — informational, not matched against a dashboard field.",
+  serviceDescription: "Service description text — informational; also used by Financial Edge keep/scrap classification.",
+  serviceName: "Service/description text for this row — used by Financial Edge keep/scrap classification and shown for context.",
+  description: "Transaction description/payee text — the primary signal for Financial Edge's keep/scrap and vendor classification.",
+  account: "General ledger account code/name — informational, not matched against a dashboard field.",
+  caseManager: "Case manager name from the source system — informational, not matched against a dashboard field.",
+  address: "Address text — informational, not matched against a dashboard field.",
+  units: "Unit count for this service row — informational, not matched against a dashboard field.",
+};
+
 export type ReportSourceProfile = {
   id: string;
   label: string;

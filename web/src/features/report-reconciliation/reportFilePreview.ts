@@ -215,7 +215,11 @@ function listZipEntries(buffer: ArrayBuffer): ZipEntry[] {
 async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   const Decompression = (globalThis as unknown as { DecompressionStream?: new (format: string) => TransformStream }).DecompressionStream;
   if (!Decompression) throw new Error("This browser cannot preview compressed XLSX files.");
-  const stream = new Blob([bytes]).stream().pipeThrough(new Decompression("deflate-raw"));
+  // TS's DOM lib types Uint8Array's buffer as ArrayBufferLike (which also
+  // covers SharedArrayBuffer) while BlobPart requires ArrayBuffer — this
+  // Uint8Array is always a plain ArrayBuffer-backed view at runtime (built
+  // from File/Response bytes above), so the cast is safe.
+  const stream = new Blob([bytes as unknown as BlobPart]).stream().pipeThrough(new Decompression("deflate-raw"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 

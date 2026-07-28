@@ -1,17 +1,25 @@
 #!/usr/bin/env node
 /**
- * Reconcile a local report file (CSV/TXT) against live dashboard data for one
- * grant, using the same profile/normalization/matching engine as the
- * /tools/*-reconciliation web tools — no browser, no LLM required.
+ * Reconcile a local report file (CSV, TXT, or XLSX) against live dashboard
+ * data for one grant, using the same profile/normalization/matching engine
+ * as the /tools/*-reconciliation web tools — no browser, no LLM required.
  *
  * Read-only: never writes to Firestore. Report rows/PII are never persisted
  * anywhere except the local --out file you choose.
  *
  * Usage:
  *   node scripts/reconcile-report.mjs --csv="C:/path/to/report.csv" --grant="Bridge Home 25-26"
+ *   node scripts/reconcile-report.mjs --csv="C:/path/to/report.xlsx" --grant="CoC RRH 25-26" --sheet="Sheet1"
  *
  * Options:
- *   --csv=PATH       Local CSV/TXT report file (required).
+ *   --csv=PATH       Local CSV, TXT, or XLSX report file (required; flag name
+ *                    is historical, all three formats work). XLSX reads go
+ *                    through the real product XML/zip parser
+ *                    (reportFilePreview.ts) via a Node DOMParser polyfill
+ *                    (scripts/lib/domParserPolyfill.mjs) — everything else
+ *                    that parser needs (Blob/DecompressionStream/File) is
+ *                    native in Node 22.
+ *   --sheet=NAME     XLSX only: worksheet name to read (default: first sheet).
  *   --grant=NAME     Grant name(s) to reconcile against, matched case-insensitively
  *                    against the `grants` collection (required). Comma-separate
  *                    multiple names for a report that spans several grants in one
@@ -28,6 +36,7 @@
  *   --out=PATH       Where to write the JSON findings report
  *                     (default: docs/active-projects.local/report-reconciliation-workbench/reports/<timestamp>-<grant>.json).
  */
+import "./lib/domParserPolyfill.mjs";
 import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
@@ -42,6 +51,7 @@ function argValue(name, fallback = null) {
 }
 
 const CSV_PATH = argValue("csv");
+const SHEET_NAME = argValue("sheet");
 const GRANT_NAME = argValue("grant");
 const PROFILE_OVERRIDE = argValue("profile");
 const HEADER_ROW_OVERRIDE = argValue("header-row");
@@ -50,7 +60,7 @@ const PROJECT_ID = argValue("project", process.env.GCLOUD_PROJECT || process.env
 const OUT_OVERRIDE = argValue("out");
 
 if (!CSV_PATH || !GRANT_NAME) {
-  console.error("Usage: node scripts/reconcile-report.mjs --csv=PATH --grant=\"Grant Name\" [--profile=ID] [--header-row=N] [--org=ORG_ID] [--out=PATH]");
+  console.error("Usage: node scripts/reconcile-report.mjs --csv=PATH --grant=\"Grant Name\" [--sheet=NAME] [--profile=ID] [--header-row=N] [--org=ORG_ID] [--out=PATH]");
   process.exit(1);
 }
 
@@ -63,7 +73,7 @@ export {
   deriveHeadersAndRows,
   detectLikelyReportProfiles,
 } from ${JSON.stringify(path.join(REPO_ROOT, "web/src/features/report-reconciliation/reportProfiles.ts"))};
-export { parseDelimitedText, findHeaderRow } from ${JSON.stringify(path.join(REPO_ROOT, "web/src/features/report-reconciliation/reportFilePreview.ts"))};
+export { parseReportFilePreview } from ${JSON.stringify(path.join(REPO_ROOT, "web/src/features/report-reconciliation/reportFilePreview.ts"))};
 export { buildReconciliationReview } from ${JSON.stringify(path.join(REPO_ROOT, "web/src/features/report-reconciliation/reconciliationReview.ts"))};
 `;
   const result = await esbuild.build({
@@ -134,13 +144,21 @@ async function main() {
     ledger: dashboard.ledger.length,
   });
 
-  const raw = fs.readFileSync(CSV_PATH, "utf-8");
-  const allRows = engine.parseDelimitedText(raw);
   const fileName = path.basename(CSV_PATH);
-  const headerRowIndex = HEADER_ROW_OVERRIDE != null
-    ? Number(HEADER_ROW_OVERRIDE)
-    : engine.findHeaderRow(allRows, engine.DEFAULT_REPORT_SOURCE_PROFILES, fileName);
-  const { headers, dataRows } = engine.deriveHeadersAndRows(allRows, headerRowIndex);
+  const lowerName = fileName.toLowerCase();
+  const mimeType = lowerName.endsWith(".xlsx")
+    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    : lowerName.endsWith(".txt")
+      ? "text/plain"
+      : "text/csv";
+  const file = new File([fs.readFileSync(CSV_PATH)], fileName, { type: mimeType });
+  const preview = await engine.parseReportFilePreview(file, engine.DEFAULT_REPORT_SOURCE_PROFILES, {
+    maxRows: 20000,
+    preferredSheet: SHEET_NAME || undefined,
+  });
+  if (preview.sheetName) console.log(`Sheet: ${preview.sheetName}`);
+  const headerRowIndex = HEADER_ROW_OVERRIDE != null ? Number(HEADER_ROW_OVERRIDE) : preview.headerRowIndex;
+  const { headers, dataRows } = engine.deriveHeadersAndRows(preview.allRows, headerRowIndex);
 
   const profile = PROFILE_OVERRIDE
     ? engine.findReportProfile(engine.DEFAULT_REPORT_SOURCE_PROFILES, PROFILE_OVERRIDE)

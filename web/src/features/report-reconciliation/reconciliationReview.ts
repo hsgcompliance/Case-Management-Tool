@@ -22,6 +22,7 @@ export type ReconciliationFindingKind =
   | "exit_date_mismatch"
   | "enrollment_compliance_missing"
   | "payment_missing_dashboard"
+  | "schedule_gap"
   | "payment_missing_hmis"
   | "payment_missing_financial_edge"
   | "payment_missing_report"
@@ -672,31 +673,38 @@ function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<strin
   const reasons: string[] = [];
   const warnings: string[] = [];
   let score = 0;
+  let hasIdentitySignal = false;
 
   if (customerId && text(row.customerId) === customerId) {
     score += 40;
     reasons.push("customerId exact");
+    hasIdentitySignal = true;
   } else if (customerId && text(row.customerId)) {
     score -= 30;
     warnings.push("different customerId");
   } else if (record.customerIdentity.fullName && hasTokenOverlap(record.customerIdentity.fullName, row.customerNameAtSpend ?? row.customerName ?? row.customer)) {
     score += 18;
     reasons.push("customer name token overlap");
+    hasIdentitySignal = true;
   }
 
+  let monthExact = false;
   if (serviceMonth && itemMonth && serviceMonth === itemMonth) {
     score += 25;
     reasons.push("same service month");
+    monthExact = true;
   } else if (serviceMonth && itemMonth) {
     score -= 15;
     warnings.push(`month differs (${serviceMonth} vs ${itemMonth})`);
   }
 
+  let amountExact = false;
   if (amount != null && itemAmount != null) {
     const diff = Math.abs(amount - itemAmount);
     if (diff <= 1) {
       score += 30;
       reasons.push("amount exact");
+      amountExact = true;
     } else if (diff <= 5000) {
       score += 8;
       warnings.push(`amount differs by ${(diff / 100).toFixed(2)}`);
@@ -714,6 +722,21 @@ function scorePaymentCandidate(record: NormalizedReportRecord, row: Record<strin
   if (reportGrant && itemGrant && hasTokenOverlap(reportGrant, itemGrant)) {
     score += 10;
     reasons.push("grant/project overlap");
+  }
+
+  // No name/ID on this row at all — common for FE "Unposted Accounts
+  // Payable Invoice" rows, which carry no client reference yet. The legacy
+  // Apps Script tool hard-capped these low and never let them auto-match,
+  // even when the row was the single decisive amount+month candidate —
+  // real-world feedback was that this made unposted-invoice reconciliation
+  // consistently weak. Amount+month alignment on its own is real corroborating
+  // evidence (especially once isDecisivelyBestPaymentCandidate below has
+  // confirmed no other row ties it), so it's credited here — but always paired
+  // with an explicit warning, since nothing here confirms *whose* payment it is.
+  if (!hasIdentitySignal && amountExact && monthExact) {
+    score += 15;
+    reasons.push("no name/ID on this row, but amount + month align exactly");
+    warnings.push("No customer name or ID on this row — confirm this is the right person before applying.");
   }
 
   if (schedule) {
@@ -869,6 +892,8 @@ function findingTitle(finding: ReconciliationFinding): string {
       return `${source} evidence not marked complete in dashboard: ${who}`;
     case "payment_missing_dashboard":
       return `${source} payment row missing from dashboard queue/ledger: ${who}`;
+    case "schedule_gap":
+      return `Payment schedule stopped generating: ${who}`;
     case "payment_missing_hmis":
       return `FE payment row missing from HMIS: ${who}`;
     case "payment_missing_financial_edge":
@@ -886,7 +911,108 @@ function findingTitle(finding: ReconciliationFinding): string {
     case "report_row_diagnostic":
       return `${source} report data issue${finding.reportValue ? `: ${finding.reportValue}` : ""}`;
     default:
-      return finding.kind.replace(/_/g, " ");
+      // Exhaustive today, but kept defensive (String() cast) rather than
+      // `.replace()` directly on the narrowed `never` type — protects
+      // against a future ReconciliationFindingKind value reaching here
+      // before every switch in this file is updated for it.
+      return String(finding.kind).replace(/_/g, " ");
+  }
+}
+
+/**
+ * Groups `payment_missing_dashboard` findings for the same customer+amount
+ * into one `schedule_gap` finding when 2+ months at the same recurring
+ * amount are missing AND the resolved enrollment already has a live
+ * `monthly` row at that exact amount — proof this is a recurring charge that
+ * stopped generating, not coincidentally-equal one-off payments. Groups that
+ * don't confirm against a real recurring schedule row are left as individual
+ * findings; nothing here is forced. Runs as a separate post-pass (like the
+ * net-zero cluster pass above) rather than inline in the main record loop,
+ * so it can't perturb the already-tuned per-record matching logic.
+ */
+function applyScheduleGapClustering(findings: ReconciliationFinding[], dashboard: DashboardData) {
+  const groups = new Map<string, ReconciliationFinding[]>();
+  for (const finding of findings) {
+    if (finding.kind !== "payment_missing_dashboard" || finding.severity === "info") continue;
+    if (!finding.customerId || !finding.reportRecord) continue;
+    const amount = cents(finding.reportRecord.paymentEvidence.amount);
+    if (amount == null) continue;
+    const key = `${finding.customerId}::${amount}`;
+    const list = groups.get(key) ?? [];
+    list.push(finding);
+    groups.set(key, list);
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const first = group[0];
+    const customerId = text(first.customerId);
+    const amount = cents(first.reportRecord!.paymentEvidence.amount);
+    if (amount == null) continue;
+
+    const customerEnrollments = findEnrollments(customerId, dashboard.enrollments);
+    const picked = pickEnrollment(first.reportRecord!, customerEnrollments);
+    const enrollment = picked.enrollment;
+    if (!enrollment) continue;
+
+    const existingPayments = Array.isArray(enrollment.payments) ? (enrollment.payments as Array<Record<string, unknown>>) : [];
+    const recurringTemplate = existingPayments.find(
+      (payment) => text(payment.type) === "monthly" && Math.abs(Math.round(Number(payment.amount ?? 0) * 100) - amount) <= 1,
+    );
+    // No proof this amount is a real recurring schedule row on this
+    // enrollment (e.g. it could be several unrelated same-amount one-offs) —
+    // leave the individual findings alone rather than guess.
+    if (!recurringTemplate) continue;
+
+    const months = group
+      .map((finding) => ({
+        finding,
+        month: finding.reportRecord!.paymentEvidence.serviceMonth || monthKey(finding.reportRecord!.paymentEvidence.transactionDate),
+        reportPaid: !isProjectedReportStatus(finding.reportRecord!),
+      }))
+      .filter((entry) => /^\d{4}-\d{2}$/.test(entry.month))
+      .sort((a, b) => a.month.localeCompare(b.month));
+    if (months.length < 2) continue;
+
+    const subsumedIds = new Set(months.map((entry) => entry.finding.id));
+    for (let i = findings.length - 1; i >= 0; i -= 1) {
+      if (subsumedIds.has(findings[i].id)) findings.splice(i, 1);
+    }
+
+    const enrollmentId = text(enrollment.id);
+    const amountLabel = (amount / 100).toFixed(2);
+    findings.push({
+      id: `schedule_gap::${enrollmentId}::${amount}::${months[0].month}`,
+      kind: "schedule_gap",
+      sourceSystem: first.sourceSystem,
+      sourceSystemLabel: first.sourceSystemLabel,
+      severity: "warning",
+      confidence: 0.7,
+      sourceFile: first.sourceFile,
+      sourceProfileId: first.sourceProfileId,
+      sourceProfileLabel: first.sourceProfileLabel,
+      sourceRowNumber: null,
+      recordKind: first.recordKind,
+      customerId,
+      customerLabel: first.customerLabel,
+      enrollmentId,
+      reportValue: `$${amountLabel}/mo x ${months.length}: ${months.map((entry) => entry.month).join(", ")}`,
+      dashboardValue: `${existingPayments.length} scheduled row(s), none for these months`,
+      explanation: [
+        `${months.length} consecutive months at the recurring $${amountLabel} amount (${months.map((entry) => entry.month).join(", ")}) are missing from this enrollment's dashboard schedule, but the enrollment already has a live monthly row at this exact amount — the schedule most likely stopped generating rather than ${months.length} independent payments going missing.`,
+      ],
+      proposedAction: "Extend the enrollment's schedule with the missing months as unpaid projections, then post/confirm any that were actually paid.",
+      reportRecord: months[months.length - 1].finding.reportRecord,
+      matchedCustomer: first.matchedCustomer,
+      matchedEnrollment: enrollment,
+      matchedPaymentCandidates: months.map((entry) => ({ month: entry.month, amountCents: amount, reportPaid: entry.reportPaid })),
+      match: {
+        criteria: [
+          `Enrollment matched by ${picked.criteria || "customer + grant"}.`,
+          `${months.length} missing months share the exact amount of an existing recurring "monthly" row on this enrollment (lineItemId ${text(recurringTemplate.lineItemId)}).`,
+        ],
+      },
+    });
   }
 }
 
@@ -1182,6 +1308,35 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
               match: { criteria: [`Customer matched by ${match.method}.`, "Dashboard enrollment compliance.hmisEntryComplete is not true."] },
             });
           }
+          // Presence in a Caseworthy service export is the same kind of
+          // signal as HMIS presence — the case-management data entry for
+          // this enrollment is done. Mirrors the HMIS check above; the
+          // schema has carried caseworthyEntryComplete/caseworthyExitComplete
+          // since day one, this just wasn't wired into reconciliation yet.
+          if (record.recordKind.startsWith("caseworthy") && compliance.caseworthyEntryComplete !== true) {
+            findings.push({
+              id: findingId("enrollment_compliance_missing", record, `${enrollmentId}:caseworthyEntry`),
+              kind: "enrollment_compliance_missing",
+              sourceSystem,
+              sourceSystemLabel: sourceLabel,
+              severity: "warning",
+              confidence: 0.65,
+              sourceFile: record.sourceFile,
+              sourceProfileId: packet.profileId,
+              sourceProfileLabel: packet.profileLabel,
+              sourceRowNumber: record.sourceRowNumber,
+              recordKind: record.recordKind,
+              customerId,
+              customerLabel: customerLabel(customer),
+              enrollmentId,
+              explanation: [`${sourceLabel} report evidence exists, but the dashboard enrollment does not show Caseworthy entry compliance complete.`],
+              proposedAction: "Review Caseworthy enrollment compliance flag.",
+              reportRecord: record,
+              matchedCustomer: customer,
+              matchedEnrollment: matchingEnrollment,
+              match: { criteria: [`Customer matched by ${match.method}.`, "Dashboard enrollment compliance.caseworthyEntryComplete is not true."] },
+            });
+          }
         }
       }
 
@@ -1436,6 +1591,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
                     ...bridgeCriteria,
                     ...unpostedCriteria,
                     ...((bestRow._matchReasons as string[]) ?? []),
+                    ...((bestRow._matchWarnings as string[]) ?? []),
                     "Queue item is not posted/paid.",
                   ],
                   customerMethod: effectiveCustomerMethod || undefined,
@@ -1471,6 +1627,7 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
                 ...unpostedCriteria,
                 `Found ${candidates.length} scored queue/ledger candidates.`,
                 ...(((candidates[0] as Record<string, unknown>)._matchReasons as string[] | undefined) ?? []),
+                ...(((candidates[0] as Record<string, unknown>)._matchWarnings as string[] | undefined) ?? []),
               ],
               customerMethod: effectiveCustomerMethod || undefined,
               customerConfidence: effectiveCustomerConfidence || undefined,
@@ -1623,6 +1780,8 @@ export function buildReconciliationReview(packets: ReconciliationPacket[], dashb
       }
     }
   }
+
+  applyScheduleGapClustering(findings, dashboard);
 
   const byKind: Record<string, number> = {};
   const bySeverity: Record<ReportDiagnosticSeverity, number> = { info: 0, warning: 0, error: 0 };

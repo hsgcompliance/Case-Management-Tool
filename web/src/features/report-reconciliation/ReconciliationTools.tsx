@@ -7,12 +7,12 @@ import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/type
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
 import FullPageModal from "@entities/ui/FullPageModal";
 import type { ExportColumn } from "@entities/ui/dashboardStyle/SmartExportButton";
-import { usePaymentQueueItemsForMonths, usePatchPaymentQueueItem, usePostPaymentQueueToLedger, useVoidPaymentQueueItem } from "@hooks/usePaymentQueue";
-import type { PaymentQueuePatchReq } from "@client/paymentQueue";
+import { usePaymentQueueItemsForMonths } from "@hooks/usePaymentQueue";
 import { useLedgerEntriesForMonths } from "@hooks/useLedger";
-import { usePaymentsSpend } from "@hooks/usePayments";
-import { usePatchCustomers, useUpsertCustomers } from "@hooks/useCustomers";
-import { useEnrollmentsPatch } from "@hooks/useEnrollments";
+import { useReconciliationAuditScan } from "@hooks/useReconciliationAudit";
+import { useAuth } from "@app/auth/AuthProvider";
+import { isAdminLike } from "@lib/roles";
+import type { ReconciliationAuditScanResp } from "@types";
 import DatabaseFilterPanel from "@entities/database-filters/DatabaseFilterPanel";
 import {
   DEFAULT_DATABASE_FILTER_CONFIG,
@@ -22,7 +22,6 @@ import {
 } from "@entities/database-filters/databaseFilters";
 import { qk } from "@hooks/queryKeys";
 import { toast } from "@lib/toast";
-import type { CustomersPatchReq, CustomersUpsertReq } from "@types";
 import { defaultExcludeRulesForProfile, type ReconciliationPacket } from "./reportProfiles";
 import { ReportUploadPanel, type ReportUpload, type ReportUploadGrant } from "@entities/report-upload/ReportUploadPanel";
 import {
@@ -40,10 +39,13 @@ import {
   buildReviewSummaryRows,
   reconciliationFindingsToRows,
 } from "./reconciliationExports";
-import { buildActionPreviews, type ReconciliationActionPreview } from "./reconciliationActions";
+import { buildActionPreviews, BULK_PAYMENT_ACTION_KINDS, type ReconciliationActionPreview } from "./reconciliationActions";
+import { useReconciliationActionApply } from "./useReconciliationActionApply";
 import ReconciliationBulkCustomerPatchModal, { buildBulkHmisCustomerPatchRows } from "./ReconciliationBulkCustomerPatchModal";
 import ReconciliationBulkCustomerImportModal, { buildBulkCustomerImportRows } from "./ReconciliationBulkCustomerImportModal";
 import ReconciliationBulkEnrollmentModal, { buildBulkEnrollmentRows } from "./ReconciliationBulkEnrollmentModal";
+import ReconciliationBulkApplyModal from "./ReconciliationBulkApplyModal";
+import ReconciliationAdjustModal, { isAdjustableActionKind } from "./ReconciliationAdjustModal";
 import {
   buildReconciliationCompare,
   type CompareCellStatus,
@@ -78,16 +80,16 @@ const TOOL_CONFIG: Record<ReconciliationToolKind, {
     uploadLabel: "Add CE/HMIS Report",
     help: "Review HMIS Coordinated Entry by-name and enrollment evidence — or any custom CSV with name/ID/grant/date columns — against dashboard customers, enrollments, entry/exit dates, and HMIS enrollment compliance.",
     findingFocus: ["Missing dashboard enrollments", "Entry/exit date differences", "HMIS enrollment compliance flags", "Grant/provider mapping review"],
-    preferredProfiles: ["coordinated_entry_by_name_list", "hmis_service_payment_report", "other_csv"],
+    preferredProfiles: ["coordinated_entry_by_name_list", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total", "other_csv"],
     findingKinds: ["enrollment_missing", "entry_date_mismatch", "exit_date_mismatch", "enrollment_compliance_missing", "grant_mapping_review", "report_row_diagnostic"],
   },
   payment: {
     title: "Payment Reconciliation",
     uploadLabel: "Add Payment Report",
     help: "Review Financial Project Activity and HMIS Service Provided reports against dashboard payment queue and schedule rows.",
-    findingFocus: ["Missing dashboard payment/ledger rows", "Ambiguous payment candidates", "Amount/date/month differences", "Grant/provider/payment-source mapping review"],
+    findingFocus: ["Missing dashboard payment/ledger rows", "Schedules that stopped generating", "Ambiguous payment candidates", "Amount/date/month differences", "Grant/provider/payment-source mapping review"],
     preferredProfiles: ["financial_edge_project_activity", "rental_assistance_invoice_request", "hmis_service_payment_report", "caseworthy_service_detail", "caseworthy_service_total"],
-    findingKinds: ["payment_missing_hmis", "payment_missing_dashboard", "payment_missing_financial_edge", "payment_missing_report", "payment_unpaid_dashboard", "payment_possible_match", "payment_amount_mismatch", "grant_mapping_review", "report_row_diagnostic"],
+    findingKinds: ["payment_missing_hmis", "payment_missing_dashboard", "schedule_gap", "payment_missing_financial_edge", "payment_missing_report", "payment_unpaid_dashboard", "payment_possible_match", "payment_amount_mismatch", "grant_mapping_review", "report_row_diagnostic"],
   },
   identity: {
     title: "Customer Identity Review",
@@ -230,78 +232,15 @@ function FindingList({
 }
 
 function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActionPreview[]; onApplied?: () => void }) {
-  const patchCustomers = usePatchCustomers();
-  const upsertCustomers = useUpsertCustomers();
-  const patchQueueItem = usePatchPaymentQueueItem();
-  const postQueueItem = usePostPaymentQueueToLedger();
-  const postSchedulePayment = usePaymentsSpend();
-  const voidQueueItem = useVoidPaymentQueueItem();
-  const enrollmentsPatch = useEnrollmentsPatch();
-  const queryClient = useQueryClient();
-  const [runningId, setRunningId] = React.useState("");
-
-  const refresh = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: qk.customers.root }),
-      queryClient.invalidateQueries({ queryKey: qk.dashboard.root }),
-    ]);
-    onApplied?.();
-  };
+  const { apply, busy, runningId } = useReconciliationActionApply(onApplied);
+  const [adjustingAction, setAdjustingAction] = React.useState<ReconciliationActionPreview | null>(null);
 
   const applyAction = async (action: ReconciliationActionPreview) => {
-    if (!action.executable) return;
-    setRunningId(action.id);
-    try {
-      if (action.kind === "push_hmis_id" || action.kind === "push_cw_id" || action.kind === "push_dob") {
-        if (!action.targetId || !action.patch) throw new Error("Customer patch action is missing its target or patch.");
-        await patchCustomers.mutateAsync({ id: action.targetId, patch: action.patch } as CustomersPatchReq);
-        await refresh();
-        toast(`${action.label} applied.`, { type: "success" });
-      } else if (action.kind === "create_customer") {
-        if (!action.create) throw new Error("Create customer action is missing its payload.");
-        await upsertCustomers.mutateAsync([action.create] as CustomersUpsertReq);
-        await refresh();
-        toast("Customer created.", { type: "success" });
-      } else if (action.kind === "patch_enrollment_dates") {
-        if (!action.targetId || !action.patch) throw new Error("Enrollment date action is missing its target or patch.");
-        await enrollmentsPatch.mutateAsync([{ id: action.targetId, patch: action.patch }]);
-        await refresh();
-        toast(`${action.label} applied.`, { type: "success" });
-      } else if (action.kind === "post_queue_payment") {
-        if (!action.targetId) throw new Error("Queue post action is missing its target.");
-        if (!window.confirm(`Post this queue item to the ledger (mark paid)?\n\nCurrent: ${action.currentValue}\nProposed: ${action.proposedValue}`)) return;
-        await postQueueItem.mutateAsync({ id: action.targetId });
-        await refresh();
-        toast("Queue item posted to ledger.", { type: "success" });
-      } else if (action.kind === "post_schedule_payment") {
-        const enrollmentId = textValue((action.patch as Record<string, unknown> | undefined)?.enrollmentId);
-        const paymentId = textValue((action.patch as Record<string, unknown> | undefined)?.paymentId);
-        if (!enrollmentId || !paymentId) throw new Error("Schedule payment action is missing its enrollment/payment id.");
-        if (!window.confirm(`Mark this scheduled payment paid and create its ledger entry?\n\nCurrent: ${action.currentValue}\nProposed: ${action.proposedValue}`)) return;
-        await postSchedulePayment.mutateAsync({ body: { enrollmentId, paymentId, reverse: false } });
-        await refresh();
-        toast("Scheduled payment marked paid and posted to ledger.", { type: "success" });
-      } else if (action.kind === "patch_queue_amount") {
-        if (!action.targetId || !action.patch) throw new Error("Queue amount action is missing its target or patch.");
-        await patchQueueItem.mutateAsync({ id: action.targetId, body: action.patch as PaymentQueuePatchReq });
-        await refresh();
-        toast("Queue amount updated.", { type: "success" });
-      } else if (action.kind === "void_queue_payment") {
-        if (!action.targetId) throw new Error("Queue void action is missing its target.");
-        if (!window.confirm("Void this scheduled payment? Only proceed if it is confirmed cancelled — the uploaded report may simply not cover it.")) return;
-        await voidQueueItem.mutateAsync({ id: action.targetId, body: { reason: "reconciliation: no report evidence" } });
-        await refresh();
-        toast("Queue item voided.", { type: "success" });
-      }
-    } catch (error) {
-      toast(error instanceof Error ? error.message : `Failed to apply ${action.label}.`, { type: "error" });
-    } finally {
-      setRunningId("");
-    }
+    const result = await apply(action);
+    toast(result.message, { type: result.ok ? "success" : "error" });
   };
 
   if (!actions.length) return null;
-  const busy = patchCustomers.isPending || upsertCustomers.isPending || patchQueueItem.isPending || postQueueItem.isPending || postSchedulePayment.isPending || voidQueueItem.isPending || enrollmentsPatch.isPending || Boolean(runningId);
   return (
     <div className="mt-4 rounded border border-sky-200 bg-sky-50 p-3 dark:border-sky-900 dark:bg-sky-950/40">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">Database actions</div>
@@ -311,9 +250,15 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="font-semibold text-slate-800 dark:text-slate-100">{action.label}</div>
               {action.executable ? (
-                <button type="button" className="btn btn-primary btn-xs" onClick={() => applyAction(action)} disabled={busy}>
-                  {runningId === action.id ? "Applying..." : "Apply"}
-                </button>
+                isAdjustableActionKind(action.kind) ? (
+                  <button type="button" className="btn btn-primary btn-xs" onClick={() => setAdjustingAction(action)} disabled={busy}>
+                    Adjust &amp; Apply
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-primary btn-xs" onClick={() => applyAction(action)} disabled={busy}>
+                    {runningId === action.id ? "Applying..." : "Apply"}
+                  </button>
+                )
               ) : null}
             </div>
             <div className="mt-1 grid gap-1 sm:grid-cols-3">
@@ -325,6 +270,12 @@ function ActionPreviewList({ actions, onApplied }: { actions: ReconciliationActi
           </div>
         ))}
       </div>
+      <ReconciliationAdjustModal
+        action={adjustingAction}
+        apply={apply}
+        busy={busy}
+        onClose={() => setAdjustingAction(null)}
+      />
     </div>
   );
 }
@@ -335,6 +286,22 @@ function formatValue(value: unknown): string {
   if (Array.isArray(value)) return value.length ? value.map(formatValue).join(", ") : "-";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+/** `schedule_gap` candidate rows only carry `amountCents` (no `amount`/`amountAbs`) — convert to dollars so this matches every other finding kind's candidate rows instead of printing raw cents. */
+function candidateAmountDisplay(row: Record<string, unknown>): unknown {
+  if (row.amount != null) return row.amount;
+  if (row.amountAbs != null) return row.amountAbs;
+  if (typeof row.amountCents === "number") return row.amountCents / 100;
+  return row.amountCents;
+}
+
+/** `schedule_gap` candidate rows only carry `reportPaid` (no `queueStatus`/`paid`) — surface it so the operator can see which gap months the report already shows as paid vs. still open. */
+function candidateStatusDisplay(row: Record<string, unknown>): unknown {
+  if (row.queueStatus != null) return row.queueStatus;
+  if (row.paid != null) return row.paid;
+  if (typeof row.reportPaid === "boolean") return row.reportPaid ? "reported paid" : "reported unpaid";
+  return undefined;
 }
 
 function escapeHtml(value: unknown): string {
@@ -510,7 +477,7 @@ function openFindingReviewTab(finding: ReconciliationFinding) {
       {
         title: "Payment / ledger candidates",
         html: finding.matchedPaymentCandidates?.length
-          ? `<table class="grid"><thead><tr><th>ID</th><th>Source</th><th>Month</th><th>Amount</th><th>Status</th><th>Customer</th></tr></thead><tbody>${finding.matchedPaymentCandidates.map((row, index) => `<tr class="filter-row"><td>${escapeHtml(row.id ?? index)}</td><td>${escapeHtml(row.source)}</td><td>${escapeHtml(row.month ?? String(row.dueDate ?? row.date ?? "").slice(0, 7))}</td><td>${escapeHtml(row.amount ?? row.amountAbs ?? row.amountCents)}</td><td>${escapeHtml(row.queueStatus ?? row.paid)}</td><td>${escapeHtml(row.customerId ?? row.customerNameAtSpend ?? row.customer)}</td></tr>`).join("")}</tbody></table>`
+          ? `<table class="grid"><thead><tr><th>ID</th><th>Source</th><th>Month</th><th>Amount</th><th>Status</th><th>Customer</th></tr></thead><tbody>${finding.matchedPaymentCandidates.map((row, index) => `<tr class="filter-row"><td>${escapeHtml(row.id ?? index)}</td><td>${escapeHtml(row.source)}</td><td>${escapeHtml(row.month ?? String(row.dueDate ?? row.date ?? "").slice(0, 7))}</td><td>${escapeHtml(candidateAmountDisplay(row))}</td><td>${escapeHtml(candidateStatusDisplay(row))}</td><td>${escapeHtml(row.customerId ?? row.customerNameAtSpend ?? row.customer)}</td></tr>`).join("")}</tbody></table>`
           : `<div class="empty">No payment or ledger candidates attached to this finding.</div>`,
       },
     ],
@@ -845,6 +812,91 @@ function DetailSection({
   );
 }
 
+type ComparisonFieldSpec = { label: string; reportKeys: string[]; dashboardKeys: string[] };
+
+// Report-side rows come from normalizedFindingRow() (flat, one key per
+// paymentEvidence/customerIdentity/enrollmentEvidence field); dashboard-side
+// rows are the raw customer/enrollment docs, which use several historical
+// key spellings for the same field (see currentCustomerValue() in
+// reconciliationActions.ts for the same alias list applied to action patches).
+const IDENTITY_COMPARISON_FIELDS: ComparisonFieldSpec[] = [
+  { label: "First name", reportKeys: ["firstName"], dashboardKeys: ["firstName"] },
+  { label: "Last name", reportKeys: ["lastName"], dashboardKeys: ["lastName"] },
+  { label: "Full name", reportKeys: ["fullName"], dashboardKeys: ["fullName", "name"] },
+  { label: "Date of birth", reportKeys: ["dob"], dashboardKeys: ["dob", "dateOfBirth", "birthDate"] },
+  { label: "HMIS ID", reportKeys: ["hmisId"], dashboardKeys: ["hmisId", "HMISId", "hmisClientId", "clientId"] },
+  { label: "Caseworthy ID", reportKeys: ["cwId", "caseworthyId"], dashboardKeys: ["caseworthyId", "caseWorthyId", "cwId", "CWID"] },
+];
+
+const ENROLLMENT_COMPARISON_FIELDS: ComparisonFieldSpec[] = [
+  { label: "Grant / provider", reportKeys: ["projectName", "programId"], dashboardKeys: ["grantName", "programName", "grantId"] },
+  { label: "Entry date", reportKeys: ["entryDate"], dashboardKeys: ["entryDate", "startDate", "enrolledAt"] },
+  { label: "Exit date", reportKeys: ["exitDate"], dashboardKeys: ["exitDate", "endDate", "closedAt"] },
+];
+
+function firstDefined(row: Record<string, unknown> | null | undefined, keys: string[]): unknown {
+  if (!row) return undefined;
+  for (const key of keys) {
+    const value = row[key];
+    if (value != null && value !== "") return value;
+  }
+  return undefined;
+}
+
+function comparisonValuesDiffer(a: unknown, b: unknown): boolean {
+  if (a == null || a === "" || b == null || b === "") return false;
+  return String(a).trim().toLowerCase() !== String(b).trim().toLowerCase();
+}
+
+type ComparisonRow = { label: string; report: unknown; dashboard: unknown; differs: boolean };
+
+function buildComparisonRows(
+  reportRow: Record<string, unknown> | null,
+  dashboardRow: Record<string, unknown> | null | undefined,
+  fields: ComparisonFieldSpec[],
+): ComparisonRow[] {
+  return fields
+    .map((field) => {
+      const report = firstDefined(reportRow, field.reportKeys);
+      const dashboard = firstDefined(dashboardRow, field.dashboardKeys);
+      return { label: field.label, report, dashboard, differs: comparisonValuesDiffer(report, dashboard) };
+    })
+    .filter((row) => row.report != null || row.dashboard != null);
+}
+
+function ComparisonTable({ title, rows }: { title: string; rows: ComparisonRow[] }) {
+  if (!rows.length) return null;
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
+      <div className="overflow-x-auto rounded border border-slate-200 dark:border-slate-800">
+        <table className="min-w-full text-left text-xs">
+          <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900">
+            <tr>
+              <th className="px-2 py-1">Field</th>
+              <th className="px-2 py-1">Report</th>
+              <th className="px-2 py-1">Dashboard</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.label}
+                className={`border-t border-slate-200 dark:border-slate-800 ${row.differs ? "bg-amber-50 dark:bg-amber-950/30" : ""}`}
+                title={row.differs ? "Report and dashboard disagree on this field." : undefined}
+              >
+                <td className="px-2 py-1 font-medium text-slate-500">{row.label}</td>
+                <td className="px-2 py-1">{formatValue(row.report)}</td>
+                <td className={`px-2 py-1 ${row.differs ? "font-semibold text-amber-700 dark:text-amber-300" : ""}`}>{formatValue(row.dashboard)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function FindingDetail({ finding }: { finding: ReconciliationFinding | null }) {
   if (!finding) {
     return (
@@ -875,7 +927,7 @@ function FindingDetail({ finding }: { finding: ReconciliationFinding | null }) {
           <div>{finding.sourceProfileLabel || finding.sourceProfileId || finding.recordKind}</div>
         </div>
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Match Confidence</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500" title="How confident the matching engine is that this finding's matched customer/enrollment/payment is the right one. Below ~75% usually means review before acting.">Match Confidence</div>
           <div>{Math.round(finding.confidence * 100)}%</div>
         </div>
         <div>
@@ -921,41 +973,40 @@ function FindingDetail({ finding }: { finding: ReconciliationFinding | null }) {
         )}
       </div>
       <div className="mt-4 space-y-3">
-        <DetailSection title="Matched Customer Doc" defaultOpen>
-          <KeyValueBlock
-            title="Customer fields"
-            row={finding.matchedCustomer}
-            preferred={["id", "firstName", "lastName", "fullName", "dob", "dateOfBirth", "hmisId", "HMISId", "cwId", "CWID", "caseworthyId", "caseWorthyId", "active", "status", "caseManagerId", "assignedToUid"]}
-          />
+        <DetailSection title="Report vs. Dashboard Comparison" defaultOpen>
+          <div className="space-y-3">
+            <ComparisonTable
+              title="Identity"
+              rows={buildComparisonRows(normalizedFindingRow(finding), finding.matchedCustomer, IDENTITY_COMPARISON_FIELDS)}
+            />
+            <ComparisonTable
+              title="Enrollment"
+              rows={buildComparisonRows(normalizedFindingRow(finding), finding.matchedEnrollment, ENROLLMENT_COMPARISON_FIELDS)}
+            />
+            {!finding.matchedCustomer && !finding.matchedEnrollment ? (
+              <div className="text-xs text-slate-400">No matched dashboard doc to compare against yet.</div>
+            ) : null}
+          </div>
         </DetailSection>
-        <DetailSection title="Normalized Report Row" defaultOpen>
-          <KeyValueBlock
-            title="Normalized fields"
-            row={finding.reportRecord ? {
-              sourceType: finding.reportRecord.sourceType,
-              recordKind: finding.reportRecord.recordKind,
-              sourceRowNumber: finding.reportRecord.sourceRowNumber,
-              ...finding.reportRecord.customerIdentity,
-              ...finding.reportRecord.enrollmentEvidence,
-              ...finding.reportRecord.paymentEvidence,
-            } : null}
-            preferred={["sourceType", "recordKind", "firstName", "lastName", "fullName", "dob", "hmisId", "caseworthyId", "projectName", "entryDate", "exitDate", "amount", "transactionDate", "serviceMonth", "vendor", "reference"]}
-          />
-        </DetailSection>
-        <DetailSection title="Uploaded Source Row">
-          <KeyValueBlock title="Source fields" row={finding.reportRecord?.raw} />
-        </DetailSection>
-        <DetailSection title="Matched Enrollment Doc">
-          <KeyValueBlock
-            title="Enrollment fields"
-            row={finding.matchedEnrollment}
-            preferred={["id", "customerId", "grantId", "grantName", "programId", "programName", "status", "active", "entryDate", "startDate", "exitDate", "endDate"]}
-          />
+        <DetailSection title="Raw docs (customer / enrollment / source row)">
+          <div className="space-y-3">
+            <KeyValueBlock
+              title="Matched customer doc"
+              row={finding.matchedCustomer}
+              preferred={["id", "firstName", "lastName", "fullName", "dob", "dateOfBirth", "hmisId", "HMISId", "cwId", "CWID", "caseworthyId", "caseWorthyId", "active", "status", "caseManagerId", "assignedToUid"]}
+            />
+            <KeyValueBlock
+              title="Matched enrollment doc"
+              row={finding.matchedEnrollment}
+              preferred={["id", "customerId", "grantId", "grantName", "programId", "programName", "status", "active", "entryDate", "startDate", "exitDate", "endDate"]}
+            />
+            <KeyValueBlock title="Uploaded source row" row={finding.reportRecord?.raw} />
+          </div>
         </DetailSection>
       </div>
       {finding.matchedPaymentCandidates?.length ? (
         <div className="mt-4">
-          <DetailSection title="Matched Payment / Ledger Candidates" defaultOpen>
+          <DetailSection title="Matched Payment / Ledger Candidates">
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-xs">
                 <thead className="text-slate-500">
@@ -974,8 +1025,8 @@ function FindingDetail({ finding }: { finding: ReconciliationFinding | null }) {
                       <td className="px-2 py-1">{formatValue(row.id)}</td>
                       <td className="px-2 py-1">{formatValue(row.source)}</td>
                       <td className="px-2 py-1">{formatValue(row.month ?? String(row.dueDate ?? row.date ?? "").slice(0, 7))}</td>
-                      <td className="px-2 py-1">{formatValue(row.amount ?? row.amountAbs ?? row.amountCents)}</td>
-                      <td className="px-2 py-1">{formatValue(row.queueStatus ?? row.paid)}</td>
+                      <td className="px-2 py-1">{formatValue(candidateAmountDisplay(row))}</td>
+                      <td className="px-2 py-1">{formatValue(candidateStatusDisplay(row))}</td>
                       <td className="px-2 py-1">{formatValue(row.customerId ?? row.customerNameAtSpend ?? row.customer)}</td>
                     </tr>
                   ))}
@@ -1144,10 +1195,10 @@ function UploadOverviewPanel({
 }
 
 function buildQueueRows(findings: ReconciliationFinding[]): QueueRow[] {
-  return findings.flatMap((finding) => {
+  return findings.flatMap((finding): QueueRow[] => {
     const actions = buildActionPreviews(finding);
     if (actions.length) {
-      return actions.map((action) => ({
+      return actions.map((action): QueueRow => ({
         id: action.id,
         finding,
         action,
@@ -1175,6 +1226,7 @@ function buildQueueRows(findings: ReconciliationFinding[]): QueueRow[] {
 }
 
 function ActionQueuePanel({
+  kind,
   selectedFindings,
   customers,
   grants,
@@ -1183,7 +1235,9 @@ function ActionQueuePanel({
   onApplyCustomerPatches,
   onCreateCustomers,
   onBulkEnroll,
+  onBulkApplyPaymentActions,
 }: {
+  kind: ReconciliationToolKind;
   selectedFindings: ReconciliationFinding[];
   customers: Array<Record<string, unknown>>;
   grants: Array<Record<string, unknown>>;
@@ -1192,8 +1246,13 @@ function ActionQueuePanel({
   onApplyCustomerPatches: () => void;
   onCreateCustomers: () => void;
   onBulkEnroll: () => void;
+  onBulkApplyPaymentActions: () => void;
 }) {
   const queueRows = React.useMemo(() => buildQueueRows(selectedFindings), [selectedFindings]);
+  const paymentActionCount = React.useMemo(
+    () => queueRows.filter((row) => !row.blocked && row.action && BULK_PAYMENT_ACTION_KINDS.has(row.action.kind)).length,
+    [queueRows],
+  );
   const hmisPatchRows = React.useMemo(() => buildBulkHmisCustomerPatchRows(selectedFindings), [selectedFindings]);
   const importRows = React.useMemo(() => buildBulkCustomerImportRows(selectedFindings, customers), [customers, selectedFindings]);
   const enrollmentRows = React.useMemo(
@@ -1231,33 +1290,50 @@ function ActionQueuePanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={!enrollmentRows.length}
-            title={enrollmentRows.length ? "Open enrollment create/date review for selected enrollment findings." : "No selected findings have enrollment create or date update actions."}
-            onClick={onBulkEnroll}
-          >
-            Bulk enroll{enrollmentEligibleCount ? ` (${enrollmentEligibleCount})` : ""}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={!importRows.length}
-            title={importRows.length ? "Open customer create review for unmatched report rows." : "No selected findings have unmatched customer rows."}
-            onClick={onCreateCustomers}
-          >
-            Create customers{importEligibleCount ? ` (${importEligibleCount})` : ""}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={!hmisEligibleCount}
-            title={hmisEligibleCount ? "Open HMIS ID customer patch review." : "No selected findings have eligible HMIS ID customer patches."}
-            onClick={onApplyCustomerPatches}
-          >
-            Push HMIS IDs{hmisEligibleCount ? ` (${hmisEligibleCount})` : ""}
-          </button>
+          {kind === "enrollment" ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={!enrollmentRows.length}
+              title={enrollmentRows.length ? "Open enrollment create/date review for selected enrollment findings." : "No selected findings have enrollment create or date update actions."}
+              onClick={onBulkEnroll}
+            >
+              Bulk enroll{enrollmentEligibleCount ? ` (${enrollmentEligibleCount})` : ""}
+            </button>
+          ) : null}
+          {kind === "identity" ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!importRows.length}
+                title={importRows.length ? "Open customer create review for unmatched report rows." : "No selected findings have unmatched customer rows."}
+                onClick={onCreateCustomers}
+              >
+                Create customers{importEligibleCount ? ` (${importEligibleCount})` : ""}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!hmisEligibleCount}
+                title={hmisEligibleCount ? "Open HMIS ID customer patch review." : "No selected findings have eligible HMIS ID customer patches."}
+                onClick={onApplyCustomerPatches}
+              >
+                Push HMIS IDs{hmisEligibleCount ? ` (${hmisEligibleCount})` : ""}
+              </button>
+            </>
+          ) : null}
+          {kind === "payment" ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={!paymentActionCount}
+              title={paymentActionCount ? "Open bulk apply review for payment/schedule actions (post to ledger, extend schedule, patch/void queue)." : "No selected findings have a ready payment/schedule action."}
+              onClick={onBulkApplyPaymentActions}
+            >
+              Bulk apply payments{paymentActionCount ? ` (${paymentActionCount})` : ""}
+            </button>
+          ) : null}
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClear}>Clear</button>
         </div>
       </div>
@@ -1898,7 +1974,6 @@ function CompareTable({
   mode,
   enrollmentGranularity,
   showMissingSystemEnrollments,
-  onModeChange,
   onEnrollmentGranularityChange,
   onShowMissingSystemEnrollmentsChange,
 }: {
@@ -1908,7 +1983,6 @@ function CompareTable({
   mode: CompareMode;
   enrollmentGranularity: EnrollmentCompareGranularity;
   showMissingSystemEnrollments: boolean;
-  onModeChange: (mode: CompareMode) => void;
   onEnrollmentGranularityChange: (value: EnrollmentCompareGranularity) => void;
   onShowMissingSystemEnrollmentsChange: (value: boolean) => void;
 }) {
@@ -2069,11 +2143,6 @@ function CompareTable({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className="input h-9 px-2 py-1 text-sm leading-5" value={mode} onChange={(event) => onModeChange(event.currentTarget.value as CompareMode)}>
-            <option value="payments">Payments</option>
-            <option value="enrollments">Enrollments</option>
-            <option value="customer_exits">Customer exits</option>
-          </select>
           {mode === "enrollments" ? (
             <>
               <select className="input h-9 px-2 py-1 text-sm leading-5" value={enrollmentGranularity} onChange={(event) => onEnrollmentGranularityChange(event.currentTarget.value as EnrollmentCompareGranularity)}>
@@ -2314,7 +2383,6 @@ function CompareWorkspaceModal({
   mode,
   enrollmentGranularity,
   showMissingSystemEnrollments,
-  onModeChange,
   onEnrollmentGranularityChange,
   onShowMissingSystemEnrollmentsChange,
 }: {
@@ -2326,7 +2394,6 @@ function CompareWorkspaceModal({
   mode: CompareMode;
   enrollmentGranularity: EnrollmentCompareGranularity;
   showMissingSystemEnrollments: boolean;
-  onModeChange: (mode: CompareMode) => void;
   onEnrollmentGranularityChange: (value: EnrollmentCompareGranularity) => void;
   onShowMissingSystemEnrollmentsChange: (value: boolean) => void;
 }) {
@@ -2373,7 +2440,6 @@ function CompareWorkspaceModal({
             mode={mode}
             enrollmentGranularity={enrollmentGranularity}
             showMissingSystemEnrollments={showMissingSystemEnrollments}
-            onModeChange={onModeChange}
             onEnrollmentGranularityChange={onEnrollmentGranularityChange}
             onShowMissingSystemEnrollmentsChange={onShowMissingSystemEnrollmentsChange}
           />
@@ -2417,6 +2483,14 @@ function rowGrantId(row: Record<string, unknown>) {
   return textValue(row.grantId ?? row.grantID ?? row.programId ?? row.projectId);
 }
 
+// TODO(multi-org): every fetch here (useDashboardSharedData, the
+// month-scoped payment queue/ledger hooks below) implicitly scopes to the
+// caller's own org. paymentQueueList/ledgerList's backend already accepts a
+// dev/super_dev explicit orgId override (see functions/src/features/
+// paymentQueue/http.ts) but nothing in this file threads an org selection
+// into that param, and customersList/enrollmentsList have no override at
+// all yet (see the TODOs there). One org in production today; this is
+// where an "Org" control in DatabaseFilterPanel would need to plug in.
 function useReviewForTool(kind: ReconciliationToolKind, filterState: ReconciliationToolFilterState) {
   const config = TOOL_CONFIG[kind];
   const workspace = useReconciliationWorkspace();
@@ -2543,6 +2617,132 @@ function useReviewForTool(kind: ReconciliationToolKind, filterState: Reconciliat
   };
 }
 
+// ─── Admin audit: duplicate enrollments & orphaned ledger/queue rows ────────
+//
+// Standalone, read-only Phase 3 scan (see docs/active-projects.local/
+// report-reconciliation-workbench/schedule-drift-reconciliation-tool.md §6).
+// No uploaded report required — pools every customerEnrollments doc for the
+// org (any status, deleted included) and flags: (a) two overlapping
+// enrollments for the same customer+grant (the Weideman duplicate-enrollment
+// bug), and (b) ledger/paymentQueue rows still pointing at a deleted/closed
+// enrollment that were never reversed or voided.
+
+function customerEnrollmentHref(customerId: string, enrollmentId?: string | null) {
+  return enrollmentId ? `/customers/${customerId}?enrollmentId=${encodeURIComponent(enrollmentId)}` : `/customers/${customerId}`;
+}
+
+function ReconciliationAuditPanel() {
+  const { profile } = useAuth();
+  const isAdmin = isAdminLike(profile);
+  const scan = useReconciliationAuditScan();
+  const [result, setResult] = React.useState<ReconciliationAuditScanResp | null>(null);
+
+  if (!isAdmin) return null;
+
+  async function run() {
+    try {
+      const res = await scan.mutateAsync({});
+      setResult(res);
+      const total = res.duplicateFindings.length + res.orphanFindings.length;
+      toast(
+        total
+          ? `Found ${res.duplicateFindings.length} duplicate enrollment group(s) and ${res.orphanFindings.length} orphaned row(s).`
+          : "No duplicate enrollments or orphaned ledger/queue rows found.",
+        { type: total ? "warning" : "success" },
+      );
+    } catch {
+      toast("Audit scan failed.", { type: "error" });
+    }
+  }
+
+  return (
+    <details className="rounded-xl border border-slate-200 bg-white px-5 py-4 dark:border-slate-700 dark:bg-slate-900">
+      <summary className="cursor-pointer select-none text-sm font-medium text-slate-700 dark:text-slate-300">
+        Admin audit · duplicate enrollments &amp; orphaned ledger/queue rows
+      </summary>
+      <div className="mt-3 space-y-3 text-xs text-slate-600 dark:text-slate-400">
+        <p>
+          Org-wide, read-only scan — no uploaded report needed. Finds customers with two overlapping
+          enrollments on the same grant (a known data-integrity bug: a soft-deleted enrollment left live
+          payment/ledger/queue rows behind it) and ledger/paymentQueue rows still pointing at a deleted or
+          closed enrollment that were never reversed or voided.
+        </p>
+        <button type="button" className="btn btn-xs btn-primary" disabled={scan.isPending} onClick={() => void run()}>
+          {scan.isPending ? "Scanning…" : "Run audit scan"}
+        </button>
+        {result && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 tabular-nums dark:border-slate-700 dark:bg-slate-800/50">
+              Scanned {result.enrollmentsScanned} enrollment(s) · {result.duplicateFindings.length} duplicate group(s) ·{" "}
+              {result.orphanFindings.length} orphaned row(s)
+            </div>
+
+            {result.duplicateFindings.length > 0 && (
+              <div>
+                <div className="mb-1 font-semibold text-slate-700 dark:text-slate-300">Duplicate enrollment schedules</div>
+                <div className="space-y-2">
+                  {result.duplicateFindings.map((finding, index) => (
+                    <div key={`${finding.customerId}-${finding.grantId}-${index}`} className="rounded border border-rose-200 bg-rose-50 p-2 dark:border-rose-900 dark:bg-rose-950/40">
+                      <div className="font-medium text-slate-800 dark:text-slate-100">
+                        {finding.customerName || finding.customerId} · {finding.grantName || finding.grantId}
+                      </div>
+                      <div className="mt-1 overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead className="text-slate-500">
+                            <tr><th className="pr-3">Enrollment</th><th className="pr-3">Status</th><th className="pr-3">Start</th><th className="pr-3">End</th><th className="pr-3">Paid</th><th>Pending</th></tr>
+                          </thead>
+                          <tbody>
+                            {finding.enrollments.map((enrollment) => (
+                              <tr key={enrollment.id}>
+                                <td className="pr-3">
+                                  <a className="underline" href={customerEnrollmentHref(finding.customerId, enrollment.id)} target="_blank" rel="noreferrer">
+                                    {enrollment.id.slice(0, 8)}
+                                  </a>
+                                </td>
+                                <td className="pr-3">{enrollment.status || "-"}</td>
+                                <td className="pr-3">{enrollment.startDate || "-"}</td>
+                                <td className="pr-3">{enrollment.endDate || "open"}</td>
+                                <td className="pr-3">{enrollment.paidCount} (${enrollment.paidTotal.toFixed(2)})</td>
+                                <td>{enrollment.pendingQueueCount}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.orphanFindings.length > 0 && (
+              <div>
+                <div className="mb-1 font-semibold text-slate-700 dark:text-slate-300">Orphaned ledger / queue rows</div>
+                <div className="space-y-1">
+                  {result.orphanFindings.map((finding, index) => (
+                    <div key={`${finding.enrollmentId}-${finding.source}-${index}`} className="rounded border border-amber-200 bg-amber-50 p-2 dark:border-amber-900 dark:bg-amber-950/40">
+                      {finding.customerId ? (
+                        <a className="underline" href={customerEnrollmentHref(finding.customerId, finding.enrollmentId)} target="_blank" rel="noreferrer">
+                          {finding.customerName || finding.customerId}
+                        </a>
+                      ) : (
+                        <span>{finding.enrollmentId}</span>
+                      )}
+                      {" "}· {finding.grantName || finding.grantId || "unknown grant"} · {finding.source}
+                      {finding.source === "ledger" ? ` · net $${(finding.netAmount ?? 0).toFixed(2)} unreversed` : " · still pending"}
+                      {" "}({finding.enrollmentStatus || "unknown"} enrollment, {finding.rowIds.length} row{finding.rowIds.length === 1 ? "" : "s"})
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function ReconciliationToolMain({
   kind,
   filterState,
@@ -2563,12 +2763,16 @@ function ReconciliationToolMain({
   const [bulkCustomerPatchOpen, setBulkCustomerPatchOpen] = React.useState(false);
   const [bulkCustomerImportOpen, setBulkCustomerImportOpen] = React.useState(false);
   const [bulkEnrollmentOpen, setBulkEnrollmentOpen] = React.useState(false);
+  const [bulkPaymentApplyOpen, setBulkPaymentApplyOpen] = React.useState(false);
   const [compareOpen, setCompareOpen] = React.useState(false);
   const [refreshingCollection, setRefreshingCollection] = React.useState<DatabaseCollectionKey | null>(null);
   const [selectedFindingIds, setSelectedFindingIds] = React.useState<Set<string>>(new Set());
   const [findingSearch, setFindingSearch] = React.useState("");
   const [rollupGrantId, setRollupGrantId] = React.useState("");
-  const [compareMode, setCompareMode] = React.useState<CompareMode>(() => defaultCompareMode(kind));
+  // Each tool only ever reviews one compare mode (proven by its own
+  // findingKinds), so this is a fixed value per tool, not user-editable
+  // state — no dropdown to switch away from it.
+  const compareMode = defaultCompareMode(kind);
   const [enrollmentGranularity, setEnrollmentGranularity] = React.useState<EnrollmentCompareGranularity>("enrollment");
   const [showMissingSystemEnrollments, setShowMissingSystemEnrollments] = React.useState(true);
   const exportRows = React.useMemo(
@@ -2602,9 +2806,6 @@ function ReconciliationToolMain({
     [selection?.findingId, visibleFindings],
   );
 
-  React.useEffect(() => {
-    setCompareMode(defaultCompareMode(kind));
-  }, [kind]);
 
   React.useEffect(() => {
     if (visibleSelectedFinding && selection?.findingId !== visibleSelectedFinding.id && !visibleFindings.some((finding) => finding.id === selection?.findingId)) {
@@ -2683,7 +2884,7 @@ function ReconciliationToolMain({
   }, [queryClient]);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="mx-auto w-full max-w-[1800px] space-y-4 px-2">
       <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2698,8 +2899,14 @@ function ReconciliationToolMain({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCompareOpen(true)} disabled={!relevantPackets.length}>
-              Open compare
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setCompareOpen(true)}
+              disabled={!relevantPackets.length}
+              title="Dense side-by-side sheet view of every matched/unmatched row across sources."
+            >
+              Open compare sheet
             </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExportOpen(true)} disabled={!filteredFindings.length}>
               Export
@@ -2707,6 +2914,8 @@ function ReconciliationToolMain({
           </div>
         </div>
       </div>
+
+      {kind === "enrollment" && <ReconciliationAuditPanel />}
 
       <ReportUploadPanel
         uploads={workspace.uploads}
@@ -2760,27 +2969,32 @@ function ReconciliationToolMain({
       <ReviewFilterPanel findings={toolFindings} value={filterState} onChange={onFilterChange} />
 
       {kind === "payment" ? (
-        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Budget rollup debug</div>
-              <div className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">Use this while reconciling payment reports to find missing line-item or cycle assignment.</div>
+        <details className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
+          <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Preview budget impact for a grant
+          </summary>
+          <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-slate-600 dark:text-slate-300" title="Shows how the selected grant's budget line items currently roll up — use it to sanity-check a pending schedule/amount change before applying it, not as a standing grant browser.">
+                See how a schedule/amount change would land on a grant's line-item budget before applying it.
+              </div>
+              <select
+                className="input h-9 min-w-64 text-sm"
+                value={rollupGrantId}
+                onChange={(event) => setRollupGrantId(event.currentTarget.value)}
+              >
+                {grantOptions.map((grant) => (
+                  <option key={grant.id || grant.name} value={grant.id}>{grant.name || grant.id}</option>
+                ))}
+              </select>
             </div>
-            <select
-              className="input h-9 min-w-64 text-sm"
-              value={rollupGrantId}
-              onChange={(event) => setRollupGrantId(event.currentTarget.value)}
-            >
-              {grantOptions.map((grant) => (
-                <option key={grant.id || grant.name} value={grant.id}>{grant.name || grant.id}</option>
-              ))}
-            </select>
+            <BudgetRollupPreviewPanel grantId={rollupGrantId || null} compact />
           </div>
-          <BudgetRollupPreviewPanel grantId={rollupGrantId || null} compact />
-        </div>
+        </details>
       ) : null}
 
       <ActionQueuePanel
+        kind={kind}
         selectedFindings={selectedFindings}
         customers={database.customers}
         grants={database.grants}
@@ -2789,6 +3003,7 @@ function ReconciliationToolMain({
         onApplyCustomerPatches={() => setBulkCustomerPatchOpen(true)}
         onCreateCustomers={() => setBulkCustomerImportOpen(true)}
         onBulkEnroll={() => setBulkEnrollmentOpen(true)}
+        onBulkApplyPaymentActions={() => setBulkPaymentApplyOpen(true)}
       />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_1fr]">
@@ -2834,6 +3049,13 @@ function ReconciliationToolMain({
         onApplied={() => setSelectedFindingIds(new Set())}
       />
 
+      <ReconciliationBulkApplyModal
+        isOpen={bulkPaymentApplyOpen}
+        findings={selectedFindings}
+        onClose={() => setBulkPaymentApplyOpen(false)}
+        onApplied={() => setSelectedFindingIds(new Set())}
+      />
+
       <ReconciliationBulkEnrollmentModal
         isOpen={bulkEnrollmentOpen}
         findings={selectedFindings}
@@ -2852,7 +3074,6 @@ function ReconciliationToolMain({
         mode={compareMode}
         enrollmentGranularity={enrollmentGranularity}
         showMissingSystemEnrollments={showMissingSystemEnrollments}
-        onModeChange={setCompareMode}
         onEnrollmentGranularityChange={setEnrollmentGranularity}
         onShowMissingSystemEnrollmentsChange={setShowMissingSystemEnrollments}
       />

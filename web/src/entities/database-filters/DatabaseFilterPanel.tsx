@@ -8,6 +8,7 @@ import {
   type DatabaseFilterConfig,
   type TriState,
 } from "./databaseFilters";
+import GrantSelect from "@entities/selectors/GrantSelect";
 
 type Props = {
   value: DatabaseFilterConfig;
@@ -96,6 +97,22 @@ function SearchField({ label, value, onChange, placeholder = "Search" }: { label
     <label className="text-xs">
       <span className="mb-1 block font-medium text-slate-500">{label}</span>
       <input className="input h-9 w-full px-2 py-1 text-sm leading-5" value={value} placeholder={placeholder} onChange={(event) => onChange(event.currentTarget.value)} />
+    </label>
+  );
+}
+
+/** `grantId` filters are an exact-id match against the dashboard doc (see databaseFilters.ts), so a raw text box meant asking the user to already know and paste a Firestore doc id — a real grant picker replaces that guesswork. */
+function GrantIdField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="text-xs">
+      <span className="mb-1 block font-medium text-slate-500">{label}</span>
+      <GrantSelect
+        value={value || null}
+        onChange={(grantId) => onChange(grantId ?? "")}
+        mode="grant"
+        placeholderLabel="Any grant"
+        className="h-9 w-full text-sm"
+      />
     </label>
   );
 }
@@ -226,7 +243,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                       <option value="closed">Inactive/exited only</option>
                     </select>
                   </label>
-                  <SearchField label="Grant ID" value={value.enrollments.grantId} placeholder="Exact grant ID" onChange={(grantId) => patch("enrollments", { grantId })} />
+                  <GrantIdField label="Grant" value={value.enrollments.grantId} onChange={(grantId) => patch("enrollments", { grantId })} />
                   <TriStateSelect label="Exit date" value={value.enrollments.exitDate} onChange={(exitDate) => patch("enrollments", { exitDate })} />
                   <TriStateSelect label="Scheduled payments" value={value.enrollments.hasScheduledPayments} onChange={(hasScheduledPayments) => patch("enrollments", { hasScheduledPayments })} />
                   <MonthRangeFields
@@ -321,7 +338,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                       <option value="system">System</option>
                     </select>
                   </label>
-                  <SearchField label="Grant ID" value={value.ledger.grantId} placeholder="Exact grant ID" onChange={(grantId) => patch("ledger", { grantId })} />
+                  <GrantIdField label="Grant" value={value.ledger.grantId} onChange={(grantId) => patch("ledger", { grantId })} />
                   <label className="text-xs">
                     <span className="mb-1 block font-medium text-slate-500">Direction</span>
                     <select className="input h-9 w-full px-2 py-1 text-sm leading-5" value={value.ledger.direction} onChange={(event) => patch("ledger", { direction: event.currentTarget.value as DatabaseFilterConfig["ledger"]["direction"] })}>
