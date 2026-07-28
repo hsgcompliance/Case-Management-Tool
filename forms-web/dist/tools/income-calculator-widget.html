@@ -10,15 +10,15 @@
     *{box-sizing:border-box}body{margin:0;padding:14px;color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f8f6}.widget{max-width:1040px;margin:auto;padding:20px;background:#fff;border:1px solid var(--line);border-top:5px solid var(--gold);border-radius:14px}
     .head,.actions,.output-row,.stub-head,.ami-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px}.head h1{margin:0;font-size:22px}.head p{margin:3px 0 0;color:var(--muted);font-size:12px}.badge{padding:4px 7px;color:#6f4b12;background:var(--gold-light);border-radius:6px;font-size:10px;font-weight:800}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}.grid.two{grid-template-columns:1fr 1fr}.full{grid-column:1/-1}label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700}label small{color:var(--muted);font-weight:500}select,input,textarea{width:100%;min-height:40px;padding:7px;border:1px solid #b8c6bf;border-radius:8px;background:#fff;font:inherit}textarea{resize:vertical}
-    .method-picker,.period{margin-top:10px;padding:10px 12px;color:#5f5546;background:var(--gold-light);border-radius:8px;font-size:12px}.method-picker{display:grid;grid-template-columns:minmax(220px,320px) 1fr;align-items:end;gap:12px}.method-picker p{margin:0 0 4px}.period{padding:8px 10px}.stub-section,.hourly-section{margin-top:14px;padding:12px;background:#f8faf9;border:1px solid var(--line);border-radius:10px}.hourly-section{background:#fffaf0;border-color:#ead9b7}.stub-head strong{font-size:13px}.stub-head span{color:var(--muted);font-size:11px}
-    .table-wrap{overflow-x:auto}table{width:100%;min-width:980px;margin-top:8px;border-collapse:collapse}th{color:var(--muted);font-size:9px;letter-spacing:.04em;text-align:left;text-transform:uppercase}th,td{padding:4px}td input,td select{min-width:108px}.include-cell{width:54px;text-align:center}.include-cell input{width:18px;min-width:18px;min-height:18px}.note-input{min-width:145px}.remove{padding:4px 8px;color:var(--red);background:var(--red-light);border-color:#efd0cd}
+    .method-picker,.period{margin-top:10px;padding:10px 12px;color:#5f5546;background:var(--gold-light);border:0;border-radius:8px;font-size:12px}.method-picker legend{padding:0;font-size:12px;font-weight:800}.method-picker p{margin:7px 0 0}.method-toggle{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px;padding:4px;background:#fff;border:1px solid #ead9b7;border-radius:10px}.method-toggle label{display:block;cursor:pointer}.method-toggle input{position:absolute;width:1px;height:1px;opacity:0}.method-toggle span{display:flex;min-height:38px;align-items:center;justify-content:center;padding:7px 12px;border-radius:7px;color:#6f4b12;font-weight:800}.method-toggle input:checked+span{color:#fff;background:#7b5314;box-shadow:0 2px 7px rgb(111 75 18 / 22%)}.method-toggle input:focus-visible+span{outline:3px solid #d9b875;outline-offset:2px}.method-toggle input:disabled+span{cursor:not-allowed;opacity:.45}.period{padding:8px 10px}.stub-section,.hourly-section{margin-top:14px;padding:12px;background:#f8faf9;border:1px solid var(--line);border-radius:10px}.hourly-section{background:#fffaf0;border-color:#ead9b7}.stub-head strong,.stub-head span{display:block}.stub-head span{margin-top:2px;color:var(--muted);font-size:11px}
+    .table-wrap{overflow-x:auto}table{width:100%;min-width:640px;margin-top:8px;border-collapse:collapse}table.show-doc-columns{min-width:850px}th{color:var(--muted);font-size:9px;letter-spacing:.04em;text-align:left;text-transform:uppercase}th,td{padding:3px 2px}td input,td select{min-width:88px;padding:5px}.include-cell{width:44px;text-align:center}.include-cell input{width:18px;min-width:18px;min-height:18px}.note-input{min-width:115px}.doc-column{display:none}table.show-doc-columns .doc-column{display:table-cell}.remove{padding:4px 7px;color:var(--red);background:var(--red-light);border-color:#efd0cd}
     button{padding:7px 10px;color:#6f4b12;background:var(--gold-light);border:1px solid #ead9b7;border-radius:7px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.add{margin-top:8px}.actions{justify-content:flex-start;margin-top:12px;flex-wrap:wrap}
     .results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}.output{padding:12px;background:#f7faf8;border:1px solid var(--line);border-radius:9px}.output.primary{color:#fff;background:var(--green);border-color:var(--green)}.output span,.output small{display:block;color:var(--muted);font-size:10px}.output.primary span,.output.primary small{color:#cce5d9}.output strong{display:block;margin:3px 0;font-size:21px}.output-row strong{font-size:30px}.secondary-results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
     .formula-card{margin-top:8px;padding:10px 12px;color:#4f493d;background:#fffaf0;border:1px solid #ead9b7;border-radius:8px;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}.warnings{margin-top:10px}.warning{margin:5px 0;padding:8px 10px;color:#74480a;background:var(--gold-light);border-left:4px solid var(--gold);border-radius:6px;font-size:11px}.warning.strong{color:#7d2d27;background:var(--red-light);border-color:var(--red)}
     .ami-section{margin-top:14px;padding:12px;background:#faf9fc;border:1px solid #ddd6eb;border-radius:10px}.ami-toggle{flex-direction:row;justify-content:flex-start;color:#4e4074;font-weight:800}.ami-toggle input{width:18px;min-height:18px}.ami-fields[hidden]{display:none}.ami-results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.ami-results div{padding:9px;background:#fff;border:1px solid #ddd6eb;border-radius:8px}.ami-results span,.ami-results small{display:block;color:var(--muted);font-size:10px}.ami-results strong{display:block;margin:2px 0;font-size:18px}.pass{color:var(--green)}.fail{color:var(--red)}
-    details{margin-top:14px;border-top:1px solid var(--line)}summary{padding-top:12px;color:#6f4b12;font-weight:800;cursor:pointer}.details{padding-top:8px;color:#46534c;font-size:12px}.details ul{padding-left:18px}.payload{margin-top:10px;padding:8px;color:var(--muted);background:#f7faf8;border-radius:7px;font:10px ui-monospace,monospace;overflow-wrap:anywhere}
+    details{margin-top:14px;border-top:1px solid var(--line)}summary{padding-top:12px;color:#6f4b12;font-weight:800;cursor:pointer}.options-panel{padding:0 12px 12px;background:#fbfcfb;border:1px solid var(--line);border-radius:10px}.options-panel summary{padding:12px 0}.summary-help{display:block;margin-top:2px;color:var(--muted);font-size:11px;font-weight:500}.details{padding-top:8px;color:#46534c;font-size:12px}.details ul{padding-left:18px}.payload{margin-top:10px;padding:8px;color:var(--muted);background:#f7faf8;border-radius:7px;font:10px ui-monospace,monospace;overflow-wrap:anywhere}
     [hidden]{display:none!important}.inline-check{flex-direction:row;align-items:center;justify-content:flex-start;margin-top:12px}.inline-check input{width:18px;min-height:18px}.hourly-note{margin:8px 0 0;color:var(--muted);font-size:11px}
-    @media(max-width:760px){.method-picker,.grid,.grid.two,.results,.secondary-results,.ami-results{grid-template-columns:1fr}.full{grid-column:auto}.widget{padding:14px}}@media print{body{padding:0;background:#fff}.widget{border:0}.no-print{display:none!important}}
+    @media(max-width:760px){.grid,.grid.two,.results,.secondary-results,.ami-results{grid-template-columns:1fr}.full{grid-column:auto}.widget{padding:14px}}@media(max-width:540px){.method-toggle{grid-template-columns:1fr}table{min-width:600px}}@media print{body{padding:0;background:#fff}.widget{border:0}.no-print{display:none!important}}
   </style>
 </head>
 <body>
@@ -28,28 +28,40 @@
       <span class="badge">INCOME</span>
     </header>
 
-    <section class="method-picker">
-      <label>Calculation method<select id="calculationMode"><option value="paystubs">Representative paystubs</option><option value="hourly">Hourly work schedule</option></select></label>
-      <p id="methodHelp">Average included gross checks and annualize them using the selected pay frequency.</p>
-    </section>
+    <fieldset class="method-picker">
+      <legend>Calculation method</legend>
+      <div class="method-toggle" role="radiogroup" aria-label="Calculation method">
+        <label><input type="radio" name="calculationMode" value="paystubs" checked><span>Use paystubs</span></label>
+        <label><input type="radio" name="calculationMode" value="hourly"><span>Use hourly schedule</span></label>
+      </div>
+      <p id="methodHelp">Average representative gross checks using the selected pay frequency.</p>
+    </fieldset>
 
     <div class="grid">
-      <label>Household member<input id="person" type="text" maxlength="60" placeholder="Name or initials"></label>
-      <label>Employer / income source<input id="employer" type="text" maxlength="80" placeholder="Employer"></label>
-      <label class="paystub-only">Pay frequency<select id="frequency"><option value="weekly">Weekly</option><option value="biweekly" selected>Bi-weekly</option><option value="semimonthly">Semi-monthly</option><option value="monthly">Monthly</option></select></label>
-      <label class="paystub-only">30-day income basis<select id="basis"><option value="annualized">Annualized 30-day estimate</option><option value="actualReceived">Actual received in prior 30 days</option></select></label>
-      <label>Calculation as-of date<input id="asOf" type="date"></label>
-      <label>Other projected monthly income <small>optional</small><input id="otherMonthly" type="number" min="0" step=".01" placeholder="0.00"></label>
-      <label class="paystub-only">Other income received in prior 30 days <small>optional</small><input id="otherActual30" type="number" min="0" step=".01" placeholder="0.00"></label>
-      <label>Prepared by <small>optional</small><input id="preparedBy" type="text" maxlength="60" placeholder="Staff name or initials"></label>
+      <label class="paystub-only">Pay frequency <small>How often the person is normally paid.</small><select id="frequency"><option value="weekly">Weekly</option><option value="biweekly" selected>Bi-weekly</option><option value="semimonthly">Semi-monthly</option><option value="monthly">Monthly</option></select></label>
+      <label class="paystub-only">30-day estimate method <small>Choose projected income or checks actually received.</small><select id="basis"><option value="annualized">Projected from representative paystubs</option><option value="actualReceived">Actually received in the prior 30 days</option></select></label>
+      <label>Calculation as-of date <small>Sets the end of the 30-day calculation window.</small><input id="asOf" type="date"></label>
     </div>
     <div id="period" class="period">Choose an as-of date</div>
 
+    <details id="documentationOptions" class="options-panel">
+      <summary>Additional income and documentation options <span class="summary-help">Optional fields for other income, report labels, paystub notes, and calculation notes.</span></summary>
+      <div class="grid">
+        <label>Household member <small>Optional — used only to label exported documentation.</small><input id="person" type="text" maxlength="60" placeholder="Name or initials"></label>
+        <label>Employer or income source <small>Optional — used only to label exported documentation.</small><input id="employer" type="text" maxlength="80" placeholder="Employer or source"></label>
+        <label>Other projected monthly income <small>Optional — added to projected monthly and annual income.</small><input id="otherMonthly" type="number" min="0" step=".01" placeholder="0.00"></label>
+        <label class="paystub-only">Other income actually received <small>Optional — added only to the actual prior-30-day method.</small><input id="otherActual30" type="number" min="0" step=".01" placeholder="0.00"></label>
+        <label>Prepared by <small>Optional — appears only in exported documentation.</small><input id="preparedBy" type="text" maxlength="60" placeholder="Staff name or initials"></label>
+        <label class="inline-check paystub-only"><input id="showPaystubDetails" type="checkbox"> Show optional classification and audit-note columns</label>
+        <label class="full">Calculation notes <small>Optional — explain employment changes, excluded checks, or program-specific decisions.</small><textarea id="calculationNotes" rows="3" maxlength="600" placeholder="Add documentation notes if needed."></textarea></label>
+      </div>
+    </details>
+
     <section id="paystubSection" class="stub-section">
-      <div class="stub-head"><strong>Paystub evidence</strong><span id="coverage">Enter available paystubs</span></div>
+      <div class="stub-head"><strong>Paystub evidence</strong><span>Enter representative gross-pay amounts and dates. Classification and notes are available under Additional options.</span><span id="coverage">Enter available paystubs</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Use</th><th>Work start</th><th>Work end</th><th>Pay date</th><th>Gross pay</th><th>Classification</th><th>Audit note</th><th class="no-print"></th></tr></thead>
+          <thead><tr><th>Use</th><th>Work start</th><th>Work end</th><th>Pay date</th><th>Gross pay</th><th class="doc-column">Classification</th><th class="doc-column">Audit note</th><th class="no-print"></th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
@@ -59,15 +71,15 @@
     <section id="hourlySection" class="hourly-section" hidden>
       <div class="stub-head"><strong>Hourly employment schedule</strong><span>Uses 52 weeks ÷ 12 months for the average-month estimate</span></div>
       <div class="grid">
-        <label>Employment start date<input id="employmentStart" type="date"></label>
-        <label>Hourly wage<input id="hourlyWage" type="number" min="0" step=".01" inputmode="decimal" placeholder="0.00"></label>
-        <label>Usual hours per week<input id="hoursPerWeek" type="number" min="0" max="168" step=".01" inputmode="decimal" placeholder="40"></label>
+        <label>Employment start date <small>Days before this date are not counted.</small><input id="employmentStart" type="date"></label>
+        <label>Hourly wage <small>Gross hourly rate before deductions.</small><input id="hourlyWage" type="number" min="0" step=".01" inputmode="decimal" placeholder="0.00"></label>
+        <label>Usual hours per week <small>Expected weekly hours under the normal schedule.</small><input id="hoursPerWeek" type="number" min="0" max="168" step=".01" inputmode="decimal" placeholder="40"></label>
       </div>
       <label class="inline-check"><input id="hasReducedHours" type="checkbox"> Apply a temporary reduced-hours period</label>
       <div id="reducedHoursFields" class="grid" hidden>
         <label>Reduced hours per week<input id="reducedHoursPerWeek" type="number" min="0" max="168" step=".01" inputmode="decimal" placeholder="20"></label>
         <label>Reduced-hours start<input id="reducedStart" type="date"></label>
-        <label>Reduced-hours end <small>optional; leave blank if ongoing</small><input id="reducedEnd" type="date"></label>
+        <label>Reduced-hours end <small>Optional — leave blank if the reduction is ongoing.</small><input id="reducedEnd" type="date"></label>
       </div>
       <p class="hourly-note">The 30-day estimate prorates scheduled weekly hours across the 30 calendar days ending on the as-of date. Days before employment began are not counted. A reduced-hours range replaces the usual weekly hours only for overlapping days.</p>
     </section>
@@ -88,8 +100,16 @@
     <div id="warnings" class="warnings" aria-live="polite"></div>
 
     <section class="ami-section">
-      <label class="ami-toggle"><input id="enableAmi" type="checkbox"> Include optional AMI calculation</label>
-      <div id="amiFields" class="ami-fields" hidden>
+      <label class="ami-toggle"><input id="enableAmi" type="checkbox" checked> Include AMI screening <small>Optional — included by default; uncheck to hide.</small></label>
+      <div id="amiFields" class="ami-fields">
+        <fieldset class="method-picker">
+          <legend>Income used for AMI</legend>
+          <div class="method-toggle" role="radiogroup" aria-label="Income used for AMI">
+            <label><input type="radio" name="amiIncomeBasis" value="annualized30" checked><span>Annualized 30-day estimate</span></label>
+            <label><input type="radio" name="amiIncomeBasis" value="actual30"><span>Actual previous 30 days</span></label>
+          </div>
+          <p id="amiIncomeBasisHelp">Uses the 30-day amount projected from representative paystubs.</p>
+        </fieldset>
         <div class="grid two">
           <label>County<select id="county"><option value="">Select county</option><option>Gallatin</option><option>Park</option><option>Meagher</option></select></label>
           <label>Household size<input id="householdSize" type="number" min="1" max="8" step="1" placeholder="1–8"></label>
@@ -101,10 +121,6 @@
         </div>
       </div>
     </section>
-
-    <div class="grid two">
-      <label class="full">Calculation notes <small>optional</small><textarea id="calculationNotes" rows="3" maxlength="600" placeholder="Explain employment changes, stale evidence, excluded checks, or program-specific decisions."></textarea></label>
-    </div>
 
     <div class="actions no-print">
       <button id="copyPayload" type="button" disabled>Copy auditable field value</button>
@@ -119,7 +135,7 @@
         <ul><li>Weekly: average check × 52</li><li>Bi-weekly: average check × 26</li><li>Semi-monthly: average check × 24</li><li>Monthly: average check × 12</li></ul>
         <p><strong>Actual prior-30-day basis:</strong> count all entered checks with pay dates inside the as-of-date window, plus other income explicitly entered as received during that window.</p>
         <p>Older paystubs remain usable for projection. The widget reports their age and warns staff to confirm continued employment or wage changes. Both basis results and the historical earned amount remain in the audit record regardless of the selected primary basis.</p>
-        <p>Optional AMI uses <strong>average monthly projected income</strong> when the annualized basis is selected, or the <strong>actual prior-30-day received amount</strong> as the monthly proxy when that basis is selected.</p>
+        <p>AMI has its own income-basis toggle. It can use the <strong>annualized 30-day estimate</strong> or the <strong>actual amount received in the previous 30 days</strong>, independently of the highlighted primary result.</p>
         <p><strong>Hourly schedule basis:</strong> hourly wage × weekly hours × 52 ÷ 12 gives an average month. The 30-day estimate prorates weekly hours across the exact window, respects the employment start date, and substitutes reduced weekly hours for any overlapping reduced-hours dates.</p>
         <div class="payload"><strong>Single Jotform field value:</strong> <span id="payload">Enter at least one included paystub</span></div>
       </div>
@@ -133,8 +149,8 @@
       <td><input data-f="workEnd" type="date" aria-label="Work period end"></td>
       <td><input data-f="payDate" type="date" aria-label="Pay date"></td>
       <td><input data-f="gross" type="number" min="0" step=".01" placeholder="0.00" aria-label="Gross pay"></td>
-      <td><select data-f="classification" aria-label="Paystub classification"><option value="regular">Regular complete period</option><option value="partial">Partial period</option><option value="overtime">Includes overtime</option><option value="bonus">Includes bonus</option><option value="leave">Leave / reduced hours</option><option value="final">Final check</option><option value="other">Other irregular pay</option></select></td>
-      <td><input class="note-input" data-f="note" type="text" maxlength="100" placeholder="Reason or verification" aria-label="Audit note"></td>
+      <td class="doc-column"><select data-f="classification" aria-label="Paystub classification"><option value="regular">Regular complete period</option><option value="partial">Partial period</option><option value="overtime">Includes overtime</option><option value="bonus">Includes bonus</option><option value="leave">Leave / reduced hours</option><option value="final">Final check</option><option value="other">Other irregular pay</option></select></td>
+      <td class="doc-column"><input class="note-input" data-f="note" type="text" maxlength="100" placeholder="Reason or verification" aria-label="Audit note"></td>
       <td class="no-print"><button class="remove" type="button" aria-label="Remove paystub">×</button></td>
     </tr>
   </template>
@@ -145,6 +161,8 @@
     const CALC_VERSION="4.0",MATRIX_VERSION="05-2026";
     let stubs=[],result={},summary="",jfReady=false;
     const $=id=>document.getElementById(id);
+    const calculationMode=()=>document.querySelector('input[name="calculationMode"]:checked')?.value||"paystubs";
+    const amiIncomeBasis=()=>document.querySelector('input[name="amiIncomeBasis"]:checked')?.value||"annualized30";
     const money=n=>Number(n||0).toLocaleString("en-US",{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2});
     const clean=value=>String(value||"").replace(/[|;{}\[\]\\]/g,"/").replace(/\s+/g," ").trim();
     function localToday(){const now=new Date(),offset=now.getTimezoneOffset()*60000;return new Date(now-offset).toISOString().slice(0,10)}
@@ -200,11 +218,11 @@
       if($("enableAmi").checked){
         const county=$("county").value,householdSize=Math.floor(Number($("householdSize").value)),table=AMI_TABLE[county];
         if(table&&householdSize>=1&&householdSize<=8){
-          const ami100=table[householdSize-1],ami30=ami100*.3,percent=averageMonthly/ami100*100;
-          ami={county,householdSize,monthlyIncomeUsed:averageMonthly,ami100,ami30,percent,status:percent<=30?"AtOrBelow30":"Above30"};
+          const ami100=table[householdSize-1],ami30=ami100*.3,percent=estimated30/ami100*100;
+          ami={county,householdSize,incomeBasis:"annualized30",monthlyIncomeUsed:estimated30,ami100,ami30,percent,status:percent<=30?"AtOrBelow30":"Above30"};
         }
       }
-      result={version:CALC_VERSION,matrixVersion:MATRIX_VERSION,mode:"hourly",valid:hourly.valid,asOf:$("asOf").value,periodStart:windowStart?windowStart.toISOString().slice(0,10):"",periodEnd:$("asOf").value,person:$("person").value,employer:$("employer").value,frequency:"hourly",frequencyLabel:"Hourly work schedule",periodsPerYear:52,basis:"hourlySchedule",basisLabel:"Hourly schedule in prior 30 days",otherProjectedMonthly:otherMonthly,otherActual30:0,stubs:[],stubsEntered:0,stubsIncluded:0,averageCheck:0,annualizedPay,annualized,averageMonthly,estimated30,actualReceived30:null,actualEarned30:null,incomeUsed30:estimated30,amiMonthlyIncome:averageMonthly,oldestPayDate:"",mostRecentPayDate:"",mostRecentPaystubAgeDays:null,hourly,warnings:warnings.map(warning=>warning.text),ami,preparedBy:$("preparedBy").value,calculationNotes:$("calculationNotes").value};
+      result={version:CALC_VERSION,matrixVersion:MATRIX_VERSION,mode:"hourly",valid:hourly.valid,asOf:$("asOf").value,periodStart:windowStart?windowStart.toISOString().slice(0,10):"",periodEnd:$("asOf").value,person:$("person").value,employer:$("employer").value,frequency:"hourly",frequencyLabel:"Hourly work schedule",periodsPerYear:52,basis:"hourlySchedule",basisLabel:"Hourly schedule in prior 30 days",amiIncomeBasis:"annualized30",otherProjectedMonthly:otherMonthly,otherActual30:0,stubs:[],stubsEntered:0,stubsIncluded:0,averageCheck:0,annualizedPay,annualized,averageMonthly,estimated30,actualReceived30:null,actualEarned30:null,incomeUsed30:estimated30,amiMonthlyIncome:estimated30,oldestPayDate:"",mostRecentPayDate:"",mostRecentPaystubAgeDays:null,hourly,warnings:warnings.map(warning=>warning.text),ami,preparedBy:$("preparedBy").value,calculationNotes:$("calculationNotes").value};
       $("period").textContent=windowStart?`As of ${result.periodEnd} • schedule window ${result.periodStart} through ${result.periodEnd}`:"Choose an as-of date";
       $("annual").textContent=money(annualized);$("monthly").textContent=money(averageMonthly);$("primary30").textContent=money(estimated30);$("primaryBasis").textContent="Scheduled hourly pay in the exact 30-day window";$("estimate30").textContent=money(estimated30);
       $("receivedLabel").textContent="SCHEDULED HOURS IN 30-DAY WINDOW";$("received").textContent=hourly.valid?`${hourly.scheduledHours30.toFixed(2)} hrs`:"—";$("receivedHelp").textContent="Prorated across active and reduced-hours dates";
@@ -213,15 +231,15 @@
       $("warnings").innerHTML=warnings.map(warning=>`<div class="warning${warning.strong?" strong":""}">⚠ ${escapeHTML(warning.text)}</div>`).join("");
       $("copy").disabled=!hourly.valid;$("copyPayload").disabled=!hourly.valid;
       if(ami){
-        $("amiPercent").textContent=`${ami.percent.toFixed(1)}%`;$("ami30").textContent=money(ami.ami30);$("ami100").textContent=money(ami.ami100);$("amiStatus").textContent=ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI";$("amiStatus").className=ami.status==="AtOrBelow30"?"pass":"fail";$("amiBasis").textContent="Compared with projected average monthly income";
+        $("amiPercent").textContent=`${ami.percent.toFixed(1)}%`;$("ami30").textContent=money(ami.ami30);$("ami100").textContent=money(ami.ami100);$("amiStatus").textContent=ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI";$("amiStatus").className=ami.status==="AtOrBelow30"?"pass":"fail";$("amiBasis").textContent="Compared with the projected 30-day estimate";
       }else{$("amiPercent").textContent="—";$("ami30").textContent="—";$("ami100").textContent="—";$("amiStatus").textContent=$("enableAmi").checked?"Complete county and household size":"AMI not enabled";$("amiStatus").className=""}
-      const flags=warnings.length?warnings.map((warning,index)=>`W${index+1}:${clean(warning.text)}`).join("~"):"None",amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:hourlySchedule,MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
+      const flags=warnings.length?warnings.map((warning,index)=>`W${index+1}:${clean(warning.text)}`).join("~"):"None",amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:annualized30,MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
       summary=hourly.valid?`CalcV:${CALC_VERSION}|AsOf:${result.asOf}|Person:${clean(result.person)||"NA"}|Employer:${clean(result.employer)||"NA"}|Frequency:hourly|PeriodsPerYear:52|Method:HourlyWorkSchedule|Basis:hourlySchedule|EmploymentStart:${hourly.start}|HourlyWage:${hourly.wage.toFixed(2)}|RegularHoursWeek:${hourly.regularHours.toFixed(2)}|ReducedHours:${hourly.hasReduction?"Y":"N"}|ReducedHoursWeek:${hourly.hasReduction?hourly.reducedHours.toFixed(2):"NA"}|ReducedPeriod:${hourly.hasReduction?`${hourly.reducedStart}-${hourly.reducedEnd||"Ongoing"}`:"NA"}|ScheduledHours30:${hourly.scheduledHours30.toFixed(2)}|OtherProjectedMonthly:${otherMonthly.toFixed(2)}|Annualized:${annualized.toFixed(2)}|AverageMonthly:${averageMonthly.toFixed(2)}|Estimated30Day:${estimated30.toFixed(2)}|IncomeUsed30:${estimated30.toFixed(2)}|PreparedBy:${clean(result.preparedBy)||"NA"}|Flags:${flags}|Notes:${clean(result.calculationNotes)||"None"}${amiOutput}`:"";
       $("payload").textContent=summary||"Complete the hourly employment fields";
       if(jfReady)JFCustomWidget.sendData(summary);
     }
     function calculate(){
-      if($("calculationMode").value==="hourly"){calculateHourly();return}
+      if(calculationMode()==="hourly"){calculateHourly();return}
       const asOf=parseDate($("asOf").value),windowStart=asOf?addDays(asOf,-29):null,frequency=FREQUENCIES[$("frequency").value],basis=$("basis").value,otherMonthly=Math.max(0,Number($("otherMonthly").value)||0),otherActual30=Math.max(0,Number($("otherActual30").value)||0);
       let received30=otherActual30,earned30=otherActual30,fallbackCount=0;
       const detailed=stubs.map((stub,index)=>{
@@ -235,7 +253,7 @@
         return{number:index+1,included:Boolean(stub.included),workStart:stub.workStart,workEnd:stub.workEnd,payDate:stub.payDate,gross:Number(gross.toFixed(2)),classification:stub.classification,note:stub.note,received30:Number((paidInWindow?gross:0).toFixed(2)),earned30:Number(earnedAmount.toFixed(2)),overlapDays:overlap,totalWorkDays,fallback};
       });
       const included=detailed.filter(stub=>stub.included&&stub.gross>0),averageCheck=included.length?included.reduce((sum,stub)=>sum+stub.gross,0)/included.length:0;
-      const annualizedPay=averageCheck*frequency.periods,annualized=annualizedPay+otherMonthly*12,averageMonthly=annualized/12,estimated30=annualized*30/365,incomeUsed30=basis==="actualReceived"?received30:estimated30,amiMonthlyIncome=basis==="actualReceived"?received30:averageMonthly;
+      const annualizedPay=averageCheck*frequency.periods,annualized=annualizedPay+otherMonthly*12,averageMonthly=annualized/12,estimated30=annualized*30/365,incomeUsed30=basis==="actualReceived"?received30:estimated30,amiBasis=amiIncomeBasis(),amiMonthlyIncome=amiBasis==="actual30"?received30:estimated30;
       const dated=detailed.filter(stub=>stub.payDate&&stub.gross>0),payDates=dated.map(stub=>parseDate(stub.payDate)),mostRecentPayDate=payDates.length?new Date(Math.max(...payDates)) : null,oldestPayDate=payDates.length?new Date(Math.min(...payDates)) : null;
       const mostRecentAge=asOf&&mostRecentPayDate?ageInDays(mostRecentPayDate,asOf):null;
       const warnings=[];
@@ -254,10 +272,10 @@
         const county=$("county").value,householdSize=Math.floor(Number($("householdSize").value)),table=AMI_TABLE[county];
         if(table&&householdSize>=1&&householdSize<=8){
           const ami100=table[householdSize-1],ami30=ami100*.3,percent=amiMonthlyIncome/ami100*100;
-          ami={county,householdSize,monthlyIncomeUsed:amiMonthlyIncome,ami100,ami30,percent,status:percent<=30?"AtOrBelow30":"Above30"};
+          ami={county,householdSize,incomeBasis:amiBasis,monthlyIncomeUsed:amiMonthlyIncome,ami100,ami30,percent,status:percent<=30?"AtOrBelow30":"Above30"};
         }
       }
-      result={version:CALC_VERSION,matrixVersion:MATRIX_VERSION,asOf:$("asOf").value,periodStart:windowStart?windowStart.toISOString().slice(0,10):"",periodEnd:$("asOf").value,person:$("person").value,employer:$("employer").value,frequency:$("frequency").value,frequencyLabel:frequency.label,periodsPerYear:frequency.periods,basis,basisLabel:basis==="actualReceived"?"Actual received in prior 30 days":"Annualized 30-day estimate",otherProjectedMonthly:otherMonthly,otherActual30,stubs:detailed,stubsEntered:detailed.filter(stub=>stub.gross>0).length,stubsIncluded:included.length,averageCheck,annualizedPay,annualized,averageMonthly,estimated30,actualReceived30:received30,actualEarned30:earned30,incomeUsed30,amiMonthlyIncome,oldestPayDate:oldestPayDate?oldestPayDate.toISOString().slice(0,10):"",mostRecentPayDate:mostRecentPayDate?mostRecentPayDate.toISOString().slice(0,10):"",mostRecentPaystubAgeDays:mostRecentAge,warnings:warnings.map(warning=>warning.text),ami,preparedBy:$("preparedBy").value,calculationNotes:$("calculationNotes").value};
+      result={version:CALC_VERSION,matrixVersion:MATRIX_VERSION,asOf:$("asOf").value,periodStart:windowStart?windowStart.toISOString().slice(0,10):"",periodEnd:$("asOf").value,person:$("person").value,employer:$("employer").value,frequency:$("frequency").value,frequencyLabel:frequency.label,periodsPerYear:frequency.periods,basis,basisLabel:basis==="actualReceived"?"Actual received in prior 30 days":"Annualized 30-day estimate",amiIncomeBasis:amiBasis,otherProjectedMonthly:otherMonthly,otherActual30,stubs:detailed,stubsEntered:detailed.filter(stub=>stub.gross>0).length,stubsIncluded:included.length,averageCheck,annualizedPay,annualized,averageMonthly,estimated30,actualReceived30:received30,actualEarned30:earned30,incomeUsed30,amiMonthlyIncome,oldestPayDate:oldestPayDate?oldestPayDate.toISOString().slice(0,10):"",mostRecentPayDate:mostRecentPayDate?mostRecentPayDate.toISOString().slice(0,10):"",mostRecentPaystubAgeDays:mostRecentAge,warnings:warnings.map(warning=>warning.text),ami,preparedBy:$("preparedBy").value,calculationNotes:$("calculationNotes").value};
 
       $("period").textContent=windowStart?`As of ${result.periodEnd} • historical comparison window ${result.periodStart} through ${result.periodEnd}`:"Choose an as-of date";
       $("annual").textContent=money(annualized);$("monthly").textContent=money(averageMonthly);$("primary30").textContent=money(incomeUsed30);$("primaryBasis").textContent=basis==="actualReceived"?"Checks paid in the prior 30 days + other actual income":"Annualized income × 30 ÷ 365";$("estimate30").textContent=money(estimated30);$("received").textContent=money(received30);$("earned").textContent=money(earned30);
@@ -269,12 +287,12 @@
 
       if(ami){
         $("amiPercent").textContent=`${ami.percent.toFixed(1)}%`;$("ami30").textContent=money(ami.ami30);$("ami100").textContent=money(ami.ami100);
-        $("amiStatus").textContent=ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI";$("amiStatus").className=ami.status==="AtOrBelow30"?"pass":"fail";$("amiBasis").textContent=basis==="actualReceived"?"Compared with actual prior-30-day income":"Compared with projected average monthly income";
+        $("amiStatus").textContent=ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI";$("amiStatus").className=ami.status==="AtOrBelow30"?"pass":"fail";$("amiBasis").textContent=amiBasis==="actual30"?"Compared with actual previous-30-day income":"Compared with the annualized 30-day estimate";
       }else{$("amiPercent").textContent="—";$("ami30").textContent="—";$("ami100").textContent="—";$("amiStatus").textContent=$("enableAmi").checked?"Complete county and household size":"AMI not enabled";$("amiStatus").className=""}
 
       const stubAudit=detailed.filter(stub=>stub.gross>0).map(stub=>`#${stub.number}{Use:${stub.included?"Y":"N"},Work:${stub.workStart||"NA"}-${stub.workEnd||"NA"},Pay:${stub.payDate||"NA"},Gross:${stub.gross.toFixed(2)},Class:${stub.classification},Note:${clean(stub.note)||"None"}}`).join(";");
       const flags=warnings.length?warnings.map((warning,index)=>`W${index+1}:${clean(warning.text)}`).join("~"):"None";
-      const amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:${basis},MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
+      const amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:${amiBasis},MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
       summary=included.length&&asOf?`CalcV:${CALC_VERSION}|AsOf:${result.asOf}|Person:${clean(result.person)||"NA"}|Employer:${clean(result.employer)||"NA"}|Frequency:${result.frequency}|PeriodsPerYear:${result.periodsPerYear}|Method:AverageIncludedChecksAnnualized|Basis:${basis}|StubsEntered:${result.stubsEntered}|StubsIncluded:${result.stubsIncluded}|StubAudit:[${stubAudit}]|AverageCheck:${averageCheck.toFixed(2)}|OtherProjectedMonthly:${otherMonthly.toFixed(2)}|OtherActual30:${otherActual30.toFixed(2)}|Annualized:${annualized.toFixed(2)}|AverageMonthly:${averageMonthly.toFixed(2)}|Estimated30Day:${estimated30.toFixed(2)}|Actual30Received:${received30.toFixed(2)}|Actual30Earned:${earned30.toFixed(2)}|IncomeUsed30:${incomeUsed30.toFixed(2)}|EvidencePayDates:${result.oldestPayDate||"NA"}-${result.mostRecentPayDate||"NA"}|MostRecentAgeDays:${mostRecentAge==null?"NA":mostRecentAge}|PreparedBy:${clean(result.preparedBy)||"NA"}|Flags:${flags}|Notes:${clean(result.calculationNotes)||"None"}${amiOutput}`:"";
       $("payload").textContent=summary||"Enter an as-of date and at least one included paystub";
       if(jfReady)JFCustomWidget.sendData(summary);
@@ -285,7 +303,7 @@
       const rows=result.mode==="hourly"
         ?`<tr><td>Schedule</td><td>Included</td><td>${escapeHTML(result.hourly.start)} – ${escapeHTML(result.asOf)}</td><td>—</td><td class="num">${money(result.hourly.wage)}/hour</td><td>${result.hourly.regularHours.toFixed(2)} hours/week</td><td>${result.hourly.hasReduction?`${result.hourly.reducedHours.toFixed(2)} hours/week from ${escapeHTML(result.hourly.reducedStart)} through ${escapeHTML(result.hourly.reducedEnd||"ongoing")}`:"No reduced-hours period"}</td></tr>`
         :result.stubs.filter(stub=>stub.gross>0).map(stub=>`<tr><td>${stub.number}</td><td>${stub.included?"Included":"Excluded"}</td><td>${escapeHTML(stub.workStart||"—")} – ${escapeHTML(stub.workEnd||"—")}</td><td>${escapeHTML(stub.payDate||"—")}</td><td class="num">${money(stub.gross)}</td><td>${escapeHTML(stub.classification)}</td><td>${escapeHTML(stub.note||"—")}</td></tr>`).join("");
-      return `<!doctype html><html><head><meta charset="utf-8"><title>Income Calculation Report</title><style>@page{size:letter;margin:.5in}*{box-sizing:border-box}body{margin:0;color:#17211d;font:11px/1.4 Arial,sans-serif}header{padding-bottom:14px;border-bottom:3px solid #146b4a}h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:#66736d}.meta,.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.meta div,.card{padding:8px;border:1px solid #d8e1dc;border-radius:6px}.meta span,.card span{display:block;color:#66736d;font-size:8px;font-weight:bold;text-transform:uppercase}.card strong{display:block;margin-top:3px;font-size:16px}.primary{color:white;background:#146b4a}.primary span{color:#d7eee3}h2{margin:16px 0 6px;font-size:13px;color:#0e4d36}table{width:100%;border-collapse:collapse}th,td{padding:5px;border-bottom:1px solid #d8e1dc;text-align:left;vertical-align:top}th{font-size:8px;text-transform:uppercase}.num{text-align:right}.formula{padding:8px;background:#fff7e5;border:1px solid #ead9b7;border-radius:5px;font:9px Consolas,monospace}.ami{padding:9px;background:#f0ecf8;border-radius:6px}.payload{margin-top:10px;padding:7px;color:#59655f;background:#f5f7f6;border-radius:5px;font:7px Consolas,monospace;overflow-wrap:anywhere}footer{margin-top:14px;padding-top:8px;color:#66736d;border-top:1px solid #d8e1dc;font-size:8px}</style></head><body><header><h1>Income Calculation</h1><p>Eviction Prevention Eligibility Worksheet • Calculation version ${CALC_VERSION}</p></header><section class="meta"><div><span>Household member</span>${escapeHTML(result.person||"Not entered")}</div><div><span>Employer / source</span>${escapeHTML(result.employer||"Not entered")}</div><div><span>Calculation as of</span>${escapeHTML(result.asOf)}</div><div><span>Frequency</span>${escapeHTML(result.frequencyLabel)} (${result.periodsPerYear}/year)</div><div><span>30-day basis selected</span>${escapeHTML(result.basisLabel)}</div><div><span>Prepared by</span>${escapeHTML(result.preparedBy||"Not entered")}</div><div><span>Evidence pay dates</span>${escapeHTML(result.oldestPayDate||"—")} – ${escapeHTML(result.mostRecentPayDate||"—")}</div></section><section class="cards"><div class="card"><span>Annualized income</span><strong>${money(result.annualized)}</strong></div><div class="card"><span>Average monthly</span><strong>${money(result.averageMonthly)}</strong></div><div class="card primary"><span>30-day income used</span><strong>${money(result.incomeUsed30)}</strong></div></section><h2>Calculation</h2><div class="formula">${escapeHTML($("formula").textContent)}</div><h2>Paystub audit</h2><table><thead><tr><th>#</th><th>Projection</th><th>Work period</th><th>Pay date</th><th class="num">Gross</th><th>Classification</th><th>Note</th></tr></thead><tbody>${rows||'<tr><td colspan="7">No paystubs entered.</td></tr>'}</tbody></table><h2>30-day basis comparison</h2><section class="cards"><div class="card"><span>Annualized estimate</span><strong>${money(result.estimated30)}</strong></div><div class="card"><span>Actual received</span><strong>${money(result.actualReceived30)}</strong></div><div class="card"><span>Actual earned</span><strong>${money(result.actualEarned30)}</strong></div><div class="card"><span>Other actual 30-day income</span><strong>${money(result.otherActual30)}</strong></div><div class="card"><span>Most recent stub age</span><strong>${result.mostRecentPaystubAgeDays==null?"—":`${result.mostRecentPaystubAgeDays} days`}</strong></div></section>${ami?`<h2>Optional AMI calculation</h2><div class="ami"><strong>${ami.percent.toFixed(1)}% of AMI — ${ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI"}</strong><br>${escapeHTML(result.basisLabel)} supplied ${money(ami.monthlyIncomeUsed)} as the monthly AMI income input. The 100% AMI value is ${money(ami.ami100)} and the 30% monthly threshold is ${money(ami.ami30)}.</div>`:""}<h2>Warnings and review notes</h2>${warningList}${result.calculationNotes?`<p><strong>Calculation notes:</strong> ${escapeHTML(result.calculationNotes)}</p>`:""}<div class="payload"><strong>Jotform audit value:</strong><br>${escapeHTML(summary)}</div><footer>Matrix version ${MATRIX_VERSION}. This report documents the calculation; confirm applicable program rules and source verification before eligibility approval.</footer></body></html>`;
+      return `<!doctype html><html><head><meta charset="utf-8"><title>Income Calculation Report</title><style>@page{size:letter;margin:.5in}*{box-sizing:border-box}body{margin:0;color:#17211d;font:11px/1.4 Arial,sans-serif}header{padding-bottom:14px;border-bottom:3px solid #146b4a}h1{margin:0;font-size:22px}header p{margin:4px 0 0;color:#66736d}.meta,.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.meta div,.card{padding:8px;border:1px solid #d8e1dc;border-radius:6px}.meta span,.card span{display:block;color:#66736d;font-size:8px;font-weight:bold;text-transform:uppercase}.card strong{display:block;margin-top:3px;font-size:16px}.primary{color:white;background:#146b4a}.primary span{color:#d7eee3}h2{margin:16px 0 6px;font-size:13px;color:#0e4d36}table{width:100%;border-collapse:collapse}th,td{padding:5px;border-bottom:1px solid #d8e1dc;text-align:left;vertical-align:top}th{font-size:8px;text-transform:uppercase}.num{text-align:right}.formula{padding:8px;background:#fff7e5;border:1px solid #ead9b7;border-radius:5px;font:9px Consolas,monospace}.ami{padding:9px;background:#f0ecf8;border-radius:6px}.payload{margin-top:10px;padding:7px;color:#59655f;background:#f5f7f6;border-radius:5px;font:7px Consolas,monospace;overflow-wrap:anywhere}footer{margin-top:14px;padding-top:8px;color:#66736d;border-top:1px solid #d8e1dc;font-size:8px}</style></head><body><header><h1>Income Calculation</h1><p>Eviction Prevention Eligibility Worksheet • Calculation version ${CALC_VERSION}</p></header><section class="meta"><div><span>Household member</span>${escapeHTML(result.person||"Not entered")}</div><div><span>Employer / source</span>${escapeHTML(result.employer||"Not entered")}</div><div><span>Calculation as of</span>${escapeHTML(result.asOf)}</div><div><span>Frequency</span>${escapeHTML(result.frequencyLabel)} (${result.periodsPerYear}/year)</div><div><span>30-day basis selected</span>${escapeHTML(result.basisLabel)}</div><div><span>Prepared by</span>${escapeHTML(result.preparedBy||"Not entered")}</div><div><span>Evidence pay dates</span>${escapeHTML(result.oldestPayDate||"—")} – ${escapeHTML(result.mostRecentPayDate||"—")}</div></section><section class="cards"><div class="card"><span>Annualized income</span><strong>${money(result.annualized)}</strong></div><div class="card"><span>Average monthly</span><strong>${money(result.averageMonthly)}</strong></div><div class="card primary"><span>30-day income used</span><strong>${money(result.incomeUsed30)}</strong></div></section><h2>Calculation</h2><div class="formula">${escapeHTML($("formula").textContent)}</div><h2>Paystub audit</h2><table><thead><tr><th>#</th><th>Projection</th><th>Work period</th><th>Pay date</th><th class="num">Gross</th><th>Classification</th><th>Note</th></tr></thead><tbody>${rows||'<tr><td colspan="7">No paystubs entered.</td></tr>'}</tbody></table><h2>30-day basis comparison</h2><section class="cards"><div class="card"><span>Annualized estimate</span><strong>${money(result.estimated30)}</strong></div><div class="card"><span>Actual received</span><strong>${money(result.actualReceived30)}</strong></div><div class="card"><span>Actual earned</span><strong>${money(result.actualEarned30)}</strong></div><div class="card"><span>Other actual 30-day income</span><strong>${money(result.otherActual30)}</strong></div><div class="card"><span>Most recent stub age</span><strong>${result.mostRecentPaystubAgeDays==null?"—":`${result.mostRecentPaystubAgeDays} days`}</strong></div></section>${ami?`<h2>Optional AMI calculation</h2><div class="ami"><strong>${ami.percent.toFixed(1)}% of AMI — ${ami.status==="AtOrBelow30"?"At or below 30% AMI":"Above 30% AMI"}</strong><br>${ami.incomeBasis==="actual30"?"Actual previous-30-day income":"Annualized 30-day estimate"} supplied ${money(ami.monthlyIncomeUsed)} as the AMI income input. The 100% AMI value is ${money(ami.ami100)} and the 30% monthly threshold is ${money(ami.ami30)}.</div>`:""}<h2>Warnings and review notes</h2>${warningList}${result.calculationNotes?`<p><strong>Calculation notes:</strong> ${escapeHTML(result.calculationNotes)}</p>`:""}<div class="payload"><strong>Jotform audit value:</strong><br>${escapeHTML(summary)}</div><footer>Matrix version ${MATRIX_VERSION}. This report documents the calculation; confirm applicable program rules and source verification before eligibility approval.</footer></body></html>`;
     }
     function exportFormattedPDF(){
       if(result.mode==="hourly"?!result.valid:!result.stubsIncluded){alert(result.mode==="hourly"?"Complete the hourly employment fields before exporting.":"Enter at least one included paystub before exporting.");return}
@@ -300,21 +318,34 @@
       const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));link.download=`income-calculation-${result.asOf||"undated"}.json`;link.click();URL.revokeObjectURL(link.href);
     }
     function setCalculationMode(){
-      const hourly=$("calculationMode").value==="hourly";
+      const hourly=calculationMode()==="hourly";
       $("paystubSection").hidden=hourly;$("hourlySection").hidden=!hourly;
       document.querySelectorAll(".paystub-only").forEach(element=>element.hidden=hourly);
       $("methodHelp").textContent=hourly?"Estimate income from an employment start date, hourly wage, usual weekly hours, and an optional reduced-hours period.":"Average included gross checks and annualize them using the selected pay frequency.";
+      const actualAmi=document.querySelector('input[name="amiIncomeBasis"][value="actual30"]'),annualizedAmi=document.querySelector('input[name="amiIncomeBasis"][value="annualized30"]');
+      actualAmi.disabled=hourly;
+      if(hourly&&actualAmi.checked)annualizedAmi.checked=true;
+      updateAmiBasisHelp();
       if(!hourly){
         $("receivedLabel").textContent="ACTUAL RECEIVED IN PRIOR 30 DAYS";$("receivedHelp").textContent="All entered checks with pay dates in the window";
         $("earnedLabel").textContent="ACTUAL EARNED IN PRIOR 30 DAYS";$("earnedHelp").textContent="All entered checks prorated by work-period overlap";
       }
       calculate();
     }
+    function updateAmiBasisHelp(){
+      $("amiIncomeBasisHelp").textContent=calculationMode()==="hourly"
+        ?"Hourly schedules provide a projected 30-day estimate; actual received income requires paystub evidence."
+        :amiIncomeBasis()==="actual30"
+          ?"Uses checks paid in the previous 30 days plus other income entered as actually received."
+          :"Uses the 30-day amount projected from representative paystubs.";
+    }
     $("asOf").value=localToday();
     ["person","employer","frequency","basis","asOf","otherMonthly","otherActual30","preparedBy","county","householdSize","calculationNotes","employmentStart","hourlyWage","hoursPerWeek","reducedHoursPerWeek","reducedStart","reducedEnd"].forEach(id=>$(id).addEventListener("input",calculate));
-    $("calculationMode").addEventListener("input",setCalculationMode);
+    document.querySelectorAll('input[name="calculationMode"]').forEach(input=>input.addEventListener("input",setCalculationMode));
+    document.querySelectorAll('input[name="amiIncomeBasis"]').forEach(input=>input.addEventListener("input",()=>{updateAmiBasisHelp();calculate()}));
     $("hasReducedHours").addEventListener("input",()=>{$("reducedHoursFields").hidden=!$("hasReducedHours").checked;calculate()});
     $("enableAmi").addEventListener("input",()=>{$("amiFields").hidden=!$("enableAmi").checked;calculate()});
+    $("showPaystubDetails").addEventListener("input",()=>{$("rows").closest("table").classList.toggle("show-doc-columns",$("showPaystubDetails").checked)});
     $("add").addEventListener("click",()=>addStub());
     $("copy").addEventListener("click",()=>navigator.clipboard?.writeText(result.incomeUsed30?.toFixed(2)||""));
     $("copyPayload").addEventListener("click",()=>navigator.clipboard?.writeText(summary));

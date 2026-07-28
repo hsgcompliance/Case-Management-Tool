@@ -28,12 +28,30 @@ export type CreateFormSessionResult = {
   expiresAt: string;
 };
 
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 const FormSessions = {
-  create: (input: CreateFormSessionInput) =>
-    api.call("createFormSession", {
-      body: { source: "main_app", ...input },
-      idempotencyKey: idemKey({ scope: "formSession", op: "create", input }),
-    }) as Promise<CreateFormSessionResult>,
+  create: (input: CreateFormSessionInput) => {
+    const body = {
+      source: "main_app" as const,
+      ...input,
+      customerId: normalizeOptionalId(input.customerId),
+      userId: normalizeOptionalId(input.userId),
+      caseManagerId: normalizeOptionalId(input.caseManagerId),
+      grantId: normalizeOptionalId(input.grantId),
+      paymentQueueId: normalizeOptionalId(input.paymentQueueId),
+      ledgerItemId: normalizeOptionalId(input.ledgerItemId),
+      creditCardId: normalizeOptionalId(input.creditCardId),
+    };
+
+    return api.call("createFormSession", {
+      body,
+      idempotencyKey: idemKey({ scope: "formSession", op: "create", input: body }),
+    }) as Promise<CreateFormSessionResult>;
+  },
 };
 
 export default FormSessions;
