@@ -21,17 +21,31 @@ export type RegexExtractionResult = {
   fields: Partial<Record<RegexExtractionField, string>>;
 };
 
+// FE customer names always lead with "[First initial][.]? Last Name" — but the
+// last name is often more than one word (e.g. "A. Sara Da", "C. Red Hat"), and
+// there's no punctuation marking where the name ends. The one reliable
+// boundary in every real sample seen is that a month-name word ("Jan", "APR",
+// "July", ...) immediately follows the name, before the transaction
+// type/vendor. Capturing "one or more non-month tokens" instead of "exactly
+// one token" fixes both a real matching bug (multi-word last names were
+// silently dropped, e.g. "Sara Da" truncated to "Sara") and lets identity
+// matching find its true last-name word again.
+const FE_MONTH_NAME_ALTERNATION =
+  "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+const FE_STAFF_PREFIX_GROUP =
+  `(?<staffPrefix>[A-Z]\\.?\\s*(?:(?!\\b(?:${FE_MONTH_NAME_ALTERNATION})\\b)[^\\s]+\\s*){1,6})`;
+
 export const DEFAULT_FE_REFERENCE_PATTERNS: RegexExtractionPattern[] = [
   {
     id: "staff-type-vendor-month",
     label: "Staff + type + vendor + month",
-    pattern: "^(?<staffPrefix>[A-Z]\\.\\s*[^\\s]+)\\s+(?<paymentType>.*?)(?:-|\\s{2,})(?<vendor>.*?)-(?<serviceMonth>[A-Z]{3}\\d{2})$",
+    pattern: `^${FE_STAFF_PREFIX_GROUP}\\s+(?<paymentType>.*?)(?:-|\\s{2,})(?<vendor>.*?)-(?<serviceMonth>[A-Z]{3}\\d{2})$`,
     flags: "i",
   },
   {
     id: "staff-type-customer-month",
     label: "Staff + type + customer + month",
-    pattern: "^(?<staffPrefix>[A-Z]\\.\\s*[^\\s]+)\\s+(?<paymentType>.*?)-(?<customerName>.*?)-(?<serviceMonth>[A-Z]{3}\\d{2})$",
+    pattern: `^${FE_STAFF_PREFIX_GROUP}\\s+(?<paymentType>.*?)-(?<customerName>.*?)-(?<serviceMonth>[A-Z]{3}\\d{2})$`,
     flags: "i",
   },
   {

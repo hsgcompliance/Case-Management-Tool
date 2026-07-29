@@ -259,7 +259,33 @@ function reportPaymentUnit(packet: ReconciliationPacket, source: { id: string; l
   };
 }
 
-function databasePaymentUnit(source: "paymentQueue" | "ledger", row: Record<string, unknown>, maps: ReturnType<typeof customerMaps>): PaymentUnit {
+/**
+ * Only trusts a database customer's CWID/HMIS ID as an identity key when the
+ * uploaded reports could actually carry that same dimension — otherwise it's
+ * a real ID that's simply useless for this reconciliation run (nothing on
+ * the report side will ever supply one to compare against) and, left
+ * unchecked, blocks the unit from ever falling through to a name-based key
+ * that could genuinely match. hmis wins over cwid when both are available
+ * per Griffin's call: an HMIS ID match is the highest-confidence identity
+ * signal.
+ */
+function resolveDatabaseIdentityKey(
+  customer: Record<string, unknown> | null | undefined,
+  dims: { reportsHaveHmis: boolean; reportsHaveCwid: boolean },
+): string {
+  const hmis = customerHmisId(customer);
+  if (dims.reportsHaveHmis && hmis) return `hmis:${hmis}`;
+  const cw = customerCwId(customer) || customerCaseworthyId(customer);
+  if (dims.reportsHaveCwid && cw) return `cwid:${cw}`;
+  return "";
+}
+
+function databasePaymentUnit(
+  source: "paymentQueue" | "ledger",
+  row: Record<string, unknown>,
+  maps: ReturnType<typeof customerMaps>,
+  identityDims: { reportsHaveHmis: boolean; reportsHaveCwid: boolean },
+): PaymentUnit {
   const customer = maps.byId.get(text(row.customerId));
   const name = customerLabel(customer) || text(row.customerNameAtSpend ?? row.customerName ?? row.customer ?? row.name);
   const rawAmount = source === "ledger" ? (row.amountCents != null ? Number(row.amountCents) / 100 : row.amount) : (row.amountAbs ?? row.amount);
@@ -273,7 +299,7 @@ function databasePaymentUnit(source: "paymentQueue" | "ledger", row: Record<stri
     name,
     nameKey: normalizeCustomerName(name),
     initialNameKey: firstInitialLastKey(name),
-    identityKey: identityKeyFromValues(customerCwId(customer) || customerCaseworthyId(customer), customerHmisId(customer), ""),
+    identityKey: resolveDatabaseIdentityKey(customer, identityDims),
     grantKey,
     date,
     month: text(row.month) || monthOf(row.dueDate ?? row.transactionDate ?? row.postedAt ?? row.date),
@@ -425,8 +451,36 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
       units.push(unit);
     });
   }
-  for (const row of database.paymentQueueItems) units.push(databasePaymentUnit("paymentQueue", row, maps));
-  for (const row of database.ledger) units.push(databasePaymentUnit("ledger", row, maps));
+
+  // What identity dimensions do the uploaded reports actually carry? A
+  // database customer having a CWID is useless if no report could ever
+  // supply one to match it against — used below so the database side never
+  // commits to a dimension nothing on the report side can reach.
+  const reportsHaveHmis = units.some((unit) => unit.identityKey.startsWith("hmis:"));
+  const reportsHaveCwid = units.some((unit) => unit.identityKey.startsWith("cwid:"));
+
+  // Reconcile the uploaded reports against EACH OTHER before ever touching
+  // the database. FE rows never carry a CWID/HMIS ID at all, but a sibling
+  // report row (e.g. an HMIS row) for the same person often does — if two
+  // report rows from different uploads agree on identity-or-name + month +
+  // amount (the same safety bar the identity_month pass already uses),
+  // every unit in that cluster inherits the strongest identity key found
+  // (hmis > cwid). The database match below then has real identity
+  // evidence to work with instead of each side guessing independently and
+  // hoping they happen to agree.
+  for (const group of groupByPaymentKey(units, loosePaymentKey).values()) {
+    if (new Set(group.map((unit) => unit.sourceId)).size < 2) continue;
+    const amounts = new Set(group.map((unit) => unit.amountCents).filter((value) => value != null));
+    if (amounts.size > 1) continue;
+    const bestKey = group.find((unit) => unit.identityKey.startsWith("hmis:"))?.identityKey
+      ?? group.find((unit) => unit.identityKey.startsWith("cwid:"))?.identityKey;
+    if (!bestKey) continue;
+    for (const unit of group) unit.identityKey = bestKey;
+  }
+
+  const identityDims = { reportsHaveHmis, reportsHaveCwid };
+  for (const row of database.paymentQueueItems) units.push(databasePaymentUnit("paymentQueue", row, maps, identityDims));
+  for (const row of database.ledger) units.push(databasePaymentUnit("ledger", row, maps, identityDims));
   units.push(...budgetLineItemUnits(database.grants));
 
   const sources = Array.from(new Map(units.map((unit) => [unit.sourceId, { id: unit.sourceId, label: unit.sourceLabel, kind: unit.sourceKind }])).values());
@@ -529,8 +583,16 @@ function buildPaymentCompareRows(packets: ReconciliationPacket[], database: Data
     const loose = looseTotals.get(loosePaymentKey(first));
     const totalValues = loose ? Array.from(loose.values()) : [];
     const partial = totalValues.length > 1 && totalValues.every((value) => value === totalValues[0]) && method === "unmatched";
+    // "identity" groups are matched via an exact identity+month+amount key, so
+    // amountMismatch can never be true for them (the key itself required
+    // agreement). "identity_month" groups share the same identity+month
+    // signal but the exact key drops amount, so !amountMismatch there means
+    // the amount was independently cross-checked across 2+ real rows and
+    // agreed — just as strong a corroboration, previously never promoted past
+    // "partial" purely because it took a different grouping pass to find it.
+    const identityConfirmed = method === "identity" || (method === "identity_month" && amountValues.length === 1);
     const status: CompareCellStatus = hasReport && hasDatabase
-      ? (amountMismatch ? "mismatch" : method === "identity" && (!hasExternalPaidSignal || hasDashboardPaid) ? "matched" : "partial")
+      ? (amountMismatch ? "mismatch" : identityConfirmed && (!hasExternalPaidSignal || hasDashboardPaid) ? "matched" : "partial")
       : amountMismatch ? "mismatch"
       : partial ? "partial" : "unmatched";
     const matchStatus = !groupHasReport
