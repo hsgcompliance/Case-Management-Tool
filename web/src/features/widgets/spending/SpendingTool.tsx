@@ -48,6 +48,7 @@ import type { CardBudget } from "./SpendDetailModal";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets/jotform/jotformSubmissionView";
 import { GRANT_ACCENT_COLORS, grantAccentSolid, grantAccentChip } from "@lib/colorRegistry";
+import { todayISO } from "@lib/date";
 import { buildQueueLedgerIndex, linkedReversalLedgerIds, queueLedgerIssue } from "./spendingReconciliation";
 
 // ---------------------------------------------------------------------------
@@ -168,9 +169,13 @@ function builtInSpendingViews(): SpendingSavedView[] {
     {
       id: "builtin-cc-invoices",
       name: "CC + Invoices",
-      filterState: spendingFilterPatch({ typeFilter: "forms" }),
+      filterState: spendingFilterPatch({
+        typeFilter: "forms",
+        workflowFilter: "open",
+        dateFilter: { mode: "before", date: todayISO() },
+      }),
       builtIn: true,
-      description: "Credit card and invoice submissions",
+      description: "Open credit card and invoice submissions through today",
     },
     {
       id: "builtin-all-open",

@@ -8,7 +8,7 @@ import {
   type DatabaseFilterConfig,
   type TriState,
 } from "./databaseFilters";
-import GrantSelect from "@entities/selectors/GrantSelect";
+import MultiSelectField, { type MultiSelectOption } from "@entities/selectors/MultiSelectField";
 
 type Props = {
   value: DatabaseFilterConfig;
@@ -20,6 +20,9 @@ type Props = {
   /** Rows currently in scope per collection (after filters), shown next to each toggle. */
   counts?: Partial<Record<DatabaseCollectionKey, number>>;
   loading?: boolean;
+  /** Already-fetched dashboard cache arrays, used only to build the Grant/Customer multiselect option lists — no new network calls. */
+  grants?: Array<Record<string, unknown>>;
+  customers?: Array<Record<string, unknown>>;
 };
 
 const COLLECTION_LABELS: Record<DatabaseCollectionKey, string> = {
@@ -101,20 +104,24 @@ function SearchField({ label, value, onChange, placeholder = "Search" }: { label
   );
 }
 
-/** `grantId` filters are an exact-id match against the dashboard doc (see databaseFilters.ts), so a raw text box meant asking the user to already know and paste a Firestore doc id — a real grant picker replaces that guesswork. */
-function GrantIdField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="text-xs">
       <span className="mb-1 block font-medium text-slate-500">{label}</span>
-      <GrantSelect
-        value={value || null}
-        onChange={(grantId) => onChange(grantId ?? "")}
-        mode="grant"
-        placeholderLabel="Any grant"
-        className="h-9 w-full text-sm"
-      />
+      <input className="input h-9 w-full px-2 py-1 text-sm leading-5" type="date" value={value} onChange={(event) => onChange(event.currentTarget.value)} />
     </label>
   );
+}
+
+function grantLabel(g: Record<string, unknown>): string {
+  return String(g.name || g.grantName || g.code || g.id || "");
+}
+
+function customerLabel(c: Record<string, unknown>): string {
+  const first = String(c.firstName || "").trim();
+  const last = String(c.lastName || "").trim();
+  const name = `${first} ${last}`.trim();
+  return name || String(c.name || c.displayName || c.id || "");
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: number | null; onChange: (value: number | null) => void }) {
@@ -134,10 +141,25 @@ function NumberField({ label, value, onChange }: { label: string; value: number 
   );
 }
 
-export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollection, refreshingCollection, embedded = false, counts, loading = false }: Props) {
+export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollection, refreshingCollection, embedded = false, counts, loading = false, grants = [], customers = [] }: Props) {
   const [open, setOpen] = React.useState(false);
   const keys = toolKind ? TOOL_COLLECTIONS[toolKind] : (Object.keys(COLLECTION_LABELS) as DatabaseCollectionKey[]);
   const activeCount = keys.reduce((sum, key) => sum + countActiveFilters(key, value), 0);
+
+  const grantOptions = React.useMemo<MultiSelectOption[]>(
+    () => grants
+      .filter((g) => !!g.id)
+      .map((g) => ({ value: String(g.id), label: grantLabel(g) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [grants],
+  );
+  const customerOptions = React.useMemo<MultiSelectOption[]>(
+    () => customers
+      .filter((c) => !!c.id)
+      .map((c) => ({ value: String(c.id), label: customerLabel(c), hint: String(c.cwId || c.hmisId || "") || undefined }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [customers],
+  );
 
   const patch = <K extends DatabaseCollectionKey>(key: K, patchValue: Partial<DatabaseFilterConfig[K]>) => {
     const next = cloneConfig(value);
@@ -157,6 +179,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
         <div>
           <div className="text-sm font-semibold text-slate-900 dark:text-slate-50">Database collections for this review</div>
           <div className="text-xs text-slate-500">Choose which dashboard collections are pulled and how they are narrowed. Filters apply to cached data before matching runs.</div>
+          <div className="text-xs text-slate-500">Payment queue and ledger default to enrollment-type payments only — switch Budget type to audit credit-card/invoice rows.</div>
         </div>
         <button type="button" className="btn btn-ghost btn-xs" onClick={reset}>Reset</button>
       </div>
@@ -229,6 +252,9 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                   <TriStateSelect label="HMIS ID" value={value.customers.hmisId} onChange={(hmisId) => patch("customers", { hmisId })} />
                   <TriStateSelect label="Caseworthy ID" value={value.customers.caseworthyId} onChange={(caseworthyId) => patch("customers", { caseworthyId })} />
                   <TriStateSelect label="DOB" value={value.customers.dob} onChange={(dob) => patch("customers", { dob })} />
+                  <DateField label="DOB after" value={value.customers.dobAfter} onChange={(dobAfter) => patch("customers", { dobAfter })} />
+                  <DateField label="DOB before" value={value.customers.dobBefore} onChange={(dobBefore) => patch("customers", { dobBefore })} />
+                  <MultiSelectField label="Customers" value={value.customers.customerIds} onChange={(customerIds) => patch("customers", { customerIds })} options={customerOptions} placeholder="Search customers…" />
                 </div>
               ) : null}
 
@@ -238,12 +264,14 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                   <label className="text-xs">
                     <span className="mb-1 block font-medium text-slate-500">Enrollment status</span>
                     <select className="input h-9 w-full px-2 py-1 text-sm leading-5" value={value.enrollments.status} onChange={(event) => patch("enrollments", { status: event.currentTarget.value as DatabaseFilterConfig["enrollments"]["status"] })}>
-                      <option value="any">Active, inactive, and exited</option>
+                      <option value="any">Active, exited, and closed</option>
                       <option value="active">Active only</option>
-                      <option value="closed">Inactive/exited only</option>
+                      <option value="exited">Exited only</option>
+                      <option value="closed">Closed only</option>
                     </select>
                   </label>
-                  <GrantIdField label="Grant" value={value.enrollments.grantId} onChange={(grantId) => patch("enrollments", { grantId })} />
+                  <MultiSelectField label="Grant" value={value.enrollments.grantIds} onChange={(grantIds) => patch("enrollments", { grantIds })} options={grantOptions} placeholder="Any grant" />
+                  <MultiSelectField label="Customers" value={value.enrollments.customerIds} onChange={(customerIds) => patch("enrollments", { customerIds })} options={customerOptions} placeholder="Search customers…" />
                   <TriStateSelect label="Exit date" value={value.enrollments.exitDate} onChange={(exitDate) => patch("enrollments", { exitDate })} />
                   <TriStateSelect label="Scheduled payments" value={value.enrollments.hasScheduledPayments} onChange={(hasScheduledPayments) => patch("enrollments", { hasScheduledPayments })} />
                   <MonthRangeFields
@@ -286,13 +314,13 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                     </select>
                   </label>
                   <label className="text-xs">
-                    <span className="mb-1 block font-medium text-slate-500">Source</span>
+                    <span className="mb-1 block font-medium text-slate-500">Budget type</span>
                     <select className="input h-9 w-full px-2 py-1 text-sm leading-5" value={value.paymentQueue.source} onChange={(event) => patch("paymentQueue", { source: event.currentTarget.value as DatabaseFilterConfig["paymentQueue"]["source"] })}>
-                      <option value="any">Any source</option>
-                      <option value="projection">Projection</option>
+                      <option value="projection">Enrollment (default)</option>
                       <option value="invoice">Invoice</option>
                       <option value="credit-card">Credit card</option>
                       <option value="unknown">Unknown</option>
+                      <option value="any">Any (incl. CC/invoice audits)</option>
                     </select>
                   </label>
                   <label className="text-xs">
@@ -303,6 +331,8 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                       <option value="unmatched">Unmatched grant</option>
                     </select>
                   </label>
+                  <MultiSelectField label="Grant" value={value.paymentQueue.grantIds} onChange={(grantIds) => patch("paymentQueue", { grantIds })} options={grantOptions} placeholder="Any grant" />
+                  <MultiSelectField label="Customers" value={value.paymentQueue.customerIds} onChange={(customerIds) => patch("paymentQueue", { customerIds })} options={customerOptions} placeholder="Search customers…" />
                   <TriStateSelect label="Has customer" value={value.paymentQueue.hasCustomer} onChange={(hasCustomer) => patch("paymentQueue", { hasCustomer })} />
                   <TriStateSelect label="Credit card/flex" value={value.paymentQueue.isFlex} onChange={(isFlex) => patch("paymentQueue", { isFlex })} />
                   <MonthRangeFields
@@ -328,17 +358,19 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                     </select>
                   </label>
                   <label className="text-xs">
-                    <span className="mb-1 block font-medium text-slate-500">Source</span>
+                    <span className="mb-1 block font-medium text-slate-500">Budget type</span>
                     <select className="input h-9 w-full px-2 py-1 text-sm leading-5" value={value.ledger.source} onChange={(event) => patch("ledger", { source: event.currentTarget.value as DatabaseFilterConfig["ledger"]["source"] })}>
-                      <option value="any">Any source</option>
-                      <option value="enrollment">Enrollment/payment</option>
+                      <option value="enrollment">Enrollment (default)</option>
                       <option value="card">Card</option>
                       <option value="manual">Manual</option>
+                      <option value="migration">Migration</option>
                       <option value="adjustment">Adjustment</option>
                       <option value="system">System</option>
+                      <option value="any">Any (incl. CC/invoice audits)</option>
                     </select>
                   </label>
-                  <GrantIdField label="Grant" value={value.ledger.grantId} onChange={(grantId) => patch("ledger", { grantId })} />
+                  <MultiSelectField label="Grant" value={value.ledger.grantIds} onChange={(grantIds) => patch("ledger", { grantIds })} options={grantOptions} placeholder="Any grant" />
+                  <MultiSelectField label="Customers" value={value.ledger.customerIds} onChange={(customerIds) => patch("ledger", { customerIds })} options={customerOptions} placeholder="Search customers…" />
                   <label className="text-xs">
                     <span className="mb-1 block font-medium text-slate-500">Direction</span>
                     <select className="input h-9 w-full px-2 py-1 text-sm leading-5" value={value.ledger.direction} onChange={(event) => patch("ledger", { direction: event.currentTarget.value as DatabaseFilterConfig["ledger"]["direction"] })}>
@@ -348,7 +380,7 @@ export function DatabaseFilterPanel({ value, onChange, toolKind, onRefreshCollec
                     </select>
                   </label>
                   <TriStateSelect label="Has customer" value={value.ledger.hasCustomer} onChange={(hasCustomer) => patch("ledger", { hasCustomer })} />
-                  <TriStateSelect label="Reversal" value={value.ledger.isReversal} onChange={(isReversal) => patch("ledger", { isReversal })} />
+                  <TriStateSelect label="Reversed pairs" value={value.ledger.isReversal} onChange={(isReversal) => patch("ledger", { isReversal })} />
                   <MonthRangeFields
                     from={value.ledger.monthFrom}
                     to={value.ledger.monthTo}

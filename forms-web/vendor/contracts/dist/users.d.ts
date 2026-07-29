@@ -7,8 +7,8 @@ export declare const RoleTagCanonical: z.ZodEnum<{
 }>;
 /** API-settable ladder levels that admins may set through admin endpoints. */
 export declare const TopRoleCanonical: z.ZodEnum<{
-    admin: "admin";
     user: "user";
+    admin: "admin";
     viewer: "viewer";
     dev: "dev";
     org_dev: "org_dev";
@@ -17,8 +17,8 @@ export declare const TopRoleCanonical: z.ZodEnum<{
 export type TRoleTag = z.infer<typeof RoleTagCanonical>;
 /** Full ladder used in claims/identity flows. */
 export declare const TopRoleLadder: z.ZodEnum<{
-    admin: "admin";
     user: "user";
+    admin: "admin";
     viewer: "viewer";
     dev: "dev";
     org_dev: "org_dev";
@@ -34,8 +34,8 @@ export declare const CreateUserBody: z.ZodObject<{
     name: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     roles: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodPipe<z.ZodString, z.ZodTransform<any, string>>>>>;
     topRole: z.ZodOptional<z.ZodEnum<{
-        admin: "admin";
         user: "user";
+        admin: "admin";
         viewer: "viewer";
         dev: "dev";
         org_dev: "org_dev";
@@ -49,8 +49,8 @@ export declare const InviteUserBody: z.ZodObject<{
     name: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     roles: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodPipe<z.ZodString, z.ZodTransform<any, string>>>>>;
     topRole: z.ZodOptional<z.ZodEnum<{
-        admin: "admin";
         user: "user";
+        admin: "admin";
         viewer: "viewer";
         dev: "dev";
         org_dev: "org_dev";
@@ -65,8 +65,8 @@ export declare const SetRoleBody: z.ZodObject<{
     uid: z.ZodString;
     roles: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodPipe<z.ZodString, z.ZodTransform<any, string>>>>>;
     topRole: z.ZodOptional<z.ZodEnum<{
-        admin: "admin";
         user: "user";
+        admin: "admin";
         viewer: "viewer";
         dev: "dev";
         org_dev: "org_dev";

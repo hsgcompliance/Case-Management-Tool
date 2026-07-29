@@ -99,6 +99,7 @@ var BudgetPipeline = import_zod.z.object({
   status: PipelineStatus,
   grantId: import_zod.z.string().nullable(),
   lineItemId: import_zod.z.string().nullable(),
+  startDate: import_zod.z.string().nullable(),
   sourceFormId: import_zod.z.string().nullable(),
   sourceFormTitle: import_zod.z.string().nullable(),
   formSchemas: import_zod.z.record(import_zod.z.string(), PipelineFormSchema).optional(),
@@ -117,6 +118,7 @@ var BudgetPipelineUpsertBody = import_zod.z.object({
   status: PipelineStatus.optional(),
   grantId: import_zod.z.string().nullable().optional(),
   lineItemId: import_zod.z.string().nullable().optional(),
+  startDate: import_zod.z.string().nullable().optional(),
   sourceFormId: import_zod.z.string().nullable().optional(),
   sourceFormTitle: import_zod.z.string().nullable().optional(),
   formSchemas: import_zod.z.record(import_zod.z.string(), PipelineFormSchema).optional(),
@@ -136,6 +138,7 @@ var BudgetPipelineDeleteBody = import_zod.z.object({
 var BudgetPipelinePreviewBody = import_zod.z.object({
   grantId: import_zod.z.string().nullable().optional(),
   lineItemId: import_zod.z.string().nullable().optional(),
+  startDate: import_zod.z.string().nullable().optional(),
   sourceFormId: import_zod.z.string().nullable().optional(),
   includeGroups: import_zod.z.array(PipelineConditionGroup),
   excludeGroups: import_zod.z.array(PipelineConditionGroup),

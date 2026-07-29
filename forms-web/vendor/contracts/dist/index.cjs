@@ -181,6 +181,7 @@ __export(index_exports, {
   UserToursState: () => UserToursState,
   WORKFLOW_CONFIGS: () => WORKFLOW_CONFIGS,
   assessments: () => assessments_exports,
+  budgetAssignment: () => budgetAssignment_exports,
   budgetPipeline: () => budgetPipeline_exports,
   caseNoteAssistant: () => caseNoteAssistant_exports,
   cleanVisibleLabel: () => cleanVisibleLabel,
@@ -370,6 +371,7 @@ var BudgetPipeline = import_zod3.z.object({
   status: PipelineStatus,
   grantId: import_zod3.z.string().nullable(),
   lineItemId: import_zod3.z.string().nullable(),
+  startDate: import_zod3.z.string().nullable(),
   sourceFormId: import_zod3.z.string().nullable(),
   sourceFormTitle: import_zod3.z.string().nullable(),
   formSchemas: import_zod3.z.record(import_zod3.z.string(), PipelineFormSchema).optional(),
@@ -388,6 +390,7 @@ var BudgetPipelineUpsertBody = import_zod3.z.object({
   status: PipelineStatus.optional(),
   grantId: import_zod3.z.string().nullable().optional(),
   lineItemId: import_zod3.z.string().nullable().optional(),
+  startDate: import_zod3.z.string().nullable().optional(),
   sourceFormId: import_zod3.z.string().nullable().optional(),
   sourceFormTitle: import_zod3.z.string().nullable().optional(),
   formSchemas: import_zod3.z.record(import_zod3.z.string(), PipelineFormSchema).optional(),
@@ -407,6 +410,7 @@ var BudgetPipelineDeleteBody = import_zod3.z.object({
 var BudgetPipelinePreviewBody = import_zod3.z.object({
   grantId: import_zod3.z.string().nullable().optional(),
   lineItemId: import_zod3.z.string().nullable().optional(),
+  startDate: import_zod3.z.string().nullable().optional(),
   sourceFormId: import_zod3.z.string().nullable().optional(),
   includeGroups: import_zod3.z.array(PipelineConditionGroup),
   excludeGroups: import_zod3.z.array(PipelineConditionGroup),
@@ -416,6 +420,24 @@ var BudgetPipelinePreviewBody = import_zod3.z.object({
   month: import_zod3.z.string().optional(),
   limit: import_zod3.z.coerce.number().int().min(1).max(5e3).default(100)
 });
+
+// src/budgetAssignment.ts
+var budgetAssignment_exports = {};
+__export(budgetAssignment_exports, {
+  BudgetAssignmentSource: () => BudgetAssignmentSource,
+  inferBudgetAssignmentSource: () => inferBudgetAssignmentSource
+});
+var BudgetAssignmentSource = import_zod2.z.enum(["pipeline", "user"]);
+function inferBudgetAssignmentSource(input) {
+  const explicit = String(input.budgetAssignmentSource || "").trim();
+  if (explicit === "pipeline" || explicit === "user") return explicit;
+  const transactionSource = String(input.source || "").trim().toLowerCase();
+  if (transactionSource !== "credit-card" && transactionSource !== "invoice") return null;
+  const grantId = String(input.grantId || "").trim();
+  const lineItemId = String(input.lineItemId || "").trim();
+  if (!grantId || !lineItemId) return null;
+  return String(input.pipelineId || "").trim() ? "pipeline" : "user";
+}
 
 // src/assessments.ts
 var assessments_exports = {};
@@ -4318,6 +4340,8 @@ var LedgerOrigin = import_zod2.z.object({
   // firestore path
   paymentQueueId: import_zod2.z.string().nullish(),
   paymentQueueSource: import_zod2.z.string().nullish(),
+  budgetAssignmentSource: import_zod2.z.enum(["pipeline", "user"]).nullish(),
+  pipelineId: import_zod2.z.string().nullish(),
   jotformSubmissionId: import_zod2.z.string().nullish(),
   idempotencyKey: import_zod2.z.string().nullish()
 }).partial();
@@ -6518,6 +6542,7 @@ var CaseNoteUsageSummaryResponseSchema = import_zod5.z.object({
   UserToursState,
   WORKFLOW_CONFIGS,
   assessments,
+  budgetAssignment,
   budgetPipeline,
   caseNoteAssistant,
   cleanVisibleLabel,

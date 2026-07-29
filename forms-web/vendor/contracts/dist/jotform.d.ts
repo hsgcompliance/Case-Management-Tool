@@ -1403,9 +1403,9 @@ export declare const JotformDigestMap: z.ZodObject<{
         spending: z.ZodDefault<z.ZodObject<{
             enabled: z.ZodDefault<z.ZodBoolean>;
             schemaKind: z.ZodDefault<z.ZodEnum<{
-                other: "other";
-                invoice: "invoice";
                 "credit-card": "credit-card";
+                invoice: "invoice";
+                other: "other";
             }>>;
             grantFieldKeys: z.ZodDefault<z.ZodArray<z.ZodString>>;
             lineItemFieldKeys: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -1475,9 +1475,9 @@ export declare const JotformDigestUpsertBody: z.ZodObject<{
         spending: z.ZodDefault<z.ZodObject<{
             enabled: z.ZodDefault<z.ZodBoolean>;
             schemaKind: z.ZodDefault<z.ZodEnum<{
-                other: "other";
-                invoice: "invoice";
                 "credit-card": "credit-card";
+                invoice: "invoice";
+                other: "other";
             }>>;
             grantFieldKeys: z.ZodDefault<z.ZodArray<z.ZodString>>;
             lineItemFieldKeys: z.ZodDefault<z.ZodArray<z.ZodString>>;

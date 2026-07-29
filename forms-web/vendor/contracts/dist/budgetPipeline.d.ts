@@ -189,6 +189,7 @@ export declare const BudgetPipeline: z.ZodObject<{
     }>;
     grantId: z.ZodNullable<z.ZodString>;
     lineItemId: z.ZodNullable<z.ZodString>;
+    startDate: z.ZodNullable<z.ZodString>;
     sourceFormId: z.ZodNullable<z.ZodString>;
     sourceFormTitle: z.ZodNullable<z.ZodString>;
     formSchemas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
@@ -360,6 +361,7 @@ export declare const BudgetPipelineUpsertBody: z.ZodObject<{
     }>>;
     grantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     lineItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    startDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     sourceFormId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     sourceFormTitle: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     formSchemas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
@@ -534,6 +536,7 @@ export type TBudgetPipelineDeleteBody = z.infer<typeof BudgetPipelineDeleteBody>
 export declare const BudgetPipelinePreviewBody: z.ZodObject<{
     grantId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     lineItemId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    startDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     sourceFormId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     includeGroups: z.ZodArray<z.ZodObject<{
         id: z.ZodString;

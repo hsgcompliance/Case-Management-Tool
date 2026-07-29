@@ -15,6 +15,11 @@ export declare const LedgerOrigin: z.ZodObject<{
     sourcePath: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     paymentQueueId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     paymentQueueSource: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    budgetAssignmentSource: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        pipeline: "pipeline";
+        user: "user";
+    }>>>>;
+    pipelineId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     jotformSubmissionId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     idempotencyKey: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
 }, z.core.$strip>;
@@ -61,6 +66,11 @@ export declare const LedgerEntry: z.ZodPreprocess<z.ZodObject<{
         sourcePath: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         paymentQueueId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         paymentQueueSource: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        budgetAssignmentSource: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            pipeline: "pipeline";
+            user: "user";
+        }>>>>;
+        pipelineId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         jotformSubmissionId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         idempotencyKey: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     }, z.core.$strip>>>;

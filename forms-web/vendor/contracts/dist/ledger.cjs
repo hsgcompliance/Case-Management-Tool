@@ -145,6 +145,8 @@ var LedgerOrigin = import_zod2.z.object({
   // firestore path
   paymentQueueId: import_zod2.z.string().nullish(),
   paymentQueueSource: import_zod2.z.string().nullish(),
+  budgetAssignmentSource: import_zod2.z.enum(["pipeline", "user"]).nullish(),
+  pipelineId: import_zod2.z.string().nullish(),
   jotformSubmissionId: import_zod2.z.string().nullish(),
   idempotencyKey: import_zod2.z.string().nullish()
 }).partial();

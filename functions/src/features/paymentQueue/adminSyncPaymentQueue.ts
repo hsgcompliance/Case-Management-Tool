@@ -22,7 +22,7 @@ import { syncEnrollmentProjectionQueueItems, upsertPaymentQueueItems } from "./s
 import { inferTransactionWindowModel, type TransactionWindowModel } from "@hdb/contracts";
 import { getJotformFormQuestions } from "../jotform/service";
 import { isSpendingFormId, extractSpendItems } from "./extractor";
-import { matchesPipeline } from "../budgetPipeline/service";
+import { matchesPipeline, withGrantStartDateDefaults } from "../budgetPipeline/service";
 import type { TBudgetPipeline } from "../budgetPipeline/schemas";
 
 const PAGE = 200;
@@ -69,8 +69,9 @@ async function reallocatePendingItems(
   results.reallocPipelinesActive = pSnap.size;
   if (pSnap.empty) return;
 
-  const pipelines: TBudgetPipeline[] = pSnap.docs.map(
-    (d) => ({ ...(d.data() as TBudgetPipeline), id: d.id }),
+  const pipelines = await withGrantStartDateDefaults(
+    pSnap.docs.map((d) => ({ ...(d.data() as TBudgetPipeline), id: d.id })),
+    orgId,
   );
 
   let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;

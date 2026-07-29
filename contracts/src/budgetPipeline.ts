@@ -82,6 +82,7 @@ export const BudgetPipeline = z.object({
   status: PipelineStatus,
   grantId: z.string().nullable(),
   lineItemId: z.string().nullable(),
+  startDate: z.string().nullable().optional(),
   sourceFormId: z.string().nullable(),
   sourceFormTitle: z.string().nullable(),
   formSchemas: z.record(z.string(), PipelineFormSchema).optional(),
@@ -104,6 +105,7 @@ export const BudgetPipelineUpsertBody = z.object({
   status: PipelineStatus.optional(),
   grantId: z.string().nullable().optional(),
   lineItemId: z.string().nullable().optional(),
+  startDate: z.string().nullable().optional(),
   sourceFormId: z.string().nullable().optional(),
   sourceFormTitle: z.string().nullable().optional(),
   formSchemas: z.record(z.string(), PipelineFormSchema).optional(),
@@ -131,6 +133,7 @@ export type TBudgetPipelineDeleteBody = z.infer<typeof BudgetPipelineDeleteBody>
 export const BudgetPipelinePreviewBody = z.object({
   grantId: z.string().nullable().optional(),
   lineItemId: z.string().nullable().optional(),
+  startDate: z.string().nullable().optional(),
   sourceFormId: z.string().nullable().optional(),
   includeGroups: z.array(PipelineConditionGroup),
   excludeGroups: z.array(PipelineConditionGroup),

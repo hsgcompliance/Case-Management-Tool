@@ -10,6 +10,7 @@
 export * from "./core.js";
 export * from "./http.js";
 export * as budgetPipeline from "./budgetPipeline.js";
+export * as budgetAssignment from "./budgetAssignment.js";
 export * from "./endpointMap.js";
 export * as assessments from "./assessments.js";
 export * as customers from "./customers.js";
@@ -36,6 +37,7 @@ export * as cmActivities from "./cmActivities.js";
 export * as caseNoteAssistant from "./caseNoteAssistant.js";
 export { CaseNoteUsageSummaryQuerySchema, CaseNoteUsageSummaryResponseSchema, GenerateCaseNoteSuggestionBodySchema, GenerateCaseNoteSuggestionResponseSchema, RecordCaseNoteSuggestionDecisionBodySchema, GenerateSmartGoalSuggestionBodySchema, GenerateSmartGoalSuggestionResponseSchema, SmartGoalFieldsSchema } from "./caseNoteAssistant.js";
 export type { TCaseNoteAction, TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryResp, TGenerateCaseNoteSuggestionReq, TGenerateCaseNoteSuggestionResp, TRecordCaseNoteSuggestionDecisionReq, TRecordCaseNoteSuggestionDecisionResp, TGenerateSmartGoalSuggestionReq, TGenerateSmartGoalSuggestionResp, TSmartGoalFields } from "./caseNoteAssistant.js";
+export type { TBudgetAssignmentSource } from "./budgetAssignment.js";
 export type { Ok, OkEmpty, Err, PaginatedResp, PageCursorUpdatedAt, } from "./http.js";
 export type { BudgetLineItemLike, BudgetTotals, TTsLike, TISO10, } from "./core.js";
 export { TsLike, ISO10, } from "./core.js";

@@ -43,6 +43,13 @@ function budgetRowDate(row: Record<string, unknown>): string {
   return isoDate10(row.dueDate || row.date || row.paymentDate || row.serviceDate || row.postedAt || row.createdAt || row.updatedAtISO || row.updatedAt);
 }
 
+function isOnOrAfterPipelineStart(item: Record<string, unknown>, startDate: unknown): boolean {
+  const boundary = isoDate10(startDate);
+  if (!boundary) return true;
+  const itemDate = budgetRowDate(item);
+  return !!itemDate && itemDate >= boundary;
+}
+
 function rowAmount(row: Record<string, unknown>): number {
   if (row.amountCents != null) return round2((Number(row.amountCents) || 0) / 100);
   return round2(Number(row.amount || 0));
@@ -411,6 +418,10 @@ function evaluatePipelineForItem(
   item: Record<string, unknown>,
   pipeline: TBudgetPipeline,
 ): {matched: boolean; matchReasons: string[]; exclusionReasons: string[]} {
+  if (!isOnOrAfterPipelineStart(item, pipeline.startDate)) {
+    return {matched: false, matchReasons: [], exclusionReasons: []};
+  }
+
   const rules = rulesForItem(item, pipeline);
   if (!rules) return {matched: false, matchReasons: [], exclusionReasons: []};
 
@@ -449,6 +460,43 @@ export async function getBudgetPipeline(id: string, orgId: string): Promise<TBud
   return {...pipeline, id: doc.id};
 }
 
+async function grantStartDate(grantId: string | null | undefined, orgId: string): Promise<string | null> {
+  if (!grantId) return null;
+  const doc = await db.collection('grants').doc(grantId).get();
+  if (!doc.exists) return null;
+  const grant = doc.data() as Record<string, unknown>;
+  if (grant.orgId && String(grant.orgId) !== orgId) return null;
+  return isoDate10(grant.startDate) || null;
+}
+
+export async function withGrantStartDateDefaults(
+  pipelines: TBudgetPipeline[],
+  orgId: string,
+): Promise<TBudgetPipeline[]> {
+  const missingGrantIds = Array.from(new Set(
+    pipelines
+      .filter((pipeline) => !isoDate10(pipeline.startDate) && pipeline.grantId)
+      .map((pipeline) => String(pipeline.grantId)),
+  ));
+  if (missingGrantIds.length === 0) return pipelines;
+
+  const docs = await db.getAll(...missingGrantIds.map((id) => db.collection('grants').doc(id)));
+  const starts = new Map<string, string>();
+  for (const doc of docs) {
+    if (!doc.exists) continue;
+    const grant = doc.data() as Record<string, unknown>;
+    if (grant.orgId && String(grant.orgId) !== orgId) continue;
+    const startDate = isoDate10(grant.startDate);
+    if (startDate) starts.set(doc.id, startDate);
+  }
+
+  return pipelines.map((pipeline) => {
+    const explicitStart = isoDate10(pipeline.startDate);
+    const effectiveStart = explicitStart || (pipeline.grantId ? starts.get(pipeline.grantId) : '');
+    return effectiveStart ? {...pipeline, startDate: effectiveStart} : pipeline;
+  });
+}
+
 export async function upsertBudgetPipeline(
   body: TBudgetPipelineUpsertBody,
   orgId: string,
@@ -463,12 +511,18 @@ export async function upsertBudgetPipeline(
     if (prev && prev.orgId !== orgId) {
       throw new Error('not_found');
     }
+    const nextGrantId = body.grantId !== undefined ? (body.grantId ?? null) : (prev?.grantId ?? null);
+    const grantChanged = body.grantId !== undefined && nextGrantId !== (prev?.grantId ?? null);
+    const nextStartDate = isoDate10(body.startDate) ||
+      (!grantChanged ? isoDate10(prev?.startDate) : '') ||
+      await grantStartDate(nextGrantId, orgId);
     const data: Omit<TBudgetPipeline, 'id'> = {
       orgId,
       name: body.name,
       status: body.status ?? prev?.status ?? 'draft',
-      grantId: body.grantId !== undefined ? (body.grantId ?? null) : (prev?.grantId ?? null),
+      grantId: nextGrantId,
       lineItemId: body.lineItemId !== undefined ? (body.lineItemId ?? null) : (prev?.lineItemId ?? null),
+      startDate: nextStartDate || null,
       sourceFormId: body.sourceFormId !== undefined ? (body.sourceFormId ?? null) : (prev?.sourceFormId ?? null),
       sourceFormTitle: body.sourceFormTitle !== undefined ? (body.sourceFormTitle ?? null) : (prev?.sourceFormTitle ?? null),
       formSchemas: body.formSchemas !== undefined
@@ -492,12 +546,15 @@ export async function upsertBudgetPipeline(
   }
 
   const ref = coll.doc();
+  const startDate = isoDate10(body.startDate) ||
+    await grantStartDate(body.grantId ?? null, orgId);
   const data: Omit<TBudgetPipeline, 'id'> = {
     orgId,
     name: body.name,
     status: body.status ?? 'draft',
     grantId: body.grantId ?? null,
     lineItemId: body.lineItemId ?? null,
+    startDate: startDate || null,
     sourceFormId: body.sourceFormId ?? null,
     sourceFormTitle: body.sourceFormTitle ?? null,
     formSchemas: normalizeFormSchemas(body.formSchemas),
@@ -554,12 +611,15 @@ export async function previewBudgetPipeline(
       return {...data, id: d.id};
     })
     .filter((item) => String(item.queueStatus || '') !== 'void');
+  const previewStartDate = isoDate10(body.startDate) ||
+    await grantStartDate(body.grantId ?? null, orgId);
 
   // Evaluate each item
   const matched: Array<Record<string, unknown> & {id: string}> = [];
   const perItem: PreviewItemResult[] = [];
 
   for (const item of items) {
+    if (!isOnOrAfterPipelineStart(item, previewStartDate)) continue;
     const inc = evalIncludes(item, body.includeGroups, body.includeTree ?? null);
     if (!inc.matched) continue;
 
@@ -592,9 +652,13 @@ export async function previewBudgetPipeline(
 
   const conflicts: Array<{pipelineId: string; pipelineName: string; itemIds: string[]}> = [];
 
-  for (const pDoc of activePipelinesSnap.docs) {
-    if (body.pipelineId && pDoc.id === body.pipelineId) continue;
-    const p = pDoc.data() as TBudgetPipeline;
+  const activePipelines = await withGrantStartDateDefaults(
+    activePipelinesSnap.docs.map((pDoc) => ({...(pDoc.data() as TBudgetPipeline), id: pDoc.id})),
+    orgId,
+  );
+  for (const p of activePipelines) {
+    const pipelineId = p.id;
+    if (body.pipelineId && pipelineId === body.pipelineId) continue;
     const conflictIds: string[] = [];
 
     for (const item of matched) {
@@ -602,9 +666,9 @@ export async function previewBudgetPipeline(
     }
 
     if (conflictIds.length > 0) {
-      conflicts.push({pipelineId: pDoc.id, pipelineName: p.name, itemIds: conflictIds});
+      conflicts.push({pipelineId, pipelineName: p.name, itemIds: conflictIds});
       for (const pi of perItem) {
-        if (conflictIds.includes(pi.itemId)) pi.conflictPipelineIds.push(pDoc.id);
+        if (conflictIds.includes(pi.itemId)) pi.conflictPipelineIds.push(pipelineId);
       }
     }
   }
@@ -937,19 +1001,22 @@ export async function autoAllocatePaymentQueueItem(
   if (snap.empty) return {pipelineId: null, allocated: false};
 
   const item = {...data, id: itemId};
-  for (const pDoc of snap.docs) {
-    const pipeline = pDoc.data() as TBudgetPipeline;
+  const pipelines = await withGrantStartDateDefaults(
+    snap.docs.map((pDoc) => ({...(pDoc.data() as TBudgetPipeline), id: pDoc.id})),
+    orgId,
+  );
+  for (const pipeline of pipelines) {
     if (!matchesPipeline(item, pipeline)) continue;
 
     const patch: Record<string, unknown> = {
       updatedAtISO: isoNow(),
-      'system.lastWriter': opts.writer ?? `autoAllocatePaymentQueueItem:pipeline:${pDoc.id}`,
+      'system.lastWriter': opts.writer ?? `autoAllocatePaymentQueueItem:pipeline:${pipeline.id}`,
       'system.lastWriteAt': isoNow(),
     };
     if (pipeline.grantId) patch.grantId = pipeline.grantId;
     if (pipeline.lineItemId) patch.lineItemId = pipeline.lineItemId;
     if (patch.grantId || patch.lineItemId) {
-      patch.pipelineId = pDoc.id;
+      patch.pipelineId = pipeline.id;
       patch.budgetAssignmentSource = 'pipeline';
       await db.collection(QUEUE_COLLECTION).doc(itemId).update(patch);
       if (patch.grantId && patch.lineItemId) {
@@ -957,7 +1024,7 @@ export async function autoAllocatePaymentQueueItem(
         await recomputeGrantBudgetFromLedger(grantId);
         await recomputeCustomerSpendForGrant({grantId}).catch(() => null);
       }
-      return {pipelineId: pDoc.id, allocated: true};
+      return {pipelineId: pipeline.id, allocated: true};
     }
     break;
   }

@@ -21,6 +21,9 @@ export type CustomerFilters = {
   hmisId: TriState;
   caseworthyId: TriState;
   dob: TriState;
+  dobBefore: string;
+  dobAfter: string;
+  customerIds: string[];
   acuityMin: number | null;
   acuityMax: number | null;
 };
@@ -28,11 +31,12 @@ export type CustomerFilters = {
 export type EnrollmentFilters = {
   enabled: boolean;
   search: string;
-  status: "any" | "active" | "closed";
+  status: "any" | "active" | "exited" | "closed";
   includeDeleted: boolean;
   exitDate: TriState;
   caseManager: "any" | "assigned" | "unassigned";
-  grantId: string;
+  grantIds: string[];
+  customerIds: string[];
   entryFrom: string;
   entryTo: string;
   hasScheduledPayments: TriState;
@@ -53,11 +57,14 @@ export type PaymentQueueFilters = {
   enabled: boolean;
   search: string;
   queueStatus: "any" | "pending" | "posted" | "void";
+  /** "Budget type" in the UI — projection = enrollment-driven payments; the rest are CC/invoice audit rows. */
   source: "any" | "credit-card" | "invoice" | "projection" | "unknown";
   matched: "any" | "matched" | "unmatched";
   okUnassigned: TriState;
   isFlex: TriState;
   hasCustomer: TriState;
+  grantIds: string[];
+  customerIds: string[];
   monthFrom: string;
   monthTo: string;
   amountMin: number | null;
@@ -68,10 +75,13 @@ export type LedgerFilters = {
   enabled: boolean;
   search: string;
   paidStatus: "any" | "paid" | "unpaid";
+  /** "Budget type" in the UI — enrollment = enrollment-driven payments; the rest are CC/invoice/other audit rows. */
   source: "any" | "enrollment" | "manual" | "card" | "migration" | "adjustment" | "system";
   direction: "any" | "charge" | "return";
-  grantId: string;
+  grantIds: string[];
+  customerIds: string[];
   hasCustomer: TriState;
+  /** "Reversed pairs" in the UI — "no" (default) hides both the reversal entry and the original it reversed. */
   isReversal: TriState;
   monthFrom: string;
   monthTo: string;
@@ -100,6 +110,9 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
     hmisId: "any",
     caseworthyId: "any",
     dob: "any",
+    dobBefore: "",
+    dobAfter: "",
+    customerIds: [],
     acuityMin: null,
     acuityMax: null,
   },
@@ -110,7 +123,8 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
     includeDeleted: false,
     exitDate: "any",
     caseManager: "any",
-    grantId: "",
+    grantIds: [],
+    customerIds: [],
     entryFrom: "",
     entryTo: "",
     hasScheduledPayments: "any",
@@ -129,11 +143,14 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
     enabled: true,
     search: "",
     queueStatus: "any",
-    source: "any",
+    // Default to enrollment-only ("projection"); CC/invoice audits are opt-in.
+    source: "projection",
     matched: "any",
     okUnassigned: "any",
     isFlex: "any",
     hasCustomer: "any",
+    grantIds: [],
+    customerIds: [],
     monthFrom: "",
     monthTo: "",
     amountMin: null,
@@ -143,11 +160,14 @@ export const DEFAULT_DATABASE_FILTER_CONFIG: DatabaseFilterConfig = {
     enabled: true,
     search: "",
     paidStatus: "any",
-    source: "any",
+    // Default to enrollment-only; CC/manual/migration/adjustment/system rows are opt-in.
+    source: "enrollment",
     direction: "any",
-    grantId: "",
+    grantIds: [],
+    customerIds: [],
     hasCustomer: "any",
-    isReversal: "any",
+    // Default to hiding reversed pairs (original + reversal) as noise.
+    isReversal: "no",
     monthFrom: "",
     monthTo: "",
     amountMin: null,
@@ -183,9 +203,20 @@ function triPass(state: TriState, present: boolean) {
   return state === "yes" ? present : !present;
 }
 
+const inSet = (ids: string[], value: string) => ids.length === 0 || ids.includes(value);
+
+/** ISO-ish date string compare; empty bound = unbounded on that side. */
+function dateInRange(value: string, after: string, before: string): boolean {
+  const v = str(value).slice(0, 10);
+  if (after && (!v || v < after)) return false;
+  if (before && (!v || v > before)) return false;
+  return true;
+}
+
 // ── per-collection predicates ─────────────────────────────────────────────────
 function customerPasses(c: Row, f: CustomerFilters): boolean {
   if (!f.includeDeleted && c.deleted === true) return false;
+  if (!inSet(f.customerIds, str(c.id))) return false;
   if (!includesSearch(f.search, [
     c.id,
     c.firstName,
@@ -210,6 +241,10 @@ function customerPasses(c: Row, f: CustomerFilters): boolean {
   if (!triPass(f.hmisId, has(c.hmisId ?? c.HMISId ?? c.hmisClientId ?? c.clientId))) return false;
   if (!triPass(f.caseworthyId, has(c.caseworthyId ?? c.caseWorthyId ?? c.cwId))) return false;
   if (!triPass(f.dob, has(c.dob ?? c.dateOfBirth ?? c.birthDate))) return false;
+  if (f.dobBefore || f.dobAfter) {
+    const dob = str(c.dob ?? c.dateOfBirth ?? c.birthDate);
+    if (!dob || !dateInRange(dob, f.dobAfter, f.dobBefore)) return false;
+  }
   const acuity = num(c.acuityScore ?? c.acuity);
   if (f.acuityMin != null && (acuity == null || acuity < f.acuityMin)) return false;
   if (f.acuityMax != null && (acuity == null || acuity > f.acuityMax)) return false;
@@ -218,6 +253,7 @@ function customerPasses(c: Row, f: CustomerFilters): boolean {
 
 function enrollmentPasses(e: Row, f: EnrollmentFilters): boolean {
   if (!f.includeDeleted && e.deleted === true) return false;
+  if (!inSet(f.customerIds, str(e.customerId))) return false;
   if (!includesSearch(f.search, [
     e.id,
     e.customerId,
@@ -231,14 +267,18 @@ function enrollmentPasses(e: Row, f: EnrollmentFilters): boolean {
     e.caseManagerName,
   ])) return false;
   const hasExit = has(e.exitDate ?? e.endDate ?? e.closedAt);
-  const closed = hasExit || !isActiveLike(e);
-  if (f.status === "active" && closed) return false;
-  if (f.status === "closed" && !closed) return false;
+  // "closed" = backend status literally closed/deleted; "exited" = has an exit
+  // date but backend hasn't (yet) marked the record closed; "active" = neither.
+  const backendClosed = !isActiveLike(e);
+  const exited = hasExit && !backendClosed;
+  if (f.status === "active" && (backendClosed || hasExit)) return false;
+  if (f.status === "exited" && !exited) return false;
+  if (f.status === "closed" && !backendClosed) return false;
   if (!triPass(f.exitDate, hasExit)) return false;
   const cm = has(e.caseManagerId ?? e.assignedToUid ?? e.caseManagerUid);
   if (f.caseManager === "assigned" && !cm) return false;
   if (f.caseManager === "unassigned" && cm) return false;
-  if (f.grantId && str(e.grantId ?? e.grantID) !== f.grantId) return false;
+  if (!inSet(f.grantIds, str(e.grantId ?? e.grantID))) return false;
   const entry = str(e.entryDate ?? e.startDate ?? e.enrolledAt).slice(0, 10);
   if (f.entryFrom && (!entry || entry < f.entryFrom)) return false;
   if (f.entryTo && (!entry || entry > f.entryTo)) return false;
@@ -277,7 +317,14 @@ function grantPasses(g: Row, f: GrantFilters): boolean {
   return true;
 }
 
+// TODO(reversal-filter): paymentQueue has no "reversed pairs" filter like
+// ledger does. Its reversal concept (reversalEntryId, void semantics) isn't
+// the same as ledger's reversalOf linkage and deserves its own look before
+// adding one here — especially while payment-queue/void code is actively
+// being touched elsewhere.
 function paymentQueuePasses(p: Row, f: PaymentQueueFilters): boolean {
+  if (!inSet(f.grantIds, str(p.grantId))) return false;
+  if (!inSet(f.customerIds, str(p.customerId))) return false;
   if (!includesSearch(f.search, [
     p.id,
     p.customerId,
@@ -311,7 +358,32 @@ function paymentQueuePasses(p: Row, f: PaymentQueueFilters): boolean {
   return true;
 }
 
-function ledgerPasses(l: Row, f: LedgerFilters): boolean {
+/**
+ * Explicit-link reversal pairing only (reversalOf field, with a labels
+ * fallback for older rows). Deliberately does not port Grant Budget
+ * Manager's net-to-zero fallback heuristic (grantBudgetManager/service.ts's
+ * buildLedgerReversalLinks) — that's a heavier, order-dependent algorithm
+ * meant for an admin reconciliation tool, not a live filter predicate.
+ */
+function buildLedgerReversalPairIds(rows: Row[]): Set<string> {
+  const byId = new Set(rows.map((r) => str(r.id)).filter(Boolean));
+  const pairIds = new Set<string>();
+  for (const r of rows) {
+    const id = str(r.id);
+    const labels = Array.isArray(r.labels) ? r.labels.map((x) => lower(x)) : [];
+    const labelTarget = labels.map((l) => /^reversalof:(.+)$/i.exec(l)?.[1]).find(Boolean) || "";
+    const target = str(r.reversalOf) || labelTarget;
+    if (target && byId.has(target)) {
+      pairIds.add(id);
+      pairIds.add(target);
+    }
+  }
+  return pairIds;
+}
+
+function ledgerPasses(l: Row, f: LedgerFilters, reversalPairIds: Set<string>): boolean {
+  if (!inSet(f.grantIds, str(l.grantId))) return false;
+  if (!inSet(f.customerIds, str(l.customerId))) return false;
   if (!includesSearch(f.search, [
     l.id,
     l.customerId,
@@ -334,11 +406,8 @@ function ledgerPasses(l: Row, f: LedgerFilters): boolean {
   const amount = num(l.amount ?? l.amountCents);
   const direction = str(l.direction) || (amount != null && amount < 0 ? "return" : "charge");
   if (f.direction !== "any" && direction !== f.direction) return false;
-  if (f.grantId && str(l.grantId) !== f.grantId) return false;
   if (!triPass(f.hasCustomer, has(l.customerId))) return false;
-  const labels = Array.isArray(l.labels) ? l.labels.map((x) => lower(x)) : [];
-  const isReversal = has(l.reversalOf) || labels.includes("reversal");
-  if (!triPass(f.isReversal, isReversal)) return false;
+  if (!triPass(f.isReversal, reversalPairIds.has(str(l.id)))) return false;
   const month = str(l.month) || str(l.dueDate ?? l.date).slice(0, 7);
   if (f.monthFrom && (!month || month < f.monthFrom)) return false;
   if (f.monthTo && (!month || month > f.monthTo)) return false;
@@ -358,12 +427,14 @@ export type DatabaseSourceData = {
 
 /** Apply the config to cached source arrays. Disabled collections return []. */
 export function applyDatabaseFilters(config: DatabaseFilterConfig, data: DatabaseSourceData) {
+  const ledgerRows = data.ledger ?? [];
+  const reversalPairIds = config.ledger.enabled ? buildLedgerReversalPairIds(ledgerRows) : new Set<string>();
   return {
     customers: config.customers.enabled ? (data.customers ?? []).filter((row) => customerPasses(row, config.customers)) : [],
     enrollments: config.enrollments.enabled ? (data.enrollments ?? []).filter((row) => enrollmentPasses(row, config.enrollments)) : [],
     grants: config.grants.enabled ? (data.grants ?? []).filter((row) => grantPasses(row, config.grants)) : [],
     paymentQueueItems: config.paymentQueue.enabled ? (data.paymentQueueItems ?? []).filter((row) => paymentQueuePasses(row, config.paymentQueue)) : [],
-    ledger: config.ledger.enabled ? (data.ledger ?? []).filter((row) => ledgerPasses(row, config.ledger)) : [],
+    ledger: config.ledger.enabled ? ledgerRows.filter((row) => ledgerPasses(row, config.ledger, reversalPairIds)) : [],
   };
 }
 
@@ -374,7 +445,12 @@ export function countActiveFilters(key: DatabaseCollectionKey, config: DatabaseF
   let count = 0;
   for (const field of Object.keys(current)) {
     if (field === "enabled") continue;
-    if (current[field] !== base[field]) count += 1;
+    const cur = current[field];
+    if (Array.isArray(cur)) {
+      if (cur.length > 0) count += 1;
+    } else if (cur !== base[field]) {
+      count += 1;
+    }
   }
   return count;
 }

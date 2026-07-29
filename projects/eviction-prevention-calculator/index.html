@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Front-end-only 30-day income, AMI, FMR, and ESG assistance limit calculator.">
+  <title>Eviction Prevention Eligibility Calculator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">HRDC • Eviction Prevention</p>
+      <h1>Eligibility calculation worksheet</h1>
+      <p class="header-copy">Document 30-day household income, 30% AMI, FMR, and the ESG assistance limit in one reviewable worksheet.</p>
+    </div>
+    <div class="header-actions no-print">
+      <span id="saveStatus" class="save-status" role="status">Saved locally</span>
+      <a class="button button-ghost" href="widgets.html">View widgets only</a>
+      <button id="loadExampleButton" class="button button-ghost" type="button">Load example</button>
+      <button id="resetButton" class="button button-ghost danger" type="button">Start over</button>
+      <button id="printButton" class="button button-primary" type="button">Export formatted PDF</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="notice no-print" aria-label="Privacy notice">
+      <span class="notice-icon" aria-hidden="true">i</span>
+      <div>
+        <strong>Front-end prototype.</strong> Information stays in this browser and is not sent to a backend. Avoid using real client data on a shared device.
+      </div>
+    </section>
+
+    <nav class="step-nav no-print" aria-label="Worksheet sections">
+      <a href="#household"><span>1</span> Household</a>
+      <a href="#income"><span>2</span> Income</a>
+      <a href="#housing"><span>3</span> Housing</a>
+      <a href="#documentation"><span>4</span> Documentation</a>
+    </nav>
+
+    <section id="household" class="card">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">01</p>
+          <h2>Household and calculation period</h2>
+        </div>
+        <p>Use a case reference instead of a client name when possible.</p>
+      </div>
+      <div class="form-grid cols-4">
+        <label class="field">
+          <span>Case reference <small>optional</small></span>
+          <input id="caseReference" type="text" maxlength="80" placeholder="EP-2026-001">
+        </label>
+        <label class="field">
+          <span>County</span>
+          <select id="county">
+            <option value="">Select county</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Household size</span>
+          <input id="householdSize" type="number" min="1" max="8" step="1" inputmode="numeric" placeholder="1–8">
+        </label>
+        <label class="field">
+          <span>Calculation as-of date</span>
+          <input id="asOfDate" type="date">
+        </label>
+      </div>
+      <div class="period-strip">
+        <div>
+          <span class="meta-label">30-day period</span>
+          <strong id="periodLabel">—</strong>
+        </div>
+        <label class="field compact">
+          <span>Primary income method</span>
+          <select id="incomeMethod">
+            <option value="earned">Earned during period (prorated)</option>
+            <option value="received">Received during period (pay date)</option>
+          </select>
+        </label>
+        <div class="method-help">
+          <strong id="methodTitle">Earned method</strong>
+          <span id="methodDescription">Allocates each check to the work-period days that overlap the 30-day window.</span>
+        </div>
+      </div>
+      <details class="income-method-note">
+        <summary>Why this calculation may differ from pay-frequency monthly income</summary>
+        <div>
+          <p>This worksheet is designed to document income within an exact rolling 30-day period. It counts checks paid in that window or prorates each check by the work-period days overlapping that window, depending on the selected method. The resulting 30-day amount is used as the monthly income figure.</p>
+          <p>A pay-frequency projection answers a different question: what income is expected in a typical average month. That method uses the average gross check multiplied by annual pay periods and divided by 12:</p>
+          <ul>
+            <li><strong>Weekly:</strong> average check × 52 ÷ 12</li>
+            <li><strong>Bi-weekly:</strong> average check × 26 ÷ 12</li>
+            <li><strong>Semi-monthly:</strong> average check × 24 ÷ 12</li>
+            <li><strong>Monthly:</strong> average check × 12 ÷ 12</li>
+          </ul>
+          <p>The results can differ because a rolling 30-day period may contain partial work periods, five weekly checks, three bi-weekly checks, overtime, or other irregular pay. Use the method required by the applicable program and document any exception in the calculation notes.</p>
+        </div>
+      </details>
+    </section>
+
+    <section id="income" class="card">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">02</p>
+          <h2>Household pay and income</h2>
+        </div>
+        <button id="addSourceButton" class="button button-secondary no-print" type="button">+ Add income source</button>
+      </div>
+      <div id="sources" class="sources"></div>
+
+      <div class="other-income-row">
+        <label class="field">
+          <span>Other countable income in this 30-day period</span>
+          <div class="money-input">
+            <span>$</span>
+            <input id="otherIncome" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+          </div>
+          <small>Examples: benefits, support, or other included income not represented by paystubs.</small>
+        </label>
+        <label class="field">
+          <span>Other income note</span>
+          <input id="otherIncomeNote" type="text" maxlength="160" placeholder="Source and documentation reviewed">
+        </label>
+      </div>
+    </section>
+
+    <section class="results-grid" aria-label="Income and AMI results">
+      <article class="result-card result-primary">
+        <p class="result-label">30-day income used</p>
+        <strong id="primaryIncomeResult">$0.00</strong>
+        <span id="primaryMethodResult">Earned during period</span>
+      </article>
+      <article class="result-card">
+        <p class="result-label">Received by pay date</p>
+        <strong id="receivedIncomeResult">$0.00</strong>
+        <span>Full checks paid in period</span>
+      </article>
+      <article class="result-card">
+        <p class="result-label">Earned in work period</p>
+        <strong id="earnedIncomeResult">$0.00</strong>
+        <span>Prorated by calendar-day overlap</span>
+      </article>
+      <article class="result-card">
+        <p class="result-label">Estimated annual income</p>
+        <strong id="annualIncomeResult">$0.00</strong>
+        <span>30-day amount × 12</span>
+      </article>
+    </section>
+
+    <section class="card ami-card">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">AMI</p>
+          <h2>Area Median Income review</h2>
+        </div>
+        <span class="data-stamp">Source matrix: updated 05-2026</span>
+      </div>
+      <div class="ami-layout">
+        <div class="ami-meter-panel">
+          <div class="ami-answer">
+            <span id="amiPercent">—</span>
+            <small>of AMI</small>
+          </div>
+          <div class="meter" aria-hidden="true">
+            <div class="meter-threshold threshold-30"><span>30%</span></div>
+            <div class="meter-threshold threshold-50"><span>50%</span></div>
+            <div class="meter-threshold threshold-80"><span>80%</span></div>
+            <div id="amiMeterFill" class="meter-fill"></div>
+          </div>
+          <div id="amiStatus" class="status neutral">Select county and household size</div>
+        </div>
+        <div class="threshold-table-wrap">
+          <table class="threshold-table">
+            <thead><tr><th>Threshold</th><th>Monthly limit</th><th>Difference</th></tr></thead>
+            <tbody>
+              <tr class="focus-row"><td>30% AMI</td><td id="ami30">—</td><td id="ami30Difference">—</td></tr>
+              <tr><td>50% AMI</td><td id="ami50">—</td><td>—</td></tr>
+              <tr><td>60% AMI</td><td id="ami60">—</td><td>—</td></tr>
+              <tr><td>80% AMI</td><td id="ami80">—</td><td>—</td></tr>
+              <tr><td>100% AMI</td><td id="ami100">—</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="housing" class="card">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">03</p>
+          <h2>FMR and ESG asset limit</h2>
+        </div>
+        <span class="data-stamp">Source matrix: updated 05-2026</span>
+      </div>
+      <div class="form-grid cols-3">
+        <label class="field">
+          <span>Unit size</span>
+          <select id="unitSize">
+            <option value="">Select unit size</option>
+            <option value="Studio">Studio</option>
+            <option value="1BR">1 bedroom</option>
+            <option value="2BR">2 bedrooms</option>
+            <option value="3BR">3 bedrooms</option>
+            <option value="4BR">4 bedrooms</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Requested ESG assistance <small>optional</small></span>
+          <div class="money-input">
+            <span>$</span>
+            <input id="requestedAssistance" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+          </div>
+        </label>
+        <label class="field">
+          <span>Housing note <small>optional</small></span>
+          <input id="housingNote" type="text" maxlength="160" placeholder="Rent, arrears, or unit context">
+        </label>
+      </div>
+      <div class="housing-widget-grid">
+        <article class="housing-widget fmr-widget">
+          <div class="widget-heading">
+            <div>
+              <p class="widget-kicker">Widget 1</p>
+              <h3>Fair Market Rent</h3>
+            </div>
+            <span class="widget-badge">FMR</span>
+          </div>
+          <div class="widget-output">
+            <span>Monthly FMR</span>
+            <div class="output-line">
+              <strong id="fmrResult">—</strong>
+              <button class="copy-number no-print" type="button" data-copy-result="fmr" disabled aria-label="Copy FMR value">Copy number</button>
+            </div>
+            <small id="fmrContext">Select county and unit size</small>
+          </div>
+          <details class="calculation-details">
+            <summary>Details explained</summary>
+            <div>
+              <p>Fair Market Rent is selected from the trusted county and bedroom-size matrix.</p>
+              <dl>
+                <div><dt>County</dt><dd id="fmrDetailCounty">—</dd></div>
+                <div><dt>Unit size</dt><dd id="fmrDetailSize">—</dd></div>
+                <div><dt>Matrix value</dt><dd id="fmrDetailValue">—</dd></div>
+              </dl>
+              <p class="detail-note">Matrix version: 05-2026. Confirm the current program-year table before final eligibility approval.</p>
+            </div>
+          </details>
+        </article>
+
+        <article class="housing-widget esg-widget">
+          <div class="widget-heading">
+            <div>
+              <p class="widget-kicker">Widget 2</p>
+              <h3>ESG Asset Limit</h3>
+            </div>
+            <span class="widget-badge">ESG</span>
+          </div>
+          <div class="widget-output">
+            <span>ESG asset limit</span>
+            <div class="output-line">
+              <strong id="esgLimitResult">—</strong>
+              <button class="copy-number no-print" type="button" data-copy-result="esg" disabled aria-label="Copy ESG asset limit value">Copy number</button>
+            </div>
+            <small>Two months at 80% of monthly FMR</small>
+          </div>
+          <div class="requested-review">
+            <span>Requested amount review</span>
+            <strong id="assistanceReview">—</strong>
+            <small id="assistanceDifference">Enter an amount to compare</small>
+          </div>
+          <details class="calculation-details">
+            <summary>Details explained</summary>
+            <div>
+              <p>This preserves the calculation used by the existing trusted widget:</p>
+              <p id="esgFormula" class="formula-display">2 × 80% × FMR = —</p>
+              <dl>
+                <div><dt>Monthly FMR</dt><dd id="esgDetailFmr">—</dd></div>
+                <div><dt>80% of FMR</dt><dd id="esgDetailEighty">—</dd></div>
+                <div><dt>Two-month limit</dt><dd id="esgDetailLimit">—</dd></div>
+              </dl>
+              <p class="detail-note">The final result is rounded to the nearest whole dollar, matching the original widget.</p>
+            </div>
+          </details>
+        </article>
+      </div>
+    </section>
+
+    <section id="documentation" class="card documentation-card">
+      <div class="section-heading">
+        <div>
+          <p class="section-number">04</p>
+          <h2>Calculation documentation</h2>
+        </div>
+        <div class="button-group no-print">
+          <button id="copyNarrativeButton" class="button button-secondary" type="button">Copy narrative</button>
+          <button id="downloadButton" class="button button-secondary" type="button">Download worksheet</button>
+        </div>
+      </div>
+      <div id="warnings" class="warnings" aria-live="polite"></div>
+      <div id="narrative" class="narrative" aria-live="polite"></div>
+      <div class="review-grid">
+        <label class="field">
+          <span>Prepared by</span>
+          <input id="preparedBy" type="text" maxlength="80" placeholder="Staff name or initials">
+        </label>
+        <label class="field">
+          <span>Review date</span>
+          <input id="reviewDate" type="date">
+        </label>
+        <label class="field">
+          <span>Calculation notes</span>
+          <textarea id="calculationNotes" rows="3" maxlength="800" placeholder="Document exceptions, verification, or program-specific decisions."></textarea>
+        </label>
+      </div>
+      <p class="disclaimer">This worksheet supports staff calculation and documentation. Confirm current program rules, source tables, income inclusions/exclusions, and required verification before making an eligibility determination.</p>
+    </section>
+  </main>
+
+  <template id="sourceTemplate">
+    <article class="income-source">
+      <div class="source-header">
+        <div>
+          <span class="source-kicker">Income source</span>
+          <h3 class="source-title">Employment income</h3>
+        </div>
+        <button class="icon-button remove-source no-print" type="button" aria-label="Remove income source">Remove source</button>
+      </div>
+      <div class="form-grid source-fields">
+        <label class="field">
+          <span>Household member</span>
+          <input data-field="person" type="text" maxlength="80" placeholder="Name or initials">
+        </label>
+        <label class="field">
+          <span>Employer / source</span>
+          <input data-field="employer" type="text" maxlength="100" placeholder="Employer">
+        </label>
+        <label class="field">
+          <span>Pay frequency</span>
+          <select data-field="frequency">
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Bi-weekly (every 2 weeks)</option>
+            <option value="semimonthly">Semi-monthly (twice monthly)</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
+      </div>
+      <div class="coverage-note"></div>
+      <div class="stub-table-wrap">
+        <table class="stub-table">
+          <thead>
+            <tr>
+              <th>Work start</th>
+              <th>Work end</th>
+              <th>Pay date</th>
+              <th>Gross pay</th>
+              <th>Note</th>
+              <th class="no-print"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody class="stub-rows"></tbody>
+        </table>
+      </div>
+      <button class="add-stub button-link no-print" type="button">+ Add paystub</button>
+    </article>
+  </template>
+
+  <template id="stubTemplate">
+    <tr class="stub-row">
+      <td data-label="Work start"><input data-stub-field="workStart" type="date" aria-label="Work period start"></td>
+      <td data-label="Work end"><input data-stub-field="workEnd" type="date" aria-label="Work period end"></td>
+      <td data-label="Pay date"><input data-stub-field="payDate" type="date" aria-label="Pay date"></td>
+      <td data-label="Gross pay"><div class="money-input table-money"><span>$</span><input data-stub-field="gross" type="number" min="0" step="0.01" inputmode="decimal" aria-label="Gross pay"></div></td>
+      <td data-label="Note"><input data-stub-field="note" type="text" maxlength="100" placeholder="OT, bonus, missing stub…" aria-label="Paystub note"></td>
+      <td class="no-print"><button class="row-remove remove-stub" type="button" aria-label="Remove paystub">×</button></td>
+    </tr>
+  </template>
+
+  <script src="calculator.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

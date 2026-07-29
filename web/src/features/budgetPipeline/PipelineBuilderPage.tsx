@@ -69,6 +69,7 @@ type Draft = {
   status: TPipelineStatus;
   grantId: string | null;
   lineItemId: string | null;
+  startDate: string;
   sourceFormId: string | null;
   sourceFormTitle: string | null;
   formSchemas: Record<SourceFormKey, FormSchemaDraft>;
@@ -109,6 +110,7 @@ type PipelineExportBlob = {
     status: TPipelineStatus;
     grantId: string | null;
     lineItemId: string | null;
+    startDate: string | null;
     sourceFormId: string | null;
     sourceFormTitle: string | null;
   };
@@ -161,6 +163,7 @@ function makeEmptyDraft(): Draft {
     status: "draft",
     grantId: null,
     lineItemId: null,
+    startDate: "",
     sourceFormId: source.id,
     sourceFormTitle: source.title,
     formSchemas: makeDefaultFormSchemas(),
@@ -229,6 +232,7 @@ function pipelineToDraft(p: TBudgetPipeline): Draft {
     status: p.status,
     grantId: p.grantId,
     lineItemId: p.lineItemId,
+    startDate: isoDate10(p.startDate),
     sourceFormId: p.sourceFormId || source.id,
     sourceFormTitle: p.sourceFormTitle || source.title,
     formSchemas: schemas,
@@ -1175,6 +1179,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [activeSourceKey, setActiveSourceKey] = useState<SourceFormKey>("creditCard");
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const seededStartDateKeyRef = useRef("");
 
   useEffect(() => {
     if (!existingPipeline) return;
@@ -1215,6 +1220,18 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
     () => (grantsData as any[]).find((g: any) => g.id === draft.grantId) ?? null,
     [grantsData, draft.grantId],
   );
+  const selectedGrantStartDate = isoDate10(selectedGrant?.startDate);
+  const startDateDiffersFromGrant = !!selectedGrantStartDate && draft.startDate !== selectedGrantStartDate;
+
+  useEffect(() => {
+    if (!draft.grantId || draft.startDate || !selectedGrantStartDate) return;
+    const key = `${draft.id || "new"}:${draft.grantId}`;
+    if (seededStartDateKeyRef.current === key) return;
+    seededStartDateKeyRef.current = key;
+    setDraft((current) => current.grantId === draft.grantId && !current.startDate
+      ? {...current, startDate: selectedGrantStartDate}
+      : current);
+  }, [draft.grantId, draft.id, draft.startDate, selectedGrantStartDate]);
   const lineItems: Array<{ id: string; label: string }> = useMemo(
     () => selectedGrant?.budget?.lineItems ?? [],
     [selectedGrant],
@@ -1263,6 +1280,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
         status: statusOverride ?? draft.status,
         grantId: draft.grantId,
         lineItemId: draft.lineItemId,
+        startDate: draft.startDate || selectedGrantStartDate || null,
         sourceFormId: enabledSchemas.length === 1 ? enabledSchemas[0].sourceFormId : null,
         sourceFormTitle,
         formSchemas: draft.formSchemas,
@@ -1291,6 +1309,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
       const result = await preview.mutateAsync({
         grantId: draft.grantId,
         lineItemId: draft.lineItemId,
+        startDate: draft.startDate || selectedGrantStartDate || null,
         sourceFormId: selectedSource.id,
         includeGroups: [],
         excludeGroups: [],
@@ -1312,6 +1331,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
       const result = await preview.mutateAsync({
         grantId: draft.grantId,
         lineItemId: draft.lineItemId,
+        startDate: draft.startDate || selectedGrantStartDate || null,
         sourceFormId: selectedSource.id,
         includeGroups: [],
         excludeGroups: [],
@@ -1342,6 +1362,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
         const result = await preview.mutateAsync({
           grantId: draft.grantId,
           lineItemId: draft.lineItemId,
+          startDate: draft.startDate || selectedGrantStartDate || null,
           sourceFormId: source.id,
           includeGroups: schema.includeGroups ?? [],
           excludeGroups: schema.excludeGroups ?? [],
@@ -1406,6 +1427,7 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
           status: draft.status,
           grantId: draft.grantId,
           lineItemId: draft.lineItemId,
+          startDate: draft.startDate || selectedGrantStartDate || null,
           sourceFormId: enabledSources.length === 1 ? enabledSources[0].id : null,
           sourceFormTitle: enabledSources.length === 1 ? enabledSources[0].title : enabledSources.map((source) => source.title).join(" + "),
         },
@@ -1463,7 +1485,16 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
           <select
             className={`${selectCls} max-w-[180px]`}
             value={draft.grantId ?? ""}
-            onChange={(e) => setDraft((d) => ({ ...d, grantId: e.target.value || null, lineItemId: null }))}
+            onChange={(e) => {
+              const grantId = e.target.value || null;
+              const grant = (grantsData as any[]).find((candidate: any) => candidate.id === grantId);
+              setDraft((current) => ({
+                ...current,
+                grantId,
+                lineItemId: null,
+                startDate: isoDate10(grant?.startDate),
+              }));
+            }}
           >
             <option value="">Any grant</option>
             {(grantsData as any[]).map((g: any) => (
@@ -1489,6 +1520,18 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="flex items-center gap-1.5 min-w-0">
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Date after</label>
+          <input
+            type="date"
+            className={`${inputCls} w-[142px]`}
+            value={draft.startDate}
+            onChange={(e) => setDraft((current) => ({...current, startDate: e.currentTarget.value}))}
+            disabled={!draft.grantId}
+            title="Transactions on or after this date may enter the pipeline."
+          />
         </div>
 
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -1525,6 +1568,15 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
             </button>
           )}
         </div>
+
+        {startDateDiffersFromGrant ? (
+          <div
+            role="alert"
+            className="basis-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            The pipeline boundary ({draft.startDate || "not set"}) differs from the selected grant start date ({selectedGrantStartDate}). Transactions before the pipeline boundary will never be assigned by this pipeline.
+          </div>
+        ) : null}
       </div>
 
       <main className="flex-1 min-h-0 overflow-y-auto p-6 space-y-8">

@@ -51,8 +51,8 @@ export declare const EnrollmentActionHistoryRecord: z.ZodObject<{
     }>;
     actionId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     actorType: z.ZodDefault<z.ZodEnum<{
-        system: "system";
         user: "user";
+        system: "system";
         automation: "automation";
     }>>;
     actorId: z.ZodOptional<z.ZodNullable<z.ZodString>>;

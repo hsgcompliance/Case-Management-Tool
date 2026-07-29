@@ -2528,6 +2528,10 @@ function useReviewForTool(kind: ReconciliationToolKind, filterState: Reconciliat
       ...(filterState.databaseFilters.paymentQueue.matched === "unmatched" ? { unmatched: true } : {}),
       ...(filterState.databaseFilters.paymentQueue.okUnassigned !== "any" ? { okUnassigned: filterState.databaseFilters.paymentQueue.okUnassigned === "yes" } : {}),
       ...(filterState.databaseFilters.paymentQueue.isFlex !== "any" ? { isFlex: filterState.databaseFilters.paymentQueue.isFlex === "yes" } : {}),
+      // Multiselect filters narrow client-side (databaseFilters.ts); only forward
+      // to the server as a single-value param when exactly one is picked.
+      ...(filterState.databaseFilters.paymentQueue.grantIds.length === 1 ? { grantId: filterState.databaseFilters.paymentQueue.grantIds[0] } : {}),
+      ...(filterState.databaseFilters.paymentQueue.customerIds.length === 1 ? { customerId: filterState.databaseFilters.paymentQueue.customerIds[0] } : {}),
     }),
     [
       filterState.databaseFilters.paymentQueue.queueStatus,
@@ -2535,14 +2539,21 @@ function useReviewForTool(kind: ReconciliationToolKind, filterState: Reconciliat
       filterState.databaseFilters.paymentQueue.matched,
       filterState.databaseFilters.paymentQueue.okUnassigned,
       filterState.databaseFilters.paymentQueue.isFlex,
+      filterState.databaseFilters.paymentQueue.grantIds,
+      filterState.databaseFilters.paymentQueue.customerIds,
     ],
   );
   const ledgerQuery = React.useMemo(
     () => ({
       ...(filterState.databaseFilters.ledger.source !== "any" ? { source: filterState.databaseFilters.ledger.source } : {}),
-      ...(filterState.databaseFilters.ledger.grantId ? { grantId: filterState.databaseFilters.ledger.grantId } : {}),
+      ...(filterState.databaseFilters.ledger.grantIds.length === 1 ? { grantId: filterState.databaseFilters.ledger.grantIds[0] } : {}),
+      ...(filterState.databaseFilters.ledger.customerIds.length === 1 ? { customerId: filterState.databaseFilters.ledger.customerIds[0] } : {}),
     }),
-    [filterState.databaseFilters.ledger.grantId, filterState.databaseFilters.ledger.source],
+    [
+      filterState.databaseFilters.ledger.grantIds,
+      filterState.databaseFilters.ledger.customerIds,
+      filterState.databaseFilters.ledger.source,
+    ],
   );
   const eligiblePaymentGrants = React.useMemo(
     () => kind === "payment"
@@ -2939,6 +2950,8 @@ function ReconciliationToolMain({
             toolKind={kind}
             onRefreshCollection={(key) => void refreshCollection(key)}
             refreshingCollection={refreshingCollection}
+            grants={dashboard.grants as Array<Record<string, unknown>>}
+            customers={dashboard.customers as Array<Record<string, unknown>>}
             counts={{
               customers: database.customers.length,
               enrollments: database.enrollments.length,
