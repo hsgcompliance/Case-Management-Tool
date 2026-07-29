@@ -1003,17 +1003,9 @@ export interface EndpointMap {
         req: PaymentsSpendReq;
         resp: PaymentsSpendResp;
     };
-    paymentsBulkSpend: {
-        req: PaymentsBulkSpendReq;
-        resp: PaymentsBulkSpendResp;
-    };
     paymentsUpdateCompliance: {
         req: PaymentsUpdateComplianceReq;
         resp: PaymentsUpdateComplianceResp;
-    };
-    paymentsBulkUpdateCompliance: {
-        req: PaymentsBulkUpdateComplianceReq;
-        resp: PaymentsBulkUpdateComplianceResp;
     };
     paymentsRentCertSet: {
         req: PaymentsRentCertSetReq;
