@@ -138,6 +138,7 @@ export const tasksList = secureHandler( async (req, res) => {
           dueMonth: String(t?.dueDate || "").slice(0, 7) || null,
           status: normalizeStatus(t),
           notify: t?.notify !== false,
+          addToCalendar: t?.addToCalendar === true,
 
           assignedToUid: t?.assignedToUid ?? null,
           assignedToGroup: t?.assignedToGroup ?? null,

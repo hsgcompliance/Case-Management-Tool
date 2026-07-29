@@ -73,6 +73,55 @@ export type TInboxDigestSubRecord = z.infer<typeof InboxDigestSubRecordSchema>;
  */
 const IsoString = z.string().min(1);
 
+export const InboxCalendarPolicySchema = z
+  .object({
+    /** Source default. General tasks are false; enrollment payments/rent-cert reminders are true. */
+    defaultEnabled: z.boolean().default(false),
+    /** Explicit source/operator override. When absent, defaultEnabled controls behavior. */
+    enabled: z.boolean().nullish(),
+    /** Only one projected row should own a shared Calendar event for paired reminders. */
+    centralOwner: z.boolean().default(true),
+  })
+  .partial();
+export type TInboxCalendarPolicy = z.infer<typeof InboxCalendarPolicySchema>;
+
+export const InboxCalendarSyncStatusSchema = z.enum([
+  "idle",
+  "pending",
+  "syncing",
+  "synced",
+  "deleting",
+  "deleted",
+  "failed",
+]);
+export type TInboxCalendarSyncStatus = z.infer<typeof InboxCalendarSyncStatusSchema>;
+
+export const InboxCalendarSyncSchema = z
+  .object({
+    version: z.literal(1).default(1),
+    status: InboxCalendarSyncStatusSchema.default("idle"),
+    operation: z.enum(["upsert", "delete"]).nullish(),
+    eventId: z.string().nullish(),
+    requestedHash: z.string().nullish(),
+    payloadHash: z.string().nullish(),
+    attendeeHash: z.string().nullish(),
+    attendeeUid: z.string().nullish(),
+    attendeeStatus: z
+      .enum(["included", "none", "opted_out", "missing_email", "disabled", "org_mismatch"])
+      .nullish(),
+    attempts: z.number().int().nonnegative().default(0),
+    nextRetryAt: IsoString.nullish(),
+    lastAttemptAt: IsoString.nullish(),
+    lastSuccessAt: IsoString.nullish(),
+    lastErrorCode: z.string().nullish(),
+    lastErrorMessage: z.string().nullish(),
+    lockId: z.string().nullish(),
+    lockExpiresAt: IsoString.nullish(),
+    updatedAt: IsoString.nullish(),
+  })
+  .partial();
+export type TInboxCalendarSync = z.infer<typeof InboxCalendarSyncSchema>;
+
 /* =============================================================================
    Inbox item (stored in userTasks / returned by inbox endpoints)
 ============================================================================= */
@@ -115,6 +164,8 @@ export const InboxItemSchema = z
     actionLabel: z.string().max(120).nullish(),
 
     completedAtISO: IsoString.nullish(),
+    calendar: InboxCalendarPolicySchema.nullish(),
+    calendarSync: InboxCalendarSyncSchema.nullish(),
   })
   .passthrough();
 

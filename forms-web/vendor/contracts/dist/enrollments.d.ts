@@ -445,6 +445,7 @@ export declare const Enrollment: z.ZodObject<{
         vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
             hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
             caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -572,6 +573,7 @@ export declare const Enrollment: z.ZodObject<{
             sequential: "sequential";
         }>>>;
         notify: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         byUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         bucket: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
@@ -859,6 +861,7 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
             hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
             caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -986,6 +989,7 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             sequential: "sequential";
         }>>>;
         notify: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         byUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         bucket: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
@@ -1233,6 +1237,7 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
         vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
             hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
             caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -1360,6 +1365,7 @@ export declare const EnrollmentsUpsertBody: z.ZodUnion<readonly [z.ZodObject<{
             sequential: "sequential";
         }>>>;
         notify: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         byUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         bucket: z.ZodOptional<z.ZodNullable<z.ZodEnum<{

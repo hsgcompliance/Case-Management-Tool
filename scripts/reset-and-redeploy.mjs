@@ -27,6 +27,13 @@ const checkoutKeys = [
   ...(DEPLOY_HOSTING || HOSTING_ONLY || DELETE_HOSTING_SSR ? ["hosting:all", "functions:ssrhousingdbv2"] : []),
 ];
 
+// See scripts/deploy-functions-safe.mjs for the full rationale: firebase-tools'
+// discovery step must load the entire functions codebase and increasingly
+// exceeds its hardcoded 10s timeout as the codebase grows. Same fix.
+if (!process.env.FUNCTIONS_DISCOVERY_TIMEOUT) {
+  process.env.FUNCTIONS_DISCOVERY_TIMEOUT = "120";
+}
+
 function run(cmd, args, { allowFailure = false, stdio = "inherit" } = {}) {
   const result = spawnSync(cmd, args, {
     stdio,

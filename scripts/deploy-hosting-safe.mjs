@@ -31,6 +31,14 @@ if (!["web", "mobile", "forms"].includes(TARGET)) {
   throw new Error(`Unsupported hosting target: ${TARGET}. Expected web, mobile, or forms.`);
 }
 
+// See scripts/deploy-functions-safe.mjs for the full rationale: the "web"
+// target also deploys functions:ssrhousingdbv2 (Next.js frameworks backend),
+// which hits the same firebase-tools discovery-timeout flakiness as the
+// main functions codebase once enough code needs to load. Same fix.
+if (!process.env.FUNCTIONS_DISCOVERY_TIMEOUT) {
+  process.env.FUNCTIONS_DISCOVERY_TIMEOUT = "120";
+}
+
 // Exit code is thrown, not applied directly with process.exit() — that
 // would skip withDeployCheckouts' finally-block release below and leave a
 // stale lock file behind (confirmed happening: a killed/failed deploy left

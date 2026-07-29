@@ -59,6 +59,19 @@ const DEPLOY_AVAILABLE_ONLY = !MATCH && !START_AT && !START_AFTER;
 
 const TEMP_CONFIG = path.join(ROOT, ".firebase.deploy-functions-safe.json");
 
+// The functions codebase has grown to ~280+ exports under one barrel
+// (functions/src/index.ts re-exports every feature domain), so the CLI's
+// discovery step — which must load and evaluate that entire module graph to
+// enumerate triggers, even when deploying a small --only chunk — increasingly
+// exceeds firebase-tools' hardcoded 10s discovery timeout as the codebase
+// grows (intermittent "Cannot determine backend specification" failures).
+// firebase-tools reads this env var itself (functions/runtimes/discovery/
+// index.js) with no CLI flag equivalent, so it must be set here rather than
+// passed as an argument. Respect an existing override instead of clobbering it.
+if (!process.env.FUNCTIONS_DISCOVERY_TIMEOUT) {
+  process.env.FUNCTIONS_DISCOVERY_TIMEOUT = "120";
+}
+
 function run(cmd, args, { allowFailure = false, cwd = ROOT, env = process.env, stdio = "inherit" } = {}) {
   const result = spawnSync(cmd, args, {
     cwd,

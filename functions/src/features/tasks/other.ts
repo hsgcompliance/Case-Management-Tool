@@ -100,6 +100,7 @@ export const createOtherTask = secureHandler(
       dueDate,
       dueMonth,
       notify: body.notify !== false,
+      addToCalendar: body.addToCalendar === true,
       customerId: body.customerId || null,
 
       status: "open",
@@ -156,6 +157,7 @@ export const updateOtherTask = secureHandler(
           }
         : {}),
       ...(patch.notify !== undefined ? { notify: !!patch.notify } : {}),
+      ...(patch.addToCalendar !== undefined ? { addToCalendar: !!patch.addToCalendar } : {}),
       updatedAt: FieldValue.serverTimestamp(),
       updatedAtISO: nowIso,
       updatedBy: uid,
@@ -172,6 +174,16 @@ export const updateOtherTask = secureHandler(
           }
         : {}),
       ...(patch.notify !== undefined ? { notify: !!patch.notify } : {}),
+      ...(patch.addToCalendar !== undefined
+        ? {
+            addToCalendar: !!patch.addToCalendar,
+            calendar: {
+              defaultEnabled: false,
+              enabled: !!patch.addToCalendar,
+              centralOwner: true,
+            },
+          }
+        : {}),
       updatedAtISO: nowIso,
       updatedBy: uid,
     };

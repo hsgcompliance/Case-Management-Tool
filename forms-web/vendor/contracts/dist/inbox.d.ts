@@ -81,6 +81,61 @@ export declare const InboxDigestSubRecordSchema: z.ZodObject<{
     grantProgramIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export type TInboxDigestSubRecord = z.infer<typeof InboxDigestSubRecordSchema>;
+export declare const InboxCalendarPolicySchema: z.ZodObject<{
+    defaultEnabled: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+    enabled: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
+    centralOwner: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+}, z.core.$strip>;
+export type TInboxCalendarPolicy = z.infer<typeof InboxCalendarPolicySchema>;
+export declare const InboxCalendarSyncStatusSchema: z.ZodEnum<{
+    deleted: "deleted";
+    idle: "idle";
+    pending: "pending";
+    syncing: "syncing";
+    synced: "synced";
+    deleting: "deleting";
+    failed: "failed";
+}>;
+export type TInboxCalendarSyncStatus = z.infer<typeof InboxCalendarSyncStatusSchema>;
+export declare const InboxCalendarSyncSchema: z.ZodObject<{
+    version: z.ZodOptional<z.ZodDefault<z.ZodLiteral<1>>>;
+    status: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
+        deleted: "deleted";
+        idle: "idle";
+        pending: "pending";
+        syncing: "syncing";
+        synced: "synced";
+        deleting: "deleting";
+        failed: "failed";
+    }>>>;
+    operation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        delete: "delete";
+        upsert: "upsert";
+    }>>>>;
+    eventId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    requestedHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    payloadHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    attendeeHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    attendeeUid: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    attendeeStatus: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        none: "none";
+        included: "included";
+        opted_out: "opted_out";
+        missing_email: "missing_email";
+        disabled: "disabled";
+        org_mismatch: "org_mismatch";
+    }>>>>;
+    attempts: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+    nextRetryAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    lastAttemptAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    lastSuccessAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    lastErrorCode: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    lastErrorMessage: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    lockId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    lockExpiresAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+}, z.core.$strip>;
+export type TInboxCalendarSync = z.infer<typeof InboxCalendarSyncSchema>;
 export declare const InboxItemSchema: z.ZodObject<{
     utid: z.ZodString;
     source: z.ZodEnum<{
@@ -144,6 +199,49 @@ export declare const InboxItemSchema: z.ZodObject<{
     actionUrl: z.ZodOptional<z.ZodNullable<z.ZodURL>>;
     actionLabel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     completedAtISO: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    calendar: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        defaultEnabled: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+        enabled: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
+        centralOwner: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+    }, z.core.$strip>>>;
+    calendarSync: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        version: z.ZodOptional<z.ZodDefault<z.ZodLiteral<1>>>;
+        status: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
+            deleted: "deleted";
+            idle: "idle";
+            pending: "pending";
+            syncing: "syncing";
+            synced: "synced";
+            deleting: "deleting";
+            failed: "failed";
+        }>>>;
+        operation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            delete: "delete";
+            upsert: "upsert";
+        }>>>>;
+        eventId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        requestedHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        payloadHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        attendeeHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        attendeeUid: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        attendeeStatus: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            none: "none";
+            included: "included";
+            opted_out: "opted_out";
+            missing_email: "missing_email";
+            disabled: "disabled";
+            org_mismatch: "org_mismatch";
+        }>>>>;
+        attempts: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+        nextRetryAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastAttemptAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastSuccessAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastErrorCode: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastErrorMessage: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lockId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lockExpiresAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    }, z.core.$strip>>>;
 }, z.core.$loose>;
 export type TInboxItem = z.infer<typeof InboxItemSchema>;
 /** Back-compat alias (functions currently imports InboxItem). */
@@ -211,6 +309,49 @@ export declare const InboxItemEntitySchema: z.ZodObject<{
     actionUrl: z.ZodOptional<z.ZodNullable<z.ZodURL>>;
     actionLabel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     completedAtISO: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    calendar: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        defaultEnabled: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+        enabled: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
+        centralOwner: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+    }, z.core.$strip>>>;
+    calendarSync: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        version: z.ZodOptional<z.ZodDefault<z.ZodLiteral<1>>>;
+        status: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
+            deleted: "deleted";
+            idle: "idle";
+            pending: "pending";
+            syncing: "syncing";
+            synced: "synced";
+            deleting: "deleting";
+            failed: "failed";
+        }>>>;
+        operation: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            delete: "delete";
+            upsert: "upsert";
+        }>>>>;
+        eventId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        requestedHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        payloadHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        attendeeHash: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        attendeeUid: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        attendeeStatus: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            none: "none";
+            included: "included";
+            opted_out: "opted_out";
+            missing_email: "missing_email";
+            disabled: "disabled";
+            org_mismatch: "org_mismatch";
+        }>>>>;
+        attempts: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+        nextRetryAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastAttemptAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastSuccessAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastErrorCode: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lastErrorMessage: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lockId: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        lockExpiresAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        updatedAt: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+    }, z.core.$strip>>>;
     id: z.ZodString;
 }, z.core.$loose>;
 export type TInboxItemEntity = z.infer<typeof InboxItemEntitySchema>;

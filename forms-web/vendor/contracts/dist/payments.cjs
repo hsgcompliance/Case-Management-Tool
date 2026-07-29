@@ -167,6 +167,8 @@ var Payment = import_zod2.z.object({
   comment: import_zod2.z.string().nullish(),
   notifyCM: import_zod2.z.boolean().nullish(),
   // used by inbox trigger logic
+  /** Calendar projection defaults to enabled when absent for enrollment payments. */
+  addToCalendar: import_zod2.z.boolean().nullish(),
   // compliance
   compliance: PaymentCompliance.nullish(),
   rentCert: PaymentRentCert.nullish(),

@@ -406,6 +406,8 @@ var Payment = import_zod2.z.object({
   comment: import_zod2.z.string().nullish(),
   notifyCM: import_zod2.z.boolean().nullish(),
   // used by inbox trigger logic
+  /** Calendar projection defaults to enabled when absent for enrollment payments. */
+  addToCalendar: import_zod2.z.boolean().nullish(),
   // compliance
   compliance: PaymentCompliance.nullish(),
   rentCert: PaymentRentCert.nullish(),
@@ -723,6 +725,7 @@ var TaskScheduleItem = import_zod2.z.object({
   multiMode: import_zod2.z.enum(["parallel", "sequential"]).nullish(),
   // --- meta
   notify: import_zod2.z.boolean().nullish(),
+  addToCalendar: import_zod2.z.boolean().nullish(),
   notes: import_zod2.z.string().nullish(),
   // legacy-ish, but keep: older code reads it in carryStatus()
   byUid: import_zod2.z.string().nullish(),
@@ -789,7 +792,8 @@ var TasksUpsertManualBody = import_zod2.z.object({
     dueDate: import_zod2.z.string().optional().default(""),
     // optional for note/reminder mode
     bucket: import_zod2.z.enum(["task", "assessment", "compliance", "other"]).optional().default("task"),
-    notify: import_zod2.z.boolean().optional().default(true)
+    notify: import_zod2.z.boolean().optional().default(true),
+    addToCalendar: import_zod2.z.boolean().optional()
   })
 });
 var TasksListQuery = import_zod2.z.object({
@@ -825,6 +829,7 @@ var TasksListItem = import_zod2.z.object({
   /** @deprecated Use reminder visibility/notify fields instead of workflow status. */
   status: import_zod2.z.enum(["open", "done", "verified"]).optional().default("open"),
   notify: import_zod2.z.boolean().optional().default(true),
+  addToCalendar: import_zod2.z.boolean().optional().default(false),
   assignedToUid: import_zod2.z.string().nullable(),
   assignedToGroup: AssignedGroup.nullable(),
   assignedAt: import_zod2.z.string().nullable().optional()
@@ -853,6 +858,7 @@ var TasksOtherCreateBody = import_zod2.z.object({
   dueDate: import_zod2.z.string().optional(),
   dueMonth: import_zod2.z.string().optional(),
   notify: import_zod2.z.boolean().optional().default(true),
+  addToCalendar: import_zod2.z.boolean().optional().default(false),
   customerId: import_zod2.z.string().nullish(),
   assign: import_zod2.z.object({
     group: OtherGroup.nullish(),
@@ -865,7 +871,8 @@ var TasksOtherUpdateBody = import_zod2.z.object({
     title: import_zod2.z.string().min(1).max(200).optional(),
     notes: import_zod2.z.string().max(2e3).optional(),
     dueDate: import_zod2.z.union([ISO10, import_zod2.z.literal(""), import_zod2.z.null()]).optional(),
-    notify: import_zod2.z.boolean().optional()
+    notify: import_zod2.z.boolean().optional(),
+    addToCalendar: import_zod2.z.boolean().optional()
   })
 });
 var TasksOtherAssignBody = import_zod2.z.object({
@@ -890,6 +897,7 @@ var TasksUpdateFieldsBody = import_zod2.z.object({
   taskId: import_zod2.z.string(),
   patch: import_zod2.z.object({
     notify: import_zod2.z.boolean().optional(),
+    addToCalendar: import_zod2.z.boolean().optional(),
     notes: import_zod2.z.string().optional(),
     type: import_zod2.z.string().optional(),
     bucket: import_zod2.z.enum(["task", "assessment", "compliance", "other"]).optional()

@@ -1,5 +1,8 @@
 import {
   InboxAssignedGroupEnum,
+  InboxCalendarPolicySchema,
+  InboxCalendarSyncSchema,
+  InboxCalendarSyncStatusSchema,
   InboxDigestPreviewQuerySchema,
   InboxDigestSubRecordSchema,
   InboxDigestTypeSchema,
@@ -18,11 +21,14 @@ import {
   InboxWorkItemKindEnum,
   InboxWorkflowRefSchema,
   InboxWorkloadListQuerySchema
-} from "./chunk-YGWKSJJ3.js";
+} from "./chunk-TRNQY2L2.js";
 import "./chunk-AXFMCCQR.js";
 import "./chunk-MLKGABMK.js";
 export {
   InboxAssignedGroupEnum,
+  InboxCalendarPolicySchema,
+  InboxCalendarSyncSchema,
+  InboxCalendarSyncStatusSchema,
   InboxDigestPreviewQuerySchema,
   InboxDigestSubRecordSchema,
   InboxDigestTypeSchema,

@@ -55,6 +55,7 @@ export const TaskScheduleItem = z
 
     // --- meta
     notify: z.boolean().nullish(),
+    addToCalendar: z.boolean().nullish(),
     notes: z.string().nullish(),
 
     // legacy-ish, but keep: older code reads it in carryStatus()
@@ -147,6 +148,7 @@ export const TasksUpsertManualBody = z.object({
     dueDate: z.string().optional().default(""), // optional for note/reminder mode
     bucket: z.enum(["task", "assessment", "compliance", "other"]).optional().default("task"),
     notify: z.boolean().optional().default(true),
+    addToCalendar: z.boolean().optional(),
   }),
 });
 export type TTasksUpsertManualBody = z.infer<typeof TasksUpsertManualBody>;
@@ -187,6 +189,7 @@ export const TasksListItem = z.object({
   /** @deprecated Use reminder visibility/notify fields instead of workflow status. */
   status: z.enum(["open", "done", "verified"]).optional().default("open"),
   notify: z.boolean().optional().default(true),
+  addToCalendar: z.boolean().optional().default(false),
 
   assignedToUid: z.string().nullable(),
   assignedToGroup: AssignedGroup.nullable(),
@@ -229,6 +232,7 @@ export const TasksOtherCreateBody = z.object({
   dueDate: z.string().optional(),
   dueMonth: z.string().optional(),
   notify: z.boolean().optional().default(true),
+  addToCalendar: z.boolean().optional().default(false),
   customerId: z.string().nullish(),
   assign: z.object({
     group: OtherGroup.nullish(),
@@ -244,6 +248,7 @@ export const TasksOtherUpdateBody = z.object({
     notes: z.string().max(2000).optional(),
     dueDate: z.union([ISO10, z.literal(""), z.null()]).optional(),
     notify: z.boolean().optional(),
+    addToCalendar: z.boolean().optional(),
   }),
 });
 export type TTasksOtherUpdateBody = z.infer<typeof TasksOtherUpdateBody>;
@@ -277,6 +282,7 @@ export const TasksUpdateFieldsBody = z.object({
   taskId: z.string(),
   patch: z.object({
     notify: z.boolean().optional(),
+    addToCalendar: z.boolean().optional(),
     notes: z.string().optional(),
     type: z.string().optional(),
     bucket: z.enum(["task", "assessment", "compliance", "other"]).optional(),

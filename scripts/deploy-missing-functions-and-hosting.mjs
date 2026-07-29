@@ -26,6 +26,13 @@ const LIST_ONLY = process.argv.includes("--list-only");
 const { shouldPush, commitMsg } = parsePushArgs();
 const CHUNK_SIZE = 20;
 
+// See scripts/deploy-functions-safe.mjs for the full rationale: firebase-tools'
+// discovery step must load the entire functions codebase and increasingly
+// exceeds its hardcoded 10s timeout as the codebase grows. Same fix.
+if (!process.env.FUNCTIONS_DISCOVERY_TIMEOUT) {
+  process.env.FUNCTIONS_DISCOVERY_TIMEOUT = "120";
+}
+
 function run(cmd, args, { allowFailure = false, cwd = ROOT, env = process.env } = {}) {
   const result = spawnSync(cmd, args, {
     cwd,

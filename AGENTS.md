@@ -95,6 +95,55 @@ npm run build:web
 ```
 A clean re-run succeeds; the error is a flaky file lock, not a code failure.
 
+### Functions discovery-timeout flakiness
+`firebase deploy` intermittently fails with `Error: User code failed to load.
+Cannot determine backend specification. Timeout after 10000` — this is
+firebase-tools' own hardcoded 10s window for loading the compiled functions
+entry point and enumerating every exported trigger, regardless of how small
+the `--only` chunk is. As `functions/src` has grown (242 files behind one
+`index.ts` barrel, pulling in `googleapis` and other heavy SDKs eagerly),
+this has gotten more likely to trip, not less — it scales with total
+codebase size, not chunk size. Same mechanism trips on the Next.js
+frameworks-generated `ssrhousingdbv2` function during `hosting:web` deploys
+(Firebase always bundles that function into a hosting deploy for a
+frameworks-backed site — see below — so it's not avoidable by only deploying
+hosting).
+
+Fixed (2026-07-29): all deploy scripts (`deploy-functions-safe.mjs`,
+`deploy-hosting-safe.mjs`, `deploy-missing-functions-and-hosting.mjs`,
+`reset-and-redeploy.mjs`) now set `FUNCTIONS_DISCOVERY_TIMEOUT=120` (an
+official firebase-tools env var override, `runtimes/discovery/index.js`)
+unless already set by the caller. Confirmed via direct reproduction (running
+`node_modules/firebase-functions/lib/bin/firebase-functions.js` standalone
+with the same env firebase-tools uses) that this is genuine slowness, not a
+hang: a clean, uncontended run completes in ~16s; under real load (another
+agent's node processes running concurrently, a just-finished Next.js build,
+antivirus scanning freshly-compiled files) it can run well past 60s. 120s
+gives comfortable headroom either way. If flakiness returns despite this,
+retry first — it's still the same class of variance, just far rarer.
+
+**Why you can't "skip SSR" on a web hosting deploy:** Firebase's own
+`isDeployingWebFramework()`/`prepareFrameworks()` (`lib/deploy/index.js`,
+`lib/frameworks/index.js`) unconditionally inject the frameworks-backend
+function into `--only` for any `hosting:web`-style deploy of a site with a
+`source` config — independent of pinTags, independent of what you actually
+requested. There's no supported way to decouple them, and splitting into two
+sequential `firebase deploy` calls doesn't help either — it just pays the
+same discovery cost twice per deploy instead of once (worse for both
+reliability and Cloud Build cost).
+
+**Follow-up worth planning (not yet started):** the real structural fix for
+"failures scale with codebase size" is splitting `functions/src`'s single
+`default` codebase into multiple Firebase codebases by domain (via
+`firebase.json`'s `functions[]` array — each entry gets its own `source`/
+`codebase`). Each codebase's discovery would only load its own slice of the
+import graph instead of everything, which — unlike the timeout bump above —
+actually reduces the underlying cost rather than just tolerating it, and
+keeps scaling well as more functions get added. This needs its own plan:
+reorganizing which functions land in which codebase, updating the chunked
+deploy scripts' `--match`/`--start-at` targeting to be codebase-aware, and
+verifying cross-codebase calls still resolve.
+
 ### Contracts (when schema changes)
 ```powershell
 npm run contracts:update   # build + vendor into functions/ and web/

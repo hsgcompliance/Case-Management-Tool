@@ -14,6 +14,11 @@ export interface CalendarEventInput {
   startTime?: string; // HH:MM
   endTime?: string;   // HH:MM
   timeZone?: string;
+  calendarId?: string;
+  attendees?: Array<{ email: string; displayName?: string }>;
+  transparency?: "opaque" | "transparent";
+  sendUpdates?: "all" | "externalOnly" | "none";
+  privateProperties?: Record<string, string>;
   /** When set, update this existing event in place instead of inserting a new one. */
   eventId?: string;
 }
@@ -58,14 +63,34 @@ export async function createCalendarEvent(
       endObj   = { dateTime: `${endDate}T${endTime}:00`,             timeZone: tz };
     } else {
       startObj = { date: event.date };
-      endObj   = { date: event.date };
+      // Google Calendar all-day end dates are exclusive.
+      endObj   = { date: addOneDay(event.date) };
     }
 
-    const requestBody = {
+    const calendarId = String(event.calendarId || "primary").trim() || "primary";
+    const attendees = event.attendees
+      ? Array.from(
+          new Map(
+            event.attendees
+              .map((entry) => ({
+                email: String(entry.email || "").trim().toLowerCase(),
+                displayName: String(entry.displayName || "").trim() || undefined,
+              }))
+              .filter((entry) => entry.email)
+              .map((entry) => [entry.email, entry]),
+          ).values(),
+        )
+      : undefined;
+    const requestBody: Record<string, unknown> = {
       summary: event.summary,
       description: event.description ?? "",
       start: startObj,
       end: endObj,
+      ...(attendees ? { attendees } : {}),
+      ...(event.transparency ? { transparency: event.transparency } : {}),
+      ...(event.privateProperties
+        ? { extendedProperties: { private: event.privateProperties } }
+        : {}),
     };
 
     // Update the existing event in place when an id is supplied (edit re-sync) —
@@ -75,9 +100,10 @@ export async function createCalendarEvent(
     if (event.eventId) {
       try {
         const { data } = await calendar.events.patch({
-          calendarId: "primary",
+          calendarId,
           eventId: event.eventId,
           requestBody,
+          sendUpdates: event.sendUpdates ?? "none",
         });
         eventId = data.id ?? event.eventId;
       } catch (patchErr: any) {
@@ -88,18 +114,43 @@ export async function createCalendarEvent(
     }
 
     if (!eventId) {
-      const { data } = await calendar.events.insert({
-        calendarId: "primary",
-        requestBody,
-      });
-      eventId = data.id ?? "";
+      const insertBody = event.eventId
+        ? { ...requestBody, id: event.eventId }
+        : requestBody;
+      try {
+        const { data } = await calendar.events.insert({
+          calendarId,
+          requestBody: insertBody,
+          sendUpdates: event.sendUpdates ?? "none",
+        });
+        eventId = data.id ?? event.eventId ?? "";
+      } catch (insertErr: any) {
+        const status = insertErr?.code ?? insertErr?.response?.status;
+        if (status !== 409 || !event.eventId) throw insertErr;
+        // Deterministic IDs make concurrent/rapid source writes safe. If another
+        // invocation inserted first, converge by patching the same event.
+        const { data } = await calendar.events.patch({
+          calendarId,
+          eventId: event.eventId,
+          requestBody,
+          sendUpdates: event.sendUpdates ?? "none",
+        });
+        eventId = data.id ?? event.eventId;
+      }
     }
 
-    // Update lastSyncAt in public metadata
-    const record = await readToken(uid, "googleCalendar");
+    // The event is already durable. Integration metadata is bookkeeping and
+    // must not turn a successful Calendar write into a retry.
+    const record = await readToken(uid, "googleCalendar").catch(() => null);
     if (record) {
       const meta = tokenToPublicMeta(record);
-      await writePublicMeta(uid, "googleCalendar", { ...meta, lastSyncAt: isoNow() });
+      await writePublicMeta(uid, "googleCalendar", { ...meta, lastSyncAt: isoNow() })
+        .catch((metadataError) => {
+          logger.warn("Calendar sync metadata update failed", {
+            uid,
+            err: safeGoogleErrorMessage(metadataError),
+          });
+        });
     }
 
     return { ok: true, eventId };
@@ -107,7 +158,7 @@ export async function createCalendarEvent(
     logger.warn("Calendar event create failed", { uid, err: String(err) });
 
     const status = err?.code ?? err?.response?.status;
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       // Mark as needs_reconnect in private store and public meta
       await patchToken(uid, "googleCalendar", {
         status: "needs_reconnect",
@@ -125,18 +176,15 @@ export async function createCalendarEvent(
       return { ok: false, error: "Token expired or revoked", code: "calendar_needs_reconnect" };
     }
 
-    const msg = err?.errors?.[0]?.message ?? err?.message ?? String(err);
-    if (String(msg).includes("SERVICE_DISABLED")) {
-      return { ok: false, error: "Google Calendar API is not enabled", code: "calendar_api_disabled" };
-    }
-
-    return { ok: false, error: msg, code: "unknown" };
+    const msg = safeGoogleErrorMessage(err);
+    return { ok: false, error: msg, code: calendarErrorCode(err) };
   }
 }
 
 export async function deleteCalendarEvent(
   uid: string,
   eventId: string,
+  calendarId = "primary",
 ): Promise<CalendarDeleteResult> {
   const cleanEventId = String(eventId || "").trim();
   if (!cleanEventId) return { ok: true, eventId: "", notFound: true };
@@ -154,14 +202,22 @@ export async function deleteCalendarEvent(
     const { google } = await import("googleapis");
     const calendar = google.calendar({ version: "v3", auth: authResult.auth });
     await calendar.events.delete({
-      calendarId: "primary",
+      calendarId: String(calendarId || "primary").trim() || "primary",
       eventId: cleanEventId,
+      sendUpdates: "none",
     });
 
-    const record = await readToken(uid, "googleCalendar");
+    const record = await readToken(uid, "googleCalendar").catch(() => null);
     if (record) {
       const meta = tokenToPublicMeta(record);
-      await writePublicMeta(uid, "googleCalendar", { ...meta, lastSyncAt: isoNow() });
+      await writePublicMeta(uid, "googleCalendar", { ...meta, lastSyncAt: isoNow() })
+        .catch((metadataError) => {
+          logger.warn("Calendar delete metadata update failed", {
+            uid,
+            eventId: cleanEventId,
+            err: safeGoogleErrorMessage(metadataError),
+          });
+        });
     }
 
     return { ok: true, eventId: cleanEventId };
@@ -172,7 +228,7 @@ export async function deleteCalendarEvent(
     }
     logger.warn("Calendar event delete failed", { uid, eventId: cleanEventId, err: String(err) });
 
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       await patchToken(uid, "googleCalendar", {
         status: "needs_reconnect",
         updatedAt: Date.now(),
@@ -189,13 +245,27 @@ export async function deleteCalendarEvent(
       return { ok: false, error: "Token expired or revoked", code: "calendar_needs_reconnect" };
     }
 
-    const msg = err?.errors?.[0]?.message ?? err?.message ?? String(err);
-    if (String(msg).includes("SERVICE_DISABLED")) {
-      return { ok: false, error: "Google Calendar API is not enabled", code: "calendar_api_disabled" };
-    }
-
-    return { ok: false, error: msg, code: "unknown" };
+    const msg = safeGoogleErrorMessage(err);
+    return { ok: false, error: msg, code: calendarErrorCode(err) };
   }
+}
+
+function safeGoogleErrorMessage(err: any): string {
+  const raw = err?.errors?.[0]?.message ?? err?.message ?? "Google Calendar request failed";
+  return String(raw).replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function calendarErrorCode(err: any): string {
+  const status = Number(err?.code ?? err?.response?.status ?? 0);
+  const message = safeGoogleErrorMessage(err).toLowerCase();
+  if (message.includes("service_disabled")) return "calendar_api_disabled";
+  if (status === 401) return "calendar_needs_reconnect";
+  if (status === 429 || message.includes("rate limit") || message.includes("quota")) {
+    return "calendar_rate_limited";
+  }
+  if (status === 403) return "calendar_permission_denied";
+  if (status >= 500) return "calendar_unavailable";
+  return "calendar_unknown";
 }
 
 function bumpHour(time: string): string {

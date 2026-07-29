@@ -11,6 +11,9 @@ import {
 var inbox_exports = {};
 __export(inbox_exports, {
   InboxAssignedGroupEnum: () => InboxAssignedGroupEnum,
+  InboxCalendarPolicySchema: () => InboxCalendarPolicySchema,
+  InboxCalendarSyncSchema: () => InboxCalendarSyncSchema,
+  InboxCalendarSyncStatusSchema: () => InboxCalendarSyncStatusSchema,
   InboxDigestPreviewQuerySchema: () => InboxDigestPreviewQuerySchema,
   InboxDigestSubRecordSchema: () => InboxDigestSubRecordSchema,
   InboxDigestTypeSchema: () => InboxDigestTypeSchema,
@@ -75,6 +78,43 @@ var InboxDigestSubRecordSchema = z.object({
   grantProgramIds: z.array(z.string()).optional()
 });
 var IsoString = z.string().min(1);
+var InboxCalendarPolicySchema = z.object({
+  /** Source default. General tasks are false; enrollment payments/rent-cert reminders are true. */
+  defaultEnabled: z.boolean().default(false),
+  /** Explicit source/operator override. When absent, defaultEnabled controls behavior. */
+  enabled: z.boolean().nullish(),
+  /** Only one projected row should own a shared Calendar event for paired reminders. */
+  centralOwner: z.boolean().default(true)
+}).partial();
+var InboxCalendarSyncStatusSchema = z.enum([
+  "idle",
+  "pending",
+  "syncing",
+  "synced",
+  "deleting",
+  "deleted",
+  "failed"
+]);
+var InboxCalendarSyncSchema = z.object({
+  version: z.literal(1).default(1),
+  status: InboxCalendarSyncStatusSchema.default("idle"),
+  operation: z.enum(["upsert", "delete"]).nullish(),
+  eventId: z.string().nullish(),
+  requestedHash: z.string().nullish(),
+  payloadHash: z.string().nullish(),
+  attendeeHash: z.string().nullish(),
+  attendeeUid: z.string().nullish(),
+  attendeeStatus: z.enum(["included", "none", "opted_out", "missing_email", "disabled", "org_mismatch"]).nullish(),
+  attempts: z.number().int().nonnegative().default(0),
+  nextRetryAt: IsoString.nullish(),
+  lastAttemptAt: IsoString.nullish(),
+  lastSuccessAt: IsoString.nullish(),
+  lastErrorCode: z.string().nullish(),
+  lastErrorMessage: z.string().nullish(),
+  lockId: z.string().nullish(),
+  lockExpiresAt: IsoString.nullish(),
+  updatedAt: IsoString.nullish()
+}).partial();
 var InboxItemSchema = z.object({
   utid: z.string().min(1),
   source: InboxSourceEnum,
@@ -106,7 +146,9 @@ var InboxItemSchema = z.object({
   /** Backend-owned deep link for workflow-backed reminders. */
   actionUrl: z.url().nullish(),
   actionLabel: z.string().max(120).nullish(),
-  completedAtISO: IsoString.nullish()
+  completedAtISO: IsoString.nullish(),
+  calendar: InboxCalendarPolicySchema.nullish(),
+  calendarSync: InboxCalendarSyncSchema.nullish()
 }).passthrough();
 var InboxItemEntitySchema = InboxItemSchema.extend({
   id: z.string().min(1)
@@ -194,6 +236,9 @@ export {
   InboxWorkflowRefSchema,
   InboxDigestTypeSchema,
   InboxDigestSubRecordSchema,
+  InboxCalendarPolicySchema,
+  InboxCalendarSyncStatusSchema,
+  InboxCalendarSyncSchema,
   InboxItemSchema,
   InboxItemEntitySchema,
   InboxListMyQuerySchema,

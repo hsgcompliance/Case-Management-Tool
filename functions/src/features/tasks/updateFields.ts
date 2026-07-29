@@ -34,6 +34,9 @@ export async function updateTaskFieldsHandler(req: Request, res: Response): Prom
 
     const t = { ...sched[idx] };
     if (Object.prototype.hasOwnProperty.call(patch, "notify")) t.notify = !!patch.notify;
+    if (Object.prototype.hasOwnProperty.call(patch, "addToCalendar")) {
+      t.addToCalendar = !!patch.addToCalendar;
+    }
     if (Object.prototype.hasOwnProperty.call(patch, "notes")) t.notes = String(patch.notes || "");
     if (Object.prototype.hasOwnProperty.call(patch, "type")) t.type = String(patch.type || t.type || "Task");
     if (Object.prototype.hasOwnProperty.call(patch, "bucket")) t.bucket = patch.bucket;

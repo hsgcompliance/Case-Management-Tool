@@ -59,6 +59,10 @@ export const tasksUpsertManual = secureHandler(async (req, res) => {
       dueDate,
       dueMonth: dueDate ? dueDate.slice(0,7) : null,
       notify: task.notify !== false,
+      addToCalendar:
+        typeof task.addToCalendar === "boolean"
+          ? task.addToCalendar
+          : base.addToCalendar === true,
       bucket: task.bucket || "task",
       customerName: (base as any)?.customerName ?? customerName,
       grantName: (base as any)?.grantName ?? grantName,

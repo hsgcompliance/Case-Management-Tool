@@ -92,6 +92,8 @@ var Payment = z.object({
   comment: z.string().nullish(),
   notifyCM: z.boolean().nullish(),
   // used by inbox trigger logic
+  /** Calendar projection defaults to enabled when absent for enrollment payments. */
+  addToCalendar: z.boolean().nullish(),
   // compliance
   compliance: PaymentCompliance.nullish(),
   rentCert: PaymentRentCert.nullish(),

@@ -43,6 +43,8 @@ export const PaymentQueueItem = z.object({
   createdAt: z.string(),
   dueDate: z.string().nullable(),
   month: z.string(),
+  /** Mirrors enrollment payment intent; Calendar sync remains owned by userTasks. */
+  addToCalendar: z.boolean().optional(),
 
   // ── Amount ────────────────────────────────────────────────────────────────
   amount: z.number(),

@@ -70,6 +70,7 @@ var TaskScheduleItem = z.object({
   multiMode: z.enum(["parallel", "sequential"]).nullish(),
   // --- meta
   notify: z.boolean().nullish(),
+  addToCalendar: z.boolean().nullish(),
   notes: z.string().nullish(),
   // legacy-ish, but keep: older code reads it in carryStatus()
   byUid: z.string().nullish(),
@@ -136,7 +137,8 @@ var TasksUpsertManualBody = z.object({
     dueDate: z.string().optional().default(""),
     // optional for note/reminder mode
     bucket: z.enum(["task", "assessment", "compliance", "other"]).optional().default("task"),
-    notify: z.boolean().optional().default(true)
+    notify: z.boolean().optional().default(true),
+    addToCalendar: z.boolean().optional()
   })
 });
 var TasksListQuery = z.object({
@@ -172,6 +174,7 @@ var TasksListItem = z.object({
   /** @deprecated Use reminder visibility/notify fields instead of workflow status. */
   status: z.enum(["open", "done", "verified"]).optional().default("open"),
   notify: z.boolean().optional().default(true),
+  addToCalendar: z.boolean().optional().default(false),
   assignedToUid: z.string().nullable(),
   assignedToGroup: AssignedGroup.nullable(),
   assignedAt: z.string().nullable().optional()
@@ -200,6 +203,7 @@ var TasksOtherCreateBody = z.object({
   dueDate: z.string().optional(),
   dueMonth: z.string().optional(),
   notify: z.boolean().optional().default(true),
+  addToCalendar: z.boolean().optional().default(false),
   customerId: z.string().nullish(),
   assign: z.object({
     group: OtherGroup.nullish(),
@@ -212,7 +216,8 @@ var TasksOtherUpdateBody = z.object({
     title: z.string().min(1).max(200).optional(),
     notes: z.string().max(2e3).optional(),
     dueDate: z.union([ISO10, z.literal(""), z.null()]).optional(),
-    notify: z.boolean().optional()
+    notify: z.boolean().optional(),
+    addToCalendar: z.boolean().optional()
   })
 });
 var TasksOtherAssignBody = z.object({
@@ -237,6 +242,7 @@ var TasksUpdateFieldsBody = z.object({
   taskId: z.string(),
   patch: z.object({
     notify: z.boolean().optional(),
+    addToCalendar: z.boolean().optional(),
     notes: z.string().optional(),
     type: z.string().optional(),
     bucket: z.enum(["task", "assessment", "compliance", "other"]).optional()

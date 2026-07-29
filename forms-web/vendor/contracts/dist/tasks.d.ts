@@ -35,6 +35,7 @@ export declare const TaskScheduleItem: z.ZodObject<{
         sequential: "sequential";
     }>>>;
     notify: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     notes: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     byUid: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     bucket: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
@@ -121,6 +122,7 @@ export declare const TasksUpsertManualBody: z.ZodObject<{
             assessment: "assessment";
         }>>>;
         notify: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export type TTasksUpsertManualBody = z.infer<typeof TasksUpsertManualBody>;
@@ -176,6 +178,7 @@ export declare const TasksListItem: z.ZodObject<{
         done: "done";
     }>>>;
     notify: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    addToCalendar: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     assignedToUid: z.ZodNullable<z.ZodString>;
     assignedToGroup: z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<"admin">, z.ZodLiteral<"casemanager">, z.ZodLiteral<"compliance">]>>;
     assignedAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -209,6 +212,7 @@ export declare const TasksOtherCreateBody: z.ZodObject<{
     dueDate: z.ZodOptional<z.ZodString>;
     dueMonth: z.ZodOptional<z.ZodString>;
     notify: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    addToCalendar: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     assign: z.ZodOptional<z.ZodObject<{
         group: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodLiteral<"admin">, z.ZodLiteral<"casemanager">, z.ZodLiteral<"compliance">]>>>;
@@ -223,6 +227,7 @@ export declare const TasksOtherUpdateBody: z.ZodObject<{
         notes: z.ZodOptional<z.ZodString>;
         dueDate: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodLiteral<"">, z.ZodNull]>>;
         notify: z.ZodOptional<z.ZodBoolean>;
+        addToCalendar: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export type TTasksOtherUpdateBody = z.infer<typeof TasksOtherUpdateBody>;
@@ -252,6 +257,7 @@ export declare const TasksUpdateFieldsBody: z.ZodObject<{
     taskId: z.ZodString;
     patch: z.ZodObject<{
         notify: z.ZodOptional<z.ZodBoolean>;
+        addToCalendar: z.ZodOptional<z.ZodBoolean>;
         notes: z.ZodOptional<z.ZodString>;
         type: z.ZodOptional<z.ZodString>;
         bucket: z.ZodOptional<z.ZodEnum<{

@@ -84,6 +84,7 @@ export declare const Payment: z.ZodObject<{
     vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -138,6 +139,7 @@ export declare const PaymentEntity: z.ZodObject<{
     vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
     compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -656,6 +658,7 @@ export declare const PaymentsRecalculateFutureResp: z.ZodUnion<readonly [z.ZodOb
         vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
             hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
             caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -711,6 +714,7 @@ export declare const PaymentsRecalculateFutureResp: z.ZodUnion<readonly [z.ZodOb
         vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         notifyCM: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        addToCalendar: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         compliance: z.ZodOptional<z.ZodNullable<z.ZodObject<{
             hmisComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
             caseworthyComplete: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;

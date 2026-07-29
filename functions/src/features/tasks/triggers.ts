@@ -490,6 +490,11 @@ export const onOtherTaskWrite = onDocumentWritten(
         customerName: customerFields?.customerName || null,
         dueDate: due,
         dueMonth,
+        calendar: {
+          defaultEnabled: false,
+          enabled: doc.addToCalendar === true,
+          centralOwner: true,
+        },
         assignedToUid,
         assignedToGroup,
         // Passthrough so CaseManagerLoadTool / other| resolution works

@@ -1372,6 +1372,8 @@ var Payment = import_zod2.z.object({
   comment: import_zod2.z.string().nullish(),
   notifyCM: import_zod2.z.boolean().nullish(),
   // used by inbox trigger logic
+  /** Calendar projection defaults to enabled when absent for enrollment payments. */
+  addToCalendar: import_zod2.z.boolean().nullish(),
   // compliance
   compliance: PaymentCompliance.nullish(),
   rentCert: PaymentRentCert.nullish(),
@@ -1714,6 +1716,7 @@ var TaskScheduleItem = import_zod2.z.object({
   multiMode: import_zod2.z.enum(["parallel", "sequential"]).nullish(),
   // --- meta
   notify: import_zod2.z.boolean().nullish(),
+  addToCalendar: import_zod2.z.boolean().nullish(),
   notes: import_zod2.z.string().nullish(),
   // legacy-ish, but keep: older code reads it in carryStatus()
   byUid: import_zod2.z.string().nullish(),
@@ -1780,7 +1783,8 @@ var TasksUpsertManualBody = import_zod2.z.object({
     dueDate: import_zod2.z.string().optional().default(""),
     // optional for note/reminder mode
     bucket: import_zod2.z.enum(["task", "assessment", "compliance", "other"]).optional().default("task"),
-    notify: import_zod2.z.boolean().optional().default(true)
+    notify: import_zod2.z.boolean().optional().default(true),
+    addToCalendar: import_zod2.z.boolean().optional()
   })
 });
 var TasksListQuery = import_zod2.z.object({
@@ -1816,6 +1820,7 @@ var TasksListItem = import_zod2.z.object({
   /** @deprecated Use reminder visibility/notify fields instead of workflow status. */
   status: import_zod2.z.enum(["open", "done", "verified"]).optional().default("open"),
   notify: import_zod2.z.boolean().optional().default(true),
+  addToCalendar: import_zod2.z.boolean().optional().default(false),
   assignedToUid: import_zod2.z.string().nullable(),
   assignedToGroup: AssignedGroup.nullable(),
   assignedAt: import_zod2.z.string().nullable().optional()
@@ -1844,6 +1849,7 @@ var TasksOtherCreateBody = import_zod2.z.object({
   dueDate: import_zod2.z.string().optional(),
   dueMonth: import_zod2.z.string().optional(),
   notify: import_zod2.z.boolean().optional().default(true),
+  addToCalendar: import_zod2.z.boolean().optional().default(false),
   customerId: import_zod2.z.string().nullish(),
   assign: import_zod2.z.object({
     group: OtherGroup.nullish(),
@@ -1856,7 +1862,8 @@ var TasksOtherUpdateBody = import_zod2.z.object({
     title: import_zod2.z.string().min(1).max(200).optional(),
     notes: import_zod2.z.string().max(2e3).optional(),
     dueDate: import_zod2.z.union([ISO10, import_zod2.z.literal(""), import_zod2.z.null()]).optional(),
-    notify: import_zod2.z.boolean().optional()
+    notify: import_zod2.z.boolean().optional(),
+    addToCalendar: import_zod2.z.boolean().optional()
   })
 });
 var TasksOtherAssignBody = import_zod2.z.object({
@@ -1881,6 +1888,7 @@ var TasksUpdateFieldsBody = import_zod2.z.object({
   taskId: import_zod2.z.string(),
   patch: import_zod2.z.object({
     notify: import_zod2.z.boolean().optional(),
+    addToCalendar: import_zod2.z.boolean().optional(),
     notes: import_zod2.z.string().optional(),
     type: import_zod2.z.string().optional(),
     bucket: import_zod2.z.enum(["task", "assessment", "compliance", "other"]).optional()
@@ -3731,6 +3739,9 @@ var ReconciliationAuditScanBody = import_zod2.z.object({
 var inbox_exports = {};
 __export(inbox_exports, {
   InboxAssignedGroupEnum: () => InboxAssignedGroupEnum,
+  InboxCalendarPolicySchema: () => InboxCalendarPolicySchema,
+  InboxCalendarSyncSchema: () => InboxCalendarSyncSchema,
+  InboxCalendarSyncStatusSchema: () => InboxCalendarSyncStatusSchema,
   InboxDigestPreviewQuerySchema: () => InboxDigestPreviewQuerySchema,
   InboxDigestSubRecordSchema: () => InboxDigestSubRecordSchema,
   InboxDigestTypeSchema: () => InboxDigestTypeSchema,
@@ -3795,6 +3806,43 @@ var InboxDigestSubRecordSchema = import_zod2.z.object({
   grantProgramIds: import_zod2.z.array(import_zod2.z.string()).optional()
 });
 var IsoString = import_zod2.z.string().min(1);
+var InboxCalendarPolicySchema = import_zod2.z.object({
+  /** Source default. General tasks are false; enrollment payments/rent-cert reminders are true. */
+  defaultEnabled: import_zod2.z.boolean().default(false),
+  /** Explicit source/operator override. When absent, defaultEnabled controls behavior. */
+  enabled: import_zod2.z.boolean().nullish(),
+  /** Only one projected row should own a shared Calendar event for paired reminders. */
+  centralOwner: import_zod2.z.boolean().default(true)
+}).partial();
+var InboxCalendarSyncStatusSchema = import_zod2.z.enum([
+  "idle",
+  "pending",
+  "syncing",
+  "synced",
+  "deleting",
+  "deleted",
+  "failed"
+]);
+var InboxCalendarSyncSchema = import_zod2.z.object({
+  version: import_zod2.z.literal(1).default(1),
+  status: InboxCalendarSyncStatusSchema.default("idle"),
+  operation: import_zod2.z.enum(["upsert", "delete"]).nullish(),
+  eventId: import_zod2.z.string().nullish(),
+  requestedHash: import_zod2.z.string().nullish(),
+  payloadHash: import_zod2.z.string().nullish(),
+  attendeeHash: import_zod2.z.string().nullish(),
+  attendeeUid: import_zod2.z.string().nullish(),
+  attendeeStatus: import_zod2.z.enum(["included", "none", "opted_out", "missing_email", "disabled", "org_mismatch"]).nullish(),
+  attempts: import_zod2.z.number().int().nonnegative().default(0),
+  nextRetryAt: IsoString.nullish(),
+  lastAttemptAt: IsoString.nullish(),
+  lastSuccessAt: IsoString.nullish(),
+  lastErrorCode: import_zod2.z.string().nullish(),
+  lastErrorMessage: import_zod2.z.string().nullish(),
+  lockId: import_zod2.z.string().nullish(),
+  lockExpiresAt: IsoString.nullish(),
+  updatedAt: IsoString.nullish()
+}).partial();
 var InboxItemSchema = import_zod2.z.object({
   utid: import_zod2.z.string().min(1),
   source: InboxSourceEnum,
@@ -3826,7 +3874,9 @@ var InboxItemSchema = import_zod2.z.object({
   /** Backend-owned deep link for workflow-backed reminders. */
   actionUrl: import_zod2.z.url().nullish(),
   actionLabel: import_zod2.z.string().max(120).nullish(),
-  completedAtISO: IsoString.nullish()
+  completedAtISO: IsoString.nullish(),
+  calendar: InboxCalendarPolicySchema.nullish(),
+  calendarSync: InboxCalendarSyncSchema.nullish()
 }).passthrough();
 var InboxItemEntitySchema = InboxItemSchema.extend({
   id: import_zod2.z.string().min(1)
@@ -4791,6 +4841,8 @@ var UserSettings = import_zod2.z.object({
   toolsPrefs: UserUnknownRecord.optional(),
   spendingViews: UserUnknownRecord.optional(),
   allowAiAssistance: import_zod2.z.boolean().optional(),
+  /** Allow HDB-owned events to include this user's Google email as an attendee. */
+  calendarWorkItemsEnabled: import_zod2.z.boolean().optional(),
   googleIntegrationModes: import_zod2.z.object({
     googleCalendar: GoogleIntegrationMode.optional(),
     googleDrive: GoogleIntegrationMode.optional()

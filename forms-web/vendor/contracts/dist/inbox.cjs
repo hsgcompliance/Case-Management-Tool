@@ -21,6 +21,9 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var inbox_exports = {};
 __export(inbox_exports, {
   InboxAssignedGroupEnum: () => InboxAssignedGroupEnum,
+  InboxCalendarPolicySchema: () => InboxCalendarPolicySchema,
+  InboxCalendarSyncSchema: () => InboxCalendarSyncSchema,
+  InboxCalendarSyncStatusSchema: () => InboxCalendarSyncStatusSchema,
   InboxDigestPreviewQuerySchema: () => InboxDigestPreviewQuerySchema,
   InboxDigestSubRecordSchema: () => InboxDigestSubRecordSchema,
   InboxDigestTypeSchema: () => InboxDigestTypeSchema,
@@ -150,6 +153,43 @@ var InboxDigestSubRecordSchema = import_zod2.z.object({
   grantProgramIds: import_zod2.z.array(import_zod2.z.string()).optional()
 });
 var IsoString = import_zod2.z.string().min(1);
+var InboxCalendarPolicySchema = import_zod2.z.object({
+  /** Source default. General tasks are false; enrollment payments/rent-cert reminders are true. */
+  defaultEnabled: import_zod2.z.boolean().default(false),
+  /** Explicit source/operator override. When absent, defaultEnabled controls behavior. */
+  enabled: import_zod2.z.boolean().nullish(),
+  /** Only one projected row should own a shared Calendar event for paired reminders. */
+  centralOwner: import_zod2.z.boolean().default(true)
+}).partial();
+var InboxCalendarSyncStatusSchema = import_zod2.z.enum([
+  "idle",
+  "pending",
+  "syncing",
+  "synced",
+  "deleting",
+  "deleted",
+  "failed"
+]);
+var InboxCalendarSyncSchema = import_zod2.z.object({
+  version: import_zod2.z.literal(1).default(1),
+  status: InboxCalendarSyncStatusSchema.default("idle"),
+  operation: import_zod2.z.enum(["upsert", "delete"]).nullish(),
+  eventId: import_zod2.z.string().nullish(),
+  requestedHash: import_zod2.z.string().nullish(),
+  payloadHash: import_zod2.z.string().nullish(),
+  attendeeHash: import_zod2.z.string().nullish(),
+  attendeeUid: import_zod2.z.string().nullish(),
+  attendeeStatus: import_zod2.z.enum(["included", "none", "opted_out", "missing_email", "disabled", "org_mismatch"]).nullish(),
+  attempts: import_zod2.z.number().int().nonnegative().default(0),
+  nextRetryAt: IsoString.nullish(),
+  lastAttemptAt: IsoString.nullish(),
+  lastSuccessAt: IsoString.nullish(),
+  lastErrorCode: import_zod2.z.string().nullish(),
+  lastErrorMessage: import_zod2.z.string().nullish(),
+  lockId: import_zod2.z.string().nullish(),
+  lockExpiresAt: IsoString.nullish(),
+  updatedAt: IsoString.nullish()
+}).partial();
 var InboxItemSchema = import_zod2.z.object({
   utid: import_zod2.z.string().min(1),
   source: InboxSourceEnum,
@@ -181,7 +221,9 @@ var InboxItemSchema = import_zod2.z.object({
   /** Backend-owned deep link for workflow-backed reminders. */
   actionUrl: import_zod2.z.url().nullish(),
   actionLabel: import_zod2.z.string().max(120).nullish(),
-  completedAtISO: IsoString.nullish()
+  completedAtISO: IsoString.nullish(),
+  calendar: InboxCalendarPolicySchema.nullish(),
+  calendarSync: InboxCalendarSyncSchema.nullish()
 }).passthrough();
 var InboxItemEntitySchema = InboxItemSchema.extend({
   id: import_zod2.z.string().min(1)
@@ -263,6 +305,9 @@ var InboxMetricsMyQuerySchema = import_zod2.z.object({
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   InboxAssignedGroupEnum,
+  InboxCalendarPolicySchema,
+  InboxCalendarSyncSchema,
+  InboxCalendarSyncStatusSchema,
   InboxDigestPreviewQuerySchema,
   InboxDigestSubRecordSchema,
   InboxDigestTypeSchema,

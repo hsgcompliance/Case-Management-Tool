@@ -200,6 +200,8 @@ var UserSettings = z.object({
   toolsPrefs: UserUnknownRecord.optional(),
   spendingViews: UserUnknownRecord.optional(),
   allowAiAssistance: z.boolean().optional(),
+  /** Allow HDB-owned events to include this user's Google email as an attendee. */
+  calendarWorkItemsEnabled: z.boolean().optional(),
   googleIntegrationModes: z.object({
     googleCalendar: GoogleIntegrationMode.optional(),
     googleDrive: GoogleIntegrationMode.optional()

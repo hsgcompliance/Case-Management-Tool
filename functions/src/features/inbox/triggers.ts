@@ -121,6 +121,27 @@ async function deleteInbox(utid: string) {
     .catch(() => {});
 }
 
+async function closeCalendarInbox(utid: string) {
+  const now = isoNow();
+  await db
+    .collection("userTasks")
+    .doc(utid)
+    .set(
+      {
+        status: "done",
+        completedAtISO: now,
+        updatedAtISO: now,
+        system: {
+          lastWriter: FN_ENROLLMENT_INBOX_INDEXER,
+          lastWriteAt: now,
+          removalReason: "source_removed",
+        },
+      },
+      { merge: true },
+    )
+    .catch(() => {});
+}
+
 /**
  * Projection trigger from customerEnrollments/{id}
  * - Direct tasks → only index if CM is assigned (assignedToUid present)
@@ -257,13 +278,20 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     const prevById = new Map(prevTasks.map((t) => [String(t?.id), t]));
     const nextById = new Map(nextTasks.map((t) => [String(t?.id), t]));
 
-    for (const [id] of prevById) if (!nextById.has(id)) await deleteInbox(UTID.task(eid, id));
+    for (const [id] of prevById) {
+      if (!nextById.has(id)) await closeCalendarInbox(UTID.task(eid, id));
+    }
 
     for (const t of nextTasks) {
       const taskId = String(t?.id || "");
       if (!taskId) continue;
       const due = iso10(t?.dueDate) || (t?.dueDate ? String(t.dueDate) : null);
       const dueMonth = t?.dueMonth ? String(t.dueMonth) : ym(due);
+      const rentCertTask =
+        taskId.toLowerCase().startsWith("payment_rent_cert_") ||
+        !!cleanText(t?.rentCertPaymentId);
+      const explicitCalendar =
+        typeof t?.addToCalendar === "boolean" ? t.addToCalendar : null;
       await upsertInbox({
         utid: UTID.task(eid, taskId),
         source: "task",
@@ -290,6 +318,13 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
         grantName,
         caseManagerName,
         enrollmentName,
+        calendar: {
+          defaultEnabled: rentCertTask,
+          enabled: explicitCalendar,
+          // Paired rent-cert reminders share one central event. The compliance
+          // projection owns it; the event itself is shared with the assigned CM.
+          centralOwner: !rentCertTask || String(t?.assignedToGroup || "") === "compliance",
+        },
       });
     }
 
@@ -311,7 +346,7 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
     for (const [k, p] of prevP) {
       if (!nextP.has(k)) {
         const pid = String(p?.id || k);
-        await deleteInbox(UTID.pay(eid, pid));
+        await closeCalendarInbox(UTID.pay(eid, pid));
         await deleteInbox(UTID.comp(eid, pid));
       }
     }
@@ -363,6 +398,11 @@ export const onEnrollmentInboxIndexer = onDocumentWritten(
         paymentAmount,
         paymentLineItemId,
         paymentLineItemLabel,
+        calendar: {
+          defaultEnabled: true,
+          enabled: typeof p?.addToCalendar === "boolean" ? p.addToCalendar : null,
+          centralOwner: true,
+        },
       });
 
       const comp = p?.compliance || null;

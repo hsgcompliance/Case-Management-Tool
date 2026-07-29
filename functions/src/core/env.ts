@@ -27,6 +27,9 @@ export const MAIL_FROM_NAME: any = defineString("MAIL_FROM_NAME");
 export const GOOGLE_API_SCOPES: any = defineString("GOOGLE_API_SCOPES");
 export const GOOGLE_DRIVE_AUTH_MODE: any = defineString("GOOGLE_DRIVE_AUTH_MODE");
 export const GDRIVE_CUSTOMER_INDEX_SHEET_ID: any = defineString("GDRIVE_CUSTOMER_INDEX_SHEET_ID");
+export const HSG_COMPLIANCE_CALENDAR_EMAIL: any = defineString("HSG_COMPLIANCE_CALENDAR_EMAIL", {
+  default: "hsgcompliance@hrdc.org",
+});
 
 // Secrets
 export const GMAIL_CLIENT_ID: any = defineSecret("GMAIL_CLIENT_ID");
