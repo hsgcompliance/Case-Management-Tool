@@ -192,6 +192,13 @@ export type TPaymentQueueItem = z.infer<typeof PaymentQueueItem>;
 
 // ─── HTTP request bodies ──────────────────────────────────────────────────────
 
+// GET query values arrive as strings (e.g. "true"), so coerce here — a plain
+// z.boolean() rejects them. Real booleans (POST JSON body) pass through as-is.
+const zBoolParam = z.preprocess(
+  (v) => (typeof v === 'string' ? v.trim().toLowerCase() === 'true' : v),
+  z.boolean(),
+);
+
 export const PaymentQueueListBody = z.object({
   orgId: z.string().optional(),
   month: z.string().optional(),
@@ -201,9 +208,9 @@ export const PaymentQueueListBody = z.object({
   customerId: z.string().optional(),
   queueStatus: PaymentQueueStatus.optional(),
   /** If true, return only items where grantId is null and okUnassigned is false */
-  unmatched: z.boolean().optional(),
-  okUnassigned: z.boolean().optional(),
-  isFlex: z.boolean().optional(),
+  unmatched: zBoolParam.optional(),
+  okUnassigned: zBoolParam.optional(),
+  isFlex: zBoolParam.optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(200),
   cursor: z.string().optional(),
 });
