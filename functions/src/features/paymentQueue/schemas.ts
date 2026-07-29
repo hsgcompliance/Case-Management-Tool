@@ -210,6 +210,8 @@ export const PaymentQueueListBody = z.object({
   grantId: z.string().optional(),
   customerId: z.string().optional(),
   queueStatus: PaymentQueueStatus.optional(),
+  dueDateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dueDateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   /** If true, return only items where grantId is null and okUnassigned is false */
   unmatched: zBoolParam.optional(),
   okUnassigned: zBoolParam.optional(),

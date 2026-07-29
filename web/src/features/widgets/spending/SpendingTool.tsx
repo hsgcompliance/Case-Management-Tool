@@ -5,11 +5,17 @@ import { useAuth } from "@app/auth/AuthProvider";
 import GrantSelect from "@entities/selectors/GrantSelect";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import { useCreditCards } from "@hooks/useCreditCards";
-import { usePaymentsSpend, usePaymentsUpdateCompliance } from "@hooks/usePayments";
+import {
+  usePaymentsSpend,
+  usePaymentsUpdateCompliance,
+  usePaymentsBulkSpend,
+  usePaymentsBulkUpdateCompliance,
+} from "@hooks/usePayments";
 import { useAutoAssignLedgerEntries, useLedgerEntries } from "@hooks/useLedger";
 import {
   usePaymentQueueItems,
   useBypassClosePaymentQueueItems,
+  useBulkDesignatePaymentQueueItems,
   usePatchPaymentQueueItem,
   usePostPaymentQueueToLedger,
   type PaymentQueueItem,
@@ -993,6 +999,9 @@ type SpendingToolProps = {
 export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const { profile, reloadProfile } = useAuth();
   const canSyncJotforms = isAdminLike(profile as { topRole?: unknown; role?: unknown } | null);
+  // TODO(spending-read-model): most queue rows already carry display names and IDs.
+  // Replace this broad dashboard join with focused customer/grant/enrollment lookups,
+  // loaded lazily when a selector or a row with missing labels actually needs them.
   const { grants, enrollments, grantNameById, customerNameById, sharedDataLoading, sharedDataError, customers } = useDashboardSharedData();
   const { data: orgConfig } = useOrgConfig();
 
@@ -1024,6 +1033,22 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const dateFilter = normalizeComplexDateValue(filterState.dateFilter, filterState.month);
   const month = complexDatePrimaryMonth(dateFilter);
   const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search, advancedQueueFilters } = filterState;
+  const dueDateRange = React.useMemo(() => {
+    if (dateFilter.mode === "before" && dateFilter.date) return { dueDateTo: dateFilter.date };
+    if (dateFilter.mode === "after" && dateFilter.date) return { dueDateFrom: dateFilter.date };
+    if (dateFilter.mode === "between") {
+      const start = dateFilter.startDate || "";
+      const end = dateFilter.endDate || "";
+      if (start && end) {
+        return start <= end
+          ? { dueDateFrom: start, dueDateTo: end }
+          : { dueDateFrom: end, dueDateTo: start };
+      }
+      if (start) return { dueDateFrom: start };
+      if (end) return { dueDateTo: end };
+    }
+    return {};
+  }, [dateFilter]);
   const [saveViewName, setSaveViewName] = React.useState("");
   const [saveViewColor, setSaveViewColor] = React.useState("");
   const [savingViews, setSavingViews] = React.useState(false);
@@ -1217,20 +1242,27 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     { active: true, limit: 200 },
     { enabled: true, staleTime: 30_000 }
   );
+  const queueOnlyOpenView =
+    workflowFilter === "open" &&
+    (typeFilter === "forms" || typeFilter === "invoice" || typeFilter === "card");
   const { data: ledgerEntries = [], isError: ledgerError } = useLedgerEntries(
     {
       ...(month ? { month } : {}),
+      ...dueDateRange,
       ...(grantId ? { grantId } : {}),
       limit: 500,
       sortBy: "dueDate",
       sortOrder: "desc",
     },
-    { enabled: true }
+    { enabled: !queueOnlyOpenView }
   );
   const { data: paymentQueueItems = [], isLoading: queueLoading, isError: queueError } = usePaymentQueueItems(
     {
       ...(month ? { month } : {}),
+      ...dueDateRange,
       ...(grantId ? { grantId } : {}),
+      ...(workflowFilter === "open" ? { queueStatus: "pending" as const } : {}),
+      ...(workflowFilter === "closed" ? { queueStatus: "posted" as const } : {}),
       limit: 500,
     },
     { enabled: true, staleTime: 30_000 }
@@ -1244,6 +1276,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   // Queue data is the operational read model. Ledger enrichment is non-blocking:
   // the table can render and remain actionable while authoritative posting data loads.
+  // TODO(spending-read-model): useDashboardSharedData currently warms thousands of
+  // customer/enrollment/grant documents. Replace this hard dependency with small
+  // lookup payloads and let labels/options enrich after the queue table renders.
   const loading = sharedDataLoading || cardsLoading || queueLoading || otherTasksLoading;
   const error = sharedDataError || cardsError || queueError || otherTasksError;
 
@@ -1262,10 +1297,13 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const autoAssignMutation = useAutoAssignLedgerEntries();
   const bypassCloseMutation = useBypassClosePaymentQueueItems();
+  const bulkDesignateMutation = useBulkDesignatePaymentQueueItems();
   const patchQueueMutation = usePatchPaymentQueueItem();
   const postMutation = usePostPaymentQueueToLedger();
   const spendMutation = usePaymentsSpend();
+  const bulkSpendMutation = usePaymentsBulkSpend();
   const updateCompliance = usePaymentsUpdateCompliance();
+  const bulkUpdateCompliance = usePaymentsBulkUpdateCompliance();
   const syncJotformSelection = useSyncJotformSelection();
 
   // ── Context menu ──────────────────────────────────────────────────────────
@@ -2172,77 +2210,101 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     let skipped = options.markPaid ? alreadyClosed.length : 0;
     let skippedIncomplete = 0;
     let failed = 0;
-
-    for (const row of postable) {
-      try {
-        if (overrideGrantId) {
-          await patchQueueMutation.mutateAsync({
-            id: row.paymentQueueItem!.id,
-            body: {
-              grantId: overrideGrantId,
-              lineItemId: overrideLineItemId,
-              okUnassigned: false,
-            },
-          });
-        } else if (!row.grantId) {
-          await patchQueueMutation.mutateAsync({
-            id: row.paymentQueueItem!.id,
-            body: {
-              grantId: null,
-              lineItemId: null,
-              okUnassigned: true,
-            },
-          });
-        } else if (!row.lineItemId) {
-          skippedIncomplete++;
-          continue;
-        }
-        await postMutation.mutateAsync({ id: row.paymentQueueItem!.id });
-        success++;
-      } catch (e: unknown) {
-        const msg = String(toApiError(e).error || "").toLowerCase();
-        if (/already.post|already_exist|conflict|duplicate|posted/i.test(msg)) {
-          skipped++;
-        } else {
-          failed++;
-        }
+    const failedRowIds = new Set<string>();
+    const queueRowByItemId = new Map<string, SpendingRow>();
+    const queueItems = postable.flatMap((row) => {
+      const itemId = String(row.paymentQueueItem?.id || "");
+      const targetGrantId = overrideGrantId || row.grantId || null;
+      const targetLineItemId = overrideGrantId ? overrideLineItemId || null : row.lineItemId || null;
+      if (targetGrantId && !targetLineItemId) {
+        skippedIncomplete++;
+        return [];
       }
+      queueRowByItemId.set(itemId, row);
+      return [{
+        id: itemId,
+        grantId: targetGrantId,
+        lineItemId: targetLineItemId,
+        post: true,
+      }];
+    });
+    const projectionRowsByKey = new Map<string, SpendingRow>();
+    const projectionItems = Array.from(new Map(payableProjections.map((row) => {
+      const ref = rowPaymentRef(row);
+      const key = `${ref.enrollmentId}:${ref.paymentId}`;
+      projectionRowsByKey.set(key, row);
+      return [key, {
+        enrollmentId: ref.enrollmentId,
+        paymentId: ref.paymentId,
+        reverse: false,
+        forceSync: false,
+      }];
+    })).values());
+
+    const [queueOutcome, spendOutcome] = await Promise.allSettled([
+      queueItems.length
+        ? bulkDesignateMutation.mutateAsync({
+            items: queueItems,
+            localModificationReason: "Bulk designation and post from Spending tracker",
+          })
+        : Promise.resolve(null),
+      projectionItems.length
+        ? bulkSpendMutation.mutateAsync({ items: projectionItems })
+        : Promise.resolve(null),
+    ]);
+
+    if (queueOutcome.status === "fulfilled" && queueOutcome.value) {
+      success += Number(queueOutcome.value.posted || 0);
+      skipped += queueOutcome.value.skipped.length;
+      failed += queueOutcome.value.failed.length;
+      for (const item of queueOutcome.value.failed) {
+        const row = queueRowByItemId.get(item.id);
+        if (row) failedRowIds.add(row.id);
+      }
+    } else if (queueOutcome.status === "rejected") {
+      failed += queueItems.length;
+      for (const row of queueRowByItemId.values()) failedRowIds.add(row.id);
     }
 
-    for (const row of payableProjections) {
-      try {
-        const ref = rowPaymentRef(row);
-        await spendMutation.mutateAsync({ body: { enrollmentId: ref.enrollmentId, paymentId: ref.paymentId, reverse: false } });
-        markedPaid++;
-      } catch {
-        failed++;
+    if (spendOutcome.status === "fulfilled" && spendOutcome.value) {
+      markedPaid += spendOutcome.value.successful.length;
+      failed += spendOutcome.value.failed.length;
+      for (const item of spendOutcome.value.failed) {
+        const row = projectionRowsByKey.get(`${item.enrollmentId}:${item.paymentId}`);
+        if (row) failedRowIds.add(row.id);
       }
+    } else if (spendOutcome.status === "rejected") {
+      failed += projectionItems.length;
+      for (const row of projectionRowsByKey.values()) failedRowIds.add(row.id);
     }
 
     if (shouldUpdateCompliance) {
-      const seen = new Set<string>();
-      for (const row of complianceRows) {
+      const complianceRowsByKey = new Map<string, SpendingRow[]>();
+      const complianceItems = Array.from(new Map(complianceRows.map((row) => {
         const ref = rowPaymentRef(row);
         const key = `${ref.enrollmentId}:${ref.paymentId}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        try {
-          await updateCompliance.mutateAsync({ enrollmentId: ref.enrollmentId, paymentId: ref.paymentId, patch: compliancePatch });
-          complianceUpdated++;
-        } catch {
-          failed++;
+        complianceRowsByKey.set(key, [...(complianceRowsByKey.get(key) || []), row]);
+        return [key, { enrollmentId: ref.enrollmentId, paymentId: ref.paymentId, patch: compliancePatch }];
+      })).values());
+      try {
+        const result = await bulkUpdateCompliance.mutateAsync({ items: complianceItems });
+        complianceUpdated += result.successful.length;
+        failed += result.failed.length;
+        for (const item of result.failed) {
+          for (const row of complianceRowsByKey.get(`${item.enrollmentId}:${item.paymentId}`) || []) {
+            failedRowIds.add(row.id);
+          }
+        }
+      } catch {
+        failed += complianceItems.length;
+        for (const rows of complianceRowsByKey.values()) {
+          for (const row of rows) failedRowIds.add(row.id);
         }
       }
     }
 
     setBulkPosting(false);
-    setSelectedIds(new Set());
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
-      queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
-      queryClient.invalidateQueries({ queryKey: qk.grants.root }),
-      queryClient.invalidateQueries({ queryKey: qk.inbox.root }),
-    ]);
+    setSelectedIds(failedRowIds);
 
     const parts = [
       success > 0 ? `${success} CC/invoice posted` : null,
@@ -2287,8 +2349,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         ids: closable.map((row) => row.paymentQueueItem!.id),
         reason: "Bypass closed from Spending tracker selected rows",
       });
-      await queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root });
-      setSelectedIds(new Set());
+      const skippedIds = new Set((result?.skipped || []).map((item) => String(item.id || "")));
+      setSelectedIds(new Set(
+        closable
+          .filter((row) => skippedIds.has(String(row.paymentQueueItem?.id || "")))
+          .map((row) => row.id)
+      ));
       const closed = Number(result?.closed?.length || 0);
       const skipped = Number(result?.skipped?.length || 0);
       toast(

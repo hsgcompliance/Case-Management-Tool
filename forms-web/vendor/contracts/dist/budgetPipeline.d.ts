@@ -189,7 +189,7 @@ export declare const BudgetPipeline: z.ZodObject<{
     }>;
     grantId: z.ZodNullable<z.ZodString>;
     lineItemId: z.ZodNullable<z.ZodString>;
-    startDate: z.ZodNullable<z.ZodString>;
+    startDate: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     sourceFormId: z.ZodNullable<z.ZodString>;
     sourceFormTitle: z.ZodNullable<z.ZodString>;
     formSchemas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{

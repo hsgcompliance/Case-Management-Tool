@@ -6,6 +6,7 @@ import {
   PaymentQueuePatchBody,
   PaymentQueueAdminPatchBody,
   PaymentQueueBypassCloseBody,
+  PaymentQueueBulkDesignateBody,
   PaymentQueuePostToLedgerBody,
   PaymentQueueReopenBody,
   PaymentQueueVoidBody,
@@ -18,6 +19,7 @@ import {
   patchPaymentQueueItem,
   adminPatchPaymentQueueItem,
   bypassClosePaymentQueueItems,
+  bulkDesignatePaymentQueueItems,
   postPaymentQueueToLedger,
   reopenPaymentQueueItem,
   voidPaymentQueueItemById,
@@ -140,6 +142,27 @@ export const paymentQueueBypassClose = secureHandler(async (req, res): Promise<v
   const result = await bypassClosePaymentQueueItems(body, uid);
   res.json({ok: true, ...result});
 }, {auth: 'user', methods: ['POST', 'OPTIONS']});
+
+/* ============================================================================
+   POST /paymentQueueBulkDesignate
+============================================================================ */
+
+export const paymentQueueBulkDesignate = secureHandler(async (req, res): Promise<void> => {
+  const body = PaymentQueueBulkDesignateBody.parse(req.body || {});
+  const uid = requireUid(req as any);
+  const orgId = orgIdFromClaims((req as any).user || {});
+  if (!orgId) {
+    res.status(403).json({ok: false, error: 'missing_org'});
+    return;
+  }
+  const result = await bulkDesignatePaymentQueueItems(body, uid, orgId);
+  res.json({ok: true, ...result});
+}, {
+  auth: 'user',
+  methods: ['POST', 'OPTIONS'],
+  memory: '1GiB',
+  timeoutSeconds: 540,
+});
 
 /* ============================================================================
    POST /paymentQueueReopen?id=…

@@ -165,6 +165,38 @@
     const amiIncomeBasis=()=>document.querySelector('input[name="amiIncomeBasis"]:checked')?.value||"annualized30";
     const money=n=>Number(n||0).toLocaleString("en-US",{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2});
     const clean=value=>String(value||"").replace(/[|;{}\[\]\\]/g,"/").replace(/\s+/g," ").trim();
+    function summaryPairs(value,delimiter="|"){return Object.fromEntries(String(value||"").split(delimiter).map(part=>{const i=part.indexOf(":");return i>0?[part.slice(0,i),part.slice(i+1)]:["",""]}))}
+    function setRadio(name,value){const input=document.querySelector(`input[name="${name}"][value="${value}"]`);if(input)input.checked=true}
+    function dateRange(value){const match=/^(\d{4}-\d{2}-\d{2})-(Ongoing|\d{4}-\d{2}-\d{2}|NA)$/.exec(value||"");return match?[match[1],match[2]==="Ongoing"||match[2]==="NA"?"":match[2]]:["",""]}
+    function restore(value){
+      if(!value)return;
+      const data=summaryPairs(value),hourly=data.Frequency==="hourly"||data.Method==="HourlyWorkSchedule";
+      setRadio("calculationMode",hourly?"hourly":"paystubs");
+      [["asOf","AsOf"],["person","Person"],["employer","Employer"],["otherMonthly","OtherProjectedMonthly"],["preparedBy","PreparedBy"],["calculationNotes","Notes"]].forEach(([id,key])=>{if(data[key]&&!/^(NA|None)$/.test(data[key]))$(id).value=data[key]});
+      if(hourly){
+        [["employmentStart","EmploymentStart"],["hourlyWage","HourlyWage"],["hoursPerWeek","RegularHoursWeek"],["reducedHoursPerWeek","ReducedHoursWeek"]].forEach(([id,key])=>{if(data[key]&&!/^NA$/.test(data[key]))$(id).value=data[key]});
+        const reduced=data.ReducedHours==="Y";$("hasReducedHours").checked=reduced;$("reducedHoursFields").hidden=!reduced;
+        const [start,end]=dateRange(data.ReducedPeriod);$("reducedStart").value=start;$("reducedEnd").value=end;
+      }else{
+        if(data.Frequency&&FREQUENCIES[data.Frequency])$("frequency").value=data.Frequency;
+        if(data.Basis)$("basis").value=data.Basis;
+        if(data.OtherActual30)$("otherActual30").value=data.OtherActual30;
+        const audit=/StubAudit:\[([\s\S]*?)\](?:\||$)/.exec(value)?.[1]||"";
+        const restored=audit.split(";").map((item,index)=>{
+          const match=/^#\d+\{([\s\S]*)\}$/.exec(item.trim());if(!match)return null;
+          const row=summaryPairs(match[1],/,(?=(?:Use|Work|Pay|Gross|Class|Note):)/),[workStart,workEnd]=dateRange(row.Work);
+          return{id:Date.now()+index+Math.random(),included:row.Use!=="N",workStart,workEnd,payDate:row.Pay==="NA"?"":row.Pay,gross:row.Gross==="NA"?"":row.Gross,classification:row.Class||"regular",note:row.Note==="None"?"":row.Note};
+        }).filter(Boolean);
+        if(restored.length){stubs=restored;renderRows()}
+      }
+      const ami=/\|AMI\{([\s\S]*?)\}(?:\||$)/.exec(value)?.[1];
+      if(ami){
+        const values=summaryPairs(ami,/,(?=(?:County|HH|Basis|MonthlyIncome|AMI100|AMI30|Pct|Status):)/);$("enableAmi").checked=true;$("amiFields").hidden=false;
+        if(values.County)$("county").value=values.County;if(values.HH)$("householdSize").value=values.HH;
+        if(values.Basis)setRadio("amiIncomeBasis",values.Basis);
+      }else{$("enableAmi").checked=false;$("amiFields").hidden=true}
+      setCalculationMode();
+    }
     function localToday(){const now=new Date(),offset=now.getTimezoneOffset()*60000;return new Date(now-offset).toISOString().slice(0,10)}
     function parseDate(value){if(!value)return null;const [year,month,day]=value.split("-").map(Number);return new Date(Date.UTC(year,month-1,day))}
     function addDays(value,amount){const next=new Date(value);next.setUTCDate(next.getUTCDate()+amount);return next}
@@ -236,7 +268,7 @@
       const flags=warnings.length?warnings.map((warning,index)=>`W${index+1}:${clean(warning.text)}`).join("~"):"None",amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:annualized30,MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
       summary=hourly.valid?`CalcV:${CALC_VERSION}|AsOf:${result.asOf}|Person:${clean(result.person)||"NA"}|Employer:${clean(result.employer)||"NA"}|Frequency:hourly|PeriodsPerYear:52|Method:HourlyWorkSchedule|Basis:hourlySchedule|EmploymentStart:${hourly.start}|HourlyWage:${hourly.wage.toFixed(2)}|RegularHoursWeek:${hourly.regularHours.toFixed(2)}|ReducedHours:${hourly.hasReduction?"Y":"N"}|ReducedHoursWeek:${hourly.hasReduction?hourly.reducedHours.toFixed(2):"NA"}|ReducedPeriod:${hourly.hasReduction?`${hourly.reducedStart}-${hourly.reducedEnd||"Ongoing"}`:"NA"}|ScheduledHours30:${hourly.scheduledHours30.toFixed(2)}|OtherProjectedMonthly:${otherMonthly.toFixed(2)}|Annualized:${annualized.toFixed(2)}|AverageMonthly:${averageMonthly.toFixed(2)}|Estimated30Day:${estimated30.toFixed(2)}|IncomeUsed30:${estimated30.toFixed(2)}|PreparedBy:${clean(result.preparedBy)||"NA"}|Flags:${flags}|Notes:${clean(result.calculationNotes)||"None"}${amiOutput}`:"";
       $("payload").textContent=summary||"Complete the hourly employment fields";
-      if(jfReady)JFCustomWidget.sendData(summary);
+      if(jfReady)JFCustomWidget.sendData({value:summary});
     }
     function calculate(){
       if(calculationMode()==="hourly"){calculateHourly();return}
@@ -295,7 +327,7 @@
       const amiOutput=ami?`|AMI{County:${ami.county},HH:${ami.householdSize},Basis:${amiBasis},MonthlyIncome:${ami.monthlyIncomeUsed.toFixed(2)},AMI100:${ami.ami100},AMI30:${ami.ami30.toFixed(2)},Pct:${ami.percent.toFixed(1)},Status:${ami.status}}`:"";
       summary=included.length&&asOf?`CalcV:${CALC_VERSION}|AsOf:${result.asOf}|Person:${clean(result.person)||"NA"}|Employer:${clean(result.employer)||"NA"}|Frequency:${result.frequency}|PeriodsPerYear:${result.periodsPerYear}|Method:AverageIncludedChecksAnnualized|Basis:${basis}|StubsEntered:${result.stubsEntered}|StubsIncluded:${result.stubsIncluded}|StubAudit:[${stubAudit}]|AverageCheck:${averageCheck.toFixed(2)}|OtherProjectedMonthly:${otherMonthly.toFixed(2)}|OtherActual30:${otherActual30.toFixed(2)}|Annualized:${annualized.toFixed(2)}|AverageMonthly:${averageMonthly.toFixed(2)}|Estimated30Day:${estimated30.toFixed(2)}|Actual30Received:${received30.toFixed(2)}|Actual30Earned:${earned30.toFixed(2)}|IncomeUsed30:${incomeUsed30.toFixed(2)}|EvidencePayDates:${result.oldestPayDate||"NA"}-${result.mostRecentPayDate||"NA"}|MostRecentAgeDays:${mostRecentAge==null?"NA":mostRecentAge}|PreparedBy:${clean(result.preparedBy)||"NA"}|Flags:${flags}|Notes:${clean(result.calculationNotes)||"None"}${amiOutput}`:"";
       $("payload").textContent=summary||"Enter an as-of date and at least one included paystub";
-      if(jfReady)JFCustomWidget.sendData(summary);
+      if(jfReady)JFCustomWidget.sendData({value:summary});
     }
     function escapeHTML(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]))}
     function reportHTML(){
@@ -352,7 +384,7 @@
     $("pdf").addEventListener("click",exportFormattedPDF);$("json").addEventListener("click",exportJSON);
     addStub();addStub();setCalculationMode();
     if(window.JFCustomWidget){
-      JFCustomWidget.subscribe("ready",()=>{jfReady=true;calculate();JFCustomWidget.requestFrameResize({height:1180})});
+      JFCustomWidget.subscribe("ready",data=>{restore(data?.value);jfReady=true;calculate();JFCustomWidget.requestFrameResize({height:1180})});
       JFCustomWidget.subscribe("submit",()=>JFCustomWidget.sendSubmit({valid:!!summary,value:summary}));
     }
   </script>

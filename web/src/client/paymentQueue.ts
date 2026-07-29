@@ -64,6 +64,8 @@ export type PaymentQueueListReq = {
   grantId?: string;
   customerId?: string;
   queueStatus?: "pending" | "posted" | "void";
+  dueDateFrom?: string;
+  dueDateTo?: string;
   unmatched?: boolean;
   okUnassigned?: boolean;
   isFlex?: boolean;
@@ -111,6 +113,27 @@ export type PaymentQueueBypassCloseResp = {
   ok: true;
   closed: string[];
   skipped: Array<{ id: string; reason: string }>;
+};
+
+export type PaymentQueueBulkDesignateReq = {
+  items: Array<{
+    id: string;
+    grantId?: string | null;
+    lineItemId?: string | null;
+    post?: boolean;
+  }>;
+  pipelineId?: string | null;
+  postedBy?: string;
+  localModificationReason?: string;
+};
+
+export type PaymentQueueBulkDesignateResp = {
+  ok: true;
+  patched: number;
+  posted: number;
+  skipped: Array<{ id: string; reason: string }>;
+  failed: Array<{ id: string; error: string }>;
+  grantsRecomputed: string[];
 };
 
 export type PaymentQueueReopenReq = {
@@ -177,6 +200,12 @@ const PaymentQueue = {
       body: { ...body, id },
       idempotencyKey: idemKey({ scope: "paymentQueue", op: "postToLedger", id, body }),
     }) as Promise<{ ok: true; queueItem: PaymentQueueItem; ledgerEntryId: string }>,
+
+  bulkDesignate: (body: PaymentQueueBulkDesignateReq) =>
+    api.call("paymentQueueBulkDesignate", {
+      body,
+      idempotencyKey: idemKey({ scope: "paymentQueue", op: "bulkDesignate", body }),
+    }) as Promise<PaymentQueueBulkDesignateResp>,
 
   bypassClose: (body: PaymentQueueBypassCloseReq) =>
     api.call("paymentQueueBypassClose", {

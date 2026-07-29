@@ -15,6 +15,7 @@ import {
 } from "@/lib/customerDetailApi";
 import { getSubmission, type JfAnswer, type JfSubmission } from "@/lib/jotformManagerApi";
 import { AnswerView } from "./AnswerView";
+import { expandWidgetAnswer } from "@/lib/widgetAnswers";
 
 // Right-hand "Webhooks" sidebar for the intake flow. Two tabs:
 //   Structured — ONE continuously-merged household model built across every
@@ -57,10 +58,11 @@ function frontendEventFromSubmission(submission: JfSubmission): WebhookEventDeta
     .filter((answer) => !["control_head", "control_button", "control_pagebreak", "control_divider", "control_text"].includes(String(answer.type || "")))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   const fields = answers
-    .map((answer) => ({
-      label: String(answer.text || answer.name || "").trim().slice(0, 200),
-      value: answerValue(answer).slice(0, 2000),
-    }))
+    .flatMap((answer) => expandWidgetAnswer(
+      String(answer.text || answer.name || ""),
+      answerValue(answer),
+      String(answer.type || ""),
+    ))
     .filter((field) => field.label && field.value);
   const nameAnswer = answers.find((answer) => answer.type === "control_fullname")
     ?? answers.find((answer) => /\bname\b/i.test(`${answer.name || ""} ${answer.text || ""}`));

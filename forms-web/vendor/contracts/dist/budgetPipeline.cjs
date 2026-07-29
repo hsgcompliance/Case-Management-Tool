@@ -99,7 +99,7 @@ var BudgetPipeline = import_zod.z.object({
   status: PipelineStatus,
   grantId: import_zod.z.string().nullable(),
   lineItemId: import_zod.z.string().nullable(),
-  startDate: import_zod.z.string().nullable(),
+  startDate: import_zod.z.string().nullable().optional(),
   sourceFormId: import_zod.z.string().nullable(),
   sourceFormTitle: import_zod.z.string().nullable(),
   formSchemas: import_zod.z.record(import_zod.z.string(), PipelineFormSchema).optional(),

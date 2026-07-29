@@ -20,6 +20,8 @@ test("canonical payment widget and iframe/deploy copies remain identical", async
   assert.match(canonical, /Hourly work schedule/);
   assert.match(canonical, /CALC_VERSION="4\.0"/);
   assert.match(canonical, /JFCustomWidget/);
+  assert.match(canonical, /subscribe\("ready",data=>\{restore\(data\?\.value\)/);
+  assert.match(canonical, /sendData\(\{value:summary\}\)/);
   assert.match(canonical, /name="calculationMode"/);
   assert.match(canonical, /name="amiIncomeBasis"/);
   assert.match(canonical, /id="documentationOptions"/);
@@ -51,5 +53,41 @@ test("all generated inline calculator scripts parse", async () => {
       .filter(Boolean);
     assert.ok(scripts.length > 0);
     for (const source of scripts) assert.doesNotThrow(() => new Function(source));
+  }
+});
+
+test("every deployed Jotform calculator restores its saved value on reopen", async () => {
+  const paths = [
+    "projects/eviction-prevention-calculator/widgets/ami-widget.html",
+    "projects/eviction-prevention-calculator/widgets/fmr-widget.html",
+    "projects/eviction-prevention-calculator/widgets/esg-asset-limit-widget.html",
+    "projects/eviction-prevention-calculator/widgets/income-calculator-widget.html",
+    "projects/eviction-prevention-calculator/deploy/AMI_calculator.html",
+    "projects/eviction-prevention-calculator/deploy/fmr_widget.html",
+    "projects/eviction-prevention-calculator/deploy/income_calculator_widget.html"
+  ];
+  for (const path of paths) {
+    const html = await text(path);
+    assert.match(html, /function restore\(value\)/, `${path} must define saved-value hydration`);
+    assert.match(html, /subscribe\("ready",data=>\{[^]*restore\(data\?\.value\)[^]*jfReady=true/, `${path} must hydrate before publishing`);
+    assert.match(html, /sendData\(\{value:(?:summary|submitString)\}\)/, `${path} must use the Jotform data envelope`);
+  }
+});
+
+test("all canonical and deployment widget scripts parse", async () => {
+  const paths = [
+    "projects/eviction-prevention-calculator/widgets/ami-widget.html",
+    "projects/eviction-prevention-calculator/widgets/fmr-widget.html",
+    "projects/eviction-prevention-calculator/widgets/esg-asset-limit-widget.html",
+    "projects/eviction-prevention-calculator/widgets/income-calculator-widget.html",
+    "projects/eviction-prevention-calculator/deploy/AMI_calculator.html",
+    "projects/eviction-prevention-calculator/deploy/fmr_widget.html"
+  ];
+  for (const path of paths) {
+    const html = await text(path);
+    const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
+      .map(match => match[1])
+      .filter(Boolean);
+    for (const source of scripts) assert.doesNotThrow(() => new Function(source), path);
   }
 });

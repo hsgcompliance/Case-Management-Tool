@@ -253,6 +253,8 @@ var LedgerListBody = import_zod2.z.object({
   customerId: import_zod2.z.string().nullish(),
   source: LedgerSource.nullish(),
   month: ISO7.nullish(),
+  dueDateFrom: ISO10.nullish(),
+  dueDateTo: ISO10.nullish(),
   // GET query values arrive as strings, so coerce here
   limit: import_zod2.z.coerce.number().int().min(1).max(500).default(50),
   cursor: import_zod2.z.string().nullish(),

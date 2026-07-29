@@ -278,7 +278,7 @@ export type EnrollmentsUndoMigrationReq = TEnrollmentsUndoMigrationBody;
 export type EnrollmentsUndoMigrationResp = TEnrollmentsUndoMigrationResp;
 export type EnrollmentsUpsertReq = TEnrollmentsUpsertBody;
 export type EnrollmentsUpsertResp = TEnrollmentsUpsertResp;
-import type { TPayment, TSpend, TPaymentsSpendBody, TPaymentsRecalculateFutureReq, TPaymentsRecalcGrantProjectedBody, TPaymentsAdjustSpendBody, TPaymentsAdjustProjectionsBody, TPaymentsBulkCopyScheduleBody, TPaymentsGenerateProjectionsBody, TPaymentsUpdateComplianceBody, TPaymentsRentCertSetBody, TPaymentsDeleteRowsBody, TPaymentsUpdateGrantBudgetBody, TPaymentsUpsertProjectionsBody, TPaymentsRecalculateFutureResp, TPaymentsRecalcGrantProjectedResp, TPaymentsDeleteRowsResp } from "./payments.js";
+import type { TPayment, TSpend, TPaymentsSpendBody, TPaymentsBulkSpendBody, TPaymentsRecalculateFutureReq, TPaymentsRecalcGrantProjectedBody, TPaymentsAdjustSpendBody, TPaymentsAdjustProjectionsBody, TPaymentsBulkCopyScheduleBody, TPaymentsGenerateProjectionsBody, TPaymentsUpdateComplianceBody, TPaymentsBulkUpdateComplianceBody, TPaymentsRentCertSetBody, TPaymentsDeleteRowsBody, TPaymentsUpdateGrantBudgetBody, TPaymentsUpsertProjectionsBody, TPaymentsRecalculateFutureResp, TPaymentsRecalcGrantProjectedResp, TPaymentsDeleteRowsResp } from "./payments.js";
 export type TSpendEntity = TSpend;
 export type PaymentsUpsertProjectionsReq = TPaymentsUpsertProjectionsBody;
 export type PaymentsUpsertProjectionsResp = Ok<{
@@ -296,12 +296,29 @@ export type PaymentsBulkCopyScheduleResp = Ok<{
 }>;
 export type PaymentsSpendReq = TPaymentsSpendBody;
 export type PaymentsSpendResp = Ok<{}>;
+export type PaymentsBulkItemResult = {
+    enrollmentId: string;
+    paymentId: string;
+};
+export type PaymentsBulkItemFailure = PaymentsBulkItemResult & {
+    error: string;
+};
+export type PaymentsBulkSpendReq = TPaymentsBulkSpendBody;
+export type PaymentsBulkSpendResp = Ok<{
+    successful: PaymentsBulkItemResult[];
+    failed: PaymentsBulkItemFailure[];
+}>;
 export type PaymentsRecalculateFutureReq = TPaymentsRecalculateFutureReq;
 export type PaymentsRecalculateFutureResp = Ok<TPaymentsRecalculateFutureResp>;
 export type PaymentsUpdateComplianceReq = TPaymentsUpdateComplianceBody;
 export type PaymentsUpdateComplianceResp = Ok<{
     id: string;
 } & Partial<TEnrollmentEntity>>;
+export type PaymentsBulkUpdateComplianceReq = TPaymentsBulkUpdateComplianceBody;
+export type PaymentsBulkUpdateComplianceResp = Ok<{
+    successful: PaymentsBulkItemResult[];
+    failed: PaymentsBulkItemFailure[];
+}>;
 export type PaymentsRentCertSetReq = TPaymentsRentCertSetBody;
 export type PaymentsRentCertSetResp = Ok<{
     enrollmentId: string;
@@ -986,9 +1003,17 @@ export interface EndpointMap {
         req: PaymentsSpendReq;
         resp: PaymentsSpendResp;
     };
+    paymentsBulkSpend: {
+        req: PaymentsBulkSpendReq;
+        resp: PaymentsBulkSpendResp;
+    };
     paymentsUpdateCompliance: {
         req: PaymentsUpdateComplianceReq;
         resp: PaymentsUpdateComplianceResp;
+    };
+    paymentsBulkUpdateCompliance: {
+        req: PaymentsBulkUpdateComplianceReq;
+        resp: PaymentsBulkUpdateComplianceResp;
     };
     paymentsRentCertSet: {
         req: PaymentsRentCertSetReq;

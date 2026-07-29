@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import PaymentQueue, {
   type PaymentQueueItem,
   type PaymentQueueBypassCloseReq,
+  type PaymentQueueBulkDesignateReq,
+  type PaymentQueueBulkDesignateResp,
   type PaymentQueueListReq,
   type PaymentQueuePatchReq,
   type PaymentQueuePostReq,
@@ -14,11 +16,14 @@ import { useInvalidateMutation } from "./optimistic";
 import {
   findCachedPaymentQueueItemById,
   optimisticPostPaymentQueuePatches,
+  optimisticClosePaymentQueuePatches,
 } from "./paymentQueueOptimistic";
 
 export type {
   PaymentQueueItem,
   PaymentQueueBypassCloseReq,
+  PaymentQueueBulkDesignateReq,
+  PaymentQueueBulkDesignateResp,
   PaymentQueueListReq,
   PaymentQueuePatchReq,
   PaymentQueuePostReq,
@@ -138,16 +143,51 @@ export function usePostPaymentQueueToLedger() {
   });
 }
 
+export function useBulkDesignatePaymentQueueItems() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [],
+    optimisticPatches: (body: PaymentQueueBulkDesignateReq, queryClient) =>
+      body.items.flatMap((input) => {
+        const item = findCachedPaymentQueueItemById(queryClient, input.id);
+        return input.post
+          ? optimisticPostPaymentQueuePatches(queryClient, item, {
+              grantId: input.grantId,
+              lineItemId: input.lineItemId,
+            })
+          : [];
+      }),
+    mutationFn: (body: PaymentQueueBulkDesignateReq) =>
+      PaymentQueue.bulkDesignate(body),
+    onSuccess: (_res: PaymentQueueBulkDesignateResp, body) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.ledger.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+        ...body.items.map((item) =>
+          qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(item.id) })
+        ),
+      ]);
+    },
+  });
+}
+
 export function useBypassClosePaymentQueueItems() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
-    queryKeys: [qk.paymentQueue.root],
+    queryKeys: [],
+    optimisticPatches: (body: PaymentQueueBypassCloseReq, queryClient) =>
+      optimisticClosePaymentQueuePatches(queryClient, body.ids),
     mutationFn: (body: PaymentQueueBypassCloseReq) => PaymentQueue.bypassClose(body),
-    onSuccess: async (_res, vars) => {
-      await Promise.all((vars.ids || []).map((id) =>
+    onSuccess: (_res, vars) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        ...(vars.ids || []).map((id) =>
         qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(id) })
-      ));
+        ),
+      ]);
     },
   });
 }

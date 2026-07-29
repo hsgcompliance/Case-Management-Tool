@@ -20,6 +20,8 @@ __export(payments_exports, {
   PaymentsAdjustProjectionsBody: () => PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody: () => PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody: () => PaymentsBulkCopyScheduleBody,
+  PaymentsBulkSpendBody: () => PaymentsBulkSpendBody,
+  PaymentsBulkUpdateComplianceBody: () => PaymentsBulkUpdateComplianceBody,
   PaymentsDeleteRowsBody: () => PaymentsDeleteRowsBody,
   PaymentsDeleteRowsResp: () => PaymentsDeleteRowsResp,
   PaymentsGenerateProjectionsBody: () => PaymentsGenerateProjectionsBody,
@@ -274,12 +276,18 @@ var PaymentsSpendBody = z.object({
   vendor: z.string().optional(),
   comment: z.string().optional()
 });
+var PaymentsBulkSpendBody = z.object({
+  items: z.array(PaymentsSpendBody).min(1).max(500)
+});
 var PaymentCompliancePatch = PaymentCompliance.partial();
 var PaymentsUpdateComplianceBody = z.object({
   enrollmentId: z.string().min(1),
   paymentId: z.string().min(1),
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch
+});
+var PaymentsBulkUpdateComplianceBody = z.object({
+  items: z.array(PaymentsUpdateComplianceBody).min(1).max(500)
 });
 var RentCertToggle = z.enum(["notDue", "due", "completed", "effective"]);
 var PaymentsRentCertSetBody = z.object({
@@ -381,8 +389,10 @@ export {
   PaymentsAdjustProjectionsBody,
   PaymentsBulkCopyScheduleBody,
   PaymentsSpendBody,
+  PaymentsBulkSpendBody,
   PaymentCompliancePatch,
   PaymentsUpdateComplianceBody,
+  PaymentsBulkUpdateComplianceBody,
   RentCertToggle,
   PaymentsRentCertSetBody,
   PaymentsDeleteRowsBody,

@@ -650,6 +650,7 @@ import type {
   TSpend,
   // request bodies
   TPaymentsSpendBody,
+  TPaymentsBulkSpendBody,
   TPaymentsRecalculateFutureReq,
   TPaymentsRecalcGrantProjectedBody,
   TPaymentsAdjustSpendBody,
@@ -657,6 +658,7 @@ import type {
   TPaymentsBulkCopyScheduleBody,
   TPaymentsGenerateProjectionsBody,
   TPaymentsUpdateComplianceBody,
+  TPaymentsBulkUpdateComplianceBody,
   TPaymentsRentCertSetBody,
   TPaymentsDeleteRowsBody,
   TPaymentsUpdateGrantBudgetBody,
@@ -694,6 +696,18 @@ export type PaymentsBulkCopyScheduleResp = Ok<{
 
 export type PaymentsSpendReq = TPaymentsSpendBody;
 export type PaymentsSpendResp = Ok<{}>;
+export type PaymentsBulkItemResult = {
+  enrollmentId: string;
+  paymentId: string;
+};
+export type PaymentsBulkItemFailure = PaymentsBulkItemResult & {
+  error: string;
+};
+export type PaymentsBulkSpendReq = TPaymentsBulkSpendBody;
+export type PaymentsBulkSpendResp = Ok<{
+  successful: PaymentsBulkItemResult[];
+  failed: PaymentsBulkItemFailure[];
+}>;
 
 // ---------------- Recalculate Future ----------------
 
@@ -706,6 +720,11 @@ export type PaymentsUpdateComplianceReq = TPaymentsUpdateComplianceBody;
 export type PaymentsUpdateComplianceResp = Ok<
   { id: string } & Partial<TEnrollmentEntity>
 >;
+export type PaymentsBulkUpdateComplianceReq = TPaymentsBulkUpdateComplianceBody;
+export type PaymentsBulkUpdateComplianceResp = Ok<{
+  successful: PaymentsBulkItemResult[];
+  failed: PaymentsBulkItemFailure[];
+}>;
 export type PaymentsRentCertSetReq = TPaymentsRentCertSetBody;
 export type PaymentsRentCertSetResp = Ok<{ enrollmentId: string; paymentId: string; rentCert: TPayment["rentCert"] }>;
 
@@ -1226,7 +1245,9 @@ export interface EndpointMap {
   paymentsUpsertProjections: { req: PaymentsUpsertProjectionsReq; resp: PaymentsUpsertProjectionsResp };
   paymentsBulkCopySchedule: { req: PaymentsBulkCopyScheduleReq; resp: PaymentsBulkCopyScheduleResp };
   paymentsSpend: { req: PaymentsSpendReq; resp: PaymentsSpendResp };
+  paymentsBulkSpend: { req: PaymentsBulkSpendReq; resp: PaymentsBulkSpendResp };
   paymentsUpdateCompliance: { req: PaymentsUpdateComplianceReq; resp: PaymentsUpdateComplianceResp };
+  paymentsBulkUpdateCompliance: { req: PaymentsBulkUpdateComplianceReq; resp: PaymentsBulkUpdateComplianceResp };
   paymentsRentCertSet: { req: PaymentsRentCertSetReq; resp: PaymentsRentCertSetResp };
   paymentsDeleteRows: { req: PaymentsDeleteRowsReq; resp: PaymentsDeleteRowsResp };
   paymentsUpdateGrantBudget: { req: PaymentsUpdateGrantBudgetReq; resp: PaymentsUpdateGrantBudgetResp };

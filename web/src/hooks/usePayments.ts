@@ -28,8 +28,12 @@ import type {
   PaymentsBulkCopyScheduleResp,
   PaymentsSpendReq,
   PaymentsSpendResp,
+  PaymentsBulkSpendReq,
+  PaymentsBulkSpendResp,
   PaymentsUpdateComplianceReq,
   PaymentsUpdateComplianceResp,
+  PaymentsBulkUpdateComplianceReq,
+  PaymentsBulkUpdateComplianceResp,
   ReqOf,
   RespOf,
   PaymentsRecalculateFutureReq,
@@ -874,47 +878,8 @@ export function usePaymentsSpend() {
   return useInvalidateMutation({
     queryClient: qc,
     queryKeys: [],
-    optimisticPatches: (args, queryClient) => {
-      const body = args?.body;
-      const enrollmentId = String(body?.enrollmentId || "").trim();
-      const paymentId = String(body?.paymentId || "").trim();
-      if (!enrollmentId || !paymentId) return [];
-      const reverse = body?.reverse === true;
-      const nowIso = new Date().toISOString();
-      const payment = findCachedPayment(queryClient, enrollmentId, paymentId);
-
-      const patches = paymentMutationPatches(queryClient, {
-        enrollmentId,
-        paymentId,
-        patch: (payment) => ({
-          ...payment,
-          paid: !reverse,
-          paidAt:
-            reverse
-              ? null
-              : typeof (payment as Record<string, unknown>)?.paidAt === "string"
-              ? String((payment as Record<string, unknown>).paidAt || "")
-              : nowIso,
-          ...(reverse ? {} : { paidFromGrant: Boolean((payment as Record<string, unknown>)?.paidFromGrant) }),
-        }),
-      });
-
-      if (!reverse) {
-        const queueItem = findCachedPaymentQueueItem(
-          queryClient,
-          (item) =>
-            String(item?.source || "") === "projection" &&
-            String(item?.enrollmentId || "").trim() === enrollmentId &&
-            String(item?.paymentId || "").trim() === paymentId,
-        );
-        patches.push(...optimisticPostPaymentQueuePatches(queryClient, queueItem));
-        patches.push(...optimisticLedgerPatches(queryClient, { enrollmentId, paymentId, reverse, payment, queueItem }));
-      } else {
-        patches.push(...optimisticLedgerPatches(queryClient, { enrollmentId, paymentId, reverse, payment }));
-      }
-
-      return patches;
-    },
+    optimisticPatches: (args, queryClient) =>
+      optimisticSpendMutationPatches(queryClient, args?.body),
     mutationFn: (args: { body: PaymentsSpendReq; idemKey?: string }) =>
       Payments.spend(args.body, args.idemKey) as Promise<PaymentsSpendResp>,
     onSuccess: (_res, vars) => {
@@ -935,41 +900,144 @@ export function usePaymentsSpend() {
   });
 }
 
+function optimisticSpendMutationPatches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  body?: PaymentsSpendReq,
+) {
+  const enrollmentId = String(body?.enrollmentId || "").trim();
+  const paymentId = String(body?.paymentId || "").trim();
+  if (!enrollmentId || !paymentId) return [];
+  const reverse = body?.reverse === true;
+  const nowIso = new Date().toISOString();
+  const payment = findCachedPayment(queryClient, enrollmentId, paymentId);
+
+  const patches = paymentMutationPatches(queryClient, {
+    enrollmentId,
+    paymentId,
+    patch: (payment) => ({
+      ...payment,
+      paid: !reverse,
+      paidAt:
+        reverse
+          ? null
+          : typeof (payment as Record<string, unknown>)?.paidAt === "string"
+          ? String((payment as Record<string, unknown>).paidAt || "")
+          : nowIso,
+      ...(reverse ? {} : { paidFromGrant: Boolean((payment as Record<string, unknown>)?.paidFromGrant) }),
+    }),
+  });
+
+  if (!reverse) {
+    const queueItem = findCachedPaymentQueueItem(
+      queryClient,
+      (item) =>
+        String(item?.source || "") === "projection" &&
+        String(item?.enrollmentId || "").trim() === enrollmentId &&
+        String(item?.paymentId || "").trim() === paymentId,
+    );
+    patches.push(...optimisticPostPaymentQueuePatches(queryClient, queueItem));
+    patches.push(...optimisticLedgerPatches(queryClient, { enrollmentId, paymentId, reverse, payment, queueItem }));
+  } else {
+    patches.push(...optimisticLedgerPatches(queryClient, { enrollmentId, paymentId, reverse, payment }));
+  }
+  return patches;
+}
+
+export function usePaymentsBulkSpend() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [],
+    optimisticPatches: (body: PaymentsBulkSpendReq, queryClient) =>
+      body.items.flatMap((item) => optimisticSpendMutationPatches(queryClient, item)),
+    mutationFn: (body: PaymentsBulkSpendReq) =>
+      Payments.bulkSpend(body) as Promise<PaymentsBulkSpendResp>,
+    onSuccess: (_res, body) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.ledger.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+        qc.invalidateQueries({ queryKey: qk.inbox.root }),
+        ...Array.from(new Set(body.items.map((item) => item.enrollmentId)))
+          .map((enrollmentId) => invalidateFromEnrollment(qc, enrollmentId)),
+      ]);
+    },
+    onError: (_err, body) => {
+      void Promise.all(
+        Array.from(new Set(body.items.map((item) => item.enrollmentId)))
+          .map((enrollmentId) => invalidateFromEnrollment(qc, enrollmentId)),
+      );
+    },
+  });
+}
+
 export function usePaymentsUpdateCompliance() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
     queryKeys: [],
-    optimisticPatches: (body, queryClient) => {
-      const enrollmentId = String(body?.enrollmentId || "").trim();
-      const paymentId = String(body?.paymentId || "").trim();
-      if (!enrollmentId || !paymentId) return [];
-      const patch = (body?.patch || {}) as Record<string, unknown>;
-
-      const patches = paymentMutationPatches(queryClient, {
-        enrollmentId,
-        paymentId,
-        patch: (payment) => {
-          const currentCompliance =
-            ((payment as Record<string, unknown>)?.compliance as Record<string, unknown> | null | undefined) || {};
-          return {
-            ...payment,
-            compliance: {
-              ...currentCompliance,
-              ...patch,
-            },
-          } as TPayment;
-        },
-      });
-      patches.push(...optimisticPaymentQueueCompliancePatches(queryClient, enrollmentId, paymentId, patch));
-      patches.push(...optimisticLedgerCompliancePatches(queryClient, enrollmentId, paymentId, patch));
-      return patches;
-    },
+    optimisticPatches: (body, queryClient) =>
+      optimisticComplianceMutationPatches(queryClient, body),
     mutationFn: (body: PaymentsUpdateComplianceReq) =>
       Payments.updateCompliance(body) as Promise<PaymentsUpdateComplianceResp>,
     onError: (_err, body) => {
       // Rollback already restored snapshots; fetch authoritative state only on failure.
       void invalidateFromEnrollment(qc, enrollmentIdOf(body));
+    },
+  });
+}
+
+function optimisticComplianceMutationPatches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  body?: PaymentsUpdateComplianceReq,
+) {
+  const enrollmentId = String(body?.enrollmentId || "").trim();
+  const paymentId = String(body?.paymentId || "").trim();
+  if (!enrollmentId || !paymentId) return [];
+  const patch = (body?.patch || {}) as Record<string, unknown>;
+
+  const patches = paymentMutationPatches(queryClient, {
+    enrollmentId,
+    paymentId,
+    patch: (payment) => {
+      const currentCompliance =
+        ((payment as Record<string, unknown>)?.compliance as Record<string, unknown> | null | undefined) || {};
+      return {
+        ...payment,
+        compliance: {
+          ...currentCompliance,
+          ...patch,
+        },
+      } as TPayment;
+    },
+  });
+  patches.push(...optimisticPaymentQueueCompliancePatches(queryClient, enrollmentId, paymentId, patch));
+  patches.push(...optimisticLedgerCompliancePatches(queryClient, enrollmentId, paymentId, patch));
+  return patches;
+}
+
+export function usePaymentsBulkUpdateCompliance() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [],
+    optimisticPatches: (body: PaymentsBulkUpdateComplianceReq, queryClient) =>
+      body.items.flatMap((item) => optimisticComplianceMutationPatches(queryClient, item)),
+    mutationFn: (body: PaymentsBulkUpdateComplianceReq) =>
+      Payments.bulkUpdateCompliance(body) as Promise<PaymentsBulkUpdateComplianceResp>,
+    onSuccess: (_res, body) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.ledger.root }),
+        ...Array.from(new Set(body.items.map((item) => item.enrollmentId)))
+          .map((enrollmentId) => invalidateFromEnrollment(qc, enrollmentId)),
+      ]);
+    },
+    onError: (_err, body) => {
+      void Promise.all(
+        Array.from(new Set(body.items.map((item) => item.enrollmentId)))
+          .map((enrollmentId) => invalidateFromEnrollment(qc, enrollmentId)),
+      );
     },
   });
 }

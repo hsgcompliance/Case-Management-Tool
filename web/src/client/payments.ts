@@ -9,7 +9,9 @@ import type {
   PaymentsGenerateProjectionsReq, PaymentsGenerateProjectionsResp,
   PaymentsBulkCopyScheduleReq, PaymentsBulkCopyScheduleResp,
   PaymentsSpendReq, PaymentsSpendResp,
+  PaymentsBulkSpendReq, PaymentsBulkSpendResp,
   PaymentsUpdateComplianceReq, PaymentsUpdateComplianceResp,
+  PaymentsBulkUpdateComplianceReq, PaymentsBulkUpdateComplianceResp,
   PaymentsUpdateGrantBudgetReq, PaymentsUpdateGrantBudgetResp,
   PaymentsRecalcGrantProjectedReq, PaymentsRecalcGrantProjectedResp,
   PaymentsRecalculateFutureReq, PaymentsRecalculateFutureResp,
@@ -24,7 +26,9 @@ import {
   PaymentsGenerateProjectionsBody,
   PaymentsBulkCopyScheduleBody,
   PaymentsSpendBody,
+  PaymentsBulkSpendBody,
   PaymentsUpdateComplianceBody,
+  PaymentsBulkUpdateComplianceBody,
   PaymentsRentCertSetBody,
   PaymentsDeleteRowsBody,
   PaymentsUpdateGrantBudgetBody,
@@ -217,11 +221,24 @@ export const Payments = {
       idemKey,
     ) as Promise<PaymentsSpendResp>,
 
+  bulkSpend: (body: PaymentsBulkSpendReq, idemKey?: string) =>
+    api.callIdem(
+      'paymentsBulkSpend',
+      PaymentsBulkSpendBody.parse(body),
+      idemKey,
+    ) as Promise<PaymentsBulkSpendResp>,
+
   updateCompliance: (body: PaymentsUpdateComplianceReq) =>
     api.post(
       'paymentsUpdateCompliance',
       PaymentsUpdateComplianceBody.parse(body),
     ) as Promise<PaymentsUpdateComplianceResp>,
+
+  bulkUpdateCompliance: (body: PaymentsBulkUpdateComplianceReq) =>
+    api.post(
+      'paymentsBulkUpdateCompliance',
+      PaymentsBulkUpdateComplianceBody.parse(body),
+    ) as Promise<PaymentsBulkUpdateComplianceResp>,
 
   setRentCert: (body: ReqOf<"paymentsRentCertSet">) =>
     api.post(

@@ -116,6 +116,8 @@ export declare const LedgerListBody: z.ZodObject<{
         adjustment: "adjustment";
     }>>>;
     month: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    dueDateFrom: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    dueDateTo: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     cursor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     sortBy: z.ZodDefault<z.ZodPreprocess<z.ZodEnum<{

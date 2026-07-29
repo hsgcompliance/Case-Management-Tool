@@ -5,6 +5,7 @@
 import Busboy from "busboy";
 import type { Request } from "express";
 import { db, FieldValue, Timestamp, isoNow, normId } from "../../core";
+import { expandWidgetAnswer } from "./widgetAnswers";
 
 const COLLECTION = "jotformWebhookEvents";
 const REGISTRY = "formsRegistry";
@@ -426,10 +427,11 @@ function fieldsFromEvent(r: Record<string, unknown>): WebhookEventFieldRow[] {
     return Object.values(answers as Record<string, Record<string, unknown>>)
       .filter((a) => a && !NON_INPUT_TYPES.has(String(a.type || "")))
       .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
-      .map((a) => ({
-        label: String(a.text || a.name || "").trim().slice(0, 200),
-        value: flattenAnswerValue(a).slice(0, 2000),
-      }))
+      .flatMap((a) => expandWidgetAnswer(
+        String(a.text || a.name || ""),
+        flattenAnswerValue(a),
+        String(a.type || ""),
+      ))
       .filter((f) => f.label && f.value);
   }
   // Fallback: the webhook's parsed rawRequest ({ q3_name: ..., q5_dob: ... }).
@@ -437,10 +439,10 @@ function fieldsFromEvent(r: Record<string, unknown>): WebhookEventFieldRow[] {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     return Object.entries(raw as Record<string, unknown>)
       .filter(([k]) => /^q\d+_/.test(k))
-      .map(([k, v]) => ({
-        label: labelFromRawKey(k).slice(0, 200),
-        value: (typeof v === "object" ? flattenAnswerValue({ answer: v }) : String(v ?? "").trim()).slice(0, 2000),
-      }))
+      .flatMap(([k, v]) => expandWidgetAnswer(
+        labelFromRawKey(k),
+        typeof v === "object" ? flattenAnswerValue({ answer: v }) : String(v ?? ""),
+      ))
       .filter((f) => f.label && f.value);
   }
   return [];
@@ -526,6 +528,8 @@ export async function listWebhookEventDetails(
       pretty: String(r.pretty || "").slice(0, 4000),
       fields: Array.isArray(r.normalizedFields)
         ? (r.normalizedFields as WebhookEventFieldRow[])
+          .flatMap((field) => expandWidgetAnswer(field.label, field.value))
+          .slice(0, 200)
         : [],
     });
   }

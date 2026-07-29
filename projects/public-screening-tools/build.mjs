@@ -59,7 +59,7 @@ function publicAmi(html) {
     description: "Private browser-only Area Median Income screening estimate from HRDC."
   });
   html = html.replace('let state={ami100:null,percent:null,limits:null,status:""},summary="",jfReady=false;', 'let state={ami100:null,percent:null,limits:null,status:""},summary="";');
-  html = html.replace(";if(jfReady)JFCustomWidget.sendData(summary)", "");
+  html = html.replace(";if(jfReady)JFCustomWidget.sendData({value:summary})", "");
   html = html.replace(/\s*\(function applyPrefill\(\)\{[^]*?\}\)\(\);\r?\n/, "\n");
   html = html.replace(/\s*if\(window\.JFCustomWidget\)\{[^]*?sendSubmit\(\{valid:!!summary,value:summary\}\)\)\}\r?\n/, "\n");
   html = html.replaceAll("AMI Calculator Widget", "AMI Screening Estimate");
@@ -75,7 +75,10 @@ function publicIncome(html) {
     description: "Private browser-only payment and income screening estimate using paystubs or an hourly work schedule."
   });
   html = html.replace('let stubs=[],result={},summary="",jfReady=false;', 'let stubs=[],result={},summary="";');
-  html = html.replaceAll("if(jfReady)JFCustomWidget.sendData(summary);", "");
+  html = html.replace(
+    /^[ \t]*if\(jfReady\)JFCustomWidget\.sendData\(\{value:summary\}\);[ \t]*\r?\n/gm,
+    ""
+  );
   html = html.replace(/\s*if\(window\.JFCustomWidget\)\{\s*JFCustomWidget\.subscribe\("ready"[^]*?JFCustomWidget\.subscribe\("submit"[^]*?\);\s*\}\r?\n/, "\n");
   html = html.replaceAll("Copy auditable field value", "Copy calculation summary");
   html = html.replaceAll("Single Jotform field value:", "Calculation summary:");

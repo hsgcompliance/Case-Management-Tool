@@ -454,6 +454,18 @@ export declare const PaymentsSpendBody: z.ZodObject<{
     comment: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type TPaymentsSpendBody = z.infer<typeof PaymentsSpendBody>;
+export declare const PaymentsBulkSpendBody: z.ZodObject<{
+    items: z.ZodArray<z.ZodObject<{
+        enrollmentId: z.ZodString;
+        paymentId: z.ZodString;
+        note: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>>;
+        reverse: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        forceSync: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        vendor: z.ZodOptional<z.ZodString>;
+        comment: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type TPaymentsBulkSpendBody = z.infer<typeof PaymentsBulkSpendBody>;
 export declare const PaymentCompliancePatch: z.ZodObject<{
     hmisComplete: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
     caseworthyComplete: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
@@ -489,6 +501,26 @@ export declare const PaymentsUpdateComplianceBody: z.ZodObject<{
         note: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     }, z.core.$strip>;
 }, z.core.$strip>;
+export declare const PaymentsBulkUpdateComplianceBody: z.ZodObject<{
+    items: z.ZodArray<z.ZodObject<{
+        enrollmentId: z.ZodString;
+        paymentId: z.ZodString;
+        patch: z.ZodObject<{
+            hmisComplete: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
+            caseworthyComplete: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodBoolean>>>;
+            items: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodObject<{
+                key: z.ZodString;
+                label: z.ZodOptional<z.ZodString>;
+                done: z.ZodDefault<z.ZodBoolean>;
+                doneAt: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+                doneBy: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+            }, z.core.$strip>>>>;
+            status: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+            note: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
+        }, z.core.$strip>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type TPaymentsBulkUpdateComplianceBody = z.infer<typeof PaymentsBulkUpdateComplianceBody>;
 /**
  * Toggle the rent cert state on a payment. "notDue" clears it; the other
  * states set it with a server-derived due date (month prior to the payment

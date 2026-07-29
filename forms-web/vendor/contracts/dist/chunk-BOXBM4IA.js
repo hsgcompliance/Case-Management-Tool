@@ -83,7 +83,7 @@ var BudgetPipeline = z.object({
   status: PipelineStatus,
   grantId: z.string().nullable(),
   lineItemId: z.string().nullable(),
-  startDate: z.string().nullable(),
+  startDate: z.string().nullable().optional(),
   sourceFormId: z.string().nullable(),
   sourceFormTitle: z.string().nullable(),
   formSchemas: z.record(z.string(), PipelineFormSchema).optional(),

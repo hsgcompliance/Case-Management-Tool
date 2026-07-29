@@ -178,6 +178,8 @@ var LedgerListBody = z.object({
   customerId: z.string().nullish(),
   source: LedgerSource.nullish(),
   month: ISO7.nullish(),
+  dueDateFrom: ISO10.nullish(),
+  dueDateTo: ISO10.nullish(),
   // GET query values arrive as strings, so coerce here
   limit: z.coerce.number().int().min(1).max(500).default(50),
   cursor: z.string().nullish(),

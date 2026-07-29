@@ -2,6 +2,7 @@ export {paymentsUpsertProjections} from "./upsertProjections";
 export {paymentsGenerateProjections} from "./generateProjections";
 export {paymentsBulkCopySchedule} from "./bulkCopySchedule";
 export {paymentsSpend} from "./spend";
+export {paymentsBulkSpend, paymentsBulkUpdateCompliance} from "./bulkOperations";
 export {paymentsUpdateCompliance} from "./updateCompliance";
 export {paymentsRentCertSet} from "./rentCert";
 export {paymentsDeleteRows} from "./deleteRows";

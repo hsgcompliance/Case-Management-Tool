@@ -371,7 +371,7 @@ var BudgetPipeline = import_zod3.z.object({
   status: PipelineStatus,
   grantId: import_zod3.z.string().nullable(),
   lineItemId: import_zod3.z.string().nullable(),
-  startDate: import_zod3.z.string().nullable(),
+  startDate: import_zod3.z.string().nullable().optional(),
   sourceFormId: import_zod3.z.string().nullable(),
   sourceFormTitle: import_zod3.z.string().nullable(),
   formSchemas: import_zod3.z.record(import_zod3.z.string(), PipelineFormSchema).optional(),
@@ -1300,6 +1300,8 @@ __export(payments_exports, {
   PaymentsAdjustProjectionsBody: () => PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody: () => PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody: () => PaymentsBulkCopyScheduleBody,
+  PaymentsBulkSpendBody: () => PaymentsBulkSpendBody,
+  PaymentsBulkUpdateComplianceBody: () => PaymentsBulkUpdateComplianceBody,
   PaymentsDeleteRowsBody: () => PaymentsDeleteRowsBody,
   PaymentsDeleteRowsResp: () => PaymentsDeleteRowsResp,
   PaymentsGenerateProjectionsBody: () => PaymentsGenerateProjectionsBody,
@@ -1554,12 +1556,18 @@ var PaymentsSpendBody = import_zod2.z.object({
   vendor: import_zod2.z.string().optional(),
   comment: import_zod2.z.string().optional()
 });
+var PaymentsBulkSpendBody = import_zod2.z.object({
+  items: import_zod2.z.array(PaymentsSpendBody).min(1).max(500)
+});
 var PaymentCompliancePatch = PaymentCompliance.partial();
 var PaymentsUpdateComplianceBody = import_zod2.z.object({
   enrollmentId: import_zod2.z.string().min(1),
   paymentId: import_zod2.z.string().min(1),
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch
+});
+var PaymentsBulkUpdateComplianceBody = import_zod2.z.object({
+  items: import_zod2.z.array(PaymentsUpdateComplianceBody).min(1).max(500)
 });
 var RentCertToggle = import_zod2.z.enum(["notDue", "due", "completed", "effective"]);
 var PaymentsRentCertSetBody = import_zod2.z.object({
@@ -4448,6 +4456,8 @@ var LedgerListBody = import_zod2.z.object({
   customerId: import_zod2.z.string().nullish(),
   source: LedgerSource.nullish(),
   month: ISO72.nullish(),
+  dueDateFrom: ISO10.nullish(),
+  dueDateTo: ISO10.nullish(),
   // GET query values arrive as strings, so coerce here
   limit: import_zod2.z.coerce.number().int().min(1).max(500).default(50),
   cursor: import_zod2.z.string().nullish(),

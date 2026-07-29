@@ -374,6 +374,11 @@ export const PaymentsSpendBody = z.object({
 });
 export type TPaymentsSpendBody = z.infer<typeof PaymentsSpendBody>;
 
+export const PaymentsBulkSpendBody = z.object({
+  items: z.array(PaymentsSpendBody).min(1).max(500),
+});
+export type TPaymentsBulkSpendBody = z.infer<typeof PaymentsBulkSpendBody>;
+
 // ---------------- Update Compliance ----------------
 export const PaymentCompliancePatch = PaymentCompliance.partial();
 export type TPaymentCompliancePatch = z.infer<typeof PaymentCompliancePatch>;
@@ -388,6 +393,12 @@ export const PaymentsUpdateComplianceBody = z.object({
   // patch semantics: allow partial updates (also allows nullish because base schema does)
   patch: PaymentCompliancePatch,
 });
+export const PaymentsBulkUpdateComplianceBody = z.object({
+  items: z.array(PaymentsUpdateComplianceBody).min(1).max(500),
+});
+export type TPaymentsBulkUpdateComplianceBody = z.infer<
+  typeof PaymentsBulkUpdateComplianceBody
+>;
 /**
  * Toggle the rent cert state on a payment. "notDue" clears it; the other
  * states set it with a server-derived due date (month prior to the payment

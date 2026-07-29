@@ -9,6 +9,8 @@ import {
   PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody,
+  PaymentsBulkSpendBody,
+  PaymentsBulkUpdateComplianceBody,
   PaymentsDeleteRowsBody,
   PaymentsDeleteRowsResp,
   PaymentsGenerateProjectionsBody,
@@ -27,7 +29,7 @@ import {
   RentCertToggle,
   Spend,
   SpendSource
-} from "./chunk-IZGYUEC2.js";
+} from "./chunk-4DPJSMQ7.js";
 import "./chunk-AXFMCCQR.js";
 import "./chunk-MLKGABMK.js";
 export {
@@ -41,6 +43,8 @@ export {
   PaymentsAdjustProjectionsBody,
   PaymentsAdjustSpendBody,
   PaymentsBulkCopyScheduleBody,
+  PaymentsBulkSpendBody,
+  PaymentsBulkUpdateComplianceBody,
   PaymentsDeleteRowsBody,
   PaymentsDeleteRowsResp,
   PaymentsGenerateProjectionsBody,

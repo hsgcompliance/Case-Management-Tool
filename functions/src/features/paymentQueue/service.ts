@@ -294,6 +294,8 @@ export async function listVisiblePaymentQueueItemsForOrg(
   if (body.queueStatus) q = q.where('queueStatus', '==', body.queueStatus);
   if (body.okUnassigned !== undefined) q = q.where('okUnassigned', '==', body.okUnassigned);
   if (body.isFlex !== undefined) q = q.where('isFlex', '==', body.isFlex);
+  if (body.dueDateFrom) q = q.where('dueDate', '>=', body.dueDateFrom);
+  if (body.dueDateTo) q = q.where('dueDate', '<=', body.dueDateTo);
   if (body.unmatched) {
     // Unmatched = no grantId AND not explicitly ok'd
     q = q.where('grantId', '==', null).where('okUnassigned', '==', false);
@@ -306,13 +308,16 @@ export async function listVisiblePaymentQueueItemsForOrg(
     if (body.month) q = q.where('month', '==', body.month);
     // No orderBy — equality-only filters work without composite indexes.
     // Frontend sorts displayed rows by date/status.
+    if (body.dueDateFrom || body.dueDateTo) q = q.orderBy('dueDate', 'desc');
     q = q.limit(body.limit + 1);
   } else if (body.grantId !== undefined) {
     q = q.where('grantId', '==', body.grantId);
     if (body.month) q = q.where('month', '==', body.month);
+    if (body.dueDateFrom || body.dueDateTo) q = q.orderBy('dueDate', 'desc');
     q = q.limit(body.limit + 1);
   } else {
     if (body.month) q = q.where('month', '==', body.month);
+    if (body.dueDateFrom || body.dueDateTo) q = q.orderBy('dueDate', 'desc');
     q = q.limit(body.limit + 1);
   }
 
@@ -336,10 +341,13 @@ export async function listVisiblePaymentQueueItemsForOrg(
     if (body.queueStatus) legacyQ = legacyQ.where('queueStatus', '==', body.queueStatus);
     if (body.okUnassigned !== undefined) legacyQ = legacyQ.where('okUnassigned', '==', body.okUnassigned);
     if (body.isFlex !== undefined) legacyQ = legacyQ.where('isFlex', '==', body.isFlex);
+    if (body.dueDateFrom) legacyQ = legacyQ.where('dueDate', '>=', body.dueDateFrom);
+    if (body.dueDateTo) legacyQ = legacyQ.where('dueDate', '<=', body.dueDateTo);
     if (body.unmatched) legacyQ = legacyQ.where('grantId', '==', null).where('okUnassigned', '==', false);
     if (body.customerId !== undefined) legacyQ = legacyQ.where('customerId', '==', body.customerId);
     if (body.grantId !== undefined) legacyQ = legacyQ.where('grantId', '==', body.grantId);
     if (body.month) legacyQ = legacyQ.where('month', '==', body.month);
+    if (body.dueDateFrom || body.dueDateTo) legacyQ = legacyQ.orderBy('dueDate', 'desc');
     legacyQ = legacyQ.limit(Math.min(1000, Math.max(body.limit * 3, body.limit + 1)));
 
     const legacySnap = await legacyQ.get();
@@ -1116,6 +1124,7 @@ export type BulkDesignateResult = {
 export async function bulkDesignatePaymentQueueItems(
     body: TPaymentQueueBulkDesignateBody,
     actorUid?: string,
+    actorOrgId?: string,
 ): Promise<BulkDesignateResult> {
   const now = isoNow();
   const actor = actorUid ?? body.postedBy ?? null;
@@ -1148,6 +1157,16 @@ export async function bulkDesignatePaymentQueueItems(
       continue;
     }
     const item = docToItem(snap);
+    if (actorOrgId) {
+      const itemOrgId = String(item.orgId || '').trim();
+      const belongsToActorOrg = itemOrgId ?
+        itemOrgId === actorOrgId :
+        await unscopedQueueItemBelongsToOrg(item, actorOrgId);
+      if (!belongsToActorOrg) {
+        failed.push({id, error: 'forbidden_org'});
+        continue;
+      }
+    }
     const prev = (snap.data() || {}) as Record<string, unknown>;
 
     const assigned = !!(input.grantId && String(input.grantId).trim());

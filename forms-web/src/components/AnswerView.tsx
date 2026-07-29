@@ -2,6 +2,7 @@
 // Type-aware display, no dangerouslySetInnerHTML, PDF links, raw toggle.
 import { useMemo, useState, type ReactNode } from "react";
 import type { JfAnswer, JfSubmission } from "@/lib/jotformManagerApi";
+import { expandWidgetAnswer } from "@/lib/widgetAnswers";
 
 const isUrl = (s: unknown) => typeof s === "string" && /^https?:\/\//.test(s);
 const stripHtml = (s: unknown) =>
@@ -47,6 +48,17 @@ function htmlish(s: unknown): ReactNode {
 
 function displayAnswer(a: JfAnswer): unknown {
   const t = typeOf(a);
+  if (t === "control_widget") {
+    const raw = String(a?.prettyFormat ?? a?.answer ?? "").trim();
+    const label = stripHtml(a?.text || a?.name || "Widget");
+    const fields = expandWidgetAnswer(label, raw, t);
+    if (fields.length > 1) {
+      return Object.fromEntries(fields.map((field) => [
+        field.label.replace(`${label} — `, ""),
+        field.value,
+      ]));
+    }
+  }
   if (t === "control_fileupload") return a?.answer ?? [];
   if (t === "control_address") return a?.answer ?? null;
   if (t === "control_phone") return (a?.answer as { full?: string })?.full ?? a?.answer ?? "";

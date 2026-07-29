@@ -126,9 +126,12 @@ export async function listLedgerEntries(
   if (body.customerId) query = query.where("customerId", "==", body.customerId);
   if (body.source) query = query.where("source", "==", body.source);
   if (body.month) query = query.where("month", "==", body.month);
+  if (body.dueDateFrom) query = query.where("dueDate", ">=", body.dueDateFrom);
+  if (body.dueDateTo) query = query.where("dueDate", "<=", body.dueDateTo);
 
   const sortDir = body.sortOrder === "asc" ? "asc" : "desc";
-  query = query.orderBy(body.sortBy as any, sortDir);
+  const sortBy = body.dueDateFrom || body.dueDateTo ? "dueDate" : body.sortBy;
+  query = query.orderBy(sortBy as any, sortDir);
 
   query = query.limit(body.limit);
 

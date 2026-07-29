@@ -150,12 +150,23 @@ export function useInvalidateMutation<TData, TVars>(config: InvalidateMutationCo
       }
 
       const patches = optimisticPatches?.(vars, qc) || [];
-      for (const p of patches) {
-        for (const key of normalizePatchKeys(p.key)) {
-          await qc.cancelQueries({ queryKey: key });
-          snapshots.push({ key, data: qc.getQueryData(key) });
-          qc.setQueryData(key, p.update(qc.getQueryData(key)));
+      const patchGroups = new Map<string, { key: unknown[]; updates: Array<(prev: unknown) => unknown> }>();
+      for (const patch of patches) {
+        for (const key of normalizePatchKeys(patch.key)) {
+          const serialized = JSON.stringify(key);
+          const group = patchGroups.get(serialized) || { key, updates: [] };
+          group.updates.push(patch.update);
+          patchGroups.set(serialized, group);
         }
+      }
+      for (const { key, updates } of patchGroups.values()) {
+        await qc.cancelQueries({ queryKey: key });
+        const before = qc.getQueryData(key);
+        snapshots.push({ key, data: before });
+        qc.setQueryData(
+          key,
+          updates.reduce((current, update) => update(current), before),
+        );
       }
 
       return { snapshots };
