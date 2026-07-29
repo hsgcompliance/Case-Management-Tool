@@ -10,11 +10,13 @@ import {
   usePaymentsUpdateCompliance,
   usePaymentsBulkSpend,
   usePaymentsBulkUpdateCompliance,
+  usePaymentsDeleteRows,
 } from "@hooks/usePayments";
 import { useAutoAssignLedgerEntries, useLedgerEntries } from "@hooks/useLedger";
 import {
   usePaymentQueueItems,
   useBypassClosePaymentQueueItems,
+  useBulkVoidPaymentQueueItems,
   useBulkDesignatePaymentQueueItems,
   usePatchPaymentQueueItem,
   usePostPaymentQueueToLedger,
@@ -719,13 +721,21 @@ function RowContextMenu({
     ledger?.enrollmentId || ""
   );
   const paymentId = String(ledger?.paymentId || "");
+  const paymentRef = rowPaymentRef(row);
   const canPost =
     (row.kind === "grant-ledger" && !!enrollmentId && !!paymentId) ||
+    (row.kind === "queue-projection" &&
+      row.workflowState === "open" &&
+      !!paymentRef.enrollmentId &&
+      !!paymentRef.paymentId) ||
     ((row.kind === "queue-invoice" || row.kind === "queue-credit-card") &&
       row.workflowState === "open" &&
       !!row.grantId &&
       !!row.lineItemId);
-  const canCompliance = row.kind === "grant-ledger" && !!enrollmentId && !!paymentId;
+  const canCompliance =
+    (row.kind === "grant-ledger" || row.kind === "queue-projection") &&
+    !!paymentRef.enrollmentId &&
+    !!paymentRef.paymentId;
 
   const btnCls =
     "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40";
@@ -741,7 +751,7 @@ function RowContextMenu({
       </div>
       {canPost && (
         <button type="button" disabled={acting} className={btnCls} onClick={() => onAction("invoice-submitted")}>
-          Invoice Submitted
+          {row.kind === "grant-ledger" ? "Invoice Submitted" : "Mark Paid"}
         </button>
       )}
       {canCompliance && (
@@ -1286,6 +1296,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [bulkPosting, setBulkPosting] = React.useState(false);
+  const [bulkVoiding, setBulkVoiding] = React.useState(false);
   const [bulkBypassClosing, setBulkBypassClosing] = React.useState(false);
   const [bulkPostDialogOpen, setBulkPostDialogOpen] = React.useState(false);
   const [bulkPostGrantId, setBulkPostGrantId] = React.useState("");
@@ -1297,6 +1308,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const autoAssignMutation = useAutoAssignLedgerEntries();
   const bypassCloseMutation = useBypassClosePaymentQueueItems();
+  const bulkVoidQueueMutation = useBulkVoidPaymentQueueItems();
   const bulkDesignateMutation = useBulkDesignatePaymentQueueItems();
   const patchQueueMutation = usePatchPaymentQueueItem();
   const postMutation = usePostPaymentQueueToLedger();
@@ -1304,6 +1316,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const bulkSpendMutation = usePaymentsBulkSpend();
   const updateCompliance = usePaymentsUpdateCompliance();
   const bulkUpdateCompliance = usePaymentsBulkUpdateCompliance();
+  const deletePaymentRows = usePaymentsDeleteRows();
   const syncJotformSelection = useSyncJotformSelection();
 
   // ── Context menu ──────────────────────────────────────────────────────────
@@ -2368,6 +2381,98 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     }
   }
 
+  async function onBulkVoid() {
+    const selected = selectedRows;
+    const queueRows = selected.filter((row) =>
+      isQueueTransactionRow(row) && row.paymentQueueItem && row.workflowState === "open"
+    );
+    const projectionRows = selected.filter((row) => {
+      const ref = rowPaymentRef(row);
+      return row.kind === "queue-projection" &&
+        row.workflowState === "open" &&
+        !!ref.enrollmentId &&
+        !!ref.paymentId;
+    });
+    const voidable = [...queueRows, ...projectionRows];
+    if (!voidable.length) {
+      toast("No selected open enrollment, credit-card, or invoice rows can be voided.", { type: "error" });
+      return;
+    }
+
+    const totalCents = voidable.reduce((sum, row) => sum + row.amountCents, 0);
+    const confirmed = window.confirm([
+      `Void ${voidable.length} selected transaction${voidable.length === 1 ? "" : "s"}?`,
+      `Total amount: ${fmtCurrencyUSD(totalCents / 100)}`,
+      `Sources: ${projectionRows.length} enrollment, ${queueRows.filter((row) => row.kind === "queue-credit-card").length} credit card, ${queueRows.filter((row) => row.kind === "queue-invoice").length} invoice`,
+      selected.length > voidable.length
+        ? `${selected.length - voidable.length} ineligible selected row${selected.length - voidable.length === 1 ? "" : "s"} will be ignored.`
+        : "",
+      "",
+      "Enrollment rows will be removed from their payment schedules; CC/invoice rows will be soft-voided in the transaction queue. No ledger entry will be created.",
+    ].filter(Boolean).join("\n"));
+    if (!confirmed) return;
+
+    const projectionRowsByEnrollment = new Map<string, SpendingRow[]>();
+    for (const row of projectionRows) {
+      const { enrollmentId } = rowPaymentRef(row);
+      projectionRowsByEnrollment.set(enrollmentId, [
+        ...(projectionRowsByEnrollment.get(enrollmentId) || []),
+        row,
+      ]);
+    }
+    const projectionGroups = Array.from(projectionRowsByEnrollment.entries());
+
+    setBulkPostDialogOpen(false);
+    setBulkVoiding(true);
+    const failedRowIds = new Set<string>();
+    let voided = 0;
+    try {
+      const [queueOutcome, projectionOutcomes] = await Promise.all([
+        queueRows.length
+          ? bulkVoidQueueMutation.mutateAsync({
+              ids: queueRows.map((row) => String(row.paymentQueueItem?.id || "")),
+              reason: "Bulk void from Spending tracker",
+            })
+          : Promise.resolve(null),
+        Promise.allSettled(projectionGroups.map(
+          ([enrollmentId, rows]) => deletePaymentRows.mutateAsync({
+            enrollmentId,
+            paymentIds: rows.map((row) => rowPaymentRef(row).paymentId),
+            preservePaid: false,
+            updateBudgets: true,
+            removeSpends: true,
+            reverseLedger: false,
+          }).then(() => rows)
+        )),
+      ]);
+
+      if (queueOutcome) {
+        voided += queueOutcome.voided.length;
+        const failedQueueIds = new Set(queueOutcome.failed.map((item) => item.id));
+        for (const row of queueRows) {
+          if (failedQueueIds.has(String(row.paymentQueueItem?.id || ""))) failedRowIds.add(row.id);
+        }
+      }
+      projectionOutcomes.forEach((outcome, index) => {
+        const rows = projectionGroups[index]?.[1] || [];
+        if (outcome.status === "fulfilled") {
+          voided += outcome.value.length;
+        } else {
+          for (const row of rows) failedRowIds.add(row.id);
+        }
+      });
+      setSelectedIds(failedRowIds);
+      toast(
+        `${voided} voided${failedRowIds.size ? `, ${failedRowIds.size} failed` : ""}.`,
+        { type: voided > 0 ? "success" : "error" }
+      );
+    } catch (error) {
+      toast(toApiError(error, "Failed to void selected rows.").error, { type: "error" });
+    } finally {
+      setBulkVoiding(false);
+    }
+  }
+
   function onBulkExport() {
     const rows = filteredRows.filter((r) => selectedIds.has(r.id)).map(toExportRow);
     downloadCsv(buildCsv(rows, EXPORT_COLUMNS), `spending-selected-${fileSafeLabel(complexDateValueLabel(dateFilter))}`);
@@ -2864,15 +2969,29 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           <button
             type="button"
             className="btn btn-xs btn-ghost"
-            disabled={bulkPosting || bulkBypassClosing || selectedRows.length === 0}
+            disabled={bulkPosting || bulkVoiding || bulkBypassClosing || selectedRows.length === 0}
             onClick={() => setBulkPostDialogOpen((v) => !v)}
           >
             {bulkPosting ? "Updating..." : "Bulk Actions"}
           </button>
           <button
             type="button"
+            className="btn btn-xs btn-ghost text-red-700"
+            disabled={
+              bulkPosting ||
+              bulkVoiding ||
+              bulkBypassClosing ||
+              (selectedQueueTransactionRows.length === 0 && selectedOpenProjectionRows.length === 0)
+            }
+            onClick={() => void onBulkVoid()}
+            title="Void selected open enrollment projections and CC/invoice queue transactions without creating ledger entries."
+          >
+            {bulkVoiding ? "Voiding..." : "Bulk Void"}
+          </button>
+          <button
+            type="button"
             className="btn btn-xs btn-ghost text-amber-700"
-            disabled={bulkPosting || bulkBypassClosing || selectedQueueTransactionRows.length === 0}
+            disabled={bulkPosting || bulkVoiding || bulkBypassClosing || selectedQueueTransactionRows.length === 0}
             onClick={() => void onBulkBypassClose()}
             title="Mark selected queue rows as closed without creating ledger entries or adjusting grant budgets. Use when an item was handled outside the system."
           >
@@ -2908,7 +3027,26 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             </div>
             <button type="button" className="btn btn-xs btn-ghost" onClick={() => setBulkPostDialogOpen(false)}>x</button>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded border border-slate-200 px-3 py-2 text-xs hover:bg-slate-50">
+              <span>
+                <span className="block font-semibold text-slate-800">Data Entry Complete</span>
+                <span className="text-slate-500">{selectedComplianceRows.length} eligible</span>
+              </span>
+              <input
+                type="checkbox"
+                className="toggle toggle-sm"
+                checked={bulkActions.hmisComplete && bulkActions.caseworthyComplete}
+                onChange={(e) => {
+                  const checked = e.currentTarget.checked;
+                  setBulkActions((prev) => ({
+                    ...prev,
+                    hmisComplete: checked,
+                    caseworthyComplete: checked,
+                  }));
+                }}
+              />
+            </label>
             {([
               ["markPaid", "Mark Paid", `${selectedQueueTransactionRows.length + selectedOpenProjectionRows.length} eligible`],
               ["hmisComplete", "HMIS Complete", `${selectedComplianceRows.length} eligible`],
@@ -3000,6 +3138,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
               className="btn btn-sm"
               disabled={
                 bulkPosting ||
+                bulkVoiding ||
                 (!bulkActions.markPaid && !bulkActions.hmisComplete && !bulkActions.caseworthyComplete) ||
                 (!!bulkPostGrantId && !bulkPostLineItemId) ||
                 selectedBulkEligibleCount === 0

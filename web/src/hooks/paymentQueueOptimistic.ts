@@ -213,6 +213,48 @@ export function optimisticClosePaymentQueuePatches(
   return patches;
 }
 
+export function optimisticVoidPaymentQueuePatches(
+  qc: QueryClient,
+  ids: string[],
+): OptimisticPatch[] {
+  const idSet = new Set(ids.map((id) => String(id || "").trim()).filter(Boolean));
+  if (!idSet.size) return [];
+  const now = new Date().toISOString();
+  const voidItem = (item: PaymentQueueItem) => ({
+    ...item,
+    queueStatus: "void" as const,
+    voidedAt: now,
+  });
+  const patches: OptimisticPatch[] = [];
+  const listKeys = qc
+    .getQueriesData({ queryKey: qk.paymentQueue.root })
+    .map(([key]) => key as unknown[])
+    .filter((key) => Array.isArray(key) && key[0] === "paymentQueue" && key[1] === "list");
+
+  for (const key of listKeys) {
+    const filters = key[2] && typeof key[2] === "object" ? key[2] as Record<string, unknown> : {};
+    const statusFilter = String(filters.queueStatus || "");
+    const excludesVoided = !!statusFilter && statusFilter !== "void";
+    patches.push({
+      key,
+      update: (prev) => Array.isArray(prev)
+        ? excludesVoided
+          ? prev.filter((item) => !idSet.has(String(asRecord(item).id || "")))
+          : prev.map((item) => idSet.has(String(asRecord(item).id || ""))
+            ? voidItem(item as PaymentQueueItem)
+            : item)
+        : prev,
+    });
+  }
+  for (const id of idSet) {
+    patches.push({
+      key: qk.paymentQueue.detail(id),
+      update: (prev) => prev ? voidItem(prev as PaymentQueueItem) : prev,
+    });
+  }
+  return patches;
+}
+
 export function optimisticPaymentQueueCompliancePatches(
   qc: QueryClient,
   enrollmentId: string,

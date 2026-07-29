@@ -17,6 +17,7 @@ import {
   findCachedPaymentQueueItemById,
   optimisticPostPaymentQueuePatches,
   optimisticClosePaymentQueuePatches,
+  optimisticVoidPaymentQueuePatches,
 } from "./paymentQueueOptimistic";
 
 export type {
@@ -214,6 +215,54 @@ export function useVoidPaymentQueueItem() {
       PaymentQueue.void(args.id, args.body || {}),
     onSuccess: async (_res, vars) => {
       await qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(vars.id) });
+    },
+  });
+}
+
+export type PaymentQueueBulkVoidReq = {
+  ids: string[];
+  reason?: string;
+};
+
+export type PaymentQueueBulkVoidResp = {
+  voided: string[];
+  failed: Array<{ id: string; error: string }>;
+};
+
+export function useBulkVoidPaymentQueueItems() {
+  const qc = useQueryClient();
+  return useInvalidateMutation({
+    queryClient: qc,
+    queryKeys: [],
+    optimisticPatches: (body: PaymentQueueBulkVoidReq, queryClient) =>
+      optimisticVoidPaymentQueuePatches(queryClient, body.ids),
+    mutationFn: async (body: PaymentQueueBulkVoidReq): Promise<PaymentQueueBulkVoidResp> => {
+      const ids = Array.from(new Set(body.ids.map((id) => String(id || "").trim()).filter(Boolean)));
+      const outcomes: PaymentQueueBulkVoidResp = { voided: [], failed: [] };
+      let nextIndex = 0;
+      const workers = Array.from({ length: Math.min(8, ids.length) }, async () => {
+        while (nextIndex < ids.length) {
+          const id = ids[nextIndex++];
+          try {
+            await PaymentQueue.void(id, body.reason ? { reason: body.reason } : {});
+            outcomes.voided.push(id);
+          } catch (error) {
+            outcomes.failed.push({
+              id,
+              error: error instanceof Error ? error.message : "void_failed",
+            });
+          }
+        }
+      });
+      await Promise.all(workers);
+      return outcomes;
+    },
+    onSuccess: (_res, vars) => {
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: qk.paymentQueue.root }),
+        qc.invalidateQueries({ queryKey: qk.grants.root }),
+        ...vars.ids.map((id) => qc.invalidateQueries({ queryKey: qk.paymentQueue.detail(id) })),
+      ]);
     },
   });
 }
