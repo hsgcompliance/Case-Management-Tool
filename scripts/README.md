@@ -6,6 +6,25 @@ Node.js automation scripts for HDB v2. All scripts are ESM (`.mjs`) and run with
 
 ## Deploy
 
+### Credential-safe verification
+
+Do not print raw `firebase functions:list --json`, verbose function descriptors, or `firebase-debug.log` in shared terminals, CI output, agent transcripts, issues, or pull requests. Firebase function metadata includes the full ordinary `environmentVariables` map, so legacy credentials stored there are returned in plaintext. Secret Manager bindings expose names and version metadata through function configuration, but not the secret payload unless it is separately accessed.
+
+Capture the response without streaming it and print only explicitly allowed fields:
+
+```powershell
+$functionListText = (& firebase functions:list --project <project-id> --json 2>$null | Out-String)
+$jsonStart = $functionListText.IndexOf('{')
+if ($jsonStart -lt 0) { throw 'Firebase did not return JSON.' }
+$functionList = $functionListText.Substring($jsonStart) | ConvertFrom-Json
+$functionList.result |
+  Where-Object { $_.id -in @('functionA', 'functionB') } |
+  Select-Object id, state, runtime, hash
+Remove-Variable functionListText, functionList
+```
+
+Do not echo `$functionListText`, add `--debug`, or paste full failure output without locally redacting it first. The captured value is still sensitive while it is in memory. New or migrated credentials must use Firebase Secret Manager/secret params rather than ordinary environment variables. If plaintext metadata reaches any retained output, rotate the affected credential and audit or remove the retained logs where possible.
+
 ### `deploy-functions-safe.mjs`
 Chunked all-functions deploy. Avoids accidentally deleting extra deployed functions by deploying in batches. Checks out the selected function names before deploy so another agent can deploy disjoint functions in parallel but cannot deploy the same function at the same time.
 ```sh

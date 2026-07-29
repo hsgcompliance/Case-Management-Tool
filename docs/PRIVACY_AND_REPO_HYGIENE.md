@@ -81,3 +81,19 @@ rg -n "(BEGIN .*KEY|PRIVATE KEY|client_secret|refresh_token|service_account|JOTF
 Public Firebase web config values beginning with `NEXT_PUBLIC_` are not secret by themselves. Real server-side secrets belong in Firebase secrets/params or environment-specific secret stores, never in source control.
 
 Google OAuth credential boundary: `GMAIL_*` secrets are for the automated Gmail sender only. Drive and Calendar integrations use `GOOGLE_OAUTH_*` secrets. Do not reuse, copy, or document the secret values in repo docs; store them only in Secret Manager or a local credential manager.
+
+## Firebase CLI Metadata Is Sensitive
+
+Treat raw Firebase function descriptors, `firebase functions:list --json` output, verbose/debug deploy output, and `firebase-debug.log` as sensitive operational data. Function descriptors can include the complete `environmentVariables` map. Any credential stored as an ordinary function environment variable can therefore appear in plaintext even when the command is only being used to verify a function's deployment state.
+
+On 2026-07-29, a deployment verification command emitted raw function metadata into an agent tool transcript. The metadata exposed an existing Jotform API credential and webhook token because those legacy values were stored as ordinary environment variables. Secret Manager payloads were not printed; Firebase reported only their binding names and version metadata.
+
+The contributing causes were:
+
+- deployment verification printed the full JSON response before narrowing it to the requested functions and fields
+- the affected Jotform credentials predated the current secret-parameter pattern and remained in the plaintext environment-variable map
+- verbose Firebase output can repeat function or service metadata during discovery, deployment, and error handling
+
+After this kind of exposure, rotate the affected credentials even if the output was not committed. Tool transcripts, terminal capture, CI logs, and debug files may be retained outside the repository. Migrate legacy secret environment variables to Firebase Secret Manager, audit retained logs, and never place the exposed values in an incident note.
+
+For deployment verification, capture command output without streaming it and emit only an allowlist such as function ID, state, runtime, and hash. Never echo the captured response, inspect or paste `environmentVariables`, or enable `--debug` in a shared or recorded session. See `scripts/README.md` for the safe PowerShell pattern.
