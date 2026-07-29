@@ -20,7 +20,7 @@ import {
   bypassClosePaymentQueueItems,
   postPaymentQueueToLedger,
   reopenPaymentQueueItem,
-  voidPaymentQueueItems,
+  voidPaymentQueueItemById,
   recomputePaymentQueueGrantAllocations,
 } from './service';
 
@@ -166,20 +166,22 @@ export const paymentQueueReopen = secureHandler(async (req, res): Promise<void> 
    POST /paymentQueueVoid?id=…  (voids a single item's entire submission group)
 ============================================================================ */
 
+/** Transaction-scoped void. Submission-wide voiding is reserved for ingestion cleanup. */
 export const paymentQueueVoid = secureHandler(async (req, res): Promise<void> => {
   const {id} = PaymentQueueItemParams.parse(req.query);
   PaymentQueueVoidBody.parse(req.body || {});
 
-  // Look up the item to get its baseId (void entire submission group)
-  const item = await getPaymentQueueItem(id);
-  if (!item) {
-    res.status(404).json({ok: false, error: 'not_found'});
-    return;
-  }
-
   const uid = requireUid(req as any);
-  const voided = await voidPaymentQueueItems(item.baseId, uid);
-  res.json({ok: true, voided});
+  try {
+    const voided = await voidPaymentQueueItemById(id, uid);
+    if (!voided) {
+      res.status(404).json({ok: false, error: 'not_found'});
+      return;
+    }
+    res.json({ok: true, voided});
+  } catch (err: any) {
+    res.status(400).json({ok: false, error: err.message || 'void_failed'});
+  }
 }, {auth: 'user', methods: ['POST', 'OPTIONS']});
 
 /* ============================================================================

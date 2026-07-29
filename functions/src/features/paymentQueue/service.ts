@@ -1,5 +1,6 @@
 // functions/src/features/paymentQueue/service.ts
 import {db, FieldValue, isoNow, removeUndefinedDeep, newBulkWriter} from '../../core';
+import {budgetAssignment, type TBudgetAssignmentSource} from '@hdb/contracts';
 import {writeLedgerEntry} from '../ledger/service';
 import {recordCustomerSpend, recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
 import {recomputeGrantBudgetFromLedger} from '../grants/budgetRecompute';
@@ -33,12 +34,58 @@ const LOCAL_RECONCILE_FIELDS = [
   'grantId',
   'lineItemId',
   'pipelineId',
+  'budgetAssignmentSource',
   'customerId',
   'enrollmentId',
   'creditCardId',
   'invoiceStatus',
   'invoiceRef',
 ] as const;
+
+type BudgetLink = {grantId: string; lineItemId: string};
+
+export function paymentQueueBudgetLink(item: {
+  grantId?: unknown;
+  lineItemId?: unknown;
+}): BudgetLink | null {
+  const grantId = String(item.grantId || '').trim();
+  const lineItemId = String(item.lineItemId || '').trim();
+  return grantId && lineItemId ? {grantId, lineItemId} : null;
+}
+
+export function paymentQueueBudgetAssignmentSource(item: {
+  source?: unknown;
+  grantId?: unknown;
+  lineItemId?: unknown;
+  pipelineId?: unknown;
+  budgetAssignmentSource?: unknown;
+}): TBudgetAssignmentSource | null {
+  return budgetAssignment.inferBudgetAssignmentSource(item);
+}
+
+async function recomputeLinkedGrantBudgets(
+    items: Array<{grantId?: unknown; lineItemId?: unknown}>,
+): Promise<string[]> {
+  const grantIds = Array.from(new Set(items.map(paymentQueueBudgetLink).filter(Boolean).map((link) => link!.grantId)));
+  const recomputed: string[] = [];
+  for (const grantId of grantIds) {
+    try {
+      const result = await recomputeGrantBudgetFromLedger(grantId);
+      await recomputeCustomerSpendForGrant({grantId}).catch(() => null);
+      if (result.recomputed) recomputed.push(grantId);
+    } catch {
+      // The queue mutation is already durable. Flag the linked grant for the
+      // scheduled reconciler instead of returning a misleading mutation error.
+      await db.collection('grants').doc(grantId).set({
+        'budget.needsRecalc': true,
+        'budget.needsRecalcAt': FieldValue.serverTimestamp(),
+        'system.lastWriter': `${FN}:budgetRecomputeFallback`,
+        'system.lastWriteAt': FieldValue.serverTimestamp(),
+      }, {merge: true}).catch(() => null);
+    }
+  }
+  return recomputed;
+}
 
 function applyLocalOverrides<T extends Record<string, unknown>>(extracted: T, prev: Record<string, unknown> | null): T {
   if (!prev) return extracted;
@@ -392,9 +439,24 @@ export async function patchPaymentQueueItem(
   if (patch.cardBucket !== undefined) mark('cardBucket', patch.cardBucket);
   if (patch.grantId !== undefined) mark('grantId', patch.grantId);
   if (patch.lineItemId !== undefined) mark('lineItemId', patch.lineItemId);
-  // Manual re-classification supersedes pipeline auto-attribution.
-  if (patch.pipelineId !== undefined) mark('pipelineId', patch.pipelineId);
-  else if (patch.grantId !== undefined || patch.lineItemId !== undefined) update.pipelineId = null;
+  const assignmentChanged =
+    patch.grantId !== undefined ||
+    patch.lineItemId !== undefined ||
+    patch.pipelineId !== undefined;
+  if (assignmentChanged) {
+    // Manual re-classification supersedes pipeline auto-attribution unless the
+    // caller explicitly supplies the pipeline responsible for the assignment.
+    const nextPipelineId = patch.pipelineId !== undefined ? patch.pipelineId : null;
+    mark('pipelineId', nextPipelineId);
+    const prev = snap.data() || {};
+    const nextGrantId = patch.grantId !== undefined ? patch.grantId : (prev as any).grantId;
+    const nextLineItemId = patch.lineItemId !== undefined ? patch.lineItemId : (prev as any).lineItemId;
+    const nextSource =
+      String(nextGrantId || '').trim() && String(nextLineItemId || '').trim() ?
+        (String(nextPipelineId || '').trim() ? 'pipeline' : 'user') :
+        null;
+    mark('budgetAssignmentSource', nextSource);
+  }
   if (patch.customerId !== undefined) mark('customerId', patch.customerId);
   if (patch.enrollmentId !== undefined) mark('enrollmentId', patch.enrollmentId);
   if (patch.creditCardId !== undefined) mark('creditCardId', patch.creditCardId);
@@ -419,26 +481,57 @@ export async function patchPaymentQueueItem(
     update.localModificationReason = patch.localModificationReason ? String(patch.localModificationReason).trim() : ((prev as any).localModificationReason ?? null);
   }
 
-  await ref.update(removeUndefinedDeep(update) as any);
   const prevItem = snap.data() as TPaymentQueueItem;
-  const changedBudgetFields = localFields.some((field) => ['amount', 'grantId', 'lineItemId', 'customerId'].includes(field));
-  if (prevItem?.queueStatus === 'posted' && prevItem.ledgerEntryId && changedBudgetFields) {
-    const ledgerUpdate: Record<string, unknown> = {
-      updatedAt: now,
-      'origin.localQueueCorrection': true,
-      'origin.localQueueCorrectionAt': now,
-      'origin.localQueueCorrectionBy': actorUid ?? null,
-    };
-    if (update.amount !== undefined) {
-      ledgerUpdate.amount = update.amount;
-      ledgerUpdate.amountCents = Math.round(Number(update.amount || 0) * 100);
+  const nextItem = {...prevItem, ...update} as TPaymentQueueItem;
+  if (assignmentChanged) await assertQueueGrantLineItem(nextItem, false);
+
+  const changedBudgetFields = localFields.some((field) => ['amount', 'grantId', 'lineItemId'].includes(field));
+  const changedLedgerFields = localFields.some((field) => ['amount', 'grantId', 'lineItemId', 'customerId'].includes(field));
+  const ledgerUpdate: Record<string, unknown> = {
+    updatedAt: now,
+    'origin.localQueueCorrection': true,
+    'origin.localQueueCorrectionAt': now,
+    'origin.localQueueCorrectionBy': actorUid ?? null,
+  };
+  if (update.amount !== undefined) {
+    ledgerUpdate.amount = update.amount;
+    ledgerUpdate.amountCents = Math.round(Number(update.amount || 0) * 100);
+  }
+  if (update.grantId !== undefined) ledgerUpdate.grantId = update.grantId;
+  if (update.lineItemId !== undefined) ledgerUpdate.lineItemId = update.lineItemId;
+  if (update.customerId !== undefined) ledgerUpdate.customerId = update.customerId;
+  if (assignmentChanged) {
+    ledgerUpdate['origin.budgetAssignmentSource'] = update.budgetAssignmentSource ?? null;
+    ledgerUpdate['origin.pipelineId'] = update.pipelineId ?? null;
+  }
+
+  let updatedPostedLedger = false;
+  await db.runTransaction(async (trx) => {
+    const currentSnap = await trx.get(ref);
+    if (!currentSnap.exists) throw new Error('payment_queue_item_not_found');
+    const current = docToItem(currentSnap);
+    let ledgerRef: FirebaseFirestore.DocumentReference | null = null;
+    if (current.queueStatus === 'posted' && current.ledgerEntryId && changedLedgerFields) {
+      ledgerRef = db.collection('ledger').doc(current.ledgerEntryId);
+      const ledgerSnap = await trx.get(ledgerRef);
+      if (!ledgerSnap.exists) throw new Error('linked_ledger_not_found');
     }
-    if (update.grantId !== undefined) ledgerUpdate.grantId = update.grantId;
-    if (update.lineItemId !== undefined) ledgerUpdate.lineItemId = update.lineItemId;
-    if (update.customerId !== undefined) ledgerUpdate.customerId = update.customerId;
-    await db.collection('ledger').doc(prevItem.ledgerEntryId).set(removeUndefinedDeep(ledgerUpdate) as any, {merge: true});
-    const grantIds = Array.from(new Set([String(prevItem.grantId || ''), String(update.grantId || '')].filter(Boolean)));
-    await Promise.all(grantIds.map((gid) => recomputeCustomerSpendForGrant({grantId: gid}).catch(() => null)));
+    trx.update(ref, removeUndefinedDeep(update) as any);
+    if (ledgerRef) {
+      trx.update(ledgerRef, removeUndefinedDeep(ledgerUpdate) as any);
+      updatedPostedLedger = true;
+    }
+  });
+
+  // Pending queue rows are projected spend, so assignment/amount changes need
+  // an explicit canonical recompute. Posted rows are spent ledger entries and
+  // are handled by onLedgerWrite using the before/after grant buckets.
+  if (changedBudgetFields && !updatedPostedLedger) {
+    await recomputeLinkedGrantBudgets([prevItem, nextItem]);
+  }
+  if (updatedPostedLedger) {
+    const grantIds = Array.from(new Set([paymentQueueBudgetLink(prevItem)?.grantId, paymentQueueBudgetLink(nextItem)?.grantId].filter(Boolean) as string[]));
+    await Promise.all(grantIds.map((grantId) => recomputeCustomerSpendForGrant({grantId}).catch(() => null)));
   }
   const updated = await ref.get();
   return docToItem(updated);
@@ -491,14 +584,17 @@ export async function recomputePaymentQueueGrantAllocations(grantId: string, dry
   return recomputeCustomerSpendForGrant({grantId, dryRun});
 }
 
-async function assertQueueGrantLineItem(item: TPaymentQueueItem): Promise<void> {
+async function assertQueueGrantLineItem(
+    item: TPaymentQueueItem,
+    requireClassified = true,
+): Promise<void> {
   const grantId = String(item.grantId || '').trim();
   const lineItemId = String(item.lineItemId || '').trim();
 
   // Both are required before posting to ledger — an unclassified item cannot
   // update grant budget totals and will silently leave the grant balance wrong.
   if (!grantId && !lineItemId) {
-    if (item.okUnassigned === true) return;
+    if (!requireClassified || item.okUnassigned === true) return;
     throw new Error('grant_classification_or_no_grant_required_before_posting');
   }
   if (!grantId && lineItemId) throw new Error('grant_required_for_line_item');
@@ -567,6 +663,8 @@ function buildLedgerEntryForQueueItem(
       sourcePath: `paymentQueue/${item.id}`,
       paymentQueueId: item.id,
       paymentQueueSource: item.source,
+      budgetAssignmentSource: paymentQueueBudgetAssignmentSource(item),
+      pipelineId: item.pipelineId || null,
       jotformSubmissionId: item.submissionId || null,
       direction: item.direction || null,
       amountFieldId: item.amountFieldId || null,
@@ -621,7 +719,11 @@ export async function voidPaymentQueueItemById(
   const ref = db.collection(COLLECTION).doc(id);
   const snap = await ref.get();
   if (!snap.exists) return 0;
-  if (String((snap.data() || {}).queueStatus || '') === 'void') return 0;
+  const item = docToItem(snap);
+  if (item.queueStatus === 'void') return 1;
+  if (item.queueStatus === 'posted') {
+    throw new Error(`PaymentQueueItem ${id} is posted; reopen it before voiding.`);
+  }
   const now = isoNow();
   await ref.update({
     'queueStatus': 'void',
@@ -631,6 +733,7 @@ export async function voidPaymentQueueItemById(
     'system.lastWriter': FN,
     'system.lastWriteAt': now,
   });
+  await recomputeLinkedGrantBudgets([item]);
   return 1;
 }
 
@@ -1056,12 +1159,15 @@ export async function bulkDesignatePaymentQueueItems(
       continue;
     }
 
-    const localFields = ['grantId', 'lineItemId', 'pipelineId', 'okUnassigned'];
+    const assignmentSource: TBudgetAssignmentSource | null =
+      assigned ? (pipelineId ? 'pipeline' : 'user') : null;
+    const localFields = ['grantId', 'lineItemId', 'pipelineId', 'budgetAssignmentSource', 'okUnassigned'];
     const prevLocal = Array.isArray(prev.localModifiedFields) ? prev.localModifiedFields.map(String) : [];
     const queueUpdate: Record<string, unknown> = {
       grantId: targetGrantId,
       lineItemId: targetLineItemId,
       pipelineId: assigned ? pipelineId : null,
+      budgetAssignmentSource: assignmentSource,
       okUnassigned: !assigned,
       okUnassignedAt: assigned ? null : now,
       okUnassignedBy: assigned ? null : actor,
@@ -1086,6 +1192,8 @@ export async function bulkDesignatePaymentQueueItems(
         ...item,
         grantId: targetGrantId,
         lineItemId: targetLineItemId,
+        pipelineId: assigned ? pipelineId : null,
+        budgetAssignmentSource: assignmentSource,
         okUnassigned: !assigned,
       };
       try {
@@ -1110,6 +1218,8 @@ export async function bulkDesignatePaymentQueueItems(
         ...item,
         grantId: targetGrantId,
         lineItemId: targetLineItemId,
+        pipelineId: assigned ? pipelineId : null,
+        budgetAssignmentSource: assignmentSource,
         okUnassigned: !assigned,
       };
       try {
@@ -1147,6 +1257,8 @@ export async function bulkDesignatePaymentQueueItems(
           updatedAt: FieldValue.serverTimestamp(),
           byUid: actor,
           adjustReason: body.localModificationReason ?? 'Grant designation from budget pipeline preview',
+          'origin.budgetAssignmentSource': assignmentSource,
+          'origin.pipelineId': assigned ? pipelineId : null,
           'system.lastWriter': 'paymentQueueBulkDesignate',
           'system.lastWriteAt': now,
         }) as any,
@@ -1158,8 +1270,8 @@ export async function bulkDesignatePaymentQueueItems(
 
     // Both the new grant and the row's previous grant need a projected/spent
     // refresh when allocation changes.
-    if (targetGrantId) affectedGrantIds.add(targetGrantId);
-    if (prevGrantId) affectedGrantIds.add(prevGrantId);
+    if (targetGrantId && targetLineItemId) affectedGrantIds.add(targetGrantId);
+    if (prevGrantId && prevLineItemId) affectedGrantIds.add(prevGrantId);
   }
 
   if (hasWrites) await writer.close();
@@ -1295,6 +1407,10 @@ export async function reopenPaymentQueueItem(
         app: 'hdb',
         baseId: item.id,
         sourcePath: `paymentQueue/${item.id}`,
+        paymentQueueId: item.id,
+        paymentQueueSource: item.source,
+        budgetAssignmentSource: paymentQueueBudgetAssignmentSource(item),
+        pipelineId: item.pipelineId || null,
       },
       grantNameAtSpend: original.grantNameAtSpend ?? null,
       lineItemLabelAtSpend: original.lineItemLabelAtSpend ?? null,
@@ -1390,6 +1506,7 @@ export async function upsertPaymentQueueItems(
         dueDate: prev.dueDate ?? null,
         lineItemId: prev.lineItemId ?? null,
         pipelineId: prev.pipelineId ?? null,
+        budgetAssignmentSource: paymentQueueBudgetAssignmentSource(prev),
         customerId: prev.customerId ?? null,
         enrollmentId: prev.enrollmentId ?? null,
         creditCardId: prev.creditCardId ?? extracted.creditCardId ?? null,
@@ -1417,7 +1534,7 @@ export async function upsertPaymentQueueItems(
         createdAtISO: prev.createdAtISO ?? now,
       } :
       {
-        paymentId: null, grantId: null, dueDate: null, lineItemId: null, pipelineId: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
+        paymentId: null, grantId: null, dueDate: null, lineItemId: null, pipelineId: null, budgetAssignmentSource: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
         invoiceStatus: null, invoicedAt: null, invoicedBy: null, invoiceRef: null,
         okUnassigned: false, okUnassignedAt: null, okUnassignedBy: null,
         queueStatus: 'pending' as const,

@@ -1,5 +1,7 @@
 // functions/src/features/budgetPipeline/service.ts
 import {db, isoNow} from '../../core';
+import {recomputeGrantBudgetFromLedger} from '../grants/budgetRecompute';
+import {recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
 import {
   type TBudgetPipeline,
   type TBudgetPipelineUpsertBody,
@@ -948,7 +950,13 @@ export async function autoAllocatePaymentQueueItem(
     if (pipeline.lineItemId) patch.lineItemId = pipeline.lineItemId;
     if (patch.grantId || patch.lineItemId) {
       patch.pipelineId = pDoc.id;
+      patch.budgetAssignmentSource = 'pipeline';
       await db.collection(QUEUE_COLLECTION).doc(itemId).update(patch);
+      if (patch.grantId && patch.lineItemId) {
+        const grantId = String(patch.grantId);
+        await recomputeGrantBudgetFromLedger(grantId);
+        await recomputeCustomerSpendForGrant({grantId}).catch(() => null);
+      }
       return {pipelineId: pDoc.id, allocated: true};
     }
     break;

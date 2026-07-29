@@ -45,6 +45,7 @@ import {
 } from "@widgets/jotform/jotformSubmissionView";
 import { paymentTypeLabel, PaymentTypeChip, paymentNoteMeta } from "@entities/payments/PaymentTypeLabel";
 import FormSessionLauncherButton from "@entities/payments/FormSessionLauncherButton";
+import { budgetAssignment } from "@hdb/contracts";
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror SpendingTool internals without importing them)
@@ -969,6 +970,20 @@ function QueueLifecycleBadge({ status }: { status?: string | null }) {
   );
 }
 
+function BudgetAssignmentBadge({ item }: { item?: Record<string, unknown> | null }) {
+  const source = budgetAssignment.inferBudgetAssignmentSource(item || {});
+  const tone = source === "pipeline"
+    ? "bg-violet-100 text-violet-700"
+    : source === "user"
+    ? "bg-sky-100 text-sky-700"
+    : "bg-slate-100 text-slate-600";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${tone}`}>
+      {source === "pipeline" ? "Pipeline assigned" : source === "user" ? "User assigned" : "No budget"}
+    </span>
+  );
+}
+
 function ProvenanceSection({
   queueItem,
   ledgerEntry,
@@ -984,6 +999,13 @@ function ProvenanceSection({
   const submissionId = String(queueItem?.submissionId || origin.jotformSubmissionId || "");
   const formId = String(queueItem?.formId || asObject(queueItem?.rawMeta).form_id || origin.jotformFormId || "");
   const jotformUrl = jotformInboxUrl(formId, submissionId);
+  const assignmentRecord = {
+    source: queueItem?.source || origin.paymentQueueSource,
+    grantId: queueItem?.grantId || ledgerRecord.grantId,
+    lineItemId: queueItem?.lineItemId || ledgerRecord.lineItemId,
+    pipelineId: queueItem?.pipelineId || origin.pipelineId,
+    budgetAssignmentSource: queueItem?.budgetAssignmentSource || origin.budgetAssignmentSource,
+  };
   return (
     <DetailSection title={title || "Pipeline Provenance"}>
       <DetailRow label="Queue Item" value={String(queueItem?.id || "-")} />
@@ -991,6 +1013,7 @@ function ProvenanceSection({
       <DetailRow label="Submission ID" value={submissionId || "-"} />
       {formId ? <DetailRow label="Form ID" value={formId} /> : null}
       <DetailRow label="Queue Source" value={stageLabelFromQueueSource(queueSource)} />
+      <DetailRow label="Budget Assignment" value={<BudgetAssignmentBadge item={assignmentRecord} />} />
       <DetailRow label="Ledger Entry" value={String(queueItem?.ledgerEntryId || ledgerRecord.id || "Not posted")} />
       <DetailRow label="Origin Path" value={String(origin.sourcePath || "-")} />
       <DetailRow label="Reopened" value={String(queueItem?.reopenedAt || "-")} />
@@ -1685,6 +1708,7 @@ function CardSpendCard({
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <StatusBadge state={row.workflowState} />
+                <BudgetAssignmentBadge item={queueItem} />
                 {row.cardBucket ? (
                   <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
                     {row.cardBucket}
@@ -2295,6 +2319,7 @@ function InvoiceSpendCard({
             <div className="flex shrink-0 flex-col items-end gap-1">
               <StatusBadge state={row.workflowState} />
               <QueueLifecycleBadge status={queueStatus} />
+              <BudgetAssignmentBadge item={queueItem} />
             </div>
           </div>
         </div>

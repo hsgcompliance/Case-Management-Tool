@@ -1,5 +1,6 @@
 import api from "./api";
 import { idemKey } from "@lib/idem";
+import type { TBudgetAssignmentSource } from "@hdb/contracts";
 
 export type PaymentQueueItem = Record<string, unknown> & {
   id: string;
@@ -33,6 +34,7 @@ export type PaymentQueueItem = Record<string, unknown> & {
   grantId?: string | null;
   lineItemId?: string | null;
   pipelineId?: string | null;
+  budgetAssignmentSource?: TBudgetAssignmentSource | null;
   customerId?: string | null;
   enrollmentId?: string | null;
   creditCardId?: string | null;

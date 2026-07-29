@@ -1,5 +1,6 @@
 // functions/src/features/paymentQueue/schemas.ts
 import {z} from '../../core/z';
+import {budgetAssignment} from '@hdb/contracts';
 
 // ─── PaymentQueueItem ─────────────────────────────────────────────────────────
 //
@@ -130,6 +131,8 @@ export const PaymentQueueItem = z.object({
   lineItemId: z.string().nullable(),
   /** Budget pipeline that auto-classified this item (attribution for rollups). */
   pipelineId: z.string().nullable().optional(),
+  /** Explicit provenance for a credit-card/invoice grant + budget assignment. */
+  budgetAssignmentSource: budgetAssignment.BudgetAssignmentSource.nullable().optional(),
   customerId: z.string().nullable(),
   enrollmentId: z.string().nullable(),
   creditCardId: z.string().nullable(),
@@ -283,6 +286,7 @@ export const PaymentQueueAdminPatchBody = z.object({
   grantId: z.string().nullable().optional(),
   lineItemId: z.string().nullable().optional(),
   pipelineId: z.string().nullable().optional(),
+  budgetAssignmentSource: budgetAssignment.BudgetAssignmentSource.nullable().optional(),
   customerId: z.string().nullable().optional(),
   enrollmentId: z.string().nullable().optional(),
   creditCardId: z.string().nullable().optional(),

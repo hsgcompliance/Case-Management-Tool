@@ -76,6 +76,8 @@ export const LedgerOrigin = z
     sourcePath: z.string().nullish(), // firestore path
     paymentQueueId: z.string().nullish(),
     paymentQueueSource: z.string().nullish(),
+    budgetAssignmentSource: z.enum(["pipeline", "user"]).nullish(),
+    pipelineId: z.string().nullish(),
     jotformSubmissionId: z.string().nullish(),
     idempotencyKey: z.string().nullish(),
   })

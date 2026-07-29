@@ -16,6 +16,7 @@ export * from "./http";
 
 // Budget pipeline
 export * as budgetPipeline from "./budgetPipeline";
+export * as budgetAssignment from "./budgetAssignment";
 
 // Canonical endpoint req/resp typing (this is where most â€œAPI typesâ€ live)
 export * from "./endpointMap";
@@ -52,6 +53,8 @@ export type { TCaseNoteAction, TCaseNoteUsageSummaryReq, TCaseNoteUsageSummaryRe
 // ------------------------------
 // Top-level TYPE exports (leaf modules only)
 // ------------------------------
+
+export type { TBudgetAssignmentSource } from "./budgetAssignment";
 
 export type {
   Ok,
