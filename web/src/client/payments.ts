@@ -223,8 +223,8 @@ export const Payments = {
 
   bulkSpend: (body: PaymentsBulkSpendReq, idemKey?: string) =>
     api.callIdem(
-      'paymentsBulkSpend',
-      PaymentsBulkSpendBody.parse(body),
+      'paymentsSpend',
+      PaymentsBulkSpendBody.parse(body) as unknown as PaymentsSpendReq,
       idemKey,
     ) as Promise<PaymentsBulkSpendResp>,
 
@@ -236,8 +236,8 @@ export const Payments = {
 
   bulkUpdateCompliance: (body: PaymentsBulkUpdateComplianceReq) =>
     api.post(
-      'paymentsBulkUpdateCompliance',
-      PaymentsBulkUpdateComplianceBody.parse(body),
+      'paymentsUpdateCompliance',
+      PaymentsBulkUpdateComplianceBody.parse(body) as unknown as PaymentsUpdateComplianceReq,
     ) as Promise<PaymentsBulkUpdateComplianceResp>,
 
   setRentCert: (body: ReqOf<"paymentsRentCertSet">) =>

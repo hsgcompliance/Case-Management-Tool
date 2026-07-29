@@ -74,6 +74,7 @@ graphify-out/
 **/*.tsbuildinfo
 contracts/dist/
 contracts/*.tgz
+/*.tgz
 contracts/*.docx
 functions/build/
 functions/vendor/

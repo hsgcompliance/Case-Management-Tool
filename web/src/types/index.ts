@@ -386,16 +386,17 @@ export type PaymentsBulkCopyScheduleResp = RespOf<"paymentsBulkCopySchedule">;
 
 export type PaymentsSpendReq = ReqOf<"paymentsSpend">;
 export type PaymentsSpendResp = RespOf<"paymentsSpend">;
-export type PaymentsBulkSpendReq = ReqOf<"paymentsBulkSpend">;
-export type PaymentsBulkSpendResp = RespOf<"paymentsBulkSpend">;
+export type { PaymentsBulkSpendReq, PaymentsBulkSpendResp } from "@hdb/contracts";
 
 export type PaymentsRecalculateFutureReq = ReqOf<"paymentsRecalculateFuture">;
 export type PaymentsRecalculateFutureResp = RespOf<"paymentsRecalculateFuture">;
 
 export type PaymentsUpdateComplianceReq = ReqOf<"paymentsUpdateCompliance">;
 export type PaymentsUpdateComplianceResp = RespOf<"paymentsUpdateCompliance">;
-export type PaymentsBulkUpdateComplianceReq = ReqOf<"paymentsBulkUpdateCompliance">;
-export type PaymentsBulkUpdateComplianceResp = RespOf<"paymentsBulkUpdateCompliance">;
+export type {
+  PaymentsBulkUpdateComplianceReq,
+  PaymentsBulkUpdateComplianceResp,
+} from "@hdb/contracts";
 
 export type PaymentsUpdateGrantBudgetReq = ReqOf<"paymentsUpdateGrantBudget">;
 export type PaymentsUpdateGrantBudgetResp = RespOf<"paymentsUpdateGrantBudget">;

@@ -79,75 +79,84 @@ function itemError(result: HandlerResult): string {
   return String(result.payload.error || `request_failed_${result.status}`).slice(0, 500);
 }
 
-export const paymentsBulkSpend = secureHandler(
+async function paymentsBulkSpendHandler(req: AuthedRequest, res: Response): Promise<void> {
+  const body = PaymentsBulkSpendBody.parse(req.body || {});
+  const items = dedupeByPayment(body.items as TPaymentsSpendBody[]);
+  const bulkIdempotencyKey = String(req.headers['idempotency-key'] || '').trim();
+
+  const outcomes = await mapWithConcurrency(items, 6, async (item) => {
+    const key = bulkIdempotencyKey ?
+      makeIdempoKey([bulkIdempotencyKey, item.enrollmentId, item.paymentId]) :
+      undefined;
+    const result = await invokePaymentHandler(
+        paymentsSpendHandler,
+        req,
+        item as unknown as Record<string, unknown>,
+        key,
+    );
+    return {item, result};
+  });
+
+  const successful: BulkItemResult[] = [];
+  const failed: BulkItemFailure[] = [];
+  for (const {item, result} of outcomes) {
+    const identity = {enrollmentId: item.enrollmentId, paymentId: item.paymentId};
+    if (result.status >= 200 && result.status < 300 && result.payload.ok === true) {
+      successful.push(identity);
+    } else {
+      failed.push({...identity, error: itemError(result)});
+    }
+  }
+  res.json({ok: true, successful, failed});
+}
+
+async function paymentsBulkUpdateComplianceHandler(
+    req: AuthedRequest,
+    res: Response,
+): Promise<void> {
+  const body = PaymentsBulkUpdateComplianceBody.parse(req.body || {});
+  const items = dedupeByPayment(body.items as TPaymentsUpdateComplianceBody[]);
+
+  const outcomes = await mapWithConcurrency(items, 10, async (item) => {
+    const result = await invokePaymentHandler(
+        paymentsUpdateComplianceHandler,
+        req,
+        item as unknown as Record<string, unknown>,
+    );
+    return {item, result};
+  });
+
+  const successful: BulkItemResult[] = [];
+  const failed: BulkItemFailure[] = [];
+  for (const {item, result} of outcomes) {
+    const identity = {enrollmentId: item.enrollmentId, paymentId: item.paymentId};
+    if (result.status >= 200 && result.status < 300 && result.payload.ok === true) {
+      successful.push(identity);
+    } else {
+      failed.push({...identity, error: itemError(result)});
+    }
+  }
+  res.json({ok: true, successful, failed});
+}
+
+export const paymentsSpendBulkAware = secureHandler(
     async (req, res): Promise<void> => {
-      const body = PaymentsBulkSpendBody.parse(req.body || {});
-      const items = dedupeByPayment(body.items as TPaymentsSpendBody[]);
-      const bulkIdempotencyKey = String(req.headers['idempotency-key'] || '').trim();
-
-      const outcomes = await mapWithConcurrency(items, 6, async (item) => {
-        const key = bulkIdempotencyKey ?
-          makeIdempoKey([bulkIdempotencyKey, item.enrollmentId, item.paymentId]) :
-          undefined;
-        const result = await invokePaymentHandler(
-            paymentsSpendHandler,
-            req as AuthedRequest,
-            item as unknown as Record<string, unknown>,
-            key,
-        );
-        return {item, result};
-      });
-
-      const successful: BulkItemResult[] = [];
-      const failed: BulkItemFailure[] = [];
-      for (const {item, result} of outcomes) {
-        const identity = {enrollmentId: item.enrollmentId, paymentId: item.paymentId};
-        if (result.status >= 200 && result.status < 300 && result.payload.ok === true) {
-          successful.push(identity);
-        } else {
-          failed.push({...identity, error: itemError(result)});
-        }
+      if (Array.isArray(req.body?.items)) {
+        await paymentsBulkSpendHandler(req as AuthedRequest, res);
+        return;
       }
-      res.json({ok: true, successful, failed});
+      await paymentsSpendHandler(req as AuthedRequest, res);
     },
-    {
-      auth: 'user',
-      methods: ['POST', 'OPTIONS'],
-      memory: '1GiB',
-      timeoutSeconds: 540,
-    },
+    {auth: 'user', methods: ['POST', 'OPTIONS'], memory: '1GiB', timeoutSeconds: 540},
 );
 
-export const paymentsBulkUpdateCompliance = secureHandler(
+export const paymentsUpdateComplianceBulkAware = secureHandler(
     async (req, res): Promise<void> => {
-      const body = PaymentsBulkUpdateComplianceBody.parse(req.body || {});
-      const items = dedupeByPayment(body.items as TPaymentsUpdateComplianceBody[]);
-
-      const outcomes = await mapWithConcurrency(items, 10, async (item) => {
-        const result = await invokePaymentHandler(
-            paymentsUpdateComplianceHandler,
-            req as AuthedRequest,
-            item as unknown as Record<string, unknown>,
-        );
-        return {item, result};
-      });
-
-      const successful: BulkItemResult[] = [];
-      const failed: BulkItemFailure[] = [];
-      for (const {item, result} of outcomes) {
-        const identity = {enrollmentId: item.enrollmentId, paymentId: item.paymentId};
-        if (result.status >= 200 && result.status < 300 && result.payload.ok === true) {
-          successful.push(identity);
-        } else {
-          failed.push({...identity, error: itemError(result)});
-        }
+      if (Array.isArray(req.body?.items)) {
+        await paymentsBulkUpdateComplianceHandler(req as AuthedRequest, res);
+        return;
       }
-      res.json({ok: true, successful, failed});
+      await paymentsUpdateComplianceHandler(req as AuthedRequest, res);
     },
-    {
-      auth: 'user',
-      methods: ['POST', 'OPTIONS'],
-      memory: '512MiB',
-      timeoutSeconds: 540,
-    },
+    {auth: 'user', methods: ['POST', 'OPTIONS'], memory: '512MiB', timeoutSeconds: 540},
 );

@@ -1245,9 +1245,7 @@ export interface EndpointMap {
   paymentsUpsertProjections: { req: PaymentsUpsertProjectionsReq; resp: PaymentsUpsertProjectionsResp };
   paymentsBulkCopySchedule: { req: PaymentsBulkCopyScheduleReq; resp: PaymentsBulkCopyScheduleResp };
   paymentsSpend: { req: PaymentsSpendReq; resp: PaymentsSpendResp };
-  paymentsBulkSpend: { req: PaymentsBulkSpendReq; resp: PaymentsBulkSpendResp };
   paymentsUpdateCompliance: { req: PaymentsUpdateComplianceReq; resp: PaymentsUpdateComplianceResp };
-  paymentsBulkUpdateCompliance: { req: PaymentsBulkUpdateComplianceReq; resp: PaymentsBulkUpdateComplianceResp };
   paymentsRentCertSet: { req: PaymentsRentCertSetReq; resp: PaymentsRentCertSetResp };
   paymentsDeleteRows: { req: PaymentsDeleteRowsReq; resp: PaymentsDeleteRowsResp };
   paymentsUpdateGrantBudget: { req: PaymentsUpdateGrantBudgetReq; resp: PaymentsUpdateGrantBudgetResp };
