@@ -46,6 +46,7 @@ import {
 import { paymentTypeLabel, PaymentTypeChip, paymentNoteMeta } from "@entities/payments/PaymentTypeLabel";
 import FormSessionLauncherButton from "@entities/payments/FormSessionLauncherButton";
 import { budgetAssignment } from "@hdb/contracts";
+import { enrollmentPaymentStatus, spendingDisplayTypeLabel } from "./spendingPresentation";
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror SpendingTool internals without importing them)
@@ -70,6 +71,8 @@ export type SpendRow = {
   completed: boolean;
   workflowState: "open" | "closed";
   workflowReason: string;
+  complianceStatus?: string;
+  enrollmentTypeHint: string;
   grantId: string;
   lineItemId: string;
   customerId: string;
@@ -335,16 +338,26 @@ function jotformInboxUrl(formId: unknown, submissionId: unknown): string {
   return `https://www.jotform.com/inbox/${encodeURIComponent(form)}/${encodeURIComponent(submission)}`;
 }
 
-function StatusBadge({ state }: { state: "open" | "closed" }) {
+function StatusBadge({
+  state,
+  openLabel = "Open",
+  closedLabel = "Closed",
+}: {
+  state: "open" | "closed";
+  openLabel?: string;
+  closedLabel?: string;
+}) {
+  const label = state === "open" ? openLabel : closedLabel;
+  const needsAction = label.includes("Needs");
   return (
     <span
       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-        state === "open"
+        state === "open" || needsAction
           ? "bg-amber-100 text-amber-700"
           : "bg-emerald-100 text-emerald-700"
       }`}
     >
-      {state === "open" ? "Open" : "Closed"}
+      {label}
     </span>
   );
 }
@@ -409,12 +422,16 @@ function AmountHeader({
   subtitle,
   state,
   badge,
+  statusLabels,
+  statusLabel,
 }: {
   amount: number;
   title?: string;
   subtitle?: string;
   state: "open" | "closed";
   badge?: React.ReactNode;
+  statusLabels?: { open: string; closed: string };
+  statusLabel?: string;
 }) {
   return (
     <div
@@ -443,7 +460,11 @@ function AmountHeader({
           )}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <StatusBadge state={state} />
+          <StatusBadge
+            state={state}
+            openLabel={statusLabel || statusLabels?.open}
+            closedLabel={statusLabel || statusLabels?.closed}
+          />
           {badge}
         </div>
       </div>
@@ -1354,6 +1375,7 @@ function EnrollmentSpendCard({
         amount={row.amountCents}
         subtitle={[grantName, lineItemLabel].filter((s) => s && s !== "-").join(" | ")}
         state={row.workflowState}
+        statusLabel={enrollmentPaymentStatus(row.kind, row.workflowState, row.complianceStatus) || undefined}
         badge={<span className="text-xs font-medium text-slate-500">{fmtDateOrDash(row.date)}</span>}
       />
 
@@ -1384,7 +1406,7 @@ function EnrollmentSpendCard({
           onToggle={() => { const next = !localCw; setLocalCw(next); void handleToggle("cw", next); }}
         />
         <ToggleCheck
-          label="Invoice Submitted"
+          label="Paid"
           checked={localPaid}
           disabled={mutationBusy || (!isProjection)}
           onToggle={() => { const next = !localPaid; setLocalPaid(next); void handleToggle("paid", next); }}
@@ -1396,7 +1418,7 @@ function EnrollmentSpendCard({
         )}
         {!isProjection && (
           <p className="text-[11px] text-slate-400 px-1">
-            Invoice Submitted is managed via the payment workflow (already posted).
+            Paid status is managed via the payment workflow.
           </p>
         )}
       </div>
@@ -2698,13 +2720,7 @@ export function SpendDetailModal({
   const isCard = row.kind === "card-ledger" || row.kind === "queue-credit-card";
   const isInvoice = row.kind === "queue-invoice";
 
-  const titleMap: Record<SpendRowKind, string> = {
-    "grant-ledger": "Posted Payment",
-    "queue-projection": "Projected Payment",
-    "card-ledger": "Card Spend",
-    "queue-credit-card": "Card Queue Item",
-    "queue-invoice": "Invoice Queue Item",
-  };
+  const enrollmentStatus = enrollmentPaymentStatus(row.kind, row.workflowState, row.complianceStatus);
 
   return (
     <>
@@ -2712,7 +2728,10 @@ export function SpendDetailModal({
         isOpen={isOpen}
         title={
           <div className="flex items-center gap-2">
-            <span>{titleMap[row.kind]}</span>
+            <span>{spendingDisplayTypeLabel(row.kind, row.enrollmentTypeHint)}</span>
+            {enrollmentStatus ? (
+              <span className="text-xs font-semibold text-slate-500">{enrollmentStatus}</span>
+            ) : null}
             <span className="text-sm font-normal text-slate-500">{fmtCents(row.amountCents)}</span>
           </div>
         }

@@ -53,6 +53,12 @@ import { monthKeyOffsetDays } from "../utils";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 import { SpendDetailModal } from "./SpendDetailModal";
 import type { CardBudget } from "./SpendDetailModal";
+import {
+  enrollmentPaymentStatus,
+  isClosedGrantRecord,
+  spendingChargeGroupLabel,
+  spendingDisplayTypeLabel,
+} from "./spendingPresentation";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets/jotform/jotformSubmissionView";
 import { GRANT_ACCENT_COLORS, grantAccentSolid, grantAccentChip } from "@lib/colorRegistry";
@@ -283,6 +289,7 @@ type SpendingRow = {
   searchText: string;
   vendor: string;
   expenseType: string;
+  enrollmentTypeHint: string;
   purchaser: string;
   isReversal: boolean;
   isReversalRelated: boolean;
@@ -591,7 +598,7 @@ function CompactCardRow({
 
 // ---------------------------------------------------------------------------
 // Topbar — primary filters + expandable secondary
-// Primary:  [All|Enrollment|Card|Invoice]  [Grant▾]  [Month]  [Filters▾]
+// Primary:  [All|Enrollment|Credit Card|Invoice]  [Grant▾]  [Month]  [Filters▾]
 // Secondary (expanded): [Open|All|Closed]  [Search]  [Clear]
 // ---------------------------------------------------------------------------
 
@@ -599,7 +606,7 @@ const TYPE_OPTIONS: { id: SpendingFilterState["typeFilter"]; label: string }[] =
   { id: "", label: "All" },
   { id: "forms", label: "CC + Invoices" },
   { id: "enrollment", label: "Enrollment" },
-  { id: "card", label: "Card" },
+  { id: "card", label: "Credit Card" },
   { id: "invoice", label: "Invoice" },
 ];
 
@@ -646,30 +653,29 @@ function RowStatusBadge({ row }: { row: SpendingRow }) {
   const { kind, workflowState, complianceStatus } = row;
 
   if (row.reconciliationIssue) {
-    return <span title={row.reconciliationIssue} className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 max-w-[150px] truncate">Needs reconciliation</span>;
+    return (
+      <span
+        title={row.reconciliationIssue}
+        className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 max-w-[190px] truncate"
+      >
+        {row.reconciliationIssue}
+      </span>
+    );
   }
 
-  if (kind === "queue-projection") {
-    if (workflowState !== "closed") return (
+  const enrollmentStatus = enrollmentPaymentStatus(kind, workflowState, complianceStatus);
+  if (enrollmentStatus) {
+    if (enrollmentStatus === "Projected") return (
       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700">Projected</span>
     );
-    if (complianceStatus === "Data Entry Complete") {
-      return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">Data Entry ✓</span>;
-    }
-    if (complianceStatus.startsWith("Posted;")) {
-      return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 max-w-[140px] truncate">{complianceStatus}</span>;
-    }
-    return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">Posted</span>;
-  }
-
-  if (kind === "grant-ledger") {
-    if (complianceStatus === "Data Entry Complete") {
-      return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">Data Entry ✓</span>;
-    }
-    if (complianceStatus.startsWith("Posted;")) {
-      return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 max-w-[140px] truncate">{complianceStatus}</span>;
-    }
-    return <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">Posted</span>;
+    if (enrollmentStatus.endsWith("Data Entry Complete")) return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">Paid · Data Entry ✓</span>
+    );
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 max-w-[170px] truncate">
+        {enrollmentStatus}
+      </span>
+    );
   }
 
   // Card / Invoice
@@ -1420,6 +1426,16 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     return map;
   }, [grants]);
 
+  const closedGrantIds = React.useMemo(
+    () => new Set(
+      (grants as Array<Record<string, unknown>>)
+        .filter(isClosedGrantRecord)
+        .map((grant) => String(grant.id || "").trim())
+        .filter(Boolean),
+    ),
+    [grants],
+  );
+
   const openTaskByToken = React.useMemo(() => {
     const map = new Map<string, Record<string, unknown>>();
     for (const raw of otherTasks as Array<Record<string, unknown>>) {
@@ -1553,7 +1569,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       rows.push({
         id: `ledger:${entryId}`,
         kind: isGrantPayment ? "grant-ledger" : "card-ledger",
-        sourceLabel: isGrantPayment ? "Enrollment" : "Card",
+        sourceLabel: spendingChargeGroupLabel(isGrantPayment ? "grant-ledger" : "card-ledger"),
         title: displayTitle,
         subtitle: entryId,
         date,
@@ -1581,12 +1597,22 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         taskToken,
         vendor,
         expenseType: "",
+        enrollmentTypeHint: isGrantPayment
+          ? [
+              String(e?.paymentType || ""),
+              String((e?.paymentSnapshot as Record<string, unknown> | undefined)?.type || ""),
+              String(e?.paymentLabelAtSpend || ""),
+            ].filter(Boolean).join(" ")
+          : "",
         purchaser: String(e?.purchaser || "").trim(),
         isReversal,
         isReversalRelated: reversalRelatedLedgerIds.has(entryId),
         searchText: [vendor, displayTitle, grantId, lineItemId, String(e?.customerId || "")].join(" ").toLowerCase(),
         ledgerEntry: e,
-        reconciliationIssue: isGrantPayment ? "Reconciliation: ledger entry has no loaded queue item" : undefined,
+        // A ledger-only enrollment row is valid historical data. The queue query
+        // is capped and legacy rows may never have had a queue mirror, so absence
+        // from the loaded queue is not itself evidence of a mismatch.
+        reconciliationIssue: undefined,
       });
     }
 
@@ -1631,11 +1657,14 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         ? (queueItem as any).compliance as Record<string, unknown>
         : {};
       const effectiveCompliance = { ...ledgerCompliance, ...queueCompliance };
+      const rowGrantId = String(postedLedger?.grantId || queueItem.grantId || "");
 
       rows.push({
         id: `queue:${queueId}`,
         kind: source === "invoice" ? "queue-invoice" : isProjection ? "queue-projection" : "queue-credit-card",
-        sourceLabel: source === "invoice" ? "Invoice" : isProjection ? "Enrollment" : "Card",
+        sourceLabel: spendingChargeGroupLabel(
+          source === "invoice" ? "queue-invoice" : isProjection ? "queue-projection" : "queue-credit-card",
+        ),
         title: merchant || queueId || "-",
         subtitle: submissionId || queueId,
         date: postedLedger ? dateIso10(postedLedger.dueDate || postedLedger.date || postedLedger.createdAt || date) : date,
@@ -1649,7 +1678,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             : isProjection
             ? "Projected spend, not yet paid"
             : "Waiting to post",
-        grantId: String(postedLedger?.grantId || queueItem.grantId || ""),
+        grantId: rowGrantId,
         lineItemId: String(postedLedger?.lineItemId || queueItem.lineItemId || ""),
         customerId: String(postedLedger?.customerId || queueItem.customerId || ""),
         creditCardId: isProjection ? "" : savedCardId || String(matchedCard?.id || ""),
@@ -1659,6 +1688,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         taskToken: "",
         vendor: queueVendor,
         expenseType: queueExpenseType,
+        enrollmentTypeHint: isProjection
+          ? [queueItem.expenseType, queueItem.serviceType, queueItem.descriptor]
+              .map((value) => String(value || "").trim())
+              .filter(Boolean)
+              .join(" ")
+          : "",
         purchaser: queuePurchaser,
         isReversal: amountCents < 0 || String((queueItem as any).direction || "").toLowerCase() === "return",
         isReversalRelated: workflowState === "closed"
@@ -1683,7 +1718,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         reversalLedgerId: String(queueItem.reversalEntryId || "") || undefined,
         paymentQueueItem: queueItem,
         ledgerEntry: linkedLedger || undefined,
-        reconciliationIssue: queueLedgerIssue(queueItem as Record<string, unknown>, linkedLedgers) || undefined,
+        reconciliationIssue: closedGrantIds.has(rowGrantId)
+          ? undefined
+          : queueLedgerIssue(queueItem as Record<string, unknown>, linkedLedgers) || undefined,
         complianceStatus: isProjection
           ? complianceStatusLabel(effectiveCompliance, queueStatus === "posted")
           : queueStatus === "posted" ? "Posted" : "Open",
@@ -1702,7 +1739,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       return Math.abs(b.amountCents) - Math.abs(a.amountCents);
     });
     return rows;
-  }, [creditCardList, ledgerEntries, month, openTaskByToken, paymentQueueItems]);
+  }, [closedGrantIds, creditCardList, ledgerEntries, month, openTaskByToken, paymentQueueItems]);
 
   // ── Credit card summaries (only computed when in card mode) ──────────────
   // Always scoped to the current calendar month regardless of the date filter,
@@ -1842,8 +1879,6 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const getSpendingColumnValue = React.useCallback((row: SpendingRow, col: string, part = "header") => {
     const info = lineItemLookup.get(`${row.grantId}:${row.lineItemId}`);
-    const isEnrollment = row.kind === "grant-ledger" || row.kind === "queue-projection";
-    const isProjection = row.kind === "queue-projection";
     const rawCmId = String(
       (row.paymentQueueItem as Record<string, unknown> | undefined)?.caseManagerId
       || (row.ledgerEntry as Record<string, unknown> | undefined)?.caseManagerId
@@ -1856,7 +1891,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       || row.sourceLabel;
 
     if (col === "date") {
-      if (part === "subheader") return isEnrollment ? (isProjection ? "Projected" : "Enrollment") : row.kind === "queue-invoice" ? "Invoice" : "Card";
+      if (part === "subheader") return spendingDisplayTypeLabel(row.kind, row.enrollmentTypeHint);
       if (part === "chip") return row.isReversal ? "Reversal" : cardType;
       return row.date;
     }
@@ -2009,24 +2044,14 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         || ""
       );
       const typeLabel = (() => {
-        const isProjection = r.kind === "queue-projection";
-        const isEnrollment = r.kind === "grant-ledger" || isProjection;
-        const isInvoice = r.kind === "queue-invoice";
-        let label = isProjection ? "Projected"
-          : isEnrollment ? "Enrollment"
-          : isInvoice ? "Invoice"
-          : r.cardBucket || (r.creditCardName ? r.creditCardName.split(" - ")[0].trim() : "") || r.sourceLabel || "Card";
+        let label = spendingDisplayTypeLabel(r.kind, r.enrollmentTypeHint);
         if (r.isReversal) label += " (Reversal)";
         return label;
       })();
       const statusLabel = (() => {
         const { kind, workflowState, complianceStatus } = r;
-        if (kind === "queue-projection") return workflowState === "closed" ? "Posted" : "Projected";
-        if (kind === "grant-ledger") {
-          if (complianceStatus === "Data Entry Complete") return "Data Entry ✓";
-          if (complianceStatus.startsWith("Posted;")) return complianceStatus;
-          return "Posted";
-        }
+        const enrollmentStatus = enrollmentPaymentStatus(kind, workflowState, complianceStatus);
+        if (enrollmentStatus) return enrollmentStatus;
         if (workflowState === "open") return "Data Entry";
         if (complianceStatus === "Data Entry Complete") return "Data Entry ✓";
         return "Posted";
@@ -3105,11 +3130,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
               const isOpenProjection = row.kind === "queue-projection" && row.workflowState === "open";
               const canCompliance = selectedComplianceRows.includes(row);
               const customerName = queueCustomerDisplayName(row, customerNameById);
-              const typeLabel = row.kind === "queue-invoice" ? "Invoice"
-                : row.kind === "queue-credit-card" ? "Credit Card"
-                : row.kind === "queue-projection" ? "Enrollment"
-                : row.kind === "grant-ledger" ? "Posted Enrollment"
-                : "Card Ledger";
+              const typeLabel = spendingDisplayTypeLabel(row.kind, row.enrollmentTypeHint);
               const actions = [
                 bulkActions.markPaid && isForm && row.workflowState === "open" ? "post" : null,
                 bulkActions.markPaid && isOpenProjection ? "mark paid" : null,
@@ -3249,14 +3270,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             <>
               {pagedRows.map((r) => {
                 const info = lineItemLookup.get(`${r.grantId}:${r.lineItemId}`);
-                const isEnrollment = r.kind === "grant-ledger" || r.kind === "queue-projection";
-                const isProjection = r.kind === "queue-projection";
                 const customerName = queueCustomerDisplayName(r, customerNameById);
                 const grantName = info?.grantName || grantNameById.get(r.grantId) || "";
                 const lineItemLabel = info?.lineItemLabel || "";
-                const cardType = r.cardBucket
-                  || (r.creditCardName ? r.creditCardName.split(" - ")[0].trim() : "")
-                  || r.sourceLabel;
                 const rawCmId = String(
                   (r.paymentQueueItem as Record<string, unknown> | undefined)?.caseManagerId
                   || (r.ledgerEntry as Record<string, unknown> | undefined)?.caseManagerId
@@ -3291,15 +3307,15 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                     <td className="w-28 min-w-[6rem]">
                       <div className="text-xs text-slate-500 whitespace-nowrap">{fmtDateOrDash(r.date)}</div>
                       <div className="mt-0.5">
-                        {isEnrollment ? (
-                          <span className={`inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold w-fit ${isProjection ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>
-                            {isProjection ? "Projected" : "Enrollment"}
+                        {r.kind === "grant-ledger" || r.kind === "queue-projection" ? (
+                          <span className="inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold w-fit bg-slate-100 text-slate-700">
+                            {spendingDisplayTypeLabel(r.kind, r.enrollmentTypeHint)}
                           </span>
                         ) : r.kind === "queue-invoice" ? (
                           <span className="inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold bg-sky-100 text-sky-700">Invoice</span>
                         ) : (
                           <span className="inline-flex items-center px-1.5 py-px rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 truncate max-w-[90px]">
-                            {cardType || "Card"}
+                            Credit Card
                           </span>
                         )}
                         {r.isReversal && (

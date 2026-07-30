@@ -120,17 +120,20 @@ export function buildQueueLedgerIndex(
 }
 
 export function queueLedgerIssue(item: SpendingRecord, ledgers: SpendingRecord[]): string {
-  if (ledgers.length > 1) return `Reconciliation: ${ledgers.length} ledger entries linked`;
+  if (ledgers.length > 1) return `Duplicate posting: ${ledgers.length} ledger entries`;
   const ledger = ledgers[0];
   if (!ledger) return "";
 
   const queueStatus = String(item.queueStatus || "pending").toLowerCase();
-  if (queueStatus !== "posted") return "Reconciliation: ledger exists while queue is open";
+  if (queueStatus !== "posted") return "Ledger posted but transaction is still open";
 
   const mismatches: string[] = [];
   if (centsOf(item) !== centsOf(ledger)) mismatches.push("amount");
   for (const field of ["grantId", "lineItemId"] as const) {
-    if (String(item[field] || "") !== String(ledger[field] || "")) mismatches.push(field === "grantId" ? "grant" : "budget");
+    if (String(item[field] || "") !== String(ledger[field] || "")) mismatches.push(field === "grantId" ? "grant" : "line item");
   }
-  return mismatches.length ? `Reconciliation: ${mismatches.join(", ")} mismatch` : "";
+  if (!mismatches.length) return "";
+  return mismatches.length === 1
+    ? `${mismatches[0]} does not match ledger`
+    : `${mismatches.join(", ")} do not match ledger`;
 }

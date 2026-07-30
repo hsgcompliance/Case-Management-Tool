@@ -2,7 +2,7 @@
 import {db, FieldValue, isoNow, removeUndefinedDeep, newBulkWriter} from '../../core';
 import {budgetAssignment, type TBudgetAssignmentSource} from '@hdb/contracts';
 import {writeLedgerEntry} from '../ledger/service';
-import {recordCustomerSpend, recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
+import {recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
 import {recomputeGrantBudgetFromLedger} from '../grants/budgetRecompute';
 import {primarySubtype} from '../payments/utils';
 import {autoAllocatePaymentQueueItem} from '../budgetPipeline/service';
@@ -1088,15 +1088,11 @@ export async function postPaymentQueueToLedger(
     };
   });
 
-  // Update per-customer cap tracking outside the ledger transaction (best-effort, non-blocking)
-  if (txResult && item.grantId && item.customerId && item.amount !== 0) {
-    recordCustomerSpend({
-      grantId: item.grantId,
-      customerId: item.customerId,
-      lineItemId: item.lineItemId || null,
-      amount: item.amount,
-    }).catch(() => {/* non-fatal */});
-  }
+  // The transaction above atomically writes the ledger row and closes the
+  // pending queue row. Recompute from those authoritative records before the
+  // endpoint returns so projected, spent, balance, and customer caps all agree.
+  // The paymentQueue/ledger triggers remain idempotent safety nets.
+  if (txResult) await recomputeLinkedGrantBudgets([item]);
 
   return txResult;
 }
@@ -1476,14 +1472,9 @@ export async function reopenPaymentQueueItem(
     };
   });
 
-  if (txResult && item.grantId && item.customerId && item.amount !== 0) {
-    recordCustomerSpend({
-      grantId: item.grantId,
-      customerId: item.customerId,
-      lineItemId: item.lineItemId || null,
-      amount: -Number(item.amount || 0),
-    }).catch(() => {/* non-fatal */});
-  }
+  // Reopening makes the queue row projected again and writes a negative ledger
+  // entry. Refresh the exact budget/cap read models before returning.
+  if (txResult) await recomputeLinkedGrantBudgets([item]);
 
   return txResult;
 }

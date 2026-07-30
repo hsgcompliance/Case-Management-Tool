@@ -27,8 +27,8 @@ describe("spending queue/ledger reconciliation", () => {
     const queue = { id: "pq-1", queueStatus: "posted", ledgerEntryId: "led-1", amount: 10, grantId: "g1", lineItemId: "li1" };
     const first = { id: "led-1", amountCents: 1000, grantId: "g1", lineItemId: "li1", origin: { paymentQueueId: "pq-1" } };
     const second = { id: "led-2", amountCents: 1200, grantId: "g2", lineItemId: "li2", origin: { paymentQueueId: "pq-1" } };
-    expect(queueLedgerIssue(queue, [first, second])).toBe("Reconciliation: 2 ledger entries linked");
-    expect(queueLedgerIssue(queue, [second])).toBe("Reconciliation: amount, grant, budget mismatch");
+    expect(queueLedgerIssue(queue, [first, second])).toBe("Duplicate posting: 2 ledger entries");
+    expect(queueLedgerIssue(queue, [second])).toBe("amount, grant, line item do not match ledger");
   });
 
   it("links adjustment reversals to the spend they cancel", () => {
