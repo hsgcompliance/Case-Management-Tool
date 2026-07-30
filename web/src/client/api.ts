@@ -124,6 +124,9 @@ export const endpointsStrict = {
   enrollmentsDelete:  { method: 'POST',  path: 'enrollmentsDelete' },
   enrollmentsAdminDelete: { method: 'POST', path: 'enrollmentsAdminDelete' },
   enrollmentsVoidProjections: { method: 'POST', path: 'enrollmentsVoidProjections' },
+  enrollmentsClose: { method: 'POST', path: 'enrollmentsClose' },
+  enrollmentsReopen: { method: 'POST', path: 'enrollmentsReopen' },
+  enrollmentActionsApply: { method: 'POST', path: 'enrollmentActionsApply' },
   enrollmentsEnrollCustomer: { method: 'POST', path: 'enrollmentsEnrollCustomer' },
   enrollmentsBulkEnroll: { method: 'POST', path: 'enrollmentsBulkEnroll' },
   enrollmentsCheckOverlaps: { method: 'POST', path: 'enrollmentsCheckOverlaps' },
@@ -218,6 +221,7 @@ export const endpointsStrict = {
 
   // INBOX
   inboxListMy:                   { method: 'GET',  path: 'inboxListMy' },
+  inboxTasksDueList:              { method: 'GET',  path: 'inboxTasksDueList' },
   inboxMetricsMy:                { method: 'GET',  path: 'inboxMetricsMy' },
   inboxWorkloadList:             { method: 'GET',  path: 'inboxWorkloadList' },
   inboxSendInvite:               { method: 'POST', path: 'inboxSendInvite' },
@@ -381,6 +385,7 @@ export const endpointsLoose = {
   createCustomerWorkbookBudget:             { method: 'POST', path: 'createCustomerWorkbookBudget' },
   patchCustomerWorkbookScaffold:            { method: 'POST', path: 'patchCustomerWorkbookScaffold' },
   deleteCustomerWorkbookRow:                { method: 'POST', path: 'deleteCustomerWorkbookRow' },
+  setCustomerWorkbookVariant:               { method: 'POST', path: 'setCustomerWorkbookVariant' },
 
   // AI recommendation helpers
   generateCaseNoteSuggestion:               { method: 'POST', path: 'generateCaseNoteSuggestion' },
