@@ -10,6 +10,12 @@
 // 2. Orphan scan — ledger/paymentQueue rows still pointing at a deleted/closed
 //    enrollment: unreversed ledger entries (net amount per paymentId is
 //    nonzero) and paymentQueue rows still queueStatus:"pending".
+//
+// Enrollments under a closed/deleted grant are cascaded closed already and have
+// nothing left to reconcile, so the org's open grants are resolved first and the
+// customerEnrollments query is scoped to just those grantIds — closed-grant rows
+// are never fetched. This keeps scan cost tied to the org's *active* footprint
+// instead of growing with its full history as more grants close over time.
 import { db, toDate, toDateOnly } from "../../core";
 import { findOverlappingEnrollments } from "../enrollments/overlap";
 import type {
@@ -20,6 +26,9 @@ import type {
 } from "./schemas";
 
 const ORPHAN_STATUSES = new Set(["deleted", "closed"]);
+// Grants in these states are no longer live: their enrollments have already been
+// cascaded closed, so there is nothing to reconcile — skip them entirely.
+const SKIP_GRANT_STATUSES = new Set(["closed", "deleted"]);
 const MAX_ENROLLMENTS = 5000;
 const IN_CHUNK = 10;
 
@@ -94,6 +103,26 @@ function findDuplicateGroups(rows: EnrollmentRow[]): Map<string, EnrollmentRow[]
     );
   }
   return flagged;
+}
+
+/**
+ * Resolves which grants the scan should touch, so closed/deleted grants never
+ * enter the customerEnrollments query at all (as opposed to fetching every
+ * enrollment row and filtering after the fact — as the org's history of closed
+ * grants grows, that fetch-everything approach only gets more wasteful).
+ * `requestedGrantIds` (from the caller's grantIds filter) is intersected with
+ * the eligible set when present; otherwise every open grant for the org is used.
+ */
+async function resolveScanGrantIds(orgId: string, requestedGrantIds: string[] | null): Promise<string[]> {
+  const grantsSnap = await db.collection("grants").where("orgId", "==", orgId).get();
+  const eligible: string[] = [];
+  for (const doc of grantsSnap.docs) {
+    const status = String((doc.data() || {}).status || "");
+    if (!SKIP_GRANT_STATUSES.has(status)) eligible.push(doc.id);
+  }
+  if (!requestedGrantIds) return eligible;
+  const eligibleSet = new Set(eligible);
+  return requestedGrantIds.filter((id) => eligibleSet.has(id));
 }
 
 async function countPendingQueueByEnrollment(enrollmentIds: string[]): Promise<Map<string, number>> {
@@ -248,14 +277,22 @@ export async function runReconciliationAuditScan(
   orgId: string,
   grantIds?: string[],
 ): Promise<TReconciliationAuditScanResp> {
-  let query: FirebaseFirestore.Query = db.collection("customerEnrollments").where("orgId", "==", orgId);
-  if (grantIds && grantIds.length === 1) query = query.where("grantId", "==", grantIds[0]);
+  const requestedGrantIds = grantIds && grantIds.length ? Array.from(new Set(grantIds.map(String))) : null;
+  // Closed/deleted grants have already had their enrollments cascaded closed —
+  // resolve which grants are still eligible *before* touching customerEnrollments
+  // so those rows are never fetched in the first place.
+  const scanGrantIds = await resolveScanGrantIds(orgId, requestedGrantIds);
 
-  const snap = await query.limit(MAX_ENROLLMENTS).get();
-  let rows: EnrollmentRow[] = snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }));
-  if (grantIds && grantIds.length > 1) {
-    const set = new Set(grantIds.map(String));
-    rows = rows.filter((row) => set.has(String(row.grantId || "")));
+  const rows: EnrollmentRow[] = [];
+  for (const idsChunk of chunk(scanGrantIds, IN_CHUNK)) {
+    if (rows.length >= MAX_ENROLLMENTS) break;
+    const snap = await db
+      .collection("customerEnrollments")
+      .where("orgId", "==", orgId)
+      .where("grantId", "in", idsChunk)
+      .limit(MAX_ENROLLMENTS - rows.length)
+      .get();
+    for (const doc of snap.docs) rows.push({ id: doc.id, ...(doc.data() as Record<string, unknown>) });
   }
 
   const duplicateGroups = findDuplicateGroups(rows);
