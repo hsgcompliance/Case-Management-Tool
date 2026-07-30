@@ -11,7 +11,12 @@ import { toast } from "@lib/toast";
 import { toApiError } from "@client/api";
 import { todayISO } from "./paymentScheduleUtils";
 import { CustomerInactivePreviewDialog } from "./CustomerInactivePreviewDialog";
-import { PriorEnrollmentNudge, isInactivePriorEnrollment } from "@features/enrollments/PriorEnrollmentNudge";
+import {
+  PriorEnrollmentDecisionDialog,
+  PriorEnrollmentNudge,
+  isReopenablePriorEnrollment,
+  requiresPriorEnrollmentDecision,
+} from "@features/enrollments/PriorEnrollmentNudge";
 
 // Selected-state colors for the Tier 1/2/3 mini-cards / pickers.
 // Tier 1 = highest risk (red) → Tier 3 = lowest (green).
@@ -55,18 +60,20 @@ export function EnrollCustomerQuickModal({
   const reopen = useEnrollmentsReopen();
   const [grantId, setGrantId] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState(todayISO());
+  const [priorEnrollmentDecisionOpen, setPriorEnrollmentDecisionOpen] = React.useState(false);
   const { data: enrollments = [] } = useCustomerEnrollments(customerId, { enabled: open });
 
   React.useEffect(() => {
     if (!open) return;
     setGrantId(null);
     setStartDate(todayISO());
+    setPriorEnrollmentDecisionOpen(false);
   }, [open]);
 
   const priorEnrollmentsForGrant = React.useMemo(() => {
     const gid = String(grantId || "").trim();
     if (!gid) return [];
-    return enrollments.filter((e) => String(e.grantId || "").trim() === gid && isInactivePriorEnrollment(e));
+    return enrollments.filter((e) => String(e.grantId || "").trim() === gid && isReopenablePriorEnrollment(e));
   }, [enrollments, grantId]);
 
   const reopenInstead = async (enrollmentId: string) => {
@@ -89,7 +96,7 @@ export function EnrollCustomerQuickModal({
     }
   };
 
-  const submit = async () => {
+  const createEnrollment = async () => {
     const gid = String(grantId || "").trim();
     if (!gid) {
       toast("Choose a program to enroll into.", { type: "error" });
@@ -113,58 +120,76 @@ export function EnrollCustomerQuickModal({
     }
   };
 
+  const submit = () => {
+    if (requiresPriorEnrollmentDecision(priorEnrollmentsForGrant)) {
+      setPriorEnrollmentDecisionOpen(true);
+      return;
+    }
+    void createEnrollment();
+  };
+
   return (
-    <Modal
-      isOpen={open}
-      onClose={onClose}
-      title="Enroll Customer"
-      widthClass="max-w-md"
-      footer={
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={enrollCustomer.isPending}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => void submit()}
-            disabled={enrollCustomer.isPending || !grantId}
-          >
-            {enrollCustomer.isPending ? "Enrolling…" : "Enroll"}
-          </button>
+    <>
+      <Modal
+        isOpen={open}
+        onClose={onClose}
+        title="Enroll Customer"
+        widthClass="max-w-md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={enrollCustomer.isPending}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={submit}
+              disabled={enrollCustomer.isPending || !grantId}
+            >
+              {enrollCustomer.isPending ? "Enrolling…" : "Enroll"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-slate-600 dark:text-slate-300">
+            Enroll <span className="font-semibold">{customerName}</span> into a program. The new enrollment loads onto the card automatically.
+          </div>
+          <label className="block space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Program</span>
+            <GrantSelect
+              value={grantId}
+              onChange={(next) => {
+                setGrantId(next);
+                setPriorEnrollmentDecisionOpen(false);
+              }}
+              placeholderLabel="Select program"
+              disabled={enrollCustomer.isPending}
+            />
+          </label>
+          <PriorEnrollmentNudge priorEnrollments={priorEnrollmentsForGrant} />
+          <label className="block space-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start Date</span>
+            <input
+              type="date"
+              className="input w-full"
+              value={startDate}
+              onChange={(event) => setStartDate(event.currentTarget.value)}
+              disabled={enrollCustomer.isPending}
+            />
+          </label>
         </div>
-      }
-    >
-      <div className="space-y-4">
-        <div className="text-sm text-slate-600 dark:text-slate-300">
-          Enroll <span className="font-semibold">{customerName}</span> into a program. The new enrollment loads onto the card automatically.
-        </div>
-        <label className="block space-y-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Program</span>
-          <GrantSelect
-            value={grantId}
-            onChange={setGrantId}
-            placeholderLabel="Select program"
-            disabled={enrollCustomer.isPending}
-          />
-        </label>
-        <PriorEnrollmentNudge
-          priorEnrollments={priorEnrollmentsForGrant}
-          onReopen={(e) => void reopenInstead(String(e.id))}
-          reopening={reopen.isPending}
-        />
-        <label className="block space-y-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Start Date</span>
-          <input
-            type="date"
-            className="input w-full"
-            value={startDate}
-            onChange={(event) => setStartDate(event.currentTarget.value)}
-            disabled={enrollCustomer.isPending}
-          />
-        </label>
-      </div>
-    </Modal>
+      </Modal>
+      <PriorEnrollmentDecisionDialog
+        open={open && priorEnrollmentDecisionOpen}
+        priorEnrollments={priorEnrollmentsForGrant}
+        reopening={reopen.isPending}
+        creating={enrollCustomer.isPending}
+        onClose={() => setPriorEnrollmentDecisionOpen(false)}
+        onReopen={(enrollment) => void reopenInstead(String(enrollment.id))}
+        onCreateNew={() => void createEnrollment()}
+      />
+    </>
   );
 }
 

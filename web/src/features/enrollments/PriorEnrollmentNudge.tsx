@@ -1,22 +1,91 @@
 "use client";
 
 import React from "react";
-import type { Enrollment } from "@client/enrollments";
+import { Modal } from "@entities/ui/Modal";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import { fmtDateOrDash } from "@lib/formatters";
+import type { PriorEnrollment } from "./priorEnrollmentDecision";
 
-/** Prior enrollment eligible for the reopen nudge — must be closed/deleted, not active. */
-export type PriorEnrollment = Pick<Enrollment, "id" | "status" | "active" | "startDate" | "endDate">;
+export {
+  isInactivePriorEnrollment,
+  isReopenablePriorEnrollment,
+  requiresPriorEnrollmentDecision,
+  toOpenClosedStatus,
+} from "./priorEnrollmentDecision";
+export type { PriorEnrollment } from "./priorEnrollmentDecision";
 
-export function toOpenClosedStatus(row: PriorEnrollment): "open" | "closed" {
-  const status = String(row.status || "").toLowerCase();
-  if (status === "closed" || status === "deleted") return "closed";
-  if (typeof row.active === "boolean") return row.active ? "open" : "closed";
-  return "open";
-}
+export function PriorEnrollmentDecisionDialog({
+  open,
+  priorEnrollments,
+  reopening = false,
+  creating = false,
+  onClose,
+  onReopen,
+  onCreateNew,
+}: {
+  open: boolean;
+  priorEnrollments: PriorEnrollment[];
+  reopening?: boolean;
+  creating?: boolean;
+  onClose: () => void;
+  onReopen: (enrollment: PriorEnrollment) => void;
+  onCreateNew: () => void;
+}) {
+  const busy = reopening || creating;
 
-export function isInactivePriorEnrollment(row: PriorEnrollment): boolean {
-  return toOpenClosedStatus(row) === "closed";
+  return (
+    <Modal
+      isOpen={open}
+      title="Prior Enrollment Found"
+      onClose={onClose}
+      widthClass="max-w-md"
+      draggable={false}
+      disableOverlayClose={busy}
+      disableEscClose={busy}
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onCreateNew} disabled={busy}>
+            {creating ? "Creating…" : "Create New Enrollment"}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <p className="text-slate-600 dark:text-slate-300">
+          Choose whether to reopen a prior enrollment or create a separate assistance episode. No new
+          enrollment will be created until you select an option.
+        </p>
+        <div className="space-y-2">
+          {priorEnrollments.map((enrollment) => (
+            <div
+              key={enrollment.id}
+              className="flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 p-3 dark:border-sky-800 dark:bg-sky-950/30"
+            >
+              <div className="min-w-0 text-xs text-sky-950 dark:text-sky-100">
+                <div className="truncate font-semibold">
+                  {formatEnrollmentLabel(enrollment as unknown as Record<string, unknown>)}
+                </div>
+                <div className="mt-0.5 text-sky-700 dark:text-sky-300">
+                  {fmtDateOrDash(enrollment.startDate)}–{enrollment.endDate ? fmtDateOrDash(enrollment.endDate) : "open"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm shrink-0"
+                disabled={busy}
+                onClick={() => onReopen(enrollment)}
+              >
+                {reopening ? "Reopening…" : "Reopen"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 /**

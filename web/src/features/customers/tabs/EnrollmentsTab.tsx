@@ -38,7 +38,12 @@ import {
 } from "@features/enrollments/enrollmentControls";
 import { defaultGrantDriveTemplateKeys, grantDriveTemplates } from "@features/grants/driveTemplates";
 import { useGDriveCopyGrantTemplates } from "@hooks/useGDrive";
-import { PriorEnrollmentNudge } from "@features/enrollments/PriorEnrollmentNudge";
+import {
+  PriorEnrollmentDecisionDialog,
+  PriorEnrollmentNudge,
+  isReopenablePriorEnrollment,
+  requiresPriorEnrollmentDecision,
+} from "@features/enrollments/PriorEnrollmentNudge";
 
 function isoToday(): string {
   return toISODate(new Date());
@@ -148,6 +153,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const [generateTaskSchedule, setGenerateTaskSchedule] = React.useState<boolean>(true);
   const [copyTemplates, setCopyTemplates] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [priorEnrollmentDecisionOpen, setPriorEnrollmentDecisionOpen] = React.useState(false);
 
   const [editing, setEditing] = React.useState<Enrollment | null>(null);
   const [editStartDate, setEditStartDate] = React.useState("");
@@ -285,10 +291,12 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
   const priorEnrollmentsInSelectedGrant = React.useMemo(() => {
     const gid = String(grantId || "").trim();
     if (!gid) return [];
-    return enrollments.filter((e) => String(e.grantId || "").trim() === gid && isInactiveEnrollment(e));
+    return enrollments.filter(
+      (e) => String(e.grantId || "").trim() === gid && isReopenablePriorEnrollment(e),
+    );
   }, [enrollments, grantId]);
 
-  const onCreate = async () => {
+  const createEnrollment = async () => {
     const gid = String(grantId || "").trim();
     if (!gid) return;
     setError(null);
@@ -331,12 +339,21 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
       setEndDateTouched(false);
       setGenerateTaskSchedule(true);
       setCopyTemplates(true);
+      setPriorEnrollmentDecisionOpen(false);
       toast("Enrollment created.", { type: "success" });
     } catch (e: unknown) {
       const msg = toApiError(e).error || "Failed to create enrollment.";
       setError(msg);
       toast(msg, { type: "error" });
     }
+  };
+
+  const onCreate = () => {
+    if (requiresPriorEnrollmentDecision(priorEnrollmentsInSelectedGrant)) {
+      setPriorEnrollmentDecisionOpen(true);
+      return;
+    }
+    void createEnrollment();
   };
 
   const patchEnrollment = async (
@@ -477,7 +494,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
     });
   };
 
-  const reopenEnrollment = async (row: Enrollment) => {
+  const reopenEnrollment = async (row: Enrollment): Promise<boolean> => {
     setError(null);
     try {
       const result = await reopen.mutateAsync({ id: row.id });
@@ -486,6 +503,8 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
       } else {
         toast("Enrollment reopened.", { type: "success" });
       }
+      setPriorEnrollmentDecisionOpen(false);
+      return true;
     } catch (e: unknown) {
       const conflicts = (e as any)?.meta?.response?.conflicts as Array<{ id: string }> | undefined;
       const msg = conflicts?.length
@@ -493,6 +512,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
         : toApiError(e).error || "Failed to reopen enrollment.";
       setError(msg);
       toast(msg, { type: "error" });
+      return false;
     }
   };
 
@@ -644,6 +664,7 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
               onChange={(next) => {
                 setGrantId(next);
                 setEndDateTouched(false);
+                setPriorEnrollmentDecisionOpen(false);
               }}
               includeUnassigned
               placeholderLabel="-- Select grant or program --"
@@ -672,15 +693,11 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
               disabled={busy}
             />
           </div>
-          <button className="btn btn-sm" onClick={() => void onCreate()} disabled={!grantId || busy}>
+          <button className="btn btn-sm" onClick={onCreate} disabled={!grantId || busy}>
             {enroll.isPending ? "Creating..." : "Enroll"}
           </button>
         </div>
-        <PriorEnrollmentNudge
-          priorEnrollments={priorEnrollmentsInSelectedGrant}
-          onReopen={(e) => void reopenEnrollment(e as Enrollment)}
-          reopening={reopen.isPending}
-        />
+        <PriorEnrollmentNudge priorEnrollments={priorEnrollmentsInSelectedGrant} />
         <div className="mt-2 flex items-center gap-2">
           <input
             id="generateTaskSchedule"
@@ -783,6 +800,16 @@ export function EnrollmentsTab({ customerId }: { customerId: string }) {
             : null}
         </>
       )}
+
+      <PriorEnrollmentDecisionDialog
+        open={priorEnrollmentDecisionOpen}
+        priorEnrollments={priorEnrollmentsInSelectedGrant}
+        reopening={reopen.isPending}
+        creating={enroll.isPending}
+        onClose={() => setPriorEnrollmentDecisionOpen(false)}
+        onReopen={(enrollment) => void reopenEnrollment(enrollment as Enrollment)}
+        onCreateNew={() => void createEnrollment()}
+      />
 
       <Modal
         isOpen={!!closeTarget}
