@@ -32,6 +32,44 @@ function scrollHostToTop(): void {
 const FORM_BOTTOM_BUFFER_PX = 240;
 const MAX_FORM_HEIGHT_PX = 12_000;
 
+function RefreshIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M16 4v4h-4M4 16v-4h4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.5 10a5.5 5.5 0 0 1 9.3-3.9L16 8M15.5 10a5.5 5.5 0 0 1-9.3 3.9L4 12"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M8 5H5.5A2.5 2.5 0 0 0 3 7.5v7A2.5 2.5 0 0 0 5.5 17h7A2.5 2.5 0 0 0 15 14.5V12"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path d="M11 3h6v6M10 10l7-7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const TOOLBAR_BUTTON_CLASS =
+  "inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50";
+
 export function JotformEmbed({
   formId,
   title,
@@ -52,6 +90,15 @@ export function JotformEmbed({
   const [embedKey, setEmbedKey] = useState(0);
   const openedAt = useRef(Date.now());
   const detecting = useRef(false);
+
+  function resetEmbed() {
+    setSubmitted(false);
+    setSubmission(null);
+    setLoadingSubmission(false);
+    detecting.current = false;
+    openedAt.current = Date.now();
+    setEmbedKey((value) => value + 1);
+  }
 
   useEffect(() => {
     setSubmitted(false);
@@ -143,16 +190,24 @@ export function JotformEmbed({
           formId={formId}
           submission={submission}
           loading={loadingSubmission}
-          onSubmitAgain={() => {
-            setSubmitted(false);
-            setSubmission(null);
-            setLoadingSubmission(false);
-            detecting.current = false;
-            openedAt.current = Date.now();
-            setEmbedKey((value) => value + 1);
-          }}
+          onSubmitAgain={resetEmbed}
         />
       ) : null}
+      <div className="flex items-center justify-end gap-2">
+        <button type="button" className={TOOLBAR_BUTTON_CLASS} onClick={resetEmbed}>
+          <RefreshIcon />
+          Refresh form
+        </button>
+        <a
+          className={TOOLBAR_BUTTON_CLASS}
+          href={`https://form.jotform.com/${formId}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ExternalLinkIcon />
+          Open in new tab
+        </a>
+      </div>
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <iframe
           ref={iframeRef}
@@ -162,7 +217,7 @@ export function JotformEmbed({
           className="w-full"
           style={{ height, minHeight: 600, border: "0" }}
           allow="geolocation; microphone; camera; fullscreen; payment"
-          scrolling="no"
+          scrolling="auto"
         />
       </div>
       <p className="px-1 text-center text-xs text-slate-500">
