@@ -56,6 +56,15 @@ export const customerLinkSubmission_http = secureHandler(
       customerName: normStr(body.customerName),
       cwId: normStr(body.cwId) || null,
       alias: normStr(body.alias) || null,
+      normalizedCustomerInfo:
+        body.normalizedCustomerInfo && typeof body.normalizedCustomerInfo === "object"
+          ? {
+              date: normStr((body.normalizedCustomerInfo as Record<string, unknown>).date),
+              requestingDeterminationFor: normStr(
+                (body.normalizedCustomerInfo as Record<string, unknown>).requestingDeterminationFor,
+              ),
+            }
+          : null,
       byUid: (caller as { uid?: string })?.uid || null,
     });
     res.status(200).json({ ok: true });

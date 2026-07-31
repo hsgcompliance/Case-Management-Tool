@@ -167,6 +167,8 @@ export type IntakeFlowStep = {
   autoCompleteChecklist?: boolean;
   /** Review customer/landlord recipients and choose the program-specific MOU. */
   mouSend?: boolean;
+  /** Pause point where the current worker can continue or transfer the saved intake to another active user. */
+  staffHandoff?: boolean;
   /** Optional eligibility-calculator tools, shown collapsed/expandable. */
   toolWidgets?: ToolWidgetId[];
 };
@@ -250,6 +252,12 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
       { href: "https://housing-db-mobile.web.app", label: "Open HHDB mobile" },
     ],
     prominentLinks: true,
+  },
+  {
+    title: "Send to compliance or continue",
+    staffHandoff: true,
+    noCompletionRequired: true,
+    note: "Continue the full intake yourself, or send the saved workflow to any active staff member so they can pick it up from their task queue.",
   },
   {
     formId: "251001226310030",

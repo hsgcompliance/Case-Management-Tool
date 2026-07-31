@@ -22,7 +22,15 @@ import { ExternalServiceIcon } from "./ui";
 import { ToolWidget } from "./ToolWidget";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
 import { extractAmiPrefill } from "@/lib/intakeWebhookSnapshot";
-import { confirmEligibilityHandoff, listRemoteIntakeFlows, saveRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
+import {
+  confirmEligibilityHandoff,
+  deleteRemoteIntakeFlow,
+  listRemoteIntakeFlows,
+  saveRemoteIntakeFlow,
+  transferIntakeFlow,
+} from "@/lib/intakeFlowsApi";
+import { loadUsers, type FormsUser } from "@/lib/usersApi";
+import { useAuth } from "@/hooks/useAuth";
 import type { JfSubmission } from "@/lib/jotformManagerApi";
 import { IntakeActionsMenu } from "./IntakeActionsMenu";
 
@@ -218,6 +226,7 @@ export function FormsCategoryView({
   resources?: { href: string; label: string }[];
   autoStart?: boolean;
 }) {
+  const { user } = useAuth();
   const { customer } = useCurrentCustomer();
   const [view, setView] = useState<View>({ kind: "list" });
   const [sendForm, setSendForm] = useState<FormDef | null>(null);
@@ -229,6 +238,10 @@ export function FormsCategoryView({
   const [driveCustomers, setDriveCustomers] = useState<FormsCustomer[]>([]);
   const [driveLoading, setDriveLoading] = useState(false);
   const [driveLoadError, setDriveLoadError] = useState<string | null>(null);
+  const [handoffUsers, setHandoffUsers] = useState<FormsUser[]>([]);
+  const [handoffTargetUid, setHandoffTargetUid] = useState("");
+  const [handoffLoading, setHandoffLoading] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
 
   // Resolve flow steps against the full catalog (flow forms may live in other categories).
   const resolvedSteps = useMemo<ResolvedStep[]>(() => {
@@ -392,6 +405,13 @@ export function FormsCategoryView({
   const stepKey = step?.key ?? null;
   const driveStepIndex = steps.findIndex((candidate) => candidate.driveSetup);
 
+  useEffect(() => {
+    if (!resolvedSteps.some((candidate) => candidate.staffHandoff)) return;
+    void loadUsers()
+      .then((items) => setHandoffUsers(items.filter((candidate) => candidate.uid !== user?.uid)))
+      .catch(() => setHandoffError("Could not load active staff."));
+  }, [resolvedSteps, user?.uid]);
+
   const refreshDriveReadiness = useCallback(async (force = false) => {
     setDriveLoading(true);
     setDriveLoadError(null);
@@ -433,6 +453,7 @@ export function FormsCategoryView({
   // Bumped when the embed detects a submit → the Webhooks sidebar refetches
   // right away instead of waiting for its next poll tick.
   const [webhookRefresh, setWebhookRefresh] = useState(0);
+  const [webhookSessionReset, setWebhookSessionReset] = useState(0);
   const [webhookSnapshot, setWebhookSnapshot] = useState<IntakeWebhookSnapshot | null>(null);
   const [receivedSubmission, setReceivedSubmission] = useState<JfSubmission | null>(null);
   const latestSubmissionByFormId = useMemo(() => {
@@ -474,6 +495,28 @@ export function FormsCategoryView({
       setComplianceConfirming(false);
     }
   }, [customer?.id]);
+
+  const startFreshIntake = useCallback(async () => {
+    if (!customer) return;
+    if (!window.confirm(
+      `Start a fresh intake for ${customer.name}? Prior submissions, enrollments, and payments will remain visible. Only the Basic Intake Jotforms will stay marked complete.`,
+    )) return;
+    const fullIntakeIndex = resolvedSteps.findIndex((candidate) => candidate.section === "Full intake");
+    const basicSteps = resolvedSteps.slice(0, fullIntakeIndex >= 0 ? fullIntakeIndex : resolvedSteps.length);
+    const done = Object.fromEntries(
+      basicSteps.filter((candidate) => Boolean(candidate.formId)).map((candidate) => [candidate.key, true]),
+    );
+    const fresh: FlowProgress = { done, checks: {} };
+    updateProgress(() => fresh);
+    removeIntakeSession(customer.id);
+    flowStartedAtRef.current = new Date().toISOString();
+    lastRemoteProgressRef.current = null;
+    setRentCertSubmitted(false);
+    setWebhookSessionReset((current) => current + 1);
+    try { localStorage.removeItem(`hdb:forms:rent-cert-draft:${customer.id}`); } catch { /* ignore */ }
+    await deleteRemoteIntakeFlow(customer.id).catch(() => undefined);
+    setView({ kind: "step", idx: 0 });
+  }, [customer, resolvedSteps, updateProgress]);
 
   // Backend writes are resume checkpoints, not the live source of truth. Save
   // once when Steps 7, 13, and 17 are reached, and only when progress changed.
@@ -532,6 +575,48 @@ export function FormsCategoryView({
     updateProgress((p) => ({ ...p, tssVariant: v }));
   };
 
+  const sendIntakeToStaff = async (currentStep: ResolvedStep) => {
+    if (!customer?.id || !handoffTargetUid || handoffLoading) return;
+    const target = handoffUsers.find((candidate) => candidate.uid === handoffTargetUid);
+    if (!target) return;
+    if (!window.confirm(
+      `Send ${customer.name}'s saved intake to ${target.name}? It will leave your Active Intakes and appear in their task queue.`,
+    )) return;
+    setHandoffLoading(true);
+    setHandoffError(null);
+    try {
+      const nextProgress: FlowProgress = {
+        ...progress,
+        done: { ...progress.done, [currentStep.key]: true },
+      };
+      const nextDoneCount = steps.filter((candidate) => nextProgress.done[candidate.key]).length;
+      const now = new Date().toISOString();
+      await transferIntakeFlow(handoffTargetUid, {
+        customerId: customer.id,
+        customerName: customer.name,
+        cwId: customer.cwId,
+        dob: customer.dob,
+        caseManagerName: customer.caseManagerName,
+        intakeType: nextProgress.intakeTypes?.[0] ?? null,
+        intakeTypes: nextProgress.intakeTypes ?? [],
+        doneCount: nextDoneCount,
+        totalSteps: steps.length,
+        startedAtISO: flowStartedAtRef.current,
+        updatedAtISO: now,
+      }, nextProgress);
+      lastRemoteProgressRef.current = null;
+      updateProgress(() => EMPTY_PROGRESS);
+      removeIntakeSession(customer.id);
+      setHandoffTargetUid("");
+      setView({ kind: "list" });
+      window.alert(`Intake sent to ${target.name}.`);
+    } catch (error) {
+      setHandoffError(error instanceof Error ? error.message : "Could not send this intake.");
+    } finally {
+      setHandoffLoading(false);
+    }
+  };
+
   // Step 1 supports program combinations, except HUD Rental and Eviction
   // Prevention, which are mutually exclusive primary assistance paths.
   const toggleIntakeType = (v: IntakeTypeId, stepKey: string) => {
@@ -577,6 +662,7 @@ export function FormsCategoryView({
         <WebhooksSidebar
           formIds={flowFormIds}
           refreshKey={webhookRefresh}
+          sessionResetKey={webhookSessionReset}
           receivedSubmission={receivedSubmission}
           onSnapshot={setWebhookSnapshot}
         />
@@ -856,6 +942,51 @@ export function FormsCategoryView({
             )}
           </section>
         ) : null}
+        {step.staffHandoff ? (
+          <section className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-5">
+            <h3 className="text-sm font-semibold text-indigo-950">Who should continue this intake?</h3>
+            <p className="mt-1 text-xs text-indigo-700">
+              Continue now, or transfer the saved intake and its open task to another active staff member.
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => {
+                  setDone(step.key, true);
+                  if (next) setView({ kind: "step", idx: idx + 1 });
+                }}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              >
+                Continue intake myself →
+              </button>
+              <select
+                value={handoffTargetUid}
+                onChange={(event) => setHandoffTargetUid(event.target.value)}
+                aria-label="Send intake to active staff member"
+                className="min-w-0 flex-1 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm text-slate-700"
+              >
+                <option value="">Send to active staff…</option>
+                {handoffUsers.map((candidate) => (
+                  <option key={candidate.uid} value={candidate.uid}>
+                    {candidate.name}{candidate.email ? ` — ${candidate.email}` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!customer || !handoffTargetUid || handoffLoading}
+                onClick={() => void sendIntakeToStaff(step)}
+                className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {handoffLoading ? "Sending…" : "Send intake"}
+              </button>
+            </div>
+            {!customer ? (
+              <p className="mt-2 text-xs font-medium text-amber-700">Link a customer before sending this intake.</p>
+            ) : null}
+            {handoffError ? <p className="mt-2 text-xs font-medium text-red-600">{handoffError}</p> : null}
+          </section>
+        ) : null}
         {step.landlordPrefill ? <LandlordPrefillPanel snapshot={webhookSnapshot} /> : null}
         {step.mouSend ? (
           <MouSendPanel
@@ -1076,18 +1207,29 @@ export function FormsCategoryView({
             </h3>
             <div className="flex items-center gap-2">
               {doneCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm("Reset intake flow progress" + (customer ? ` for ${customer.name}` : "") + "?")) {
-                      updateProgress(() => EMPTY_PROGRESS);
-                      removeIntakeSession(customer?.id ?? null);
-                    }
-                  }}
-                  className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50"
-                >
-                  Reset
-                </button>
+                <>
+                  {customer ? (
+                    <button
+                      type="button"
+                      onClick={() => void startFreshIntake()}
+                      className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                    >
+                      Start fresh intake
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Reset intake flow progress" + (customer ? ` for ${customer.name}` : "") + "?")) {
+                        updateProgress(() => EMPTY_PROGRESS);
+                        removeIntakeSession(customer?.id ?? null);
+                      }
+                    }}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                  >
+                    Reset all
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"

@@ -61,6 +61,7 @@ export type HouseholdMember = {
   citizenship: ExtractedValue | null;
   disabling: ExtractedValue | null;
   disabilityTypes: ExtractedValue | null;
+  studentStatus: ExtractedValue | null;
   /** Contact group (usually only the head of household). */
   phone: ExtractedValue | null;
   email: ExtractedValue | null;
@@ -100,6 +101,8 @@ export type HouseholdInfo = {
   household: SlotValue[];
   /** Housing group: status, eviction timeline, rent amounts, current address. */
   housing: SlotValue[];
+  /** Verified rent-determination income, asset, and assistance calculations. */
+  financial: SlotValue[];
   /**
    * HoH compatibility slots (hohName / dob / age / cwId) — kept for consumers
    * that prefill from the head of household (CreateCustomerModal).
@@ -145,7 +148,12 @@ const HOUSEHOLD_SLOTS: SlotDef[] = [
   },
   { key: "adults", label: "Adults", match: /(number|#|how many)( of)? adults/i, valueOk: (v) => /^\d{1,2}$/.test(v) || /^none$/i.test(v) },
   { key: "children", label: "Children", match: /(number|#|how many)( of)? (children|minors|kids)/i, valueOk: (v) => /^\d{1,2}$/.test(v) || /^none$/i.test(v) },
-  { key: "totalIncome", label: "Total income (monthly)", match: /total (monthly )?(household )?income/i, valueOk: money },
+  {
+    key: "totalIncome",
+    label: "Total income (monthly)",
+    match: /monthly income calculation|total (monthly )?(household )?income/i,
+    valueOk: money,
+  },
 ];
 
 const HOUSING_SLOTS: SlotDef[] = [
@@ -159,11 +167,29 @@ const HOUSING_SLOTS: SlotDef[] = [
   { key: "daysToVacate", label: "Days until eviction", match: /days.*(vacate|eviction)|days until eviction/i },
   { key: "monthlyRent", label: "Monthly rent", match: /monthly rent|^rent amount/i, valueOk: money },
   { key: "backRent", label: "Back rent owed", match: /back rent/i, valueOk: money },
-  { key: "addressFull", label: "Current address", match: /address for current living/i },
+  { key: "addressFull", label: "Current address", match: /address for current living|^unit address$|^tenant address$|^address$/i, exclude: /landlord|payee|mailing/i },
   { key: "street", label: "Street", match: /^street address/i },
   { key: "city", label: "City", match: /^city$/i },
   { key: "stateZip", label: "State, Zip", match: /^state,? ?zip/i },
   { key: "cwId", label: "CWID", match: /\bcw ?id\b|caseworthy/i },
+];
+
+const FINANCIAL_SLOTS: SlotDef[] = [
+  { key: "includeArrears", label: "Includes arrears", match: /include arrears\?/i },
+  { key: "annualIncome", label: "Household annual income", match: /^sum household income$|total household annual income/i, valueOk: money },
+  { key: "assetTotal", label: "Total assets", match: /^total asset amount/i, valueOk: money },
+  { key: "monthlyHousingCost", label: "Monthly housing cost", match: /^monthly housing cost/i, valueOk: money },
+  { key: "depositAmount", label: "Security deposit", match: /^deposit amount/i, valueOk: money },
+  {
+    key: "proratedOrArrears",
+    label: "Prorated rent / arrears",
+    match: /^prorated rent\s*\/\s*arrears/i,
+    exclude: /month/i,
+    valueOk: money,
+  },
+  { key: "tenantRentPayment", label: "Tenant rent payment", match: /^tenant rent payment/i, valueOk: money },
+  { key: "hrdcRentPayment", label: "HRDC rent payment", match: /^hrdc (rent initial payment portion|payment)/i, valueOk: money },
+  { key: "utilityAllowance", label: "Utility allowance", match: /^utility allowance amount/i, valueOk: money },
 ];
 
 /** Labels that name the head of household directly. */
@@ -191,7 +217,7 @@ const BANK_MATCH = /bank|financial institution|account name/i;
 /** Consent boilerplate, signatures, initials, plain dates — traced but never displayed. */
 // NOTE: plain "Date" / "Date of Referral" are boilerplate, but "Date of Birth" must survive.
 const IGNORE_MATCH =
-  /^date\s*\d*$|^date of referral\b|^terms and conditions|signature|initial|^i (agree|have received)|^counselor|widget_metadata|^typea$/i;
+  /^date\s*\d*$|^date of referral\b|^terms and conditions|signature|\binitials\b|^initial\s*\d*$|^i (agree|have received)|^counselor|widget_metadata|^typea$/i;
 const UPLOAD_URL = /^https?:\/\/\S+\/uploads\//i;
 
 // ── merge helpers ───────────────────────────────────────────────────────────
@@ -205,13 +231,97 @@ function wins(a: ExtractedValue | null, b: ExtractedValue): boolean {
 
 /** Compute age in years from a parseable DOB string, or null. */
 export function ageFromDob(dob: string): number | null {
-  const d = new Date(dob);
+  const normalized = normalizeDob(dob);
+  const d = new Date(`${normalized}T00:00:00`);
   if (Number.isNaN(d.getTime())) return null;
   const now = new Date();
   let age = now.getFullYear() - d.getFullYear();
   const m = now.getMonth() - d.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
   return age >= 0 && age < 130 ? age : null;
+}
+
+/** Jotform dates often contain both a display value and timestamp; retain ISO date only. */
+export function normalizeDob(raw: string): string {
+  const value = String(raw || "").trim();
+  const iso = value.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const us = value.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/);
+  if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  return value;
+}
+
+function eventDateISO(fields: WebhookEventDetail["fields"]): string | null {
+  for (const field of fields) {
+    if (!/^(?:submission )?date$/i.test(field.label.trim())) continue;
+    const normalized = normalizeDob(field.value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  }
+  return null;
+}
+
+function remainingDays(raw: string, submittedOn: string | null): string {
+  const original = Number(String(raw).match(/\d+/)?.[0]);
+  if (!Number.isFinite(original) || !submittedOn) return raw;
+  const submitted = new Date(`${submittedOn}T00:00:00`);
+  const today = new Date();
+  const todayLocal = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const elapsed = Math.max(0, Math.floor((todayLocal.getTime() - submitted.getTime()) / 86_400_000));
+  return String(Math.max(0, original - elapsed));
+}
+
+function indexedMemberLabel(label: string): { index: number; kind: "name" | "dob" | "relationship" | "student" | "disabling" } | null {
+  const text = label.trim();
+  let match = /^(?:household(?: member)?|hoh)\s*#?\s*(\d+)\b/i.exec(text);
+  if (match && !/^# of household/i.test(text)) return { index: Number(match[1]), kind: "name" };
+  match = /^child\s*#?\s*(\d+)\b/i.exec(text);
+  if (match) return { index: Number(match[1]) + 1, kind: "name" };
+  match = /date of birth(?:\s*-\s*hoh|\s*-\s*)?\s*#?\s*(\d+)?/i.exec(text);
+  if (match) return { index: Number(match[1] || 1), kind: "dob" };
+  match = /^relationship to hoh(?:\s*-\s*)?\s*#?\s*(\d+)?/i.exec(text);
+  if (match) return { index: Number(match[1] || 1), kind: "relationship" };
+  match = /^full[ -]?time student(?:\s*-\s*)?\s*#?\s*(\d+)?/i.exec(text);
+  if (match) return { index: Number(match[1] || 1), kind: "student" };
+  match = /documented disabling condition(?:\s*-\s*)?\s*#?\s*(\d+)?/i.exec(text);
+  if (match) return { index: Number(match[1] || 1), kind: "disabling" };
+  return null;
+}
+
+function addressParts(address: ExtractedValue | null): SlotValue[] {
+  const empty = (key: string, label: string): SlotValue => ({ key, label, found: null });
+  if (!address) {
+    return [
+      empty("addressStreet", "Street"),
+      empty("addressUnit", "Unit"),
+      empty("addressCity", "City"),
+      empty("addressState", "State"),
+      empty("addressZip", "ZIP"),
+    ];
+  }
+  const parts = address.value.split(/\s*(?:Â·|·)\s*|,\s*/).map((part) => part.trim()).filter(Boolean);
+  const zipIndex = parts.findIndex((part) => /^\d{5}(?:-\d{4})?$/.test(part));
+  const zip = zipIndex >= 0 ? parts[zipIndex] : "";
+  const stateNames = /^(?:A[LKZR]|C[AOT]|DE|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEHINOPST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AIT]|W[AIVY]|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)$/i;
+  const stateIndex = parts.findIndex((part) => stateNames.test(part));
+  const localityBoundary = Math.min(
+    zipIndex >= 0 ? zipIndex : parts.length,
+    stateIndex >= 0 ? stateIndex : parts.length,
+  );
+  const cityIndex = localityBoundary > 0 ? localityBoundary - 1 : -1;
+  const unitIndex = cityIndex > 1 ? cityIndex - 1 : -1;
+  const streetEnd = unitIndex > 0 ? unitIndex : cityIndex > 0 ? cityIndex : parts.length;
+  const found = (key: string, label: string, value: string): SlotValue => ({
+    key,
+    label,
+    found: value ? { ...address, value } : null,
+  });
+  return [
+    found("addressStreet", "Street", parts.slice(0, streetEnd).join(", ")),
+    found("addressUnit", "Unit", unitIndex > 0 ? parts[unitIndex] : ""),
+    found("addressCity", "City", cityIndex > 0 ? parts[cityIndex] : ""),
+    found("addressState", "State", stateIndex > 0 ? parts[stateIndex] : ""),
+    found("addressZip", "ZIP", zip),
+  ];
 }
 
 function normCount(v: string): string {
@@ -243,6 +353,7 @@ export function extractHousehold(
 ): HouseholdInfo {
   const membersByName = new Map<string, MemberAccum>();
   const slotFound = new Map<string, ExtractedValue>(); // all SlotDef keys
+  const slotPriority = new Map<string, number>();
   let hohName: ExtractedValue | null = null;
   const unmatched = new Map<string, UnmatchedField>(); // key: label::value
   const trace: EventTrace[] = [];
@@ -261,6 +372,7 @@ export function extractHousehold(
         citizenship: null,
         disabling: null,
         disabilityTypes: null,
+        studentStatus: null,
         phone: null,
         email: null,
         incomes: new Map(),
@@ -303,6 +415,8 @@ export function extractHousehold(
     let draft: MemberDraft = {};
     let holder: ExtractedValue | null = null; // last "Full Name" (income/asset owner)
     let pendingSource: ExtractedValue | null = null;
+    const indexedMembers = new Map<number, ExtractedValue>();
+    const submittedOn = eventDateISO(ev.fields);
 
     const flushDraft = () => {
       if (draft.name && isPlausibleName(draft.name.value)) {
@@ -332,6 +446,37 @@ export function extractHousehold(
       if (!value) continue;
       const consumedBy: string[] = [];
       const ev8 = (v: string): ExtractedValue => ({ value: v, ...src });
+      const indexed = indexedMemberLabel(label);
+
+      if (indexed?.kind === "name" && isPlausibleName(value)) {
+        const name = ev8(value);
+        indexedMembers.set(indexed.index, name);
+        upsertMember(name);
+        if (indexed.index === 1 && wins(hohName, name)) hohName = name;
+        consumedBy.push("member.name");
+      } else if (indexed && indexed.kind !== "name") {
+        const owner = indexedMembers.get(indexed.index) ?? (indexed.index === 1 ? hohName : null);
+        if (owner) {
+          const member = upsertMember(owner);
+          if (indexed.kind === "dob") {
+            const candidate = ev8(normalizeDob(value));
+            if (wins(member.dob, candidate)) member.dob = candidate;
+            consumedBy.push("member.dob");
+          } else if (indexed.kind === "relationship") {
+            const candidate = ev8(value);
+            if (wins(member.relationship, candidate)) member.relationship = candidate;
+            consumedBy.push("member.relationship");
+          } else if (indexed.kind === "student") {
+            const candidate = ev8(value);
+            if (wins(member.studentStatus, candidate)) member.studentStatus = candidate;
+            consumedBy.push("member.studentStatus");
+          } else {
+            const candidate = ev8(value);
+            if (wins(member.disabling, candidate)) member.disabling = candidate;
+            consumedBy.push("member.disabling");
+          }
+        }
+      }
 
       // Signature/consent/date boilerplate: traced, never displayed or unmatched.
       if (UPLOAD_URL.test(value) || IGNORE_MATCH.test(label)) {
@@ -343,13 +488,13 @@ export function extractHousehold(
       }
 
       // ── member blocks (positional) ──
-      if (MEMBER_NAME_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
+      if (!consumedBy.length && MEMBER_NAME_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
         flushDraft();
         if (isPlausibleName(value)) {
           draft.name = ev8(value);
           consumedBy.push("member.name");
         }
-      } else if (HOLDER_NAME_MATCH.test(label)) {
+      } else if (!consumedBy.length && HOLDER_NAME_MATCH.test(label)) {
         flushDraft();
         commitPendingAsAsset();
         if (isPlausibleName(value)) {
@@ -357,23 +502,23 @@ export function extractHousehold(
           upsertMember(holder);
           consumedBy.push("member.name");
         }
-      } else if (RELATIONSHIP_MATCH.test(label)) {
+      } else if (!consumedBy.length && RELATIONSHIP_MATCH.test(label)) {
         draft.relationship = ev8(value);
         consumedBy.push("member.relationship");
-      } else if (DISABILITY_TYPES_MATCH.test(label)) {
+      } else if (!consumedBy.length && DISABILITY_TYPES_MATCH.test(label)) {
         draft.disabilityTypes = ev8(value);
         consumedBy.push("member.disabilityTypes");
-      } else if (DISABLING_MATCH.test(label)) {
+      } else if (!consumedBy.length && DISABLING_MATCH.test(label)) {
         draft.disabling = ev8(value);
         consumedBy.push("member.disabling");
-      } else if (HOH_NAME_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
+      } else if (!consumedBy.length && HOH_NAME_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
         if (isPlausibleName(value)) {
           const nameEV = ev8(value);
           upsertMember(nameEV);
           if (wins(hohName, nameEV)) hohName = nameEV;
           consumedBy.push("hohName");
         }
-      } else if (MEMBER_LIST_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
+      } else if (!consumedBy.length && MEMBER_LIST_MATCH.test(label) && !EXCLUDE_OTHER_PEOPLE.test(label)) {
         // Multi-member answers come through as newline or "·"-separated lists.
         for (const part of value.split(/\n|·/)) {
           const name = part.replace(/^[^:]*:\s*/, "").trim();
@@ -420,14 +565,28 @@ export function extractHousehold(
       }
 
       // ── slots (HoH person, household counts, housing) ──
-      for (const def of [...HOH_PERSON_SLOTS, ...HOUSEHOLD_SLOTS, ...HOUSING_SLOTS]) {
+      for (const def of [...HOH_PERSON_SLOTS, ...HOUSEHOLD_SLOTS, ...HOUSING_SLOTS, ...FINANCIAL_SLOTS]) {
+        if (indexed && ["dob", "gender", "citizenship", "phone", "email"].includes(def.key)) continue;
         if (!def.match.test(label)) continue;
         if (def.exclude?.test(label)) continue;
         if (def.valueOk && !def.valueOk(value)) continue;
         const isCount = def.key === "hhSize" || def.key === "adults" || def.key === "children";
-        const candidate = ev8(isCount ? normCount(value) : value);
+        const normalizedValue =
+          def.key === "dob" ? normalizeDob(value)
+            : def.key === "daysToVacate" ? remainingDays(value, submittedOn)
+              : isCount ? normCount(value) : value;
+        const candidate = ev8(normalizedValue);
         consumedBy.push(def.key);
-        if (wins(slotFound.get(def.key) ?? null, candidate)) slotFound.set(def.key, candidate);
+        const priority = def.key === "totalIncome"
+          ? /monthly income calculation/i.test(label) ? 3
+            : /total monthly income/i.test(label) ? 2
+              : 1
+          : 0;
+        const currentPriority = slotPriority.get(def.key) ?? -1;
+        if (priority > currentPriority || (priority === currentPriority && wins(slotFound.get(def.key) ?? null, candidate))) {
+          slotFound.set(def.key, candidate);
+          slotPriority.set(def.key, priority);
+        }
       }
 
       if (!consumedBy.length) {
@@ -485,6 +644,19 @@ export function extractHousehold(
     const parts = [slot("street")?.value, slot("city")?.value, slot("stateZip")?.value].filter(Boolean);
     address = { ...slot("street")!, value: parts.join(", ") };
   }
+  const decomposedAddress = addressParts(address);
+  if (address) {
+    const part = (key: string) => decomposedAddress.find((row) => row.key === key)?.found?.value || "";
+    const locality = [part("addressCity"), [part("addressState"), part("addressZip")].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    address = {
+      ...address,
+      value: [
+        part("addressStreet"),
+        part("addressUnit") ? `Unit ${part("addressUnit")}` : "",
+        locality,
+      ].filter(Boolean).join(", "),
+    };
+  }
 
   const household: SlotValue[] = [
     { key: "hhSize", label: "Household size", found: slot("hhSize") },
@@ -498,7 +670,29 @@ export function extractHousehold(
     { key: "daysToVacate", label: "Days until eviction", found: slot("daysToVacate") },
     { key: "monthlyRent", label: "Monthly rent", found: slot("monthlyRent") },
     { key: "backRent", label: "Back rent owed", found: slot("backRent") },
-    { key: "address", label: "Current address", found: address },
+    { key: "address", label: "Full unit address", found: address },
+    ...decomposedAddress,
+  ];
+
+  const financial: SlotValue[] = [
+    { key: "totalIncome", label: "Authoritative monthly income", found: slot("totalIncome") },
+    { key: "annualIncome", label: "Household annual income", found: slot("annualIncome") },
+    { key: "assetTotal", label: "Total assets", found: slot("assetTotal") },
+    { key: "monthlyHousingCost", label: "Monthly housing cost", found: slot("monthlyHousingCost") },
+    { key: "depositAmount", label: "Security deposit", found: slot("depositAmount") },
+    {
+      key: "arrearsAmount",
+      label: "Rent arrears",
+      found: /^y/i.test(slot("includeArrears")?.value || "") ? slot("proratedOrArrears") : slot("backRent"),
+    },
+    {
+      key: "proratedAmount",
+      label: "Prorated rent",
+      found: /^y/i.test(slot("includeArrears")?.value || "") ? null : slot("proratedOrArrears"),
+    },
+    { key: "tenantRentPayment", label: "Tenant rent payment", found: slot("tenantRentPayment") },
+    { key: "hrdcRentPayment", label: "HRDC rent payment", found: slot("hrdcRentPayment") },
+    { key: "utilityAllowance", label: "Utility allowance", found: slot("utilityAllowance") },
   ];
 
   // Compatibility slots for HoH-prefill consumers (CreateCustomerModal).
@@ -515,6 +709,7 @@ export function extractHousehold(
     members,
     household,
     housing,
+    financial,
     slots,
     unmatched: [...unmatched.values()],
     trace: [...trace].reverse(), // newest first for the export

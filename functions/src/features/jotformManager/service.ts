@@ -155,6 +155,10 @@ export async function linkSubmissionToCustomer(args: {
   customerName: string;
   cwId: string | null;
   alias: string | null;
+  normalizedCustomerInfo: {
+    date: string;
+    requestingDeterminationFor: string;
+  } | null;
   byUid: string | null;
 }): Promise<{ ok: true }> {
   if (!isValidId(args.formId) || !isValidId(args.submissionId)) throw Object.assign(new Error("invalid_id"), { code: 400 });
@@ -181,7 +185,38 @@ export async function linkSubmissionToCustomer(args: {
     const list = Array.isArray(meta.linkedSubmissions) ? (meta.linkedSubmissions as LinkedSubmissionRef[]) : [];
     const idx = list.findIndex((x) => String(x?.submissionId) === args.submissionId);
     const next = idx >= 0 ? list.map((x, i) => (i === idx ? { ...x, ...ref } : x)) : [...list, ref];
-    tx.set(cref, { meta: { ...meta, linkedSubmissions: next } }, { merge: true });
+    const normalized = args.formId === "251001226310030" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(args.normalizedCustomerInfo?.date || "") &&
+      Boolean(args.normalizedCustomerInfo?.requestingDeterminationFor)
+      ? {
+          date: args.normalizedCustomerInfo!.date,
+          requestingDeterminationFor: args.normalizedCustomerInfo!.requestingDeterminationFor.slice(0, 200),
+          sourceFormId: args.formId,
+          sourceSubmissionId: args.submissionId,
+          updatedAtISO: ref.linkedAt,
+        }
+      : null;
+    const priorNormalized =
+      data.normalizedCustomerInfo && typeof data.normalizedCustomerInfo === "object"
+        ? data.normalizedCustomerInfo as Record<string, unknown>
+        : {};
+    const priorDeterminations = Array.isArray(priorNormalized.determinations)
+      ? priorNormalized.determinations.filter((item) => item && typeof item === "object").slice(-49)
+      : [];
+    const determinations = normalized
+      ? [
+          ...priorDeterminations.filter(
+            (item) => String((item as Record<string, unknown>).sourceSubmissionId || "") !== args.submissionId,
+          ),
+          normalized,
+        ]
+      : priorDeterminations;
+    tx.set(cref, {
+      meta: { ...meta, linkedSubmissions: next },
+      ...(normalized
+        ? { normalizedCustomerInfo: { ...normalized, determinations } }
+        : {}),
+    }, { merge: true });
   });
 
   // 2) Derived reverse index (best-effort; rebuildable). Keyed by submissionId,

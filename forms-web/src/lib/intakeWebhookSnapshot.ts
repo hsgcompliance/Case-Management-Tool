@@ -55,7 +55,7 @@ function money(value: string): string {
   const match = String(value || "").replace(/,/g, "").match(/-?\d+(?:\.\d{1,2})?/);
   if (!match) return "";
   const amount = Number(match[0]);
-  return Number.isFinite(amount) && amount >= 0 ? String(amount) : "";
+  return Number.isFinite(amount) && amount > 0 ? String(amount) : "";
 }
 
 function isoDate(value: string): string {
@@ -88,6 +88,23 @@ export function extractAssistancePrefill(snapshot: IntakeWebhookSnapshot | null)
     });
     return hit?.value?.trim() || "";
   };
+  const pickMoney = (matches: RegExp[], excludes: RegExp[] = []): string => {
+    for (const field of fields) {
+      const label = field.label.trim();
+      if (!matches.some((match) => match.test(label)) || excludes.some((exclude) => exclude.test(label))) continue;
+      const amount = money(field.value);
+      if (amount) return amount;
+    }
+    return "";
+  };
+  const includeArrears = pick([/include arrears\?/i]);
+  const combinedRentAmount = pickMoney(
+    [/^prorated rent\s*\/\s*arrears/i],
+    [/month/i],
+  );
+  const explicitArrears = pickMoney([/arrears amount/i, /^rent arrears/i, /^back rent/i]);
+  const explicitProrated = pickMoney([/prorated.*amount/i, /^prorated rent$/i]);
+  const combinedIsArrears = /^y/i.test(includeArrears);
 
   const housing = snapshot.household.housing;
   return {
@@ -104,12 +121,15 @@ export function extractAssistancePrefill(snapshot: IntakeWebhookSnapshot | null)
     landlordAddress: pick([/landlord.*address/i, /property (owner|management).*address/i, /payee.*address/i]),
     unitAddress: slotValue(housing, "address") || pick([/unit address/i, /rental address/i, /address for current living/i]),
     monthlyRent: money(
-      pick([/hrdc (rent )?payment/i, /rental assistance amount/i, /^rent amount/i, /monthly rent/i]) ||
+      pick([/^hrdc.*payment/i, /rental assistance amount/i, /^rent amount/i, /monthly rent/i]) ||
         slotValue(housing, "monthlyRent"),
     ),
-    depositAmount: money(pick([/security deposit/i, /deposit amount/i])),
-    arrearsAmount: money(pick([/arrears amount/i, /rent arrears/i, /back rent/i]) || slotValue(housing, "backRent")),
-    proratedAmount: money(pick([/prorated.*amount/i, /prorated rent/i])),
-    utilityAmount: money(pick([/utility allowance/i, /utility assistance amount/i, /^utility amount/i])),
+    depositAmount: pickMoney([/security deposit/i, /deposit amount/i]),
+    arrearsAmount:
+      explicitArrears ||
+      (combinedIsArrears ? combinedRentAmount : "") ||
+      money(slotValue(housing, "backRent")),
+    proratedAmount: explicitProrated || (!combinedIsArrears ? combinedRentAmount : ""),
+    utilityAmount: pickMoney([/^utility allowance amount/i, /utility assistance amount/i, /^utility amount/i]),
   };
 }

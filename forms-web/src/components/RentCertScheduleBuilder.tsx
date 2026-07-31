@@ -278,7 +278,9 @@ function SinglePlanCard({
   const resolvedGrantId = plan.grantId || defaultGrantId;
   const lineItems = lineItemsForGrant(resolvedGrantId);
   const effectiveLineItemId = plan.lineItemId || (usingDefaultGrant ? defaultLineItemId : "");
-  const active = Boolean(plan.amount || plan.date || plan.lineItemId || plan.grantId);
+  // One-time assistance is optional. Dates/grant defaults may be prefilled for
+  // convenience, but the row only becomes required once it has a real amount.
+  const active = positiveNumber(plan.amount) > 0;
   const complete = active && positiveNumber(plan.amount) > 0 && isISO(plan.date) && Boolean(effectiveLineItemId);
   return (
     <div className={`rounded-lg border px-3 py-3 ${active ? (complete ? "border-emerald-300 bg-emerald-50/40" : "border-rose-300 bg-rose-50/40") : "border-slate-200 bg-white"}`}>
@@ -327,7 +329,8 @@ function MonthlyPlanCard({
   const resolvedGrantId = plan.grantId || defaultGrantId;
   const lineItems = lineItemsForGrant(resolvedGrantId);
   const effectiveLineItemId = plan.lineItemId || (usingDefaultGrant ? defaultLineItemId : "");
-  const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId || plan.grantId);
+  // Recurring periods are optional too; only an entered amount activates one.
+  const active = positiveNumber(plan.monthlyAmount) > 0;
   const complete = active && isISO(plan.firstDue) && positiveMonths(plan.months) > 0 && positiveNumber(plan.monthlyAmount) > 0 && Boolean(effectiveLineItemId);
   return (
     <div className={`rounded-lg border px-3 py-3 ${active ? (complete ? "border-emerald-300 bg-emerald-50/40" : "border-rose-300 bg-rose-50/40") : "border-slate-200 bg-white"}`}>
@@ -390,6 +393,7 @@ export function RentCertScheduleBuilder({
   const [hydratedCustomerId, setHydratedCustomerId] = useState("");
   const prefill = useMemo(() => extractAssistancePrefill(webhookSnapshot), [webhookSnapshot]);
   const lastPrefill = useRef("");
+  const submittedDraftLoaded = useRef(false);
 
   const loadEnrollments = useCallback(() => {
     if (!customer) {
@@ -443,6 +447,7 @@ export function RentCertScheduleBuilder({
     setResults(null);
     setApplyError(null);
     lastPrefill.current = "";
+    submittedDraftLoaded.current = Boolean(cached?.lastSubmittedSignature);
     setHydratedCustomerId(customer?.id || "");
   }, [customer?.id]);
 
@@ -481,7 +486,7 @@ export function RentCertScheduleBuilder({
 
   useEffect(() => {
     const key = JSON.stringify(prefill);
-    if (!webhookSnapshot || key === lastPrefill.current) return;
+    if (!webhookSnapshot || key === lastPrefill.current || submittedDraftLoaded.current) return;
     lastPrefill.current = key;
     setLandlord((current) => ({
       name: current.name || prefill.landlordName,
@@ -496,17 +501,17 @@ export function RentCertScheduleBuilder({
       deposit: {
         ...current.deposit,
         amount: current.deposit.amount || prefill.depositAmount,
-        date: current.deposit.date || prefill.assistanceStart,
+        date: current.deposit.date || (current.deposit.amount || prefill.depositAmount ? prefill.assistanceStart : ""),
       },
       prorated: {
         ...current.prorated,
         amount: current.prorated.amount || prefill.proratedAmount,
-        date: current.prorated.date || prefill.assistanceStart,
+        date: current.prorated.date || (current.prorated.amount || prefill.proratedAmount ? prefill.assistanceStart : ""),
       },
       arrears: {
         ...current.arrears,
         amount: current.arrears.amount || prefill.arrearsAmount,
-        date: current.arrears.date || prefill.assistanceStart,
+        date: current.arrears.date || (current.arrears.amount || prefill.arrearsAmount ? prefill.assistanceStart : ""),
       },
     }));
     if (prefill.monthlyRent) {
@@ -581,7 +586,7 @@ export function RentCertScheduleBuilder({
       return { grantId, lineItemId, items: lineItemsForGrant(grantId) };
     };
     const addSingle = (plan: SinglePlan) => {
-      const active = Boolean(plan.amount || plan.date || plan.lineItemId || plan.grantId);
+      const active = positiveNumber(plan.amount) > 0;
       if (!active) return;
       const amount = positiveNumber(plan.amount);
       const { grantId, lineItemId, items } = resolveRow(plan);
@@ -596,7 +601,7 @@ export function RentCertScheduleBuilder({
       rows.push({ key: plan.kind, type: plan.kind, label: SINGLE_LABELS[plan.kind], dueDate: plan.date, amount, grantId, lineItemId });
     };
     const addMonthly = (plan: MonthlyPlan) => {
-      const active = Boolean(plan.firstDue || plan.months || plan.monthlyAmount || plan.lineItemId || plan.grantId);
+      const active = positiveNumber(plan.monthlyAmount) > 0;
       if (!active) return;
       const amount = positiveNumber(plan.monthlyAmount);
       const months = positiveMonths(plan.months);
@@ -627,25 +632,65 @@ export function RentCertScheduleBuilder({
     rentPlans.forEach(addMonthly);
     utilityPlans.forEach(addMonthly);
     if (!rows.length) issues.push("Add at least one complete payment row or recurring period.");
-    if (!vendor.trim()) issues.push("Default vendor / payee is required.");
 
-    const seen = new Set<string>();
+    const seen = new Map<string, PreviewRow>();
     for (const row of rows) {
       const family = row.type === "monthly" && row.sub === "utility" ? "utility" : row.type === "deposit" ? "deposit" : "landlord";
       const key = `${row.grantId}:${family}:${row.dueDate.slice(0, 7)}`;
-      if (seen.has(key)) issues.push(`Two ${family} payments overlap in ${row.dueDate.slice(0, 7)} on the same grant. Adjust the periods.`);
-      seen.add(key);
+      const previous = seen.get(key);
+      if (previous) {
+        const month = row.dueDate.slice(0, 7);
+        const grantName = programsById.get(row.grantId)?.grantName || row.grantId;
+        issues.push(
+          `${previous.label} (${money(previous.amount)} on ${previous.dueDate}) and ${row.label} (${money(row.amount)} on ${row.dueDate}) both create ${family} assistance for ${month} on ${grantName}. Only one ${family} payment is allowed per grant and service month; recurring rent must begin after any prorated rent or arrears month.`,
+        );
+      } else {
+        seen.set(key, row);
+      }
       const enrollment = enrollmentByGrantId.get(row.grantId);
       if (enrollment) {
         const conflict = findConflict(row, enrollment.payments, sourceSubmissionId);
         if (conflict && !conflict.sameSource) issues.push(`${row.label}: ${describeConflict(conflict)}.`);
       }
     }
+    const landlordRows = rows.filter(
+      (row) => (row.type === "monthly" && row.sub !== "utility") || row.type === "prorated" || row.type === "arrears",
+    );
+    for (let left = 0; left < landlordRows.length; left += 1) {
+      for (let right = left + 1; right < landlordRows.length; right += 1) {
+        const a = landlordRows[left];
+        const b = landlordRows[right];
+        if (a.dueDate.slice(0, 7) !== b.dueDate.slice(0, 7)) continue;
+        const oneRecurring = a.type === "monthly" || b.type === "monthly";
+        const onePartial = ["prorated", "arrears"].includes(a.type) || ["prorated", "arrears"].includes(b.type);
+        if (!oneRecurring || !onePartial || a.grantId === b.grantId) continue;
+        issues.push(
+          `${a.label} (${money(a.amount)} on ${a.dueDate}) conflicts with ${b.label} (${money(b.amount)} on ${b.dueDate}). Recurring rent cannot share service month ${a.dueDate.slice(0, 7)} with prorated rent or arrears, even when the rows use different grants.`,
+        );
+      }
+    }
     return { rows, issues: [...new Set(issues)] };
-  }, [defaultGrantId, defaultLineItemId, enrollmentByGrantId, lineItemsForGrant, rentPlans, singles, sourceSubmissionId, utilityPlans, vendor]);
+  }, [defaultGrantId, defaultLineItemId, enrollmentByGrantId, lineItemsForGrant, programsById, rentPlans, singles, sourceSubmissionId, utilityPlans]);
 
   const paymentReady = enrollmentReady && schedule.rows.length > 0 && schedule.issues.length === 0;
   const total = schedule.rows.reduce((sum, row) => sum + row.amount, 0);
+  const createdCount = results?.filter((result) => result.status === "created").length ?? 0;
+  const alreadyAppliedCount = results?.filter((result) => result.status === "already_applied").length ?? 0;
+  const existingPaymentRows = useMemo(
+    () => selectedGrantIds.flatMap((grantId) => {
+      const enrollment = enrollmentByGrantId.get(grantId);
+      if (!enrollment) return [];
+      return enrollment.payments
+        .filter((payment) => !payment.void)
+        .map((payment) => ({
+          ...payment,
+          enrollmentId: enrollment.id,
+          grantId,
+          grantName: programsById.get(grantId)?.grantName || enrollment.grantName || grantId,
+        }));
+    }).sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
+    [enrollmentByGrantId, programsById, selectedGrantIds],
+  );
 
   const addGrant = (grantId: string) => {
     if (!grantId || selectedGrantIds.includes(grantId)) return;
@@ -724,7 +769,28 @@ export function RentCertScheduleBuilder({
         rows,
       });
       setResults(response.results);
-      setLastSubmittedSignature(currentSignature);
+      const unsuccessful = response.results.filter((result) => result.status !== "created" && result.status !== "already_applied");
+      if (unsuccessful.length) {
+        setApplyError(
+          `${unsuccessful.length} payment row${unsuccessful.length === 1 ? "" : "s"} could not be applied (${[...new Set(unsuccessful.map((result) => result.status.replace(/_/g, " ")))].join(", ")}). No duplicate rows were created; review the conflicts above and submit again.`,
+        );
+      } else {
+        setLastSubmittedSignature(currentSignature);
+        submittedDraftLoaded.current = true;
+        const persisted: RentCertDraft = {
+          version: 2,
+          selectedGrantIds,
+          defaultGrantId,
+          defaultLineItemId,
+          vendor,
+          landlord,
+          singles,
+          rentPlans,
+          utilityPlans,
+          lastSubmittedSignature: currentSignature,
+        };
+        try { localStorage.setItem(draftStorageKey(customer.id), JSON.stringify(persisted)); } catch { /* ignore */ }
+      }
       loadEnrollments();
     } catch (error) {
       setApplyError(error instanceof Error ? error.message : String(error));
@@ -888,7 +954,7 @@ export function RentCertScheduleBuilder({
             label="Default line item (required unless every row overrides)"
             allowDefault={false}
           />
-          <Field label="Default vendor / payee (required)" value={vendor} onChange={setVendor} placeholder="Landlord or property company" />
+          <Field label="Default vendor / payee (optional)" value={vendor} onChange={setVendor} placeholder="Landlord or property company" />
         </div>
 
         <div className="space-y-2">
@@ -943,8 +1009,44 @@ export function RentCertScheduleBuilder({
         </div>
 
         <div className="mt-4 rounded-lg border border-slate-200 bg-white px-3 py-3">
+          <div className="mb-3">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Existing payments</div>
+              <div className="text-xs text-slate-500">{existingPaymentRows.length} row{existingPaymentRows.length === 1 ? "" : "s"}</div>
+            </div>
+            {existingPaymentRows.length ? (
+              <div className="max-h-48 overflow-auto rounded-md border border-slate-100">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-400">
+                    <tr>
+                      <th className="px-2 py-1">Date</th>
+                      <th>Type</th>
+                      {showGrantSelect ? <th>Grant</th> : null}
+                      <th className="text-right">Amount</th>
+                      <th className="px-2 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {existingPaymentRows.map((payment) => (
+                      <tr key={`${payment.enrollmentId}:${payment.id}`}>
+                        <td className="px-2 py-1">{payment.dueDate}</td>
+                        <td>{payment.sub || payment.type}</td>
+                        {showGrantSelect ? <td>{payment.grantName}</td> : null}
+                        <td className="text-right font-medium">{money(payment.amount)}</td>
+                        <td className="px-2 text-right">{payment.paid ? "Paid" : "Open"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-400">
+                No existing payments on the selected enrollment{selectedGrantIds.length === 1 ? "" : "s"}.
+              </div>
+            )}
+          </div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Schedule preview</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Proposed schedule</div>
             <div className="text-xs text-slate-700"><b>{schedule.rows.length}</b> rows · <b>{money(total)}</b></div>
           </div>
           {schedule.issues.length ? (
@@ -994,9 +1096,11 @@ export function RentCertScheduleBuilder({
           </button>
         </div>
         {applyError ? <div className="mt-2 text-xs text-rose-700">Submit failed: {applyError}</div> : null}
-        {results ? (
+        {results && !applyError ? (
           <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-            ✓ {results.filter((result) => result.status === "created").length} payment row{results.filter((result) => result.status === "created").length === 1 ? "" : "s"} created. Enrollment response was resolved before schedule creation; queue projections are syncing.
+            ✓ {createdCount} payment row{createdCount === 1 ? "" : "s"} created
+            {alreadyAppliedCount ? `; ${alreadyAppliedCount} already applied from this intake and safely skipped` : ""}.
+            Enrollment response was resolved before schedule creation; queue projections are syncing.
           </div>
         ) : null}
       </section>

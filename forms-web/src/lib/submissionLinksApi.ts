@@ -18,6 +18,10 @@ export async function linkSubmission(args: {
   customerName: string;
   cwId: string | null;
   alias?: string | null;
+  normalizedCustomerInfo?: {
+    date: string;
+    requestingDeterminationFor: string;
+  } | null;
 }): Promise<void> {
   await postAuthed("customerLinkSubmission", args);
 }

@@ -146,6 +146,19 @@ function shortTime(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function eligibilityCustomerInfo(ev: WebhookEventDetail): {
+  date: string;
+  requestingDeterminationFor: string;
+} | null {
+  if (ev.formId !== "251001226310030") return null;
+  const value = (pattern: RegExp) => ev.fields.find((field) => pattern.test(field.label.trim()))?.value?.trim() || "";
+  const rawDate = value(/^date$/i);
+  const iso = rawDate.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  const date = iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : "";
+  const requestingDeterminationFor = value(/^requesting determination for:?$/i);
+  return date && requestingDeterminationFor ? { date, requestingDeterminationFor } : null;
+}
+
 function CopyButton({ text, small = false }: { text: string; small?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -173,24 +186,12 @@ function MatchDot({ match }: { match: NameMatch }) {
   return <span title={title} className={`inline-block h-2 w-2 shrink-0 rounded-full ${cls}`} />;
 }
 
-function DocBadge() {
-  return (
-    <span
-      title="Document-verified (Eligibility / Rent Determination)"
-      className="inline-flex shrink-0 items-center rounded bg-emerald-100 px-1 text-[9px] font-bold uppercase text-emerald-700"
-    >
-      ✓ doc
-    </span>
-  );
-}
-
 function ValueRow({ label, found }: { label: string; found: ExtractedValue | null }) {
   return (
     <div className="border-b border-slate-100 py-1.5 last:border-0">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-slate-400">
           {label}
-          {found?.verified ? <DocBadge /> : null}
         </span>
         {found ? <CopyButton text={found.value} small /> : null}
       </div>
@@ -214,10 +215,17 @@ function SectionTitle({ children }: { children: ReactNode }) {
 
 /** A group of slot rows (Household / Housing). */
 function SlotGroup({ title, rows }: { title: string; rows: SlotValue[] }) {
+  const countRows = title === "Household" ? rows.filter((row) => ["hhSize", "adults", "children"].includes(row.key)) : [];
+  const remainingRows = countRows.length ? rows.filter((row) => !countRows.some((count) => count.key === row.key)) : rows;
   return (
     <div>
       <SectionTitle>{title}</SectionTitle>
-      {rows.map((s) => (
+      {countRows.length ? (
+        <div className="mt-1 grid grid-cols-3 gap-1 rounded-lg border border-slate-100 bg-slate-50 px-2">
+          {countRows.map((s) => <ValueRow key={s.key} label={s.label} found={s.found} />)}
+        </div>
+      ) : null}
+      {remainingRows.map((s) => (
         <ValueRow key={s.key} label={s.label} found={s.found} />
       ))}
     </div>
@@ -252,7 +260,6 @@ function MiniRow({ label, found, suffix }: { label: string; found: ExtractedValu
     <div className="flex items-start justify-between gap-2 py-0.5">
       <div className="min-w-0">
         <span className="text-[10px] uppercase tracking-wide text-slate-400">{label} </span>
-        {found.verified ? <DocBadge /> : null}
         <div className="whitespace-pre-wrap break-words text-xs font-medium text-slate-800" title={found.sourceFormTitle}>
           {found.value}
           {suffix ? <span className="font-normal text-slate-400"> {suffix}</span> : null}
@@ -269,7 +276,7 @@ function MemberGroupTitle({ children }: { children: ReactNode }) {
 
 /** One household member: name copies + demographic / contact / income / asset groups. */
 function MemberCard({ m }: { m: HouseholdMember }) {
-  const hasDemo = m.dob || m.gender || m.citizenship || m.disabling || m.disabilityTypes;
+  const hasDemo = m.dob || m.gender || m.citizenship || m.disabling || m.disabilityTypes || m.studentStatus;
   return (
     <div className={`rounded-lg border p-2 ${m.isHoH ? "border-indigo-200 bg-indigo-50/40" : "border-slate-200"}`}>
       <div className="flex items-center gap-1.5">
@@ -301,6 +308,7 @@ function MemberCard({ m }: { m: HouseholdMember }) {
           <MiniRow label="Citizenship" found={m.citizenship} />
           <MiniRow label="Disabling condition" found={m.disabling} />
           <MiniRow label="Disability types" found={m.disabilityTypes} />
+          <MiniRow label="Full-time student" found={m.studentStatus} />
         </>
       ) : null}
 
@@ -342,11 +350,13 @@ export function WebhooksSidebar({
   formIds,
   /** Bump to trigger near-term refreshes (e.g. when the embed detects a submit). */
   refreshKey = 0,
+  sessionResetKey = 0,
   receivedSubmission,
   onSnapshot,
 }: {
   formIds: string[];
   refreshKey?: number;
+  sessionResetKey?: number;
   receivedSubmission?: JfSubmission | null;
   onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
 }) {
@@ -463,6 +473,12 @@ export function WebhooksSidebar({
     setManualExc(new Set());
     setBrowserSubmissionIds(new Set());
   };
+  const lastSessionResetKey = useRef(sessionResetKey);
+  useEffect(() => {
+    if (lastSessionResetKey.current === sessionResetKey) return;
+    lastSessionResetKey.current = sessionResetKey;
+    resetSession();
+  }, [sessionResetKey]);
 
   const formIdsKey = formIds.join(",");
   const loadScope = `${formIdsKey}|${sessionStartISO}`;
@@ -651,6 +667,7 @@ export function WebhooksSidebar({
           customerId: customer.id,
           customerName: customer.name,
           cwId: customer.cwId,
+          normalizedCustomerInfo: eligibilityCustomerInfo(ev),
         });
         setLinks((cur) => {
           const forForm = { ...(cur[ev.formId] ?? {}) };
@@ -821,6 +838,7 @@ export function WebhooksSidebar({
     };
     pushSlots("Household", household.household);
     pushSlots("Housing", household.housing);
+    pushSlots("Financial", household.financial);
     if (household.members.length) {
       lines.push("Members");
       for (const m of household.members) {
@@ -830,6 +848,7 @@ export function WebhooksSidebar({
           m.dob ? `DOB ${m.dob.value}${m.age != null ? ` (${m.age})` : ""}` : null,
           m.gender?.value ?? null,
           m.disabling ? `Disabling: ${m.disabling.value}${m.disabilityTypes ? ` (${m.disabilityTypes.value})` : ""}` : null,
+          m.studentStatus ? `Full-time student: ${m.studentStatus.value}` : null,
           m.phone?.value ?? null,
           m.email?.value ?? null,
         ].filter(Boolean);
@@ -869,6 +888,7 @@ export function WebhooksSidebar({
       normalized: {
         household: slotObj(household.household),
         housing: slotObj(household.housing),
+        financial: slotObj(household.financial),
         headOfHousehold: slotObj(household.slots),
         members: household.members.map((m) => ({
           name: m.name, // { full, first, last }
@@ -881,6 +901,7 @@ export function WebhooksSidebar({
             citizenship: val(m.citizenship),
             disabling: val(m.disabling),
             disabilityTypes: val(m.disabilityTypes),
+            studentStatus: val(m.studentStatus),
           },
           contact: { phone: val(m.phone), email: val(m.email) },
           income: m.incomes.map((i) => ({ source: val(i.source), amountMonthly: val(i.amountMonthly) })),
@@ -1158,6 +1179,7 @@ export function WebhooksSidebar({
 
               <SlotGroup title="Household" rows={household.household} />
               <SlotGroup title="Housing" rows={household.housing} />
+              <SlotGroup title="Financial" rows={household.financial} />
 
               <div className="border-t border-slate-100 pt-2">
                 <button
@@ -1193,9 +1215,8 @@ export function WebhooksSidebar({
                 One household model, merged continuously from the forms this session (since{" "}
                 {shortTime(sessionStartISO) || "start"}) that name-match the anchor — concurrent intakes by other
                 staff are excluded automatically (override above or in Raw). Everything through the workbook step
-                is self-declared; <span className="font-semibold text-emerald-500">✓ doc</span> values come from
-                the Eligibility / Rent Determination forms (paystubs, bank statements) and outrank self-declared
-                answers. Unmatched fields land above for mapping troubleshooting.
+                is self-declared; Eligibility / Rent Determination values outrank self-declared answers.
+                Unmatched fields land above for mapping troubleshooting.
               </p>
             </div>
           ) : (
