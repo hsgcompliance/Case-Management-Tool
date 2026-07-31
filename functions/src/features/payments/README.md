@@ -7,6 +7,128 @@ This is the backend/source-of-truth catalog for payment endpoints in this repo.
 - Endpoint req/resp aliases: `contracts/src/endpointMap.ts`
 - Runtime schema re-export used by functions: `functions/src/features/payments/schemas.ts`
 
+## Payment Queue And Ledger Invariants
+
+The invoicing tool combines three charge groups with separate display subtypes
+and workflow status:
+
+- Charge group/filter: `Enrollment`, `Invoice`, or `Credit Card`.
+- Enrollment display subtype: `Arrears`, `Deposit`, `Prorated`, or `Rent`.
+- Workflow status remains independent: projected/paid plus compliance states such
+  as Needs HMIS, Needs CW, Posted, and Data Entry Complete.
+- Closed/deleted grants are historical and are excluded from the operational
+  invoicing table and reconciliation warnings.
+
+The global `ledger` collection remains authoritative for posted spend. Pending
+enrollment or payment-queue rows remain authoritative for projections.
+
+### Queue posting and retry safety
+
+- Credit-card and invoice queue rows use deterministic ledger document IDs:
+  `pqledger_<paymentQueueId>`.
+- The ledger entry also stores the queue transaction identity at
+  `origin.paymentQueueId` and `origin.sourcePath`.
+- `paymentQueuePostToLedger` verifies that a linked ledger document exists before
+  treating a queue row as posted.
+- If a ledger row exists but the queue row is open or has lost its link, the
+  normal row-level Post action repairs `queueStatus` and `ledgerEntryId` without
+  creating another spend.
+- If a queue row says it is posted but its ledger document is missing, the same
+  Post action recreates the missing deterministic ledger row and relinks it.
+- Posting validates caller organization, grant ownership, line-item existence,
+  and line-item locks before creating new spend.
+- Manual invoice/credit-card overrides first create the deterministic ledger row,
+  then call the normal post endpoint. If the second call fails, the UI reports
+  that the ledger entry was saved and instructs the user to retry the row-level
+  Post action.
+
+Do not create a second manual ledger entry to repair an open queue row. Retry the
+row-level Post action so the existing transaction identity is reused.
+
+### Reversals
+
+- Every new compensating entry must set `reversalOf` to the original ledger ID.
+- Manual reversal entries also include a `reversalOf:<ledgerId>` label for
+  search/backward-compatible reconciliation.
+- Do not represent a reversal only in free-text notes. Reconciliation pairing
+  relies on the explicit ID.
+
+### Payment deletion
+
+- Paid payment deletion is one packaged operation: write the compensating ledger
+  reversal, remove enrollment spend mirrors, and recalculate the grant budget.
+- The backend rejects paid deletion when budget reversal is not requested.
+- "Delete all unpaid payments" preserves paid history.
+- Spend mirror cleanup is automatic; the UI no longer exposes independent
+  combinations that could orphan an authoritative ledger row.
+- After deletion, the backend runs the canonical grant recompute from ledger and
+  remaining projections before returning.
+
+### Budget previews and recomputation
+
+- Moving a pending queue item to the ledger is previewed as `spent +amount` and
+  `projected -amount`; projected remaining therefore does not double-count the
+  transaction.
+- Standalone manual ledger entries preview only the spent/balance change.
+- Manual ledger creation, queue post/reopen, and payment deletion synchronously
+  request canonical grant budget recomputation. Firestore triggers remain an
+  idempotent safety net rather than the only path.
+
+## Operator Recovery Playbook
+
+For an invoice or credit-card row that appears open even though a ledger entry
+was created:
+
+1. Open the row and confirm its grant and line item.
+2. Use the row-level `Post Invoice` or `Post Credit Card` action.
+3. The backend locates the deterministic or legacy ledger row by
+   `origin.paymentQueueId`, relinks the queue row, and recalculates the grant.
+4. If the action reports multiple ledger entries for one queue ID, stop. Review
+   the duplicate pair before reversing anything; the backend intentionally will
+   not choose between duplicates.
+
+For a partial `Mark Past Payments Complete` result, the success/failure toast
+reports how many payments completed and identifies failed due dates. Successful
+payments stay posted; failed payments remain unpaid and can be retried.
+
+## 2026-07 Payment/Invoice Handoff
+
+Implemented in commit `8e89317` (`fix(payments): harden ledger posting and reversals`).
+
+Verification completed on the development Mac:
+
+- Contracts build/update passed.
+- Functions TypeScript passed with `--incremental false`.
+- All changed web payment/spending files produced no TypeScript errors.
+- 29 focused spending, presentation, reconciliation, and hardening tests passed.
+- Full repository web TypeScript still reports unrelated pre-existing errors.
+- The full Next production build and one lint run stalled in idle workers without
+  emitting a code error; rerun them on the primary workstation.
+- Graphify was unavailable in this environment (`ModuleNotFoundError`).
+
+Primary-workstation pickup:
+
+1. Pull commit `8e89317` and this handoff update after they are pushed.
+2. Run `npm run contracts:update` if vendor artifacts need regeneration.
+3. Run `npx tsc -p functions/tsconfig.json --noEmit --incremental false`.
+4. Run the focused web tests:
+   `npx vitest run src/features/widgets/spending/paymentHardening.test.ts src/features/widgets/spending/spendingPresentation.test.ts src/features/widgets/spending/spendingReconciliation.test.ts --pool=threads --maxWorkers=1 --no-file-parallelism --no-isolate` from `web/`.
+5. Run `npm run build:web` on the primary workstation.
+6. Deploy the changed Functions and web hosting through the safe repository
+   scripts, then smoke-test one invoice post, one credit-card post, one repair
+   retry, one reversal pair, and one paid-payment deletion.
+
+Remaining follow-up:
+
+- Row-level posting performs orphan/link repair. Bulk designate/post already uses
+  deterministic IDs, but it does not perform the legacy `origin.paymentQueueId`
+  repair lookup. Use the row-level Post action for known unsynced transactions;
+  extend bulk repair separately if operators need mass recovery.
+- Zod defaults in several older endpoint contracts are inferred as required
+  output properties in frontend request types. Runtime parsing is safe, and the
+  touched payment callers now pass the fields explicitly, but a future contract
+  cleanup should distinguish `z.input` request types from parsed output types.
+
 ## Endpoints
 
 ### `paymentsGenerateProjections`
