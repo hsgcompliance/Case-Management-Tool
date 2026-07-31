@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { INTAKE_TYPES, intakeTypesLabel, type FormDef, type IntakeFlowStep, type IntakeTypeId } from "@/lib/formsCatalog";
-import { removeIntakeSession, upsertIntakeSession } from "@/lib/intakeSessions";
+import { removeIntakeSession, upsertIntakeSession, type IntakeSession } from "@/lib/intakeSessions";
 import { loadCustomers, setCustomerTssStatus, type FormsCustomer } from "@/lib/customersApi";
 import { getCustomerDetail, type CustomerDetail } from "@/lib/customerDetailApi";
 import { loadDriveReadinessInputs, type DriveFolderIndexEntry, type FormsDriveConfig } from "@/lib/driveReadinessApi";
@@ -22,8 +22,12 @@ import { ExternalServiceIcon } from "./ui";
 import { ToolWidget } from "./ToolWidget";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
 import { extractAmiPrefill } from "@/lib/intakeWebhookSnapshot";
-import { listRemoteIntakeFlows, saveRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
+import { confirmEligibilityHandoff, listRemoteIntakeFlows, saveRemoteIntakeFlow } from "@/lib/intakeFlowsApi";
 import type { JfSubmission } from "@/lib/jotformManagerApi";
+import { IntakeActionsMenu } from "./IntakeActionsMenu";
+
+/** Step 13 — Eligibility Determination Request; triggers the compliance hand-off. */
+const ELIGIBILITY_DETERMINATION_FORM_ID = "251001226310030";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
 
@@ -456,6 +460,21 @@ export function FormsCategoryView({
     setReceivedSubmission(submission);
   }, []);
 
+  const [complianceConfirmedFor, setComplianceConfirmedFor] = useState<string | null>(null);
+  const [complianceConfirming, setComplianceConfirming] = useState(false);
+  const handleConfirmCompliance = useCallback(async (submissionId: string) => {
+    if (!customer?.id) return;
+    setComplianceConfirming(true);
+    try {
+      await confirmEligibilityHandoff(customer.id, submissionId);
+      setComplianceConfirmedFor(submissionId);
+    } catch (err) {
+      window.alert(`Could not confirm hand-off: ${err instanceof Error ? err.message : "unknown error"}`);
+    } finally {
+      setComplianceConfirming(false);
+    }
+  }, [customer?.id]);
+
   // Backend writes are resume checkpoints, not the live source of truth. Save
   // once when Steps 7, 13, and 17 are reached, and only when progress changed.
   const resumeCheckpoint =
@@ -639,8 +658,40 @@ export function FormsCategoryView({
       </div>
     );
 
+    const isEligibilityStep = step.formId === ELIGIBILITY_DETERMINATION_FORM_ID;
+    const eligibilitySubmissionId = isEligibilityStep
+      ? latestSubmissionByFormId.get(step.formId!)?.submissionId ?? null
+      : null;
+    const eligibilityConfirmed = !!eligibilitySubmissionId && complianceConfirmedFor === eligibilitySubmissionId;
+
+    // Lets any CM save/hand off from wherever they are in the flow, not just
+    // the 3 automatic checkpoints. Requires a linked customer (same as the
+    // backend save/transfer endpoints).
+    const menuSession: IntakeSession | null = customer?.id
+      ? {
+          customerId: customer.id,
+          customerName: customer.name ?? null,
+          cwId: customer.cwId ?? null,
+          dob: customer.dob ?? null,
+          caseManagerName: customer.caseManagerName ?? null,
+          intakeType: progress.intakeTypes?.[0] ?? null,
+          intakeTypes: progress.intakeTypes ?? [],
+          doneCount,
+          totalSteps: steps.length,
+          startedAtISO: flowStartedAtRef.current,
+          updatedAtISO: new Date().toISOString(),
+        }
+      : null;
+
     return withSidebar(
       <div className="space-y-3">
+        {menuSession ? (
+          <IntakeActionsMenu
+            session={menuSession}
+            progress={progress}
+            onSent={() => setView({ kind: "list" })}
+          />
+        ) : null}
         <button
           type="button"
           onClick={() => setView({ kind: "list" })}
@@ -928,6 +979,25 @@ export function FormsCategoryView({
                   onSubmitted={handleSubmitted}
                   onSubmissionReceived={handleSubmissionReceived}
                 />
+                {isEligibilityStep && customer?.id ? (
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span className="text-xs text-slate-500">
+                      {eligibilityConfirmed
+                        ? "✓ Sent to compliance."
+                        : eligibilitySubmissionId
+                          ? "Submitted — confirm the hand-off to Compliance."
+                          : "Submit the form above first to enable this."}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!eligibilitySubmissionId || complianceConfirming || eligibilityConfirmed}
+                      onClick={() => eligibilitySubmissionId && handleConfirmCompliance(eligibilitySubmissionId)}
+                      className="shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                      {eligibilityConfirmed ? "Sent ✓" : "Continue intake / Send to compliance"}
+                    </button>
+                  </div>
+                ) : null}
               </div>
               {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
             </div>

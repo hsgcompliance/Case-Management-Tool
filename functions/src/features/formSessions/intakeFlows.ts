@@ -26,6 +26,10 @@ const Session = z.object({
 const SaveBody = z.object({ session: Session, progress: Progress });
 const TransferBody = SaveBody.extend({ targetUid: z.string().trim().min(1).max(200) });
 const DeleteBody = z.object({ customerId: z.string().trim().min(1).max(200) });
+const EligibilityConfirmBody = z.object({
+  customerId: z.string().trim().min(1).max(200),
+  submissionId: z.string().trim().min(1).max(100),
+});
 
 function orgFor(caller: Record<string, unknown>): string {
   return normId(orgIdFromClaims(caller) || requireOrg(caller));
@@ -204,4 +208,69 @@ export const formsIntakeFlowDelete_http = secureHandler(async (req, res) => {
   });
 
   res.status(200).json({ ok: true, deleted });
+}, { auth: "user", methods: ["POST", "OPTIONS"] });
+
+/**
+ * Manual backstop for the step-13 (Eligibility Determination) compliance
+ * hand-off: the CM clicks "Continue intake / Send to compliance" after
+ * submitting, which force-writes the same userTasks doc the async webhook
+ * sync would eventually produce (same doc id, so whichever writes first is
+ * harmless — the other just re-confirms the same task).
+ */
+export const intakeEligibilityConfirm_http = secureHandler(async (req, res) => {
+  const body = EligibilityConfirmBody.parse(req.body || {});
+  const caller = req.user! as Record<string, unknown>;
+  const orgId = orgFor(caller);
+  await assertCustomerInOrg(body.customerId, orgId);
+
+  const customerSnap = await db.collection("customers").doc(body.customerId).get();
+  const customerData = (customerSnap.data() || {}) as Record<string, unknown>;
+  const customerName = String(customerData.name || "") || null;
+  const cmUid = String(customerData.caseManagerId || "") || null;
+  const secondaryCmUid = String(customerData.secondaryCaseManagerId || "") || null;
+
+  const rule = FORM_WORKFLOW_TASK_RULES.eligibilityReview;
+  const utid = `jotform|${body.submissionId}`;
+  const ref = db.collection("userTasks").doc(utid);
+  const existing = await ref.get();
+  const isNew = !existing.exists;
+  const now = isoNow();
+
+  await ref.set({
+    utid,
+    source: "jotform",
+    ...(isNew ? { status: "open" } : {}),
+    orgId,
+    teamIds: [orgId],
+    enrollmentId: null,
+    clientId: body.customerId,
+    grantId: null,
+    sourcePath: `jotformSubmissions/${body.submissionId}`,
+    sourceId: body.submissionId,
+    dueDate: null,
+    dueMonth: null,
+    assignedToUid: null,
+    assignedToGroup: "compliance",
+    cmUid,
+    secondaryCmUid,
+    notify: true,
+    workItemKind: "intake",
+    workflowRef: {
+      type: "intake",
+      instanceId: body.customerId,
+      stage: "eligibility_follow_up",
+      customerId: body.customerId,
+      enrollmentId: null,
+      formId: rule.formId,
+    },
+    title: `${rule.title} - ${customerName || body.customerId}`,
+    subtitle: null,
+    labels: ["jotform", "intake-step-13", "compliance-handoff"],
+    ...(isNew ? { completedAtISO: null, createdAtISO: now } : {}),
+    customerName,
+    updatedAtISO: now,
+    system: { lastWriter: "intakeEligibilityConfirm", lastWriteAt: now },
+  }, { merge: true });
+
+  res.status(200).json({ ok: true, id: ref.id });
 }, { auth: "user", methods: ["POST", "OPTIONS"] });

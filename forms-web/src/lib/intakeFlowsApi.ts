@@ -33,3 +33,8 @@ export function transferIntakeFlow(targetUid: string, session: IntakeSession, pr
 export function deleteRemoteIntakeFlow(customerId: string) {
   return postAuthed<{ ok: true; deleted: boolean }>("formsIntakeFlowDelete", { customerId });
 }
+
+/** Manual backstop confirming the step-13 compliance hand-off happened. */
+export function confirmEligibilityHandoff(customerId: string, submissionId: string) {
+  return postAuthed<{ ok: true; id: string }>("intakeEligibilityConfirm", { customerId, submissionId });
+}

@@ -25,4 +25,5 @@ export {
   formsIntakeFlowSave_http as formsIntakeFlowSave,
   formsIntakeFlowTransfer_http as formsIntakeFlowTransfer,
   formsIntakeFlowDelete_http as formsIntakeFlowDelete,
+  intakeEligibilityConfirm_http as intakeEligibilityConfirm,
 } from "./intakeFlows";
