@@ -9,7 +9,7 @@
  * - Deploy only missing functions + all hosting targets:
  *   `node scripts/deploy-missing-functions-and-hosting.mjs housing-db-v2 --hosting-all`
  */
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,10 +33,18 @@ if (!process.env.FUNCTIONS_DISCOVERY_TIMEOUT) {
   process.env.FUNCTIONS_DISCOVERY_TIMEOUT = "120";
 }
 
+function deployChildEnv(sourceEnv = process.env) {
+  const env = { ...sourceEnv };
+  // Prevent firebase-tools from interpreting a generic workstation DEBUG
+  // setting as permission to print raw API responses/function descriptors.
+  delete env.DEBUG;
+  return env;
+}
+
 function run(cmd, args, { allowFailure = false, cwd = ROOT, env = process.env } = {}) {
   const result = spawnSync(cmd, args, {
     cwd,
-    env,
+    env: deployChildEnv(env),
     stdio: "inherit",
     shell: process.platform === "win32",
     encoding: "utf8",
@@ -63,11 +71,23 @@ function getLocalFunctionNames() {
 }
 
 function getDeployedFunctionNames() {
-  const raw = execSync(
-    `gcloud functions list --project ${PROJECT} --format="value(name)"`,
-    { cwd: ROOT, encoding: "utf8" }
+  const result = spawnSync(
+    "gcloud",
+    ["functions", "list", "--project", PROJECT, "--format=value(name)"],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: deployChildEnv(),
+    },
   );
-  return raw
+  if (result.error || result.status !== 0) {
+    // Do not echo failed command output: gcloud may return partial function
+    // descriptors containing ordinary environment variables.
+    throw new Error("Unable to list deployed functions. Refresh gcloud auth and retry.");
+  }
+  return String(result.stdout || "")
     .replace(/\r/g, "")
     .split("\n")
     .map((s) => s.trim())

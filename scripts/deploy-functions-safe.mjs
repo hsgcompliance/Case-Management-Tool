@@ -16,7 +16,7 @@
  *   node scripts/deploy-functions-safe.mjs housing-db-v2 --hosting-all --no-push
  */
 import fs from "node:fs";
-import { execSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,10 +72,18 @@ if (!process.env.FUNCTIONS_DISCOVERY_TIMEOUT) {
   process.env.FUNCTIONS_DISCOVERY_TIMEOUT = "120";
 }
 
+function deployChildEnv(sourceEnv = process.env) {
+  const env = { ...sourceEnv };
+  // A workstation-wide DEBUG value makes firebase-tools print raw API bodies,
+  // including function descriptors and ordinary environment variables.
+  delete env.DEBUG;
+  return env;
+}
+
 function run(cmd, args, { allowFailure = false, cwd = ROOT, env = process.env, stdio = "inherit" } = {}) {
   const result = spawnSync(cmd, args, {
     cwd,
-    env,
+    env: deployChildEnv(env),
     stdio,
     shell: process.platform === "win32",
     encoding: "utf8",
@@ -135,22 +143,33 @@ function getLocalFunctionNames() {
 }
 
 function getDeployedFunctionNames() {
-  try {
-    const raw = execSync(
-      `gcloud functions list --project ${PROJECT} --format="value(name)"`,
-      { cwd: ROOT, encoding: "utf8" },
-    );
-    return raw
+  const result = spawnSync(
+    "gcloud",
+    ["functions", "list", "--project", PROJECT, "--format=value(name)"],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: deployChildEnv(),
+    },
+  );
+  if (result.error || result.status !== 0) {
+    // Never surface raw stdout/stderr here. Failed list calls can contain
+    // partial function descriptors, including ordinary environment variables.
+    return { known: false, names: [] };
+  }
+  return {
+    known: true,
+    names: String(result.stdout || "")
       .replace(/\r/g, "")
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean)
       .map((s) => s.split("/").pop())
       .filter(Boolean)
-      .sort();
-  } catch {
-    return [];
-  }
+      .sort(),
+  };
 }
 
 function chunk(items, size) {
@@ -256,7 +275,8 @@ try {
   const localAll = getLocalFunctionNames();
   const selected = applyWindow(localAll);
   const { deployable, skipped } = filterCheckedOutFunctions(selected);
-  const deployed = getDeployedFunctionNames();
+  const deployedResult = getDeployedFunctionNames();
+  const deployed = deployedResult.names;
   const deployedSet = new Set(deployed);
   const localSet = new Set(localAll);
   const missing = localAll.filter((name) => !deployedSet.has(name));
@@ -267,9 +287,9 @@ try {
   console.log(`Selected for deploy: ${selected.length}`);
   if (skipped.length) console.log(`Skipped checked-out functions: ${skipped.length} (${skipped.join(", ")})`);
   console.log(`Deployable now: ${deployable.length}`);
-  console.log(`Deployed functions: ${deployed.length || "unknown"}`);
-  if (missing.length) console.log(`Missing deployed functions: ${missing.join(", ")}`);
-  if (extra.length) console.log(`Extra deployed functions left untouched: ${extra.join(", ")}`);
+  console.log(`Deployed functions: ${deployedResult.known ? deployed.length : "unknown (gcloud auth unavailable)"}`);
+  if (deployedResult.known && missing.length) console.log(`Missing deployed functions: ${missing.join(", ")}`);
+  if (deployedResult.known && extra.length) console.log(`Extra deployed functions left untouched: ${extra.join(", ")}`);
   console.log(`Chunks: ${groups.length}`);
   groups.forEach((group, i) => console.log(`  ${i + 1}: ${group[0]} ... ${group[group.length - 1]} (${group.length})`));
 

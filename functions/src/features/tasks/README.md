@@ -58,13 +58,21 @@ deprecated enrollment task generator. Active rules live in
 - completing the intake closes that reminder automatically;
 - an Eligibility Determination submission (intake step 13) creates a Compliance-bucket
   handoff notification. Linked primary and secondary case managers retain visibility
-  and can take or receive the work.
+  and can take or receive the work;
+- `intakeEligibilityConfirm` is the staff-visible manual backstop for that step-13
+  hand-off. It writes the same deterministic `jotform|<submissionId>` task identity
+  as the asynchronous Jotform trigger, so retries or trigger completion do not create
+  duplicate Compliance work;
+- referral submissions use the referral-to-intake rule and appear in the task inbox;
+- the Forms intake action menu can save the current checkpoint or transfer the active
+  intake reminder to another staff member without leaving the flow.
 
 These are lightweight smart notifications for transparency and reminders, not
 staff-performance tracking. The same registry contains disabled placeholders for
 referral-to-intake, basic-intake-to-compliance, landlord contact, MOU follow-up, and
 MOU-complete payment-data transitions. Enable them only after their canonical source
-events are defined.
+events are defined. Referral-to-intake is now active; the remaining placeholders
+stay disabled until their canonical source events are defined.
 
 ## Rent certification reminders
 

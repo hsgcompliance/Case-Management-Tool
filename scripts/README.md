@@ -25,6 +25,11 @@ Remove-Variable functionListText, functionList
 
 Do not echo `$functionListText`, add `--debug`, or paste full failure output without locally redacting it first. The captured value is still sensitive while it is in memory. New or migrated credentials must use Firebase Secret Manager/secret params rather than ordinary environment variables. If plaintext metadata reaches any retained output, rotate the affected credential and audit or remove the retained logs where possible.
 
+The safe deploy helpers remove a generic inherited `DEBUG` variable from their
+child environments. firebase-tools treats values such as `DEBUG=release` as
+debug logging and can otherwise print raw Hosting responses or Cloud Function
+descriptors even when `--debug` was not passed explicitly.
+
 ### `deploy-functions-safe.mjs`
 Chunked all-functions deploy. Avoids accidentally deleting extra deployed functions by deploying in batches. Checks out the selected function names before deploy so another agent can deploy disjoint functions in parallel but cannot deploy the same function at the same time.
 ```sh

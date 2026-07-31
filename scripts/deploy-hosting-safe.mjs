@@ -51,11 +51,20 @@ class DeployExitError extends Error {
   }
 }
 
+function deployChildEnv() {
+  const env = { ...process.env };
+  // firebase-tools treats a generic DEBUG value (for example DEBUG=release)
+  // as authorization to print raw API bodies and function descriptors.
+  delete env.DEBUG;
+  return env;
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
     shell: process.platform === "win32",
     timeout: COMMAND_TIMEOUT_MS,
+    env: deployChildEnv(),
   });
 
   if (result.error) {

@@ -21,6 +21,48 @@ Households DB v2 is an internal operations system for housing/grant case work. I
 For Budget Digest behavior, budget-display org config, and the planned line-item /
 split-goal digest manager work, see `docs/BUDGET_DIGEST_WORKFLOW.md`.
 
+## 2026-07-31 Operations Update
+
+The July 31 sync added several related workflow safeguards:
+
+- Payment queue posting now uses deterministic ledger identities, repairs partial
+  queue/ledger links on retry, validates organization/grant/line-item scope, and
+  requests canonical budget recomputation after posting, reversal, or paid-row
+  deletion. See `functions/src/features/payments/README.md` for the recovery
+  playbook and invariants.
+- The reconciliation audit resolves open grants before querying enrollments, so
+  closed/deleted grant history is excluded at the query boundary.
+- Enrollment creation requires an explicit decision when a customer has a prior
+  enrollment in the selected program. The decision can continue, cancel, or open
+  the prior enrollment; the customer action menu and Enrollments tab share the
+  same decision helper.
+- Forms intake now derives the head of household from the first-listed member,
+  exposes Jotform refresh/open controls, routes referral submissions into the
+  task inbox, supports manual Eligibility Determination hand-off confirmation,
+  and provides floating save/transfer actions during an intake.
+- Follow-up Forms work adds fresh-intake reset, staff transfer, expanded
+  rent-cert extraction/scheduling, and normalized eligibility-determination data
+  when linking Jotform submissions to customers.
+
+The floating intake action menu and the dedicated “Send to compliance or
+continue” checkpoint intentionally coexist. The floating menu saves or transfers
+the current state from any step; the checkpoint records that specific decision
+as complete before transferring. Both route through `formsIntakeFlowTransfer`,
+so they share ownership validation and task reassignment behavior.
+
+Backend changes in this update touch `ledgerCreate`,
+`paymentQueuePostToLedger`, `paymentsDeleteRows`, `reconciliationAuditScan`,
+`intakeEligibilityConfirm`, `onJotformSubmissionCreate`,
+`onJotformSubmissionUpdate`, and `customerLinkSubmission`. Keep these exports in
+the targeted deploy set when any of their shared services or workflow rules
+change.
+
+On 2026-07-31 those nine exports were deployed and verified active on Node 22;
+Forms hosting and web hosting (including `ssrhousingdbv2`) were also released.
+Local verification passed the contracts update, strict Functions TypeScript,
+the Forms and Next.js production builds, and 32 focused payment,
+reconciliation, presentation, and prior-enrollment tests.
+
 ## Runtime Stack
 
 - Web: Next.js 15, React 19, TypeScript, Firebase client SDK, React Query

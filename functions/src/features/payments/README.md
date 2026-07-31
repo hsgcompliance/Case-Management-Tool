@@ -95,28 +95,19 @@ payments stay posted; failed payments remain unpaid and can be retried.
 
 Implemented in commit `8e89317` (`fix(payments): harden ledger posting and reversals`).
 
-Verification completed on the development Mac:
+Primary-workstation verification completed on 2026-07-31:
 
-- Contracts build/update passed.
-- Functions TypeScript passed with `--incremental false`.
-- All changed web payment/spending files produced no TypeScript errors.
-- 29 focused spending, presentation, reconciliation, and hardening tests passed.
-- Full repository web TypeScript still reports unrelated pre-existing errors.
-- The full Next production build and one lint run stalled in idle workers without
-  emitting a code error; rerun them on the primary workstation.
-- Graphify was unavailable in this environment (`ModuleNotFoundError`).
+- Contracts update and Forms production build passed.
+- Strict Functions TypeScript passed with `--noEmit --incremental false`.
+- 32 focused payment, presentation, reconciliation, hardening, and prior-enrollment
+  tests passed.
+- The full Next.js production build completed successfully.
+- The root package-lock integrity for `functions/vendor/contracts.tgz` was refreshed;
+  otherwise npm could reuse a stale same-version contracts tarball and hide the new
+  `paymentQueueId` request field from Functions TypeScript.
 
-Primary-workstation pickup:
-
-1. Pull commit `8e89317` and this handoff update after they are pushed.
-2. Run `npm run contracts:update` if vendor artifacts need regeneration.
-3. Run `npx tsc -p functions/tsconfig.json --noEmit --incremental false`.
-4. Run the focused web tests:
-   `npx vitest run src/features/widgets/spending/paymentHardening.test.ts src/features/widgets/spending/spendingPresentation.test.ts src/features/widgets/spending/spendingReconciliation.test.ts --pool=threads --maxWorkers=1 --no-file-parallelism --no-isolate` from `web/`.
-5. Run `npm run build:web` on the primary workstation.
-6. Deploy the changed Functions and web hosting through the safe repository
-   scripts, then smoke-test one invoice post, one credit-card post, one repair
-   retry, one reversal pair, and one paid-payment deletion.
+After deployment, smoke-test one invoice post, one credit-card post, one repair
+retry, one reversal pair, and one paid-payment deletion.
 
 Remaining follow-up:
 

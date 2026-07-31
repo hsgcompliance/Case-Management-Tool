@@ -96,4 +96,14 @@ The contributing causes were:
 
 After this kind of exposure, rotate the affected credentials even if the output was not committed. Tool transcripts, terminal capture, CI logs, and debug files may be retained outside the repository. Migrate legacy secret environment variables to Firebase Secret Manager, audit retained logs, and never place the exposed values in an incident note.
 
+On 2026-07-31 this recurred during a targeted deploy because the workstation
+had `DEBUG=release`; firebase-tools interpreted the generic `DEBUG` setting as
+debug mode and printed function/hosting API response bodies. A failed `gcloud`
+inventory lookup also made the deploy helper report every local function as
+missing. The safe deploy helpers now remove `DEBUG` from child-process
+environments, capture and discard failed inventory output, and distinguish an
+unknown inventory from a real missing-function list. Treat any legacy ordinary
+environment credentials present in the emitted descriptors as exposed and
+rotate/migrate them; do not copy their values into this document.
+
 For deployment verification, capture command output without streaming it and emit only an allowlist such as function ID, state, runtime, and hash. Never echo the captured response, inspect or paste `environmentVariables`, or enable `--debug` in a shared or recorded session. See `scripts/README.md` for the safe PowerShell pattern.
