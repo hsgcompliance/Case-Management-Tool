@@ -243,7 +243,10 @@ function sanitizeSavedSpendingView(value: unknown): SpendingSavedView | null {
     : null;
   if (!id || !name || !filterState) return null;
   const VALID_COLORS = new Set(GRANT_ACCENT_COLORS);
-  const color = typeof raw.color === "string" && VALID_COLORS.has(raw.color) ? raw.color : undefined;
+  const color = typeof raw.color === "string" &&
+    VALID_COLORS.has(raw.color as (typeof GRANT_ACCENT_COLORS)[number])
+    ? raw.color
+    : undefined;
   return {
     id,
     name,
@@ -757,7 +760,10 @@ function RowContextMenu({
       </div>
       {canPost && (
         <button type="button" disabled={acting} className={btnCls} onClick={() => onAction("invoice-submitted")}>
-          {row.kind === "grant-ledger" ? "Invoice Submitted" : "Mark Paid"}
+          {row.kind === "grant-ledger" ? "Invoice Submitted"
+            : row.kind === "queue-invoice" ? "Post Invoice"
+            : row.kind === "queue-credit-card" ? "Post Credit Card"
+            : "Mark Paid"}
         </button>
       )}
       {canCompliance && (
@@ -1366,7 +1372,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             toast("Cannot mark projected payment complete - missing enrollment/payment ID.", { type: "error" });
             return;
           }
-          await spendMutation.mutateAsync({ body: { enrollmentId, paymentId, reverse: false } });
+          await spendMutation.mutateAsync({
+            body: { enrollmentId, paymentId, reverse: false, forceSync: false },
+          });
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: qk.paymentQueue.root }),
             queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
@@ -1923,6 +1931,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     const q = search.trim().toLowerCase();
     const { showReversals, customerId: filterCustomerId, cmId: filterCmId } = filterState;
     return allRows.filter((row) => {
+      // Closed/deleted grants are historical and intentionally excluded from
+      // the operational invoicing queue.
+      if (row.grantId && closedGrantIds.has(row.grantId)) return false;
       const typePass =
         !typeFilter ? true
         : typeFilter === "forms" ? isQueueTransactionRow(row)
@@ -1954,7 +1965,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       return typePass && workflowPass && datePass && searchPass && cardPass && grantPass
         && bucketPass && reversalPass && customerIdPass && cmIdPass && advancedPass;
     });
-  }, [allRows, advancedQueueFilters, cardBucketFilter, cardFilterId, dateFilter, search, typeFilter, workflowFilter, grantId, filterState, cmIdByCustomerId]);
+  }, [allRows, advancedQueueFilters, cardBucketFilter, cardFilterId, closedGrantIds, dateFilter, search, typeFilter, workflowFilter, grantId, filterState, cmIdByCustomerId]);
 
   // ── Sort + Pagination ────────────────────────────────────────────────────
 
@@ -2463,8 +2474,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           ([enrollmentId, rows]) => deletePaymentRows.mutateAsync({
             enrollmentId,
             paymentIds: rows.map((row) => rowPaymentRef(row).paymentId),
-            preservePaid: false,
-            updateBudgets: true,
+            deleteAll: false,
+            preservePaid: true,
+            updateBudgets: false,
             removeSpends: true,
             reverseLedger: false,
           }).then(() => rows)

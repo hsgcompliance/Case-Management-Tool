@@ -472,6 +472,8 @@ export type LedgerListResp = Ok<{
 export type LedgerCreateReq = TLedgerCreateBody;
 export type LedgerCreateResp = Ok<{
     entry: TLedgerEntry;
+    budgetRecomputed?: boolean;
+    warnings?: string[];
 }>;
 export type LedgerClassifyReq = TLedgerClassifyBody;
 export type LedgerClassifyResp = Ok<TLedgerClassifyResp>;

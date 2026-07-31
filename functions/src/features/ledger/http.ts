@@ -66,17 +66,75 @@ export const ledgerCreate = secureHandler(
       return;
     }
 
-    // Only check existence if caller provided an id.
-    if (body.id) {
-      const existing = await db.collection("ledger").doc(body.id).get();
-      if (existing.exists) {
-         res.status(409).json({ ok: false, error: "entry_already_exists" });
-         return;
+    const paymentQueueId = String(body.paymentQueueId || "").trim();
+    const grantId = String(body.grantId || "").trim();
+    const lineItemId = String(body.lineItemId || "").trim();
+    if (grantId) {
+      const grantSnap = await db.collection("grants").doc(grantId).get();
+      const grant = grantSnap.exists ? grantSnap.data() || {} : null;
+      if (!grant || String((grant as any).orgId || "").trim() !== callerOrg) {
+        res.status(404).json({ ok: false, error: "grant_not_found" });
+        return;
+      }
+      const lineItems = Array.isArray((grant as any)?.budget?.lineItems)
+        ? (grant as any).budget.lineItems
+        : [];
+      const lineItem = lineItems.find((item: any) => String(item?.id || "") === lineItemId);
+      if (!lineItem) {
+        res.status(400).json({ ok: false, error: "line_item_not_found" });
+        return;
+      }
+      if (lineItem.locked) {
+        res.status(400).json({ ok: false, error: "line_item_locked" });
+        return;
       }
     }
 
+    const reservedQueueLedgerId = String(body.id || "").startsWith("pqledger_");
+    if (
+      (paymentQueueId && body.id !== `pqledger_${paymentQueueId}`) ||
+      (reservedQueueLedgerId && !paymentQueueId)
+    ) {
+      res.status(400).json({ ok: false, error: "invalid_queue_ledger_identity" });
+      return;
+    }
+
+    if (paymentQueueId) {
+      const queueSnap = await db.collection("paymentQueue").doc(paymentQueueId).get();
+      if (!queueSnap.exists) {
+        res.status(404).json({ ok: false, error: "payment_queue_item_not_found" });
+        return;
+      }
+      const queueOrgId = String((queueSnap.data() as any)?.orgId || "").trim();
+      if (queueOrgId && queueOrgId !== callerOrg) {
+        res.status(404).json({ ok: false, error: "payment_queue_item_not_found" });
+        return;
+      }
+    }
+
+    // A queue-linked manual create is retry-safe: if the deterministic ledger
+    // document already exists for this queue item, return it for the caller to
+    // finish/repair the queue post instead of creating a duplicate.
+    if (body.id) {
+      const existing = await db.collection("ledger").doc(body.id).get();
+      if (existing.exists) {
+        const existingEntry = { id: existing.id, ...(existing.data() || {}) } as any;
+        if (
+          paymentQueueId &&
+          String(existingEntry?.origin?.paymentQueueId || "") === paymentQueueId &&
+          String(existingEntry?.orgId || "") === callerOrg
+        ) {
+          res.status(200).json({ ok: true, entry: existingEntry });
+          return;
+        }
+        res.status(409).json({ ok: false, error: "entry_already_exists" });
+        return;
+      }
+    }
+
+    const { paymentQueueId: _paymentQueueId, ...ledgerBody } = body;
     const entryData = {
-      ...body,
+      ...ledgerBody,
       orgId: callerOrg,
 
       // optional audit (matches contracts)
@@ -86,7 +144,13 @@ export const ledgerCreate = secureHandler(
 
       origin: {
         app: "hdb",
-        // sourcePath filled by service if missing and origin exists
+        ...(paymentQueueId
+          ? {
+              baseId: paymentQueueId,
+              paymentQueueId,
+              sourcePath: `paymentQueue/${paymentQueueId}`,
+            }
+          : {}),
       },
 
       // Use real timestamps (TsLike-friendly). Avoid FieldValue sentinels here.
@@ -98,7 +162,20 @@ export const ledgerCreate = secureHandler(
       return writeLedgerEntry(trx, entryData);
     });
 
-    res.status(201).json({ ok: true, entry });
+    let budgetRecomputed = false;
+    const warnings: string[] = [];
+    const affectedGrantId = String((entry as any)?.grantId || "").trim();
+    if (affectedGrantId) {
+      try {
+        const recompute = await recomputeGrantBudgetFromLedger(affectedGrantId);
+        await recomputeCustomerSpendForGrant({ grantId: affectedGrantId }).catch(() => null);
+        budgetRecomputed = recompute.recomputed;
+      } catch (err: any) {
+        warnings.push(`budget_recompute_failed:${err?.message || String(err)}`);
+      }
+    }
+
+    res.status(201).json({ ok: true, entry, budgetRecomputed, warnings });
     return;
   },
   { auth: "user", requireOrg: true, methods: ["POST", "OPTIONS"] }

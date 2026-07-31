@@ -1230,7 +1230,9 @@ function EnrollmentSpendCard({
             toast("Missing enrollment/payment for spend action.", { type: "error" });
             return;
           }
-          await spendMutation.mutateAsync({ body: { enrollmentId, paymentId, reverse: !next } });
+          await spendMutation.mutateAsync({
+            body: { enrollmentId, paymentId, reverse: !next, forceSync: false },
+          });
         }
         // For grant-ledger (already posted) the paid field is read-only; skip silently
       }
@@ -1359,14 +1361,41 @@ function EnrollmentSpendCard({
     }
     const total = pastPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     if (!window.confirm(`Mark ${pastPayments.length} past payment${pastPayments.length === 1 ? "" : "s"} complete for ${fmtCurrencyUSD(total)}?`)) return;
-    try {
-      for (const payment of pastPayments) {
-        await spendMutation.mutateAsync({ body: { enrollmentId, paymentId: String(payment.id), reverse: false } });
+    const completed: PaymentRecord[] = [];
+    const failed: Array<{ payment: PaymentRecord; error: string }> = [];
+    for (const payment of pastPayments) {
+      try {
+        await spendMutation.mutateAsync({
+          body: {
+            enrollmentId,
+            paymentId: String(payment.id),
+            reverse: false,
+            forceSync: false,
+          },
+        });
+        completed.push(payment);
+      } catch (e: unknown) {
+        failed.push({
+          payment,
+          error: toApiError(e, "Payment failed.").error,
+        });
       }
-      toast("Past payments marked complete.", { type: "success" });
-    } catch (e: unknown) {
-      toast(toApiError(e, "Mark past payments complete failed.").error, { type: "error" });
     }
+
+    if (!failed.length) {
+      toast(`${completed.length} past payment${completed.length === 1 ? "" : "s"} marked complete.`, { type: "success" });
+      return;
+    }
+
+    const failedDates = failed
+      .slice(0, 3)
+      .map(({ payment }) => paymentDueDate(payment) || String(payment.id))
+      .join(", ");
+    const more = failed.length > 3 ? ` +${failed.length - 3} more` : "";
+    toast(
+      `${completed.length} completed; ${failed.length} failed (${failedDates}${more}). ${failed[0]?.error || "Payment failed."} Failed payments remain unpaid and can be retried.`,
+      { type: "error" },
+    );
   };
 
   return (
@@ -1684,6 +1713,7 @@ function CardSpendCard({
       await createTask.mutateAsync({
         title: `Allocate card spend ${row.subtitle}`,
         notify: false,
+        addToCalendar: false,
         notes: [
           `LEDGER_ENTRY:${row.subtitle}`,
           `Source: ${row.sourceLabel}`,
@@ -2117,17 +2147,35 @@ function CardSpendCard({
           sourceLineItemId={assignLineItemId || row.lineItemId || undefined}
           sourceCreditCardId={row.creditCardId || undefined}
           sourceDate={row.date || undefined}
+          sourceCustomerId={row.customerId || undefined}
           sourceNote={typeof row.paymentQueueItem?.note === "string" ? row.paymentQueueItem.note : undefined}
-          busy={createLedger.isPending}
+          sourcePaymentQueueId={entryDialogMode === "manual-cc" && isQueue ? queueId : undefined}
+          replacesPendingProjection={entryDialogMode === "manual-cc" && isQueue}
+          busy={createLedger.isPending || postQueue.isPending}
           onCancel={() => setEntryDialogOpen(false)}
           onSave={async (body) => {
+            let created;
             try {
-              await createLedger.mutateAsync(body);
-              toast("Ledger entry created.", { type: "success" });
-              setEntryDialogOpen(false);
+              created = await createLedger.mutateAsync(body);
             } catch (e: unknown) {
               toast(toApiError(e, "Create failed.").error, { type: "error" });
+              return;
             }
+            if (entryDialogMode === "manual-cc" && isQueue) {
+              const ledgerEntryId = String(created?.entry?.id || body.id || "");
+              try {
+                await postQueue.mutateAsync({ id: queueId, body: { ledgerEntryId } });
+                toast("Ledger entry created and transaction posted.", { type: "success" });
+              } catch (e: unknown) {
+                toast(
+                  `${toApiError(e, "Queue sync failed.").error} The ledger entry is saved; use Post Credit Card to repair the queue link without reposting.`,
+                  { type: "error" },
+                );
+              }
+            } else {
+              toast("Ledger entry created.", { type: "success" });
+            }
+            setEntryDialogOpen(false);
           }}
         />
       )}
@@ -2674,16 +2722,30 @@ function InvoiceSpendCard({
           sourceCreditCardId={assignCardId || row.creditCardId || undefined}
           sourceDate={row.date || undefined}
           sourceCustomerId={row.customerId || undefined}
-          busy={createLedger.isPending}
+          sourceNote={invoiceNote || undefined}
+          sourcePaymentQueueId={queueId}
+          replacesPendingProjection
+          busy={createLedger.isPending || postQueue.isPending}
           onCancel={() => setEntryDialogOpen(false)}
           onSave={async (body) => {
+            let created;
             try {
-              await createLedger.mutateAsync(body);
-              toast("Invoice ledger entry created.", { type: "success" });
-              setEntryDialogOpen(false);
+              created = await createLedger.mutateAsync(body);
             } catch (e: unknown) {
               toast(toApiError(e, "Create failed.").error, { type: "error" });
+              return;
             }
+            const ledgerEntryId = String(created?.entry?.id || body.id || "");
+            try {
+              await postQueue.mutateAsync({ id: queueId, body: { ledgerEntryId } });
+              toast("Invoice ledger entry created and transaction posted.", { type: "success" });
+            } catch (e: unknown) {
+              toast(
+                `${toApiError(e, "Queue sync failed.").error} The ledger entry is saved; use Post Invoice to repair the queue link without reposting.`,
+                { type: "error" },
+              );
+            }
+            setEntryDialogOpen(false);
           }}
         />
       )}

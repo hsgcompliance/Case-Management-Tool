@@ -38,19 +38,11 @@ export default function PaymentsDeleteDialog({
   onConfirm,
 }: Props) {
   const [scope, setScope] = React.useState<Scope>("selected");
-  const [preservePaid, setPreservePaid] = React.useState(true);
-  const [updateBudgets, setUpdateBudgets] = React.useState(false);
-  const [removeSpends, setRemoveSpends] = React.useState(true);
-  const [reverseLedger, setReverseLedger] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
     setScope("selected");
-    setPreservePaid(Boolean(selected?.paid));
-    setUpdateBudgets(false);
-    setRemoveSpends(true);
-    setReverseLedger(true);
     setError(null);
   }, [open, selected]);
 
@@ -60,15 +52,19 @@ export default function PaymentsDeleteDialog({
     const paymentId = String(selected?.paymentId || "").trim();
     if (!enrollmentId) return setError("No enrollment selected.");
     if (scope === "selected" && !paymentId) return setError("No payment selected.");
+    const deletingSelectedPaidPayment = scope === "selected" && selected?.paid === true;
     onConfirm({
       enrollmentId,
       ...(scope === "allEnrollment"
         ? { deleteAll: true }
         : { deleteAll: false, paymentIds: [paymentId] }),
-      preservePaid,
-      updateBudgets,
-      removeSpends,
-      reverseLedger,
+      // Paid deletion is one safe operation: reverse ledger, remove spend
+      // mirrors, and update budgets together. Bulk scope intentionally leaves
+      // paid history alone and deletes only unpaid projections.
+      preservePaid: !deletingSelectedPaidPayment,
+      updateBudgets: deletingSelectedPaidPayment,
+      removeSpends: true,
+      reverseLedger: deletingSelectedPaidPayment,
     });
   };
 
@@ -81,7 +77,9 @@ export default function PaymentsDeleteDialog({
       footer={
         <div className="flex w-full items-center justify-between gap-2">
           <div className="text-xs text-slate-600">
-            {updateBudgets ? "Will write compensating ledger reversals for paid spends and remove enrollment spend docs." : "Deletes payment rows only (plus spend docs if selected)."}
+            {scope === "selected" && selected?.paid
+              ? "The paid spend will be reversed, its spend records removed, and the grant budget recalculated."
+              : "Unpaid projections and their related spend records will be removed; paid history is preserved."}
           </div>
           <div className="flex items-center gap-2">
             <button className="btn-secondary btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
@@ -105,31 +103,12 @@ export default function PaymentsDeleteDialog({
           </label>
           <label className="mt-1 flex items-center gap-2">
             <input type="radio" name="delete-payments-scope" checked={scope === "allEnrollment"} onChange={() => setScope("allEnrollment")} />
-            <span>Delete all payments in this enrollment</span>
+            <span>Delete all unpaid payments in this enrollment</span>
           </label>
         </div>
 
-        <div className="rounded border border-slate-200 p-3">
-          <div className="font-medium text-slate-900">Options</div>
-          <div className="mt-2 space-y-2">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={preservePaid} onChange={(e) => setPreservePaid(e.currentTarget.checked)} />
-              <span>Preserve paid payments (Don&apos;t delete already paid rows)</span>
-            </label>
-            {/*Shouldn't budgets automatically be updated from ledger reversals?*/}
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={updateBudgets} onChange={(e) => setUpdateBudgets(e.currentTarget.checked)} />
-              <span>Update budgets for deleted paid rows</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={removeSpends} onChange={(e) => setRemoveSpends(e.currentTarget.checked)} />
-              <span>Remove enrollment spend subdocs + embedded spends for deleted payments</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={reverseLedger} onChange={(e) => setReverseLedger(e.currentTarget.checked)} disabled={!updateBudgets} />
-              <span>Write reversal ledger entries (only when updating budgets)</span>
-            </label>
-          </div>
+        <div className="rounded border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+          Budget and ledger cleanup is automatic. Paid payment rows cannot be deleted without a compensating ledger reversal.
         </div>
       </div>
     </Modal>

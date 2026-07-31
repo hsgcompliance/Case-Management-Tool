@@ -5,11 +5,14 @@ import GrantWorkspaceModal from "@features/grants/GrantWorkspaceModal";
 import { useGrant } from "@hooks/useGrants";
 import { fmtCurrencyUSD } from "@lib/formatters";
 import { getGrantFinancialCapabilities } from "@hdb/contracts";
+import { budgetPreviewActivityDelta } from "./budgetPreview";
 
 type Props = {
   grantId: string | null | undefined;
   /** Additional projected spend from the current editing session (positive = more cost). */
   projectionDelta?: number;
+  /** Additional posted ledger spend from the current editing session. */
+  spentDelta?: number;
   /** Optional per-line-item preview deltas. Positive means the edit increases projected/spent pressure. */
   lineItemDeltas?: Record<string, number>;
   className?: string;
@@ -99,7 +102,13 @@ function invoiceDocsFromGrant(grant: Record<string, unknown> | null | undefined)
   return [];
 }
 
-export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas, className }: Props) {
+export function GrantBudgetStrip({
+  grantId,
+  projectionDelta = 0,
+  spentDelta = 0,
+  lineItemDeltas,
+  className,
+}: Props) {
   const { data: grant, isLoading } = useGrant(grantId ?? undefined, { enabled: !!grantId });
   const [grantModalOpen, setGrantModalOpen] = React.useState(false);
 
@@ -156,7 +165,8 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
 
   const projectedBalance =
     totals.projectedBalance ?? fromCents(toCents(totals.total) - toCents(totals.spent) - toCents(totals.projected));
-  const adjustedBalance = fromCents(toCents(projectedBalance) - toCents(projectionDelta));
+  const totalActivityDelta = budgetPreviewActivityDelta(spentDelta, projectionDelta);
+  const adjustedBalance = fromCents(toCents(projectedBalance) - toCents(totalActivityDelta));
   const isOverspend = drawsDownBudget && adjustedBalance < 0;
   const projectedActivity = fromCents(toCents(totals.spent) + toCents(totals.projected));
   const lineItems = Array.isArray(grant?.budget?.lineItems) ? grant.budget.lineItems : [];
@@ -226,21 +236,21 @@ export function GrantBudgetStrip({ grantId, projectionDelta = 0, lineItemDeltas,
       ) : null}
       <div className="flex flex-wrap gap-x-8 gap-y-2 justify-evenly">
         <Stat label={drawsDownBudget ? "Budget" : "Reference"} value={totals.total} />
-        <Stat label={drawsDownBudget ? "Spent" : "Recorded"} value={totals.spent} />
+        <Stat label={drawsDownBudget ? "Spent" : "Recorded"} value={totals.spent} delta={spentDelta} />
         <Stat label="Projected" value={totals.projected} delta={projectionDelta} />
         {drawsDownBudget ? (
           <>
             <Stat
               label="Proj. Remaining"
               value={projectedBalance}
-              delta={-projectionDelta}
+              delta={-totalActivityDelta}
               warnNegative
               bold
             />
-            {totals.balance != null && <Stat label="Balance" value={totals.balance} />}
+            {totals.balance != null && <Stat label="Balance" value={totals.balance} delta={-spentDelta} />}
           </>
         ) : (
-          <Stat label="Activity Total" value={projectedActivity} delta={projectionDelta} bold />
+          <Stat label="Activity Total" value={projectedActivity} delta={totalActivityDelta} bold />
         )}
       </div>
       {visibleLineItemImpacts.length ? (

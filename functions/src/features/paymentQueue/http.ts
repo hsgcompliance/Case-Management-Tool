@@ -119,9 +119,14 @@ export const paymentQueuePostToLedger = secureHandler(async (req, res): Promise<
   const {id} = PaymentQueueItemParams.parse({...((req.body || {}) as any), ...((req.query || {}) as any)});
   const body = PaymentQueuePostToLedgerBody.parse(req.body || {});
   const uid = requireUid(req as any);
+  const callerOrg = orgIdFromClaims((req as any).user || {});
+  if (!callerOrg) {
+    res.status(400).json({ok: false, error: 'org_required'});
+    return;
+  }
 
   try {
-    const result = await postPaymentQueueToLedger(id, body, uid);
+    const result = await postPaymentQueueToLedger(id, body, uid, callerOrg);
     if (!result) {
       res.status(404).json({ok: false, error: 'not_found'});
       return;

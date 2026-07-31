@@ -85,6 +85,9 @@ export type CardInvoiceEntryDialogProps = {
   sourceDate?: string;
   sourceCustomerId?: string;
   sourceNote?: string;
+  sourcePaymentQueueId?: string;
+  /** Saving replaces an already-counted pending queue projection with posted spend. */
+  replacesPendingProjection?: boolean;
   busy?: boolean;
   onCancel: () => void;
   onSave: (body: LedgerCreateReq) => void;
@@ -118,6 +121,8 @@ export default function CardInvoiceEntryDialog({
   sourceDate,
   sourceCustomerId,
   sourceNote,
+  sourcePaymentQueueId,
+  replacesPendingProjection = false,
   busy = false,
   onCancel,
   onSave,
@@ -139,11 +144,11 @@ export default function CardInvoiceEntryDialog({
     if (!open) return;
     const c = MODE_CONFIG[mode];
     setSign(c.defaultSign);
-    setDate(sourceDate || todayISO());
+    setDate(toISODate(sourceDate || todayISO()));
     setGrantId(sourceGrantId || "");
     setLineItemId(sourceLineItemId || "");
     setCreditCardId(sourceCreditCardId || "");
-    setNote("");
+    setNote(sourceNote || "");
     setVendor("");
     setComment("");
     setError(null);
@@ -152,7 +157,7 @@ export default function CardInvoiceEntryDialog({
     } else {
       setAmountStr("");
     }
-  }, [open, mode, sourceGrantId, sourceLineItemId, sourceCreditCardId, sourceDate, sourceAmountCents]);
+  }, [open, mode, sourceGrantId, sourceLineItemId, sourceCreditCardId, sourceDate, sourceAmountCents, sourceNote]);
 
   const parsedAmount = parseDollarAmount(amountStr);
   const isValidAmount = parsedAmount > 0;
@@ -160,8 +165,8 @@ export default function CardInvoiceEntryDialog({
   const signedAmountDollars = signedAmountCents / 100;
   const isNegative = signedAmountCents < 0;
 
-  // projectionDelta: positive = more spend (Projected +delta, Proj.Balance -delta)
-  const projectionDelta = isValidAmount ? signedAmountDollars : 0;
+  const spentDelta = isValidAmount ? signedAmountDollars : 0;
+  const projectionDelta = replacesPendingProjection ? -spentDelta : 0;
 
   const submit = () => {
     setError(null);
@@ -178,11 +183,17 @@ export default function CardInvoiceEntryDialog({
     if (mode === "reversal" && sourceEntryId) noteLines.push(`Reversal of: ${sourceEntryId}`);
 
     const labels: string[] =
-      mode === "reversal" ? ["reversal"]
+      mode === "reversal" ? ["reversal", ...(sourceEntryId ? [`reversalOf:${sourceEntryId}`] : [])]
       : mode === "adjustment" ? ["adjustment"]
       : [];
 
     onSave({
+      ...(sourcePaymentQueueId
+        ? {
+            id: `pqledger_${sourcePaymentQueueId}`,
+            paymentQueueId: sourcePaymentQueueId,
+          }
+        : {}),
       source: cfg.ledgerSource,
       amountCents: signedAmountCents,
       amount: signedAmountDollars,
@@ -191,6 +202,7 @@ export default function CardInvoiceEntryDialog({
       lineItemId: lineItemId || null,
       creditCardId: creditCardId || null,
       customerId: sourceCustomerId || null,
+      reversalOf: mode === "reversal" ? sourceEntryId || null : null,
       note: noteLines.length === 1 ? noteLines[0] : noteLines.length > 1 ? noteLines : undefined,
       vendor: vendor.trim() || undefined,
       comment: comment.trim() || undefined,
@@ -320,7 +332,7 @@ export default function CardInvoiceEntryDialog({
             type="date"
             className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
             value={date}
-            onChange={(e) => setDate(e.currentTarget.value)}
+            onChange={(e) => setDate(toISODate(e.currentTarget.value))}
           />
         </label>
 
@@ -340,7 +352,11 @@ export default function CardInvoiceEntryDialog({
             mode="grant"
           />
           {grantId && (
-            <GrantBudgetStrip grantId={grantId} projectionDelta={projectionDelta} />
+            <GrantBudgetStrip
+              grantId={grantId}
+              spentDelta={spentDelta}
+              projectionDelta={projectionDelta}
+            />
           )}
           <div>
             <div className="mb-1 text-xs text-slate-600 flex items-center gap-1">

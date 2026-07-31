@@ -682,6 +682,61 @@ function buildLedgerEntryForQueueItem(
   };
 }
 
+function deterministicQueueLedgerEntryId(queueItemId: string): string {
+  return `pqledger_${queueItemId}`;
+}
+
+async function resolveExistingQueueLedgerId(
+    item: TPaymentQueueItem,
+    requestedLedgerEntryId?: string | null,
+): Promise<string | null> {
+  const deterministicId = deterministicQueueLedgerEntryId(item.id);
+  const candidateIds = Array.from(new Set([
+    requestedLedgerEntryId,
+    item.ledgerEntryId,
+    deterministicId,
+  ].map((value) => String(value || '').trim()).filter(Boolean)));
+
+  if (candidateIds.length) {
+    const refs = candidateIds.map((id) => db.collection('ledger').doc(id));
+    const snaps = await db.getAll(...refs);
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const ledger = snap.data() || {};
+      const ledgerOrgId = String((ledger as any).orgId || '').trim();
+      const itemOrgId = String(item.orgId || '').trim();
+      if (ledgerOrgId && itemOrgId && ledgerOrgId !== itemOrgId) {
+        throw new Error('queue_ledger_org_mismatch');
+      }
+      const linkedQueueId = String((ledger as any)?.origin?.paymentQueueId || '').trim();
+      if (linkedQueueId && linkedQueueId !== item.id) {
+        throw new Error('queue_ledger_id_conflict');
+      }
+      const trustedLegacyLink = snap.id === String(item.ledgerEntryId || '').trim();
+      if (!linkedQueueId && snap.id !== deterministicId && !trustedLegacyLink) {
+        throw new Error('queue_ledger_provenance_mismatch');
+      }
+      return snap.id;
+    }
+  }
+
+  // Legacy single-posts used generated ledger ids. Recover those by the
+  // transaction identity already persisted in ledger.origin.
+  const linked = await db.collection('ledger')
+      .where('origin.paymentQueueId', '==', item.id)
+      .limit(2)
+      .get();
+  if (linked.size > 1) throw new Error('multiple_ledger_entries_for_queue_item');
+  if (linked.empty) return null;
+  const linkedDoc = linked.docs[0];
+  const linkedOrgId = String((linkedDoc.data() as any)?.orgId || '').trim();
+  const itemOrgId = String(item.orgId || '').trim();
+  if (linkedOrgId && itemOrgId && linkedOrgId !== itemOrgId) {
+    throw new Error('queue_ledger_org_mismatch');
+  }
+  return linkedDoc.id;
+}
+
 // ─── Void ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -1025,16 +1080,19 @@ export async function postPaymentQueueToLedger(
     id: string,
     body: TPaymentQueuePostToLedgerBody,
     actorUid?: string,
+    actorOrgId?: string,
 ): Promise<{ queueItem: TPaymentQueueItem; ledgerEntryId: string } | null> {
   const ref = db.collection(COLLECTION).doc(id);
   const snap = await ref.get();
   if (!snap.exists) return null;
 
   const item = docToItem(snap);
-
-  // Already posted — idempotent return
-  if (item.queueStatus === 'posted' && item.ledgerEntryId) {
-    return {queueItem: item, ledgerEntryId: item.ledgerEntryId};
+  if (actorOrgId) {
+    const itemOrgId = String(item.orgId || '').trim();
+    const belongsToActorOrg = itemOrgId ?
+      itemOrgId === actorOrgId :
+      await unscopedQueueItemBelongsToOrg(item, actorOrgId);
+    if (!belongsToActorOrg) throw new Error('forbidden_org');
   }
 
   if (item.queueStatus === 'void') {
@@ -1044,15 +1102,44 @@ export async function postPaymentQueueToLedger(
     throw new Error('use_payments_spend_for_projection');
   }
 
-  await assertQueueGrantLineItem(item);
-
   const now = isoNow();
   const actor = actorUid ?? body.postedBy ?? null;
+  const existingLedgerEntryId = await resolveExistingQueueLedgerId(item, body.ledgerEntryId);
+  const targetLedgerEntryId = existingLedgerEntryId ||
+    String(body.ledgerEntryId || item.ledgerEntryId || deterministicQueueLedgerEntryId(id));
+
+  // A valid queue link is already complete. Unlike the former early return,
+  // this only trusts the link after verifying that the ledger document exists.
+  if (existingLedgerEntryId &&
+      item.queueStatus === 'posted' &&
+      item.ledgerEntryId === existingLedgerEntryId) {
+    return {queueItem: item, ledgerEntryId: existingLedgerEntryId};
+  }
+
+  // Only new ledger rows need queue-side grant validation. Existing rows are
+  // repairable even if later queue edits left their classification incomplete.
+  if (!existingLedgerEntryId) await assertQueueGrantLineItem(item);
 
   const txResult = await db.runTransaction(async (trx) => {
-    const rawEntry = buildLedgerEntryForQueueItem(item, {ledgerEntryId: body.ledgerEntryId});
-    const entry = writeLedgerEntry(trx, rawEntry);
-    const ledgerEntryId = entry.id as string;
+    const freshSnap = await trx.get(ref);
+    if (!freshSnap.exists) throw new Error('payment_queue_item_not_found');
+    const freshItem = docToItem(freshSnap as FirebaseFirestore.QueryDocumentSnapshot);
+    if (freshItem.queueStatus === 'void') {
+      throw new Error(`PaymentQueueItem ${id} is voided; cannot post to ledger.`);
+    }
+
+    const ledgerRef = db.collection('ledger').doc(targetLedgerEntryId);
+    const ledgerSnap = await trx.get(ledgerRef);
+    let ledgerEntryId = targetLedgerEntryId;
+    if (ledgerSnap.exists) {
+      const ledger = ledgerSnap.data() || {};
+      const linkedQueueId = String((ledger as any)?.origin?.paymentQueueId || '').trim();
+      if (linkedQueueId && linkedQueueId !== id) throw new Error('queue_ledger_id_conflict');
+    } else {
+      const rawEntry = buildLedgerEntryForQueueItem(freshItem, {ledgerEntryId: targetLedgerEntryId});
+      const entry = writeLedgerEntry(trx, rawEntry);
+      ledgerEntryId = entry.id as string;
+    }
 
     trx.update(ref, removeUndefinedDeep({
       'queueStatus': 'posted',
@@ -1069,7 +1156,7 @@ export async function postPaymentQueueToLedger(
 
     return {
       queueItem: {
-        ...item,
+        ...freshItem,
         queueStatus: 'posted',
         ledgerEntryId,
         postedAt: now,
@@ -1079,7 +1166,7 @@ export async function postPaymentQueueToLedger(
         reopenReason: null,
         updatedAtISO: now,
         system: {
-          ...(item.system || {}),
+          ...(freshItem.system || {}),
           lastWriter: FN,
           lastWriteAt: now,
         },
@@ -1092,7 +1179,7 @@ export async function postPaymentQueueToLedger(
   // pending queue row. Recompute from those authoritative records before the
   // endpoint returns so projected, spent, balance, and customer caps all agree.
   // The paymentQueue/ledger triggers remain idempotent safety nets.
-  if (txResult) await recomputeLinkedGrantBudgets([item]);
+  if (txResult) await recomputeLinkedGrantBudgets([item, txResult.queueItem]);
 
   return txResult;
 }

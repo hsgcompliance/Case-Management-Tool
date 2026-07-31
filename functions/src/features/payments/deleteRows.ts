@@ -12,6 +12,7 @@ import {
   withTxn,
 } from "../../core";
 import { writeLedgerEntry } from "../ledger/service";
+import { recomputeGrantBudgetFromLedger } from "../grants/budgetRecompute";
 import { PaymentsDeleteRowsBody, type TPaymentsDeleteRowsBody } from "./schemas";
 import {
   assertOrgAccess,
@@ -43,8 +44,11 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
     return res.status(400).json({ ok: false, error: parsed.error.message });
   }
   const body: TPaymentsDeleteRowsBody = parsed.data;
-  const removeSpends = body.updateBudgets ? true : body.removeSpends;
-  const reverseLedger = body.updateBudgets ? body.reverseLedger : false;
+  // Payment deletion is intentionally packaged as one cleanup operation.
+  // Callers can no longer detach payment/spend records while retaining an
+  // unreversed paid ledger row.
+  const removeSpends = true;
+  const reverseLedger = body.updateBudgets;
   const user: any = (req as any)?.user || {};
   try {
     requireUid(user);
@@ -87,6 +91,9 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
 
       const toDeletePayments = payments.filter((p) => deleteIds.has(String(p?.id || "").trim()));
       const paidToDelete = toDeletePayments.filter((p) => !!p?.paid);
+      if (paidToDelete.length > 0 && !body.updateBudgets) {
+        throw new Error("paid_payment_delete_requires_budget_reversal");
+      }
 
       let gRef: FirebaseFirestore.DocumentReference | null = null;
       let grant: any = null;
@@ -240,12 +247,24 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
 
       return {
         enrollmentId,
+        grantId: String(e?.grantId || "").trim() || null,
         deletedPaymentIds: Array.from(deleteIds),
         skippedPaidIds,
         reversedSpendIds,
         removedSpendSubdocIds,
       };
     }, "paymentsDeleteRows");
+
+    let budgetRecomputed = false;
+    const warnings: string[] = [];
+    if (result.grantId) {
+      try {
+        const recompute = await recomputeGrantBudgetFromLedger(result.grantId);
+        budgetRecomputed = recompute.recomputed;
+      } catch (err: any) {
+        warnings.push(`budget_recompute_failed:${err?.message || String(err)}`);
+      }
+    }
 
     return res.status(200).json({
       ok: true,
@@ -254,6 +273,8 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
       skippedPaidIds: result.skippedPaidIds,
       reversedSpendIds: result.reversedSpendIds,
       removedSpendSubdocIds: result.removedSpendSubdocIds,
+      budgetRecomputed,
+      warnings,
       counts: {
         deletedPayments: result.deletedPaymentIds.length,
         skippedPaid: result.skippedPaidIds.length,

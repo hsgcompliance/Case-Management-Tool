@@ -146,6 +146,8 @@ export declare const LedgerCreateBody: z.ZodPreprocess<z.ZodObject<{
     enrollmentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     paymentId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     customerId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    paymentQueueId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    reversalOf: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     note: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>>>;
     vendor: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     comment: z.ZodOptional<z.ZodNullable<z.ZodString>>;

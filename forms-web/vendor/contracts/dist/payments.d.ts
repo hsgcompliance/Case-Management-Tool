@@ -776,6 +776,8 @@ export declare const PaymentsDeleteRowsResp: z.ZodObject<{
     skippedPaidIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     reversedSpendIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     removedSpendSubdocIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    budgetRecomputed: z.ZodOptional<z.ZodBoolean>;
+    warnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
     counts: z.ZodObject<{
         deletedPayments: z.ZodNumber;
         skippedPaid: z.ZodNumber;

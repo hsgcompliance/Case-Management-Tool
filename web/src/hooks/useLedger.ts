@@ -100,7 +100,7 @@ export function useCreateLedgerEntry() {
   const qc = useQueryClient();
   return useInvalidateMutation({
     queryClient: qc,
-    queryKeys: [qk.ledger.root],
+    queryKeys: [qk.ledger.root, qk.grants.root],
     mutationFn: (body: LedgerCreateReq) => LedgerAPI.create(body),
     onSuccess: async (res) => {
       const id = String((res as any)?.entry?.id || "");

@@ -1644,6 +1644,8 @@ var PaymentsDeleteRowsResp = import_zod2.z.object({
   skippedPaidIds: import_zod2.z.array(import_zod2.z.string()).optional(),
   reversedSpendIds: import_zod2.z.array(import_zod2.z.string()).optional(),
   removedSpendSubdocIds: import_zod2.z.array(import_zod2.z.string()).optional(),
+  budgetRecomputed: import_zod2.z.boolean().optional(),
+  warnings: import_zod2.z.array(import_zod2.z.string()).optional(),
   counts: import_zod2.z.object({
     deletedPayments: import_zod2.z.number().int().nonnegative(),
     skippedPaid: import_zod2.z.number().int().nonnegative(),
@@ -4532,6 +4534,10 @@ var LedgerCreateBody = import_zod2.z.preprocess(
     enrollmentId: import_zod2.z.string().nullish(),
     paymentId: import_zod2.z.string().nullish(),
     customerId: import_zod2.z.string().nullish(),
+    /** Queue transaction identity for repairable manual queue-to-ledger sync. */
+    paymentQueueId: import_zod2.z.string().min(1).nullish(),
+    /** Canonical link to the original ledger entry for compensating entries. */
+    reversalOf: import_zod2.z.string().min(1).nullish(),
     note: import_zod2.z.union([import_zod2.z.string(), import_zod2.z.array(import_zod2.z.string())]).nullish(),
     vendor: import_zod2.z.string().nullish(),
     comment: import_zod2.z.string().nullish(),

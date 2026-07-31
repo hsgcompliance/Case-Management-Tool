@@ -439,6 +439,8 @@ var PaymentsDeleteRowsResp = import_zod2.z.object({
   skippedPaidIds: import_zod2.z.array(import_zod2.z.string()).optional(),
   reversedSpendIds: import_zod2.z.array(import_zod2.z.string()).optional(),
   removedSpendSubdocIds: import_zod2.z.array(import_zod2.z.string()).optional(),
+  budgetRecomputed: import_zod2.z.boolean().optional(),
+  warnings: import_zod2.z.array(import_zod2.z.string()).optional(),
   counts: import_zod2.z.object({
     deletedPayments: import_zod2.z.number().int().nonnegative(),
     skippedPaid: import_zod2.z.number().int().nonnegative(),

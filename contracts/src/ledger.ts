@@ -260,6 +260,10 @@ export const LedgerCreateBody = z
         enrollmentId: z.string().nullish(),
         paymentId: z.string().nullish(),
         customerId: z.string().nullish(),
+        /** Queue transaction identity for repairable manual queue-to-ledger sync. */
+        paymentQueueId: z.string().min(1).nullish(),
+        /** Canonical link to the original ledger entry for compensating entries. */
+        reversalOf: z.string().min(1).nullish(),
 
         note: z.union([z.string(), z.array(z.string())]).nullish(),
         vendor: z.string().nullish(),

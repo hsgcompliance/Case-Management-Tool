@@ -364,6 +364,8 @@ var PaymentsDeleteRowsResp = z.object({
   skippedPaidIds: z.array(z.string()).optional(),
   reversedSpendIds: z.array(z.string()).optional(),
   removedSpendSubdocIds: z.array(z.string()).optional(),
+  budgetRecomputed: z.boolean().optional(),
+  warnings: z.array(z.string()).optional(),
   counts: z.object({
     deletedPayments: z.number().int().nonnegative(),
     skippedPaid: z.number().int().nonnegative(),
