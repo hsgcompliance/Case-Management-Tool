@@ -444,8 +444,18 @@ export function extractHousehold(
   }
 
   // ── assemble ──
-  const hohKey = hohName ? splitPersonName(hohName.value).full.toLowerCase() : null;
-  const hoh = hohKey ? membersByName.get(hohKey) ?? null : null;
+  // Verified forms (VERIFIED_FORM_IDS) name the HoH from actual documents, so they
+  // may override the pick. Otherwise default to the first household member listed
+  // (order === 0) instead of last-write-wins across self-declared submissions —
+  // a later self-declared re-submission or a generic "Client Name"/"Printed Name"
+  // field on an unrelated form must not bump a correctly-first-listed member.
+  const verifiedHohKey =
+    hohName?.verified ? splitPersonName(hohName.value).full.toLowerCase() : null;
+  const firstListed = [...membersByName.values()].reduce<MemberAccum | null>(
+    (first, m) => (first === null || m.order < first.order ? m : first),
+    null
+  );
+  const hoh = (verifiedHohKey ? membersByName.get(verifiedHohKey) ?? null : null) ?? firstListed;
 
   // HoH-person slots (dob/gender/citizenship/phone/email) fold into their card.
   if (hoh) {
