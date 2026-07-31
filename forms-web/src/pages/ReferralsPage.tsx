@@ -4,6 +4,7 @@ import { useCatalog } from "@/hooks/useCatalog";
 import { JotformEmbed } from "@/components/JotformEmbed";
 import { CreditCardCards } from "@/components/CreditCardCards";
 import { formInCategory, type FormDef } from "@/lib/formsCatalog";
+import { createOtherTask } from "@/lib/tasksApi";
 
 // Referrals tab: the common referral forms, embedded. Completing a referral
 // that starts a case (Bridging Home, Homelessness Prevention screening) pipes
@@ -89,10 +90,19 @@ export default function ReferralsPage() {
 
   const onSubmittedCb = useCallback(() => {
     setSubmitted(true);
-    if (selectedId && pipeToIntake.has(selectedId) && timer.current == null) {
-      timer.current = window.setTimeout(() => navigate("/staff/intake?start=basic"), 2500);
+    if (selectedId && pipeToIntake.has(selectedId)) {
+      const title = forms.find((f) => f.id === selectedId)?.title || "Referral";
+      // Self-assigned reminder so the referral shows up in the submitter's
+      // task inbox even if they navigate away before starting Basic Intake.
+      void createOtherTask({
+        title: `Complete intake from referral — ${title}`,
+        notes: "Referral form submitted — continue into Basic Intake.",
+      }).catch(() => {});
+      if (timer.current == null) {
+        timer.current = window.setTimeout(() => navigate("/staff/intake?start=basic"), 2500);
+      }
     }
-  }, [selectedId, navigate, pipeToIntake]);
+  }, [selectedId, navigate, pipeToIntake, forms]);
 
   if (selected) {
     return (

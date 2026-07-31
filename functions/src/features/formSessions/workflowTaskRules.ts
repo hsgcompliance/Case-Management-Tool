@@ -20,7 +20,10 @@ export const FORM_WORKFLOW_TASK_RULES = {
     title: "Intake complete — assess eligibility and continue follow-up",
   },
   referralToIntake: {
-    enabled: false,
+    // Implemented client-side: forms-web calls tasksOtherCreate (self-assigned)
+    // on referral submission, since no customerId exists yet at this point to
+    // key a dedicated intake-tracking task on (see ReferralsPage.tsx).
+    enabled: true,
     event: "referral_submitted",
     assignment: "referral_owner",
     title: "Complete intake from referral",
