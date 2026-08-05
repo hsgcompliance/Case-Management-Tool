@@ -57,16 +57,40 @@ Budget exists only when `kind:"grant"` / `budgetMode:"budgeted"`.
   - `id` (server fills if missing)
   - `label`
   - `amount`
-  - `projected` (all-time)
-  - `spent` (all-time)
-  - `projectedInWindow` (optional)
-  - `spentInWindow` (optional)
+  - `projected` (eligible transactions inside the inclusive grant period)
+  - `spent` (eligible transactions inside the inclusive grant period)
+  - `projectedInWindow` / `spentInWindow` (compatibility mirrors of the
+    canonical eligible totals)
 - `budget.totals` is server-derived for determinism:
   - `total, projected, spent, balance, projectedBalance`
   - `remaining` is a compat alias of `balance`
   - window totals (optional): `projectedInWindow, spentInWindow, windowBalance, windowProjectedBalance`
 
 **Important:** Budget updates are treated as "special" in patching (see Patch semantics).
+
+### Canonical transaction eligibility
+
+All grant-budget writers and previews use
+`@hdb/contracts/grantBudgetEligibility`. A transaction is assigned when it
+names the grant; it contributes to totals only when it also names an existing
+line item, is not void or a posted queue shadow, and its resolved transaction
+date is within the grant's inclusive `startDate` / `endDate`.
+
+Transaction-date precedence is `transactionDate`, `dueDate`, `date`,
+`paymentDate`, `serviceDate`, `postedAt`, `createdAt`, `ts`, `updatedAtISO`,
+then `updatedAt`. An explicit `YYYY-MM-DD` prefix keeps its calendar day and is
+not shifted by a viewer or server timezone.
+
+`splitGoals` define spending-cycle allocation, not grant-period eligibility. A
+row may therefore count in grant totals while remaining outside every spending
+cycle. Pipeline matching dates and display configuration do not override the
+grant period. The shared contract recognizes an override only when it contains
+an approval flag, approver, approval timestamp, and reason; no unreviewed row
+flag is trusted.
+
+Assigned but ineligible rows remain in `grantsActivity`. Each normalized row
+includes `budgetEligibility` with the exclusion reason and suggested workflow,
+so callers can show it for review without adding it to eligible totals.
 
 ---
 

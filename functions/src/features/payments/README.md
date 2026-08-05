@@ -73,6 +73,16 @@ row-level Post action so the existing transaction identity is reused.
 - Manual ledger creation, queue post/reopen, and payment deletion synchronously
   request canonical grant budget recomputation. Firestore triggers remain an
   idempotent safety net rather than the only path.
+- The shared grant-budget eligibility contract separates assignment from
+  inclusion. Assigned rows outside the inclusive grant dates, without a valid
+  line item, with no transaction date, or outside another eligibility rule stay
+  reviewable but do not change projected, spent, balance, or projected balance.
+- Pending `paymentQueue` rows are projected spend. Posted queue rows are shadows
+  of their linked authoritative ledger entries and are never counted a second
+  time.
+- Primary totals and legacy `*InWindow` fields now represent the same canonical
+  eligible period. Keep the aliases for compatibility; do not restore all-time
+  values to the primary fields.
 
 ## Operator Recovery Playbook
 
