@@ -15,6 +15,7 @@ import { fmtCurrencyUSD } from "@lib/formatters";
 // ---------------------------------------------------------------------------
 
 export type CardInvoiceEntryMode =
+  | "adjust-transaction" // Edit an existing queue transaction and linked ledger row
   | "manual-cc"       // New CC spend recorded directly to ledger
   | "manual-invoice"  // New invoice spend recorded directly to ledger
   | "adjustment"      // Positive or negative correction against a grant/LI
@@ -31,6 +32,16 @@ type ModeConfig = {
 };
 
 const MODE_CONFIG: Record<CardInvoiceEntryMode, ModeConfig> = {
+  "adjust-transaction": {
+    title: "Adjust Transaction",
+    description:
+      "Edit the live transaction. Pending items update in place; posted items update both the queue record and its linked ledger entry. Grant and line item may be left unassigned for later review.",
+    ledgerSource: "manual",
+    defaultSign: 1,
+    showCardSelect: false,
+    noteLabel: "Adjustment reason",
+    notePlaceholder: "Why is this transaction being adjusted?",
+  },
   "manual-cc": {
     title: "Record CC Spend",
     description:
@@ -143,7 +154,7 @@ export default function CardInvoiceEntryDialog({
   React.useEffect(() => {
     if (!open) return;
     const c = MODE_CONFIG[mode];
-    setSign(c.defaultSign);
+    setSign(mode === "adjust-transaction" && sourceAmountCents != null && sourceAmountCents < 0 ? -1 : c.defaultSign);
     setDate(toISODate(sourceDate || todayISO()));
     setGrantId(sourceGrantId || "");
     setLineItemId(sourceLineItemId || "");
@@ -173,8 +184,8 @@ export default function CardInvoiceEntryDialog({
 
     if (!isValidAmount) return setError("Amount must be greater than 0.");
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return setError("Date must be YYYY-MM-DD.");
-    if (grantId && !lineItemId) return setError("Select a line item when a grant is assigned.");
-    if (!grantId && mode !== "adjustment") {
+    if (grantId && !lineItemId && mode !== "adjust-transaction") return setError("Select a line item when a grant is assigned.");
+    if (!grantId && mode !== "adjustment" && mode !== "adjust-transaction") {
       return setError("Grant and line item are required.");
     }
 
@@ -233,7 +244,7 @@ export default function CardInvoiceEntryDialog({
               Cancel
             </button>
             <button className="btn btn-sm" onClick={submit} disabled={busy}>
-              {busy ? "Saving..." : "Create Entry"}
+              {busy ? "Saving..." : mode === "adjust-transaction" ? "Save Changes" : "Create Entry"}
             </button>
           </div>
         </div>
@@ -276,7 +287,7 @@ export default function CardInvoiceEntryDialog({
         <div>
           <div className="mb-1.5 flex items-center gap-2">
             <span className="text-xs font-medium text-slate-700">Amount</span>
-            {mode === "adjustment" && (
+            {(mode === "adjustment" || mode === "adjust-transaction") && (
               <div className="inline-flex rounded border border-slate-300 bg-white p-0.5 text-xs">
                 <button
                   type="button"
@@ -294,7 +305,7 @@ export default function CardInvoiceEntryDialog({
                 </button>
               </div>
             )}
-            {isNegative && mode !== "adjustment" && (
+            {isNegative && mode !== "adjustment" && mode !== "adjust-transaction" && (
               <span className="text-xs font-semibold text-rose-600 uppercase tracking-wide">Negative / Credit</span>
             )}
           </div>
@@ -327,7 +338,7 @@ export default function CardInvoiceEntryDialog({
 
         {/* Date */}
         <label className="block">
-          <div className="mb-1 text-xs font-medium text-slate-700">Date</div>
+          <div className="mb-1 text-xs font-medium text-slate-700">{mode === "adjust-transaction" ? "Transaction Date" : "Date"}</div>
           <input
             type="date"
             className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
@@ -340,7 +351,8 @@ export default function CardInvoiceEntryDialog({
         <div className="space-y-2">
           <div className="text-xs font-medium text-slate-700">
             Grant &amp; Line Item
-            {mode !== "adjustment" && <span className="ml-1 text-rose-500">*</span>}
+            {mode !== "adjustment" && mode !== "adjust-transaction" && <span className="ml-1 text-rose-500">*</span>}
+            {mode === "adjust-transaction" && <span className="ml-1 font-normal text-slate-400">(optional)</span>}
           </div>
           <GrantSelect
             value={grantId || null}
@@ -361,7 +373,7 @@ export default function CardInvoiceEntryDialog({
           <div>
             <div className="mb-1 text-xs text-slate-600 flex items-center gap-1">
               Line Item
-              {grantId && !lineItemId && (
+              {grantId && !lineItemId && mode !== "adjust-transaction" && (
                 <span className="text-amber-600 font-medium">(required — select a line item)</span>
               )}
             </div>
@@ -430,9 +442,11 @@ export default function CardInvoiceEntryDialog({
                 : "border-sky-200 bg-sky-50 text-sky-800"
             }`}
           >
-            {isNegative
-              ? `${signedDisplay} credit — reduces grant spend${lineItemId ? " on this line item" : ""}.`
-              : `${signedDisplay} debit — adds to grant spend${lineItemId ? " on this line item" : ""}.`}
+            {mode === "adjust-transaction"
+              ? `${signedDisplay} will be the updated live transaction amount${grantId && !lineItemId ? "; it will remain outside eligible grant totals until a line item is selected" : ""}.`
+              : isNegative
+                ? `${signedDisplay} credit — reduces grant spend${lineItemId ? " on this line item" : ""}.`
+                : `${signedDisplay} debit — adds to grant spend${lineItemId ? " on this line item" : ""}.`}
           </div>
         )}
       </div>

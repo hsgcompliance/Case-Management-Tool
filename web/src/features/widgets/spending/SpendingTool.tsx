@@ -57,6 +57,7 @@ import { monthKeyOffsetDays } from "../utils";
 import type { DashboardToolDefinition } from "@entities/Page/dashboardStyle/types";
 import { SpendDetailModal } from "./SpendDetailModal";
 import type { CardBudget } from "./SpendDetailModal";
+import { BulkGrantDesignationModal } from "@features/budgetPipeline/PipelineBuilderPage";
 import {
   enrollmentPaymentStatus,
   isClosedGrantRecord,
@@ -1342,10 +1343,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const [bulkVoiding, setBulkVoiding] = React.useState(false);
   const [bulkBypassClosing, setBulkBypassClosing] = React.useState(false);
   const [bulkPostDialogOpen, setBulkPostDialogOpen] = React.useState(false);
+  const [advancedDesignationOpen, setAdvancedDesignationOpen] = React.useState(false);
+  const [advancedDesignationQueueIds, setAdvancedDesignationQueueIds] = React.useState<string[]>([]);
   const [bulkPostGrantId, setBulkPostGrantId] = React.useState("");
   const [bulkPostLineItemId, setBulkPostLineItemId] = React.useState("");
   const [bulkActions, setBulkActions] = React.useState<BulkActionOptions>(DEFAULT_BULK_ACTIONS);
-  React.useEffect(() => { setSelectedIds(new Set()); setBulkPostDialogOpen(false); }, [filterState]);
+  React.useEffect(() => {
+    setSelectedIds(new Set());
+    setBulkPostDialogOpen(false);
+    setAdvancedDesignationOpen(false);
+    setAdvancedDesignationQueueIds([]);
+  }, [filterState]);
 
   // ── Mutations ────────────────────────────────────────────────────────────
 
@@ -2053,6 +2061,11 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const selectedQueueTransactionRows = React.useMemo(
     () => selectedRows.filter((row) => isQueueTransactionRow(row) && row.paymentQueueItem && row.workflowState === "open"),
+    [selectedRows]
+  );
+
+  const selectedDesignationQueueRows = React.useMemo(
+    () => selectedRows.filter((row) => isQueueTransactionRow(row) && row.paymentQueueItem),
     [selectedRows]
   );
 
@@ -3110,6 +3123,21 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           >
             {bulkPosting ? "Updating..." : "Bulk Actions"}
           </button>
+          {typeFilter === "invoice" ? (
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost text-sky-700"
+              disabled={bulkPosting || bulkVoiding || bulkBypassClosing || selectedDesignationQueueRows.length === 0}
+              onClick={() => {
+                setBulkPostDialogOpen(false);
+                setAdvancedDesignationQueueIds(selectedDesignationQueueRows.map((row) => String(row.paymentQueueItem?.id || "")).filter(Boolean));
+                setAdvancedDesignationOpen(true);
+              }}
+              title="Open the advanced pipeline designation grid for the selected invoices."
+            >
+              Advanced Designation
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn-xs btn-ghost text-red-700"
@@ -3527,6 +3555,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       )}
 
       {/* ── Spend Detail Modal ─────────────────────────────────────────────── */}
+      <BulkGrantDesignationModal
+        open={advancedDesignationOpen}
+        previewResult={null}
+        pipelineId={null}
+        defaultGrantId={null}
+        defaultLineItemId={null}
+        initialQueueIds={advancedDesignationQueueIds}
+        hideTransactionSidebar
+        onClose={() => setAdvancedDesignationOpen(false)}
+      />
+
       <SpendDetailModal
         row={modalRow as any}
         isOpen={modalOpen}

@@ -54,6 +54,7 @@ const SOURCE_FORMS = [
 ] as const;
 const ADVANCED_PREVIEW_LIMIT = 5000;
 const ADVANCED_QUEUE_LIMIT = 1000;
+const EMPTY_QUEUE_IDS: string[] = [];
 
 type SourceFormKey = (typeof SOURCE_FORMS)[number]["key"];
 
@@ -432,12 +433,14 @@ function isoDate10(value: unknown): string {
   return text.slice(0, 10);
 }
 
-function BulkGrantDesignationModal({
+export function BulkGrantDesignationModal({
   open,
   previewResult,
   pipelineId,
   defaultGrantId,
   defaultLineItemId,
+  initialQueueIds = EMPTY_QUEUE_IDS,
+  hideTransactionSidebar = false,
   onClose,
 }: {
   open: boolean;
@@ -445,6 +448,8 @@ function BulkGrantDesignationModal({
   pipelineId: string | null;
   defaultGrantId: string | null;
   defaultLineItemId: string | null;
+  initialQueueIds?: string[];
+  hideTransactionSidebar?: boolean;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -459,8 +464,9 @@ function BulkGrantDesignationModal({
   const grantWindowStart = isoDate10(targetGrant?.startDate);
   const grantWindowEnd = isoDate10(targetGrant?.endDate);
   const [search, setSearch] = useState("");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(previewResult?.matched.map((item) => item.id) ?? []));
-  const [designationIds, setDesignationIds] = useState<Set<string>>(() => new Set(previewResult?.matched.map((item) => item.id) ?? []));
+  const initialIds = initialQueueIds.length > 0 ? initialQueueIds : (previewResult?.matched.map((item) => item.id) ?? []);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(initialIds));
+  const [designationIds, setDesignationIds] = useState<Set<string>>(() => new Set(initialIds));
   const [rowDrafts, setRowDrafts] = useState<Record<string, RowDesignationDraft>>({});
   const [applying, setApplying] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<MatchingSourceFilter>("all");
@@ -490,17 +496,18 @@ function BulkGrantDesignationModal({
   );
   const creditCardSubmissionsQ = useJotformSubmissionsLite(
     { formId: LINE_ITEMS_FORM_IDS.creditCard, limit: 500 },
-    { enabled: open, staleTime: 20_000 },
+    { enabled: open && !hideTransactionSidebar, staleTime: 20_000 },
   );
   const invoiceSubmissionsQ = useJotformSubmissionsLite(
     { formId: LINE_ITEMS_FORM_IDS.invoice, limit: 500 },
-    { enabled: open, staleTime: 20_000 },
+    { enabled: open && !hideTransactionSidebar, staleTime: 20_000 },
   );
 
   useEffect(() => {
     if (!open) return;
-    setSelectedIds(new Set(previewResult?.matched.map((item) => item.id) ?? []));
-    setDesignationIds(new Set(previewResult?.matched.map((item) => item.id) ?? []));
+    const nextInitialIds = initialQueueIds.length > 0 ? initialQueueIds : (previewResult?.matched.map((item) => item.id) ?? []);
+    setSelectedIds(new Set(nextInitialIds));
+    setDesignationIds(new Set(nextInitialIds));
     setRowDrafts({});
     setSourceFilter("all");
     setSubmissionScope(grantWindowStart || grantWindowEnd ? "pullDateRange" : "cached");
@@ -515,7 +522,7 @@ function BulkGrantDesignationModal({
     setAdvancedFilters(EMPTY_SUBMISSION_ADVANCED_FILTERS);
     setRefreshingSubmissions(false);
     initialGrantPullKey.current = "";
-  }, [defaultGrantId, defaultLineItemId, grantWindowEnd, grantWindowStart, open, previewResult]);
+  }, [defaultGrantId, defaultLineItemId, grantWindowEnd, grantWindowStart, hideTransactionSidebar, initialQueueIds, open, previewResult]);
 
   useEffect(() => {
     if (!isResizingTransactionSidebar) return;
@@ -853,10 +860,12 @@ function BulkGrantDesignationModal({
         </div>
 
         <div
-          className="grid min-h-0 grid-rows-[minmax(220px,38%)_minmax(0,1fr)] bg-slate-50 dark:bg-slate-900/40 lg:grid-cols-[var(--transaction-sidebar-width)_minmax(0,1fr)] lg:grid-rows-none"
+          className={hideTransactionSidebar
+            ? "grid min-h-0 grid-cols-1 bg-slate-50 dark:bg-slate-900/40"
+            : "grid min-h-0 grid-rows-[minmax(220px,38%)_minmax(0,1fr)] bg-slate-50 dark:bg-slate-900/40 lg:grid-cols-[var(--transaction-sidebar-width)_minmax(0,1fr)] lg:grid-rows-none"}
           style={{ "--transaction-sidebar-width": `${transactionSidebarWidth}px` } as React.CSSProperties}
         >
-          <aside className="relative flex min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+          <aside className={`${hideTransactionSidebar ? "hidden" : "relative flex"} min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950`}>
             <div className="shrink-0 border-b border-slate-200 p-3 dark:border-slate-700">
               <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">All Transactions</div>
               <div className="grid grid-cols-3 gap-1 rounded-md border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800">
@@ -924,7 +933,7 @@ function BulkGrantDesignationModal({
                           <td className="px-2 py-2 text-xs">{type === "invoice" ? "Inv" : "Card"}</td>
                           <td className="min-w-0 px-2 py-2">
                             <div className="truncate font-semibold text-slate-900 dark:text-slate-100">{String(item.merchant || item.descriptor || item.formTitle || "Spend row")}</div>
-                            <div className="truncate text-xs text-slate-500">{fmtDateOrDash(item.createdAt || item.dueDate)} - {String(item.purchaser || item.customer || item.submissionId || "")}</div>
+                            <div className="truncate text-xs text-slate-500">{fmtDateOrDash(item.dueDate || item.createdAt)} - {String(item.purchaser || item.customer || item.submissionId || "")}</div>
                           </td>
                           <td className="px-2 py-2 text-right font-mono text-xs">{fmtCurrencyUSD(item.amount)}</td>
                           <td className="px-2 py-2 text-xs">
@@ -1010,7 +1019,7 @@ function BulkGrantDesignationModal({
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <strong className="text-sm text-slate-800 dark:text-slate-200">Spending Designations</strong>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600">{selectedCount} selected</span>
-                <span className="text-xs text-slate-400">Rows originate from current budget pipeline filters plus added transactions.</span>
+                <span className="text-xs text-slate-400">{hideTransactionSidebar ? "Rows come from the current Invoicing bulk selection." : "Rows originate from current budget pipeline filters plus added transactions."}</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className="btn btn-xs" disabled={applying || selectedRows.length === 0} onClick={() => void saveDesignationRows(selectedRows.map((row) => row.id))}>
@@ -1065,7 +1074,7 @@ function BulkGrantDesignationModal({
                     <td className="px-3 py-2 align-top">
                       <input type="checkbox" checked={checked} onChange={() => toggleOne(item.id)} onClick={(e) => e.stopPropagation()} />
                     </td>
-                    <td className="px-3 py-2 align-top text-xs">{fmtDateOrDash(item.createdAt || item.dueDate)}</td>
+                    <td className="px-3 py-2 align-top text-xs">{fmtDateOrDash(item.dueDate || item.createdAt)}</td>
                     <td className="px-3 py-2 align-top">
                       <div className="font-medium text-slate-900 dark:text-slate-100">{String(item.merchant || item.descriptor || item.formTitle || "Jotform spend")}</div>
                       <div className="text-xs text-slate-500">{String(item.source || "")} - {String(item.submissionId || item.id)}</div>
@@ -1127,7 +1136,7 @@ function BulkGrantDesignationModal({
                 );
               })}
               {!loading && designationRows.length === 0 ? (
-                <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-500">No spending designations are in this workset yet. Add transactions from the left rail.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-500">{hideTransactionSidebar ? "No selected Invoicing transactions are available for designation." : "No spending designations are in this workset yet. Add transactions from the left rail."}</td></tr>
               ) : null}
             </tbody>
           </table>

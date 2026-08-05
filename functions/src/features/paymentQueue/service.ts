@@ -23,6 +23,8 @@ const LOCAL_RECONCILE_FIELDS = [
   'amount',
   'amountAbs',
   'direction',
+  'dueDate',
+  'month',
   'merchant',
   'expenseType',
   'program',
@@ -439,6 +441,10 @@ export async function patchPaymentQueueItem(
   }
   if (patch.amountAbs !== undefined && patch.amount === undefined) mark('amountAbs', Number(patch.amountAbs || 0));
   if (patch.direction !== undefined) mark('direction', patch.direction);
+  if (patch.dueDate !== undefined) {
+    mark('dueDate', patch.dueDate);
+    mark('month', patch.dueDate.slice(0, 7));
+  }
   if (patch.merchant !== undefined) mark('merchant', patch.merchant);
   if (patch.expenseType !== undefined) mark('expenseType', patch.expenseType);
   if (patch.program !== undefined) mark('program', patch.program);
@@ -495,8 +501,8 @@ export async function patchPaymentQueueItem(
   const nextItem = {...prevItem, ...update} as TPaymentQueueItem;
   if (assignmentChanged) await assertQueueGrantLineItem(nextItem, false);
 
-  const changedBudgetFields = localFields.some((field) => ['amount', 'grantId', 'lineItemId'].includes(field));
-  const changedLedgerFields = localFields.some((field) => ['amount', 'grantId', 'lineItemId', 'customerId'].includes(field));
+  const changedBudgetFields = localFields.some((field) => ['amount', 'dueDate', 'grantId', 'lineItemId'].includes(field));
+  const changedLedgerFields = localFields.some((field) => ['amount', 'dueDate', 'grantId', 'lineItemId', 'customerId'].includes(field));
   const ledgerUpdate: Record<string, unknown> = {
     updatedAt: now,
     'origin.localQueueCorrection': true,
@@ -506,6 +512,11 @@ export async function patchPaymentQueueItem(
   if (update.amount !== undefined) {
     ledgerUpdate.amount = update.amount;
     ledgerUpdate.amountCents = Math.round(Number(update.amount || 0) * 100);
+  }
+  if (update.dueDate !== undefined) {
+    ledgerUpdate.dueDate = update.dueDate;
+    ledgerUpdate.date = update.dueDate;
+    ledgerUpdate.month = String(update.dueDate).slice(0, 7);
   }
   if (update.grantId !== undefined) ledgerUpdate.grantId = update.grantId;
   if (update.lineItemId !== undefined) ledgerUpdate.lineItemId = update.lineItemId;
@@ -608,7 +619,7 @@ async function assertQueueGrantLineItem(
     throw new Error('grant_classification_or_no_grant_required_before_posting');
   }
   if (!grantId && lineItemId) throw new Error('grant_required_for_line_item');
-  if (grantId && !lineItemId) throw new Error('line_item_required_for_grant_posting');
+  if (grantId && !lineItemId && requireClassified) throw new Error('line_item_required_for_grant_posting');
 
   const grantSnap = await db.collection('grants').doc(grantId).get();
   if (!grantSnap.exists) throw new Error('grant_not_found');
@@ -617,6 +628,11 @@ async function assertQueueGrantLineItem(
   if (item.orgId && String((grant as any).orgId || '') !== String(item.orgId || '')) {
     throw new Error('grant_org_mismatch');
   }
+
+  // Draft/live corrections may preserve a validated grant assignment without
+  // forcing a line item. The shared eligibility model keeps that row
+  // reviewable but out of budget totals. Posting remains strict above.
+  if (!lineItemId) return;
 
   const lineItems: any[] = Array.isArray((grant as any)?.budget?.lineItems) ?
     (grant as any).budget.lineItems :

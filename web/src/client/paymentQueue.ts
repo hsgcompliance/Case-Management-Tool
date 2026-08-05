@@ -93,6 +93,7 @@ export type PaymentQueuePatchReq = {
   amount?: number;
   amountAbs?: number;
   direction?: "charge" | "return";
+  dueDate?: string;
   merchant?: string;
   expenseType?: string;
   program?: string;

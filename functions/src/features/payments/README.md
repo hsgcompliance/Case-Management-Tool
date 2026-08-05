@@ -84,6 +84,19 @@ row-level Post action so the existing transaction identity is reused.
   eligible period. Keep the aliases for compatibility; do not restore all-time
   values to the primary fields.
 
+### Live invoice and credit-card adjustments
+
+- Invoicing's `Adjust Transaction` action edits the existing payment-queue row;
+  it does not create a replacement ledger entry or void the source row.
+- For a posted transaction, `paymentQueuePatch` updates the queue row and linked
+  authoritative ledger entry atomically. Date changes write `dueDate`, `date`,
+  and the derived `month` to the ledger.
+- Grant and line item may both be blank. A validated grant-only assignment is
+  also allowed for review, but remains outside eligible totals until a valid
+  line item is selected. Posting a pending transaction remains strict.
+- Locally adjusted date, month, amount, and assignment fields are recorded in
+  `localModifiedFields`; Jotform reconciliation preserves them.
+
 ## Operator Recovery Playbook
 
 For an invoice or credit-card row that appears open even though a ledger entry

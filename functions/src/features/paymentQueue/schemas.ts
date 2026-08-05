@@ -227,6 +227,7 @@ export const PaymentQueuePatchBody = z.object({
   amount: z.number().optional(),
   amountAbs: z.number().optional(),
   direction: z.enum(['charge', 'return']).optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   merchant: z.string().optional(),
   expenseType: z.string().optional(),
   program: z.string().optional(),

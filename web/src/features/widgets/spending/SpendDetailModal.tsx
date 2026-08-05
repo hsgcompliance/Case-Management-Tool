@@ -15,6 +15,7 @@ import LineItemSelect from "@entities/selectors/LineItemSelect";
 import CreditCardSelect from "@entities/selectors/CreditCardSelect";
 import CardInvoiceEntryDialog from "@entities/dialogs/payments/CardInvoiceEntryDialog";
 import type { CardInvoiceEntryMode } from "@entities/dialogs/payments/CardInvoiceEntryDialog";
+import { buildTransactionAdjustmentPatch } from "./transactionAdjustment";
 import { GrantBudgetStrip } from "@entities/grants/GrantBudgetStrip";
 import CustomerWorkspaceModal from "@features/customers/CustomerWorkspaceModal";
 import { computeRentCertDues, normalizePayments, todayISO } from "@features/customers/components/paymentScheduleUtils";
@@ -1915,8 +1916,8 @@ function CardSpendCard({
                 <button type="button" className="btn btn-ghost btn-sm justify-start border border-slate-200 bg-white text-slate-700 hover:bg-slate-50" disabled={anyMutating || saving || row.workflowState === "open"} onClick={handleReopen}>
                   Reopen Closed Transaction
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm justify-start border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 md:col-span-3" disabled={anyMutating} onClick={() => openEntryDialog("manual-cc")}>
-                  Manual Entry Override
+                <button type="button" className="btn btn-ghost btn-sm justify-start border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 md:col-span-3" disabled={anyMutating} onClick={() => openEntryDialog("adjust-transaction")}>
+                  Adjust Transaction
                 </button>
               </div>
             </div>
@@ -2151,9 +2152,19 @@ function CardSpendCard({
           sourceNote={typeof row.paymentQueueItem?.note === "string" ? row.paymentQueueItem.note : undefined}
           sourcePaymentQueueId={entryDialogMode === "manual-cc" && isQueue ? queueId : undefined}
           replacesPendingProjection={entryDialogMode === "manual-cc" && isQueue}
-          busy={createLedger.isPending || postQueue.isPending}
+          busy={patchQueue.isPending || createLedger.isPending || postQueue.isPending}
           onCancel={() => setEntryDialogOpen(false)}
           onSave={async (body) => {
+            if (entryDialogMode === "adjust-transaction" && isQueue) {
+              try {
+                await patchQueue.mutateAsync({ id: queueId, body: buildTransactionAdjustmentPatch(body) });
+                toast(row.workflowState === "closed" ? "Live transaction and linked ledger entry updated." : "Transaction updated.", { type: "success" });
+                setEntryDialogOpen(false);
+              } catch (e: unknown) {
+                toast(toApiError(e, "Transaction adjustment failed.").error, { type: "error" });
+              }
+              return;
+            }
             let created;
             try {
               created = await createLedger.mutateAsync(body);
@@ -2214,7 +2225,6 @@ function InvoiceSpendCard({
   const postQueue = usePostPaymentQueueToLedger();
   const reopenQueue = useReopenPaymentQueueItem();
   const voidQueue = useVoidPaymentQueueItem();
-  const createLedger = useCreateLedgerEntry();
   const [entryDialogOpen, setEntryDialogOpen] = React.useState(false);
 
   const queueId = String(row.paymentQueueItem?.id || "");
@@ -2264,7 +2274,7 @@ function InvoiceSpendCard({
   const amountCorrectionRequired = isAmountChanged(row.amountCents, amountDraft);
 
   const anyMutating = patchQueue.isPending || postQueue.isPending || reopenQueue.isPending ||
-    voidQueue.isPending || createLedger.isPending;
+    voidQueue.isPending;
 
   const handleSaveAssignment = async () => {
     setActionError("");
@@ -2542,7 +2552,7 @@ function InvoiceSpendCard({
                 Reopen Closed Transaction
               </button>
               <button type="button" className="btn btn-ghost btn-sm justify-start border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 md:col-span-3" disabled={anyMutating} onClick={() => setEntryDialogOpen(true)}>
-                Manual Entry Override
+                Adjust Transaction
               </button>
             </div>
           </div>
@@ -2698,13 +2708,13 @@ function InvoiceSpendCard({
             </button>
           </div>
           <div className="border-t border-slate-100 pt-2 grid grid-cols-1 gap-1.5">
-            <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Manual Entry</div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Adjustments</div>
             <button
               className="btn btn-ghost btn-sm w-full text-left"
               disabled={anyMutating}
               onClick={() => setEntryDialogOpen(true)}
             >
-              Record Invoice Payment (manual)
+              Adjust Transaction
             </button>
           </div>
         </div>
@@ -2715,7 +2725,7 @@ function InvoiceSpendCard({
       {entryDialogOpen && (
         <CardInvoiceEntryDialog
           open={entryDialogOpen}
-          mode="manual-invoice"
+          mode="adjust-transaction"
           sourceAmountCents={row.amountCents}
           sourceGrantId={assignGrantId || row.grantId || undefined}
           sourceLineItemId={assignLineItemId || row.lineItemId || undefined}
@@ -2725,27 +2735,16 @@ function InvoiceSpendCard({
           sourceNote={invoiceNote || undefined}
           sourcePaymentQueueId={queueId}
           replacesPendingProjection
-          busy={createLedger.isPending || postQueue.isPending}
+          busy={patchQueue.isPending}
           onCancel={() => setEntryDialogOpen(false)}
           onSave={async (body) => {
-            let created;
             try {
-              created = await createLedger.mutateAsync(body);
+              await patchQueue.mutateAsync({ id: queueId, body: buildTransactionAdjustmentPatch(body) });
+              toast(row.workflowState === "closed" ? "Live transaction and linked ledger entry updated." : "Transaction updated.", { type: "success" });
+              setEntryDialogOpen(false);
             } catch (e: unknown) {
-              toast(toApiError(e, "Create failed.").error, { type: "error" });
-              return;
+              toast(toApiError(e, "Transaction adjustment failed.").error, { type: "error" });
             }
-            const ledgerEntryId = String(created?.entry?.id || body.id || "");
-            try {
-              await postQueue.mutateAsync({ id: queueId, body: { ledgerEntryId } });
-              toast("Invoice ledger entry created and transaction posted.", { type: "success" });
-            } catch (e: unknown) {
-              toast(
-                `${toApiError(e, "Queue sync failed.").error} The ledger entry is saved; use Post Invoice to repair the queue link without reposting.`,
-                { type: "error" },
-              );
-            }
-            setEntryDialogOpen(false);
           }}
         />
       )}
