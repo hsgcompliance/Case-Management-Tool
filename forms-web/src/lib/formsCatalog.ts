@@ -50,9 +50,9 @@ export const FORMS: FormDef[] = [
   // ── Referral ────────────────────────────────────────────────────────────
   { id: "250809472429059", title: "Connect with Resources", category: "referral", submissions: 508 },
   { id: "251038163574153", title: "Refer a Household to Resource Navigation", category: "referral", submissions: 209 },
-  { id: "251346523348053", title: "Referral to Rental Assistance (Homelessness)", category: "referral", submissions: 114 },
-  { id: "253555227407155", title: "Bridging Home Referral", category: "referral", submissions: 74 },
-  { id: "250021786346152", title: "Referral to Homelessness Prevention Screening", category: "referral", submissions: 71 },
+  { id: "251346523348053", title: "Referral to Rental Assistance (Homelessness)", category: "referral", submissions: 114, buildHousehold: true },
+  { id: "253555227407155", title: "Bridging Home Referral", category: "referral", submissions: 74, buildHousehold: true },
+  { id: "250021786346152", title: "Referral to Homelessness Prevention Screening", category: "referral", submissions: 71, buildHousehold: true },
   { id: "250785697676075", title: "Health Dept Referral to HRDC Case Management", category: "referral", submissions: 14 },
   { id: "260766127603053", title: "Referral to Family Shelter", category: "referral", submissions: 0 },
 
@@ -74,7 +74,10 @@ export const FORMS: FormDef[] = [
   { id: "260347030470043", title: "Self-Declaration of Zero Income", category: "other", submissions: 7 },
   { id: "260346243018046", title: "Self-Declaration of Zero Assets", category: "other", submissions: 1 },
   // Doubles as the TSS payer variant in the intake tssGate (referenced by id).
-  { id: "260345071136045", title: "Referral to TSS", category: "referral", submissions: 4 },
+  // buildHousehold matters here specifically: the tssGate step only exposes the
+  // NONPAYER form id to flowFormIds (see FormsCategoryView), so without this flag
+  // a payer-path submission's webhooks never reach the sidebar at all.
+  { id: "260345071136045", title: "Referral to TSS", category: "referral", submissions: 4, buildHousehold: true },
 ];
 
 /** The staff web app (customer documents + Google Drive folders live there). */
@@ -85,19 +88,23 @@ const HOMELESSNESS_STATUS_CERTIFICATION_URL =
 /** Intake programs selected in step 1. PATH and TSS may accompany another path. */
 export type IntakeTypeId =
   | "eviction-prevention"
-  | "hud-rental"
+  | "hud-rrh"
+  | "hud-psh"
   | "bridging-home"
   | "path-housing"
   | "ryan-white-housing"
-  | "tss-deposit-fee";
+  | "tss-deposit-fee"
+  | "interim-intake";
 
 export const INTAKE_TYPES: { id: IntakeTypeId; label: string; hint: string }[] = [
   { id: "eviction-prevention", label: "Eviction Prevention Intake", hint: "Assessment is a spreadsheet, not a form" },
-  { id: "hud-rental", label: "HUD Rental Intake", hint: "Requires Coordinated Entry Assessment in HMIS" },
+  { id: "hud-rrh", label: "HUD Rapid Rehousing (RRH)", hint: "Requires literal homelessness; pays deposit + 3–18 months of assistance" },
+  { id: "hud-psh", label: "HUD Permanent Supportive Housing (PSH)", hint: "Documented disability + literal homelessness (or a current RRH client); indefinite assistance" },
   { id: "bridging-home", label: "Bridging Home Intake", hint: "HUD workflow without an inspection" },
   { id: "path-housing", label: "PATH Housing Intake", hint: "Requires HMIS entry" },
   { id: "ryan-white-housing", label: "Ryan White Housing Assistance", hint: "Same HMIS workflow as PATH Housing Intake" },
-  { id: "tss-deposit-fee", label: "TSS Deposit & Application Fee Only", hint: "Deposit / application fee assistance only" },
+  { id: "tss-deposit-fee", label: "TSS Deposit & Application Fee", hint: "Deposit / application fee assistance — pairs with any program except Eviction Prevention" },
+  { id: "interim-intake", label: "Interim Intake", hint: "Reassess eligibility as income/rent changes — workflow isn't built yet, but the selection is saved" },
 ];
 
 export function intakeTypeLabel(id: string | null | undefined): string {
@@ -230,6 +237,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     checklist: [
       "Photo ID for ALL household members",
       "Income documents (or zero-income self-declaration)",
+      "Chimes Verification (if zero income)",
       "Asset documents (or zero-assets self-declaration)",
       "Copy of eviction notice (if applicable)",
       "Copy of Homeless Certification (if applicable)",

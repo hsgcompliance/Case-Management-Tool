@@ -90,7 +90,7 @@ const EVICTION_ASSESSMENT_URL = "https://docs.google.com/spreadsheets/d/15oqPBUX
 const TSS_HOUSING_ASSESSMENT_URL = "https://drive.google.com/file/d/1s-WjmM_FZd4HwfC2Tzeve4_mlsaTdxa0/view?usp=drive_link";
 const HQS_INSPECTION_URL = "https://drive.google.com/file/d/1WY57mEu6-RW9Ry2bpTJWYsYmWwyYDZNT/view";
 const HABITABILITY_INSPECTION_FORM_ID = "250648244597063";
-const PRIMARY_INTAKE_TYPES = new Set<IntakeTypeId>(["eviction-prevention", "hud-rental", "bridging-home"]);
+const PRIMARY_INTAKE_TYPES = new Set<IntakeTypeId>(["eviction-prevention", "hud-rrh", "hud-psh", "bridging-home"]);
 
 function GuidanceLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -104,7 +104,8 @@ function GuidanceLink({ href, children }: { href: string; children: ReactNode })
 function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] }) {
   const selected = new Set(intakeTypes);
   const needsHmis =
-    selected.has("hud-rental") ||
+    selected.has("hud-rrh") ||
+    selected.has("hud-psh") ||
     selected.has("bridging-home") ||
     selected.has("path-housing") ||
     selected.has("ryan-white-housing");
@@ -121,10 +122,16 @@ function IntakeProgramGuidance({ intakeTypes }: { intakeTypes: IntakeTypeId[] })
           <div className="mt-4"><ToolWidget id="fmr" /></div>
         </section>
       ) : null}
-      {selected.has("hud-rental") ? (
+      {selected.has("hud-rrh") ? (
         <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4">
-          <h3 className="font-semibold text-sky-950">HUD Rental Assistance</h3>
+          <h3 className="font-semibold text-sky-950">HUD Rapid Rehousing (RRH)</h3>
           <p className="mt-1 text-sm text-sky-900">Please verify that a Coordinated Entry (CE) entry exists with a MAP Assessment dated in the current month. Download a PDF of the MAP Assessment and save it in the customer file.</p>
+        </section>
+      ) : null}
+      {selected.has("hud-psh") ? (
+        <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4">
+          <h3 className="font-semibold text-sky-950">HUD Permanent Supportive Housing (PSH)</h3>
+          <p className="mt-1 text-sm text-sky-900">Please verify that a Coordinated Entry (CE) entry exists with a MAP Assessment dated in the current month (or a current RRH enrollment), and confirm disability documentation is on file. Download a PDF of the MAP Assessment and save it in the customer file.</p>
         </section>
       ) : null}
       {selected.has("bridging-home") ? (
@@ -181,11 +188,11 @@ function IntakeInspection({
       </div>
     );
   }
-  if (intakeTypes.includes("hud-rental")) {
+  if (intakeTypes.includes("hud-rrh") || intakeTypes.includes("hud-psh")) {
     return (
       <section className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-4">
         <h3 className="font-semibold text-sky-950">HQS Inspection</h3>
-        <p className="mt-1 text-sm text-sky-900">Schedule and complete an HQS inspection for this HUD Rental intake. Use the HQS inspection form linked below.</p>
+        <p className="mt-1 text-sm text-sky-900">Schedule and complete an HQS inspection for this HUD intake. Use the HQS inspection form linked below.</p>
         <div className="mt-4 flex justify-center"><GuidanceLink href={HQS_INSPECTION_URL}>Open HQS Inspection Form</GuidanceLink></div>
       </section>
     );
@@ -334,7 +341,8 @@ export function FormsCategoryView({
   );
 
   const intakeTypes = progress.intakeTypes ?? [];
-  const inspectionRequired = intakeTypes.includes("hud-rental") || intakeTypes.includes("eviction-prevention");
+  const inspectionRequired =
+    intakeTypes.includes("hud-rrh") || intakeTypes.includes("hud-psh") || intakeTypes.includes("eviction-prevention");
   const steps = useMemo(
     () => resolvedSteps.filter((candidate) => !candidate.inspectionGate || inspectionRequired),
     [resolvedSteps, inspectionRequired]
@@ -617,8 +625,10 @@ export function FormsCategoryView({
     }
   };
 
-  // Step 1 supports program combinations, except HUD Rental and Eviction
-  // Prevention, which are mutually exclusive primary assistance paths.
+  // Step 1 supports program combinations, except the primary assistance paths
+  // (HUD RRH, HUD PSH, Bridging Home, Eviction Prevention), which are mutually
+  // exclusive with each other. TSS is also blocked alongside Eviction
+  // Prevention specifically — it's allowed to pair with every other program.
   const toggleIntakeType = (v: IntakeTypeId, stepKey: string) => {
     updateProgress((p) => {
       const current = new Set(p.intakeTypes ?? []);
@@ -665,6 +675,7 @@ export function FormsCategoryView({
           sessionResetKey={webhookSessionReset}
           receivedSubmission={receivedSubmission}
           onSnapshot={setWebhookSnapshot}
+          intakeTypes={intakeTypes}
         />
       </div>
     ) : (
@@ -1010,12 +1021,15 @@ export function FormsCategoryView({
           <div className="rounded-xl border border-indigo-200 bg-white px-6 py-8 text-center">
             <div className="text-base font-semibold text-slate-900">Which programs are part of this intake?</div>
             <p className="mx-auto mt-1 max-w-xl text-xs text-slate-500">
-              Select all that apply. PATH and TSS can accompany one primary program. HUD Rental, Bridging Home, and Eviction Prevention are mutually exclusive.
+              Select all that apply. PATH can accompany any primary program; TSS can accompany any primary program except Eviction Prevention. HUD RRH, HUD PSH, Bridging Home, and Eviction Prevention are mutually exclusive with each other.
             </p>
             <div className="mx-auto mt-5 grid max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
               {INTAKE_TYPES.map((t) => {
                 const selected = intakeTypes.includes(t.id);
-                const conflicts = PRIMARY_INTAKE_TYPES.has(t.id) && intakeTypes.some((id) => id !== t.id && PRIMARY_INTAKE_TYPES.has(id));
+                const conflicts =
+                  (PRIMARY_INTAKE_TYPES.has(t.id) && intakeTypes.some((id) => id !== t.id && PRIMARY_INTAKE_TYPES.has(id))) ||
+                  (t.id === "tss-deposit-fee" && intakeTypes.includes("eviction-prevention")) ||
+                  (t.id === "eviction-prevention" && intakeTypes.includes("tss-deposit-fee"));
                 return (
                   <button
                     key={t.id}

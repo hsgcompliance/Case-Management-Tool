@@ -3,7 +3,7 @@ import { listWebhookEventDetails, type WebhookEventDetail } from "@/lib/webhookD
 import { getSubmissionLinks, linkSubmission, type SubmissionLink } from "@/lib/submissionLinksApi";
 import { extractHousehold, type ExtractedValue, type HouseholdMember, type SlotValue } from "@/lib/householdExtract";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
-import { formById } from "@/lib/formsCatalog";
+import { formById, intakeTypesLabel, type IntakeTypeId } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { matchName, type NameMatch } from "@/lib/nameMatch";
 import {
@@ -353,12 +353,15 @@ export function WebhooksSidebar({
   sessionResetKey = 0,
   receivedSubmission,
   onSnapshot,
+  /** Programs selected in Step 1 — surfaced at the top of the household model. */
+  intakeTypes,
 }: {
   formIds: string[];
   refreshKey?: number;
   sessionResetKey?: number;
   receivedSubmission?: JfSubmission | null;
   onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
+  intakeTypes?: IntakeTypeId[];
 }) {
   const { customer } = useCurrentCustomer();
   const [collapsed, setCollapsed] = useState(() => {
@@ -884,6 +887,7 @@ export function WebhooksSidebar({
       exportedAtISO: new Date().toISOString(),
       sessionStartISO,
       customer: customer ? { id: customer.id, name: customer.name, cwId: customer.cwId } : null,
+      intakeTypes: intakeTypes?.length ? { ids: intakeTypes, label: intakeTypesLabel(intakeTypes) } : null,
       anchor: anchor ? { name: anchor, source: anchorSource } : null,
       normalized: {
         household: slotObj(household.household),
@@ -1036,6 +1040,12 @@ export function WebhooksSidebar({
                   Copy all
                 </button>
               </div>
+
+              {intakeTypes?.length ? (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700">
+                  Intake type: {intakeTypesLabel(intakeTypes)}
+                </div>
+              ) : null}
 
               {anchor ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-600">

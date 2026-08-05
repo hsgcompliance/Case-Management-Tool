@@ -417,6 +417,12 @@ export function extractHousehold(
     let pendingSource: ExtractedValue | null = null;
     const indexedMembers = new Map<number, ExtractedValue>();
     const submittedOn = eventDateISO(ev.fields);
+    // Some live forms copy-paste a per-member block's label ("Gender Identity
+    // (head of household)") across every repeated dependent block instead of
+    // indexing it. Once a repeated Name block has started, stop letting bare
+    // HOH_PERSON_SLOTS fields (dob/gender/citizenship/phone/email) overwrite
+    // the HoH's real value with a later dependent's mislabeled answer.
+    let sawMemberBlock = false;
 
     const flushDraft = () => {
       if (draft.name && isPlausibleName(draft.name.value)) {
@@ -454,6 +460,7 @@ export function extractHousehold(
         upsertMember(name);
         if (indexed.index === 1 && wins(hohName, name)) hohName = name;
         consumedBy.push("member.name");
+        sawMemberBlock = true;
       } else if (indexed && indexed.kind !== "name") {
         const owner = indexedMembers.get(indexed.index) ?? (indexed.index === 1 ? hohName : null);
         if (owner) {
@@ -493,6 +500,7 @@ export function extractHousehold(
         if (isPlausibleName(value)) {
           draft.name = ev8(value);
           consumedBy.push("member.name");
+          sawMemberBlock = true;
         }
       } else if (!consumedBy.length && HOLDER_NAME_MATCH.test(label)) {
         flushDraft();
@@ -566,7 +574,7 @@ export function extractHousehold(
 
       // ── slots (HoH person, household counts, housing) ──
       for (const def of [...HOH_PERSON_SLOTS, ...HOUSEHOLD_SLOTS, ...HOUSING_SLOTS, ...FINANCIAL_SLOTS]) {
-        if (indexed && ["dob", "gender", "citizenship", "phone", "email"].includes(def.key)) continue;
+        if ((indexed || sawMemberBlock) && ["dob", "gender", "citizenship", "phone", "email"].includes(def.key)) continue;
         if (!def.match.test(label)) continue;
         if (def.exclude?.test(label)) continue;
         if (def.valueOk && !def.valueOk(value)) continue;
