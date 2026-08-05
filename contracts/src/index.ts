@@ -16,6 +16,22 @@ export * from "./http";
 
 // Budget pipeline
 export * as budgetPipeline from "./budgetPipeline";
+export * as grantBudgetEligibility from "./grantBudgetEligibility";
+export {
+  evaluateGrantBudgetEligibility,
+  grantBudgetIsoDate,
+  resolveGrantBudgetTransactionDate,
+} from "./grantBudgetEligibility";
+export type {
+  GrantBudgetEligibilityGrant,
+  GrantBudgetEligibilityOverride,
+  GrantBudgetEligibilityReason,
+  GrantBudgetEligibilityResult,
+  GrantBudgetEligibilityTransaction,
+  GrantBudgetLineItemConfig,
+  GrantBudgetSpendingCycle,
+  GrantBudgetTransactionState,
+} from "./grantBudgetEligibility";
 export * as budgetAssignment from "./budgetAssignment";
 
 // Canonical endpoint req/resp typing (this is where most â€œAPI typesâ€ live)
