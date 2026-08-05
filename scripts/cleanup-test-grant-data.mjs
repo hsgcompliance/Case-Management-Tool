@@ -149,6 +149,18 @@ async function loadAndReview() {
 async function applyCleanup(review) {
   const batch = db.batch();
   const now = Timestamp.now();
+  const voidedPaymentIdsByEnrollment = new Map();
+  for (const doc of review.queueDocs) {
+    const row = records("projection").find((candidate) => candidate.recordId === doc.id);
+    if (row?.proposedAction !== "void") continue;
+    const source = doc.data() || {};
+    const enrollmentId = String(source.enrollmentId || "").trim();
+    const paymentId = String(source.paymentId || source.submissionId || "").trim();
+    if (!enrollmentId || !paymentId) continue;
+    const ids = voidedPaymentIdsByEnrollment.get(enrollmentId) || new Set();
+    ids.add(paymentId);
+    voidedPaymentIdsByEnrollment.set(enrollmentId, ids);
+  }
   for (const snap of review.grantSnaps) {
     const source = snap.data() || {};
     const budget = source.budget && typeof source.budget === "object" ? source.budget : null;
@@ -200,10 +212,24 @@ async function applyCleanup(review) {
     }, { merge: true });
   }
   for (const doc of review.enrollmentDocs) {
+    const source = doc.data() || {};
+    const voidedPaymentIds = voidedPaymentIdsByEnrollment.get(doc.id) || new Set();
+    const matchedPaymentIds = new Set();
+    const hasPaymentSchedule = Array.isArray(source.payments);
+    const payments = hasPaymentSchedule
+      ? source.payments.map((payment) => {
+          const paymentId = String(payment?.id || "").trim();
+          if (!voidedPaymentIds.has(paymentId)) return payment;
+          matchedPaymentIds.add(paymentId);
+          return payment?.void === true ? payment : { ...payment, void: true };
+        })
+      : [];
+    assertSameIds(`enrollment_voided_payments:${doc.id}`, matchedPaymentIds, voidedPaymentIds);
     batch.set(doc.ref, {
       status: "deleted",
       active: false,
       deleted: true,
+      ...(hasPaymentSchedule ? { payments } : {}),
       deletedAt: FieldValue.serverTimestamp(),
       cleanupProject: "invoicing-budget-alignment-project-4",
       updatedAt: FieldValue.serverTimestamp(),
