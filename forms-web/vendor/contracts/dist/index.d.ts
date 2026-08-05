@@ -10,6 +10,9 @@
 export * from "./core.js";
 export * from "./http.js";
 export * as budgetPipeline from "./budgetPipeline.js";
+export * as grantBudgetEligibility from "./grantBudgetEligibility.js";
+export { evaluateGrantBudgetEligibility, grantBudgetIsoDate, resolveGrantBudgetTransactionDate, } from "./grantBudgetEligibility.js";
+export type { GrantBudgetEligibilityGrant, GrantBudgetEligibilityOverride, GrantBudgetEligibilityReason, GrantBudgetEligibilityResult, GrantBudgetEligibilityTransaction, GrantBudgetLineItemConfig, GrantBudgetSpendingCycle, GrantBudgetTransactionState, } from "./grantBudgetEligibility.js";
 export * as budgetAssignment from "./budgetAssignment.js";
 export * from "./endpointMap.js";
 export * as assessments from "./assessments.js";

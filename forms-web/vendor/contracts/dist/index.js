@@ -1,4 +1,11 @@
 import {
+  ReconciliationAuditDuplicateFinding,
+  ReconciliationAuditEnrollmentSummary,
+  ReconciliationAuditOrphanFinding,
+  ReconciliationAuditScanBody,
+  reconciliationAudit_exports
+} from "./chunk-OSRYOPMH.js";
+import {
   TourFlow,
   TourStep,
   ToursDeleteBody,
@@ -57,6 +64,25 @@ import {
   UserToursState,
   users_exports
 } from "./chunk-6SM6VRHA.js";
+import {
+  HouseholdEntity,
+  HouseholdInputSchema,
+  HouseholdMember,
+  HouseholdRelationship,
+  HouseholdStatus,
+  HouseholdsAddMemberBody,
+  HouseholdsDeleteBody,
+  HouseholdsGetQuery,
+  HouseholdsListQuery,
+  HouseholdsPatchBody,
+  HouseholdsPatchRow,
+  HouseholdsRemoveMemberBody,
+  HouseholdsSetHeadBody,
+  HouseholdsUpsertBody,
+  deriveHeadCustomerId,
+  householdRelationshipLabel,
+  households_exports
+} from "./chunk-JWPMGPLN.js";
 import "./chunk-6MMLCWVM.js";
 import {
   InboxItemSchema,
@@ -77,13 +103,6 @@ import {
   MetricWorkspacePrefs,
   metrics_exports
 } from "./chunk-LRQ4JJAK.js";
-import {
-  ReconciliationAuditDuplicateFinding,
-  ReconciliationAuditEnrollmentSummary,
-  ReconciliationAuditOrphanFinding,
-  ReconciliationAuditScanBody,
-  reconciliationAudit_exports
-} from "./chunk-OSRYOPMH.js";
 import "./chunk-RSTNFQ4V.js";
 import {
   enrollments_exports
@@ -140,6 +159,12 @@ import {
   google_exports
 } from "./chunk-ZSXXMBJ6.js";
 import {
+  evaluateGrantBudgetEligibility,
+  grantBudgetEligibility_exports,
+  grantBudgetIsoDate,
+  resolveGrantBudgetTransactionDate
+} from "./chunk-JOEWQO4Q.js";
+import {
   GrantBudgetManagerLineItem,
   GrantBudgetManagerLoadBody,
   GrantBudgetManagerOriginal,
@@ -172,25 +197,6 @@ import {
   parseGrantMaxAssistanceMonths,
   shouldRetainGrantBudget
 } from "./chunk-EEXJMPYI.js";
-import {
-  HouseholdEntity,
-  HouseholdInputSchema,
-  HouseholdMember,
-  HouseholdRelationship,
-  HouseholdStatus,
-  HouseholdsAddMemberBody,
-  HouseholdsDeleteBody,
-  HouseholdsGetQuery,
-  HouseholdsListQuery,
-  HouseholdsPatchBody,
-  HouseholdsPatchRow,
-  HouseholdsRemoveMemberBody,
-  HouseholdsSetHeadBody,
-  HouseholdsUpsertBody,
-  deriveHeadCustomerId,
-  householdRelationshipLabel,
-  households_exports
-} from "./chunk-JWPMGPLN.js";
 import {
   assessments_exports
 } from "./chunk-BM7NCR2O.js";
@@ -426,12 +432,15 @@ export {
   customers_exports as customers,
   deriveHeadCustomerId,
   enrollments_exports as enrollments,
+  evaluateGrantBudgetEligibility,
   formSessions_exports as formSessions,
   gdrive_exports as gdrive,
   getGrantFinancialCapabilities,
   getGrantLineItemAmountSemantics,
   getWorkflowConfig,
   google_exports as google,
+  grantBudgetEligibility_exports as grantBudgetEligibility,
+  grantBudgetIsoDate,
   grantBudgetManager_exports as grantBudgetManager,
   grants_exports as grants,
   householdRelationshipLabel,
@@ -447,6 +456,7 @@ export {
   parseGrantMaxAssistanceMonths,
   payments_exports as payments,
   reconciliationAudit_exports as reconciliationAudit,
+  resolveGrantBudgetTransactionDate,
   shouldRetainGrantBudget,
   tasks_exports as tasks,
   toArray,
