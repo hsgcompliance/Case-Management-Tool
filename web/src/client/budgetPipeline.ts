@@ -8,6 +8,7 @@ import type {
   TBudgetPipelinePreviewBody,
   TBudgetPipelinePreviewResult,
 } from "@types";
+import type { GrantBudgetEligibilityReason, GrantBudgetEligibilityResult } from "@hdb/contracts";
 
 type ListResult = { ok: true; items: TBudgetPipeline[]; count: number };
 type GetResult  = { ok: true; pipeline: TBudgetPipeline };
@@ -52,6 +53,11 @@ export type BudgetRollupPreviewSource = {
   caseManagerId: string;
   ledgerId: string | null;
   paymentQueueId: string | null;
+  assignedToGrant: boolean;
+  eligibleForGrantTotals: boolean;
+  eligibleForSpendingCycleTotals: boolean;
+  eligibilityReason: GrantBudgetEligibilityReason;
+  suggestedCorrectiveWorkflow: GrantBudgetEligibilityResult["suggestedCorrectiveWorkflow"];
   reason?: string;
 };
 

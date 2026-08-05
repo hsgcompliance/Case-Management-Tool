@@ -29,6 +29,10 @@ import { useSyncJotformSelection } from "@hooks/useJotform";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
 import type { CreditCardEntity } from "@types";
+import {
+  evaluateGrantBudgetEligibility,
+  type GrantBudgetEligibilityResult,
+} from "@hdb/contracts";
 import { buildCsv, downloadCsv } from "@entities/ui/dashboardStyle/SmartExportButton";
 import { useOrgConfig, useSaveOrgConfig, type OrgDisplayConfig, type SpendingPreset } from "@hooks/useOrgConfig";
 import { isAdminLike } from "@lib/roles";
@@ -316,6 +320,7 @@ type SpendingRow = {
   ledgerEntry?: Record<string, unknown>;
   paymentQueueItem?: PaymentQueueItem;
   reconciliationIssue?: string;
+  budgetEligibility?: GrantBudgetEligibilityResult;
 };
 
 type CreditCardSummaryView = {
@@ -673,6 +678,18 @@ function RowStatusBadge({ row }: { row: SpendingRow }) {
         className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 max-w-[190px] truncate"
       >
         {row.reconciliationIssue}
+      </span>
+    );
+  }
+
+  if (row.budgetEligibility?.assignedToGrant && !row.budgetEligibility.eligibleForGrantTotals) {
+    const outsidePeriod = row.budgetEligibility.reason === "before-grant-start" || row.budgetEligibility.reason === "after-grant-end";
+    return (
+      <span
+        title={`${row.budgetEligibility.reasonLabel} Recommended action: ${row.budgetEligibility.suggestedCorrectiveWorkflow}.`}
+        className="inline-flex max-w-[190px] items-center truncate rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800"
+      >
+        {outsidePeriod ? "Outside grant period" : "Review budget eligibility"}
       </span>
     );
   }
@@ -1565,6 +1582,25 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     const queue = paymentQueueItems as Array<Record<string, unknown>>;
     const reconciliation = buildQueueLedgerIndex(queue, ledger);
     const reversalRelatedLedgerIds = linkedReversalLedgerIds(ledger);
+    const grantById = new Map(
+      (grants as Array<Record<string, unknown>>)
+        .map((grant) => [String(grant.id || ""), grant] as const)
+        .filter(([id]) => !!id),
+    );
+    const budgetEligibilityFor = (
+      record: Record<string, unknown>,
+      assignedGrantId: string,
+      assignedLineItemId: string,
+      sourceType: "ledger" | "paymentQueue",
+    ) => {
+      const grant = grantById.get(assignedGrantId);
+      if (!grant) return undefined;
+      return evaluateGrantBudgetEligibility({
+        transaction: { ...record, grantId: assignedGrantId, lineItemId: assignedLineItemId },
+        grant: { ...grant, id: assignedGrantId },
+        sourceType,
+      });
+    };
 
     for (const e of ledger) {
       const source = String(e?.source || "").toLowerCase();
@@ -1646,6 +1682,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         // is capped and legacy rows may never have had a queue mirror, so absence
         // from the loaded queue is not itself evidence of a mismatch.
         reconciliationIssue: undefined,
+        budgetEligibility: budgetEligibilityFor(e, grantId, lineItemId, "ledger"),
       });
     }
 
@@ -1691,6 +1728,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         : {};
       const effectiveCompliance = { ...ledgerCompliance, ...queueCompliance };
       const rowGrantId = String(postedLedger?.grantId || queueItem.grantId || "");
+      const rowLineItemId = String(postedLedger?.lineItemId || queueItem.lineItemId || "");
+      const eligibilityRecord = (postedLedger || queueItem) as Record<string, unknown>;
 
       rows.push({
         id: `queue:${queueId}`,
@@ -1712,7 +1751,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             ? "Projected spend, not yet paid"
             : "Waiting to post",
         grantId: rowGrantId,
-        lineItemId: String(postedLedger?.lineItemId || queueItem.lineItemId || ""),
+        lineItemId: rowLineItemId,
         customerId: String(postedLedger?.customerId || queueItem.customerId || ""),
         creditCardId: isProjection ? "" : savedCardId || String(matchedCard?.id || ""),
         creditCardName: isProjection ? "" : cardDisplayName(matchedCard) || savedCardId || "",
@@ -1757,6 +1796,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         complianceStatus: isProjection
           ? complianceStatusLabel(effectiveCompliance, queueStatus === "posted")
           : queueStatus === "posted" ? "Posted" : "Open",
+        budgetEligibility: budgetEligibilityFor(
+          eligibilityRecord,
+          rowGrantId,
+          rowLineItemId,
+          postedLedger ? "ledger" : "paymentQueue",
+        ),
       });
     }
 
@@ -1772,7 +1817,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       return Math.abs(b.amountCents) - Math.abs(a.amountCents);
     });
     return rows;
-  }, [closedGrantIds, creditCardList, ledgerEntries, month, openTaskByToken, paymentQueueItems]);
+  }, [closedGrantIds, creditCardList, grants, ledgerEntries, month, openTaskByToken, paymentQueueItems]);
 
   // ── Credit card summaries (only computed when in card mode) ──────────────
   // Always scoped to the current calendar month regardless of the date filter,

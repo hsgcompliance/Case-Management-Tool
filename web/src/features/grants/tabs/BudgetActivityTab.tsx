@@ -17,6 +17,10 @@ import {
 } from "./GrantBudgetSandboxModal";
 import { paymentTypeLabel, paymentNoteMeta } from "@entities/payments/PaymentTypeLabel";
 import {
+  evaluateGrantBudgetEligibility,
+  type GrantBudgetEligibilityResult,
+} from "@hdb/contracts";
+import {
   generateSplitGoals,
   moneyCents,
   moneyFromCents,
@@ -38,6 +42,7 @@ type GrantActivityRow = SpendRow & {
   displayType: "Paid" | "Projected" | "Reversal";
   sourceType: "paid" | "projected";
   complianceStatus: ComplianceStatus;
+  budgetEligibility: GrantBudgetEligibilityResult;
   searchText: string;
 };
 
@@ -293,7 +298,9 @@ function ActivityDrawer({
     () => items.filter((item) => item.sourceType === "paid").length,
     [items],
   );
-  const net = filteredItems.reduce((acc, item) => acc + item.amountCents / 100, 0);
+  const net = filteredItems
+    .filter((item) => item.budgetEligibility.eligibleForGrantTotals)
+    .reduce((acc, item) => acc + item.amountCents / 100, 0);
   const headerButton = (key: ActivitySortKey, label: string, className = "pb-1 pr-4 font-medium") => (
     <button type="button" className={`w-full text-left ${className}`} onClick={() => toggleSort(key)}>
       {label}
@@ -308,7 +315,7 @@ function ActivityDrawer({
             <div className="min-w-0">
               <span className="text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                 {filteredItems.length > 0
-                  ? `${filteredItems.length} activit${filteredItems.length === 1 ? "y" : "ies"} · Net ${currency(net)}`
+                  ? `${filteredItems.length} activit${filteredItems.length === 1 ? "y" : "ies"} · Eligible net ${currency(net)}`
                   : "No matching activity"}
               </span>
               <div className="inline-flex rounded-lg border border-sky-200 bg-white/80 p-0.5 text-[11px]">
@@ -395,7 +402,14 @@ function ActivityDrawer({
                       <td className="py-1 pr-4 text-slate-600">{item.rentCertDueOn ? fmtMDY(item.rentCertDueOn) : "—"}</td>
                       <td className="py-1 pr-4 text-slate-500">{item.noteText || item.title || "—"}</td>
                       <td className="py-1">
-                        {item.displayType === "Reversal" ? (
+                        {!item.budgetEligibility.eligibleForGrantTotals ? (
+                          <span
+                            className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800"
+                            title={tip(`${item.budgetEligibility.reasonLabel} Recommended action: ${item.budgetEligibility.suggestedCorrectiveWorkflow}.`)}
+                          >
+                            Outside eligible totals
+                          </span>
+                        ) : item.displayType === "Reversal" ? (
                           <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">Reversal</span>
                         ) : item.displayType === "Projected" ? (
                           <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">Projected</span>
@@ -1286,6 +1300,25 @@ export function BudgetActivityTab({
 
   const activityRows = useMemo(() => {
     const rows: GrantActivityRow[] = [];
+    const eligibilityGrant = { ...model, id: grantId || model?.id, budget };
+    const eligibilityFor = (
+      raw: Record<string, any>,
+      item: Record<string, any>,
+      sourceType: "ledger" | "paymentQueue" | "legacySpend",
+    ): GrantBudgetEligibilityResult => {
+      if (raw?.budgetEligibility && typeof raw.budgetEligibility === "object") {
+        return raw.budgetEligibility as GrantBudgetEligibilityResult;
+      }
+      return evaluateGrantBudgetEligibility({
+        transaction: {
+          ...item,
+          grantId: raw?.grantId || item?.grantId || grantId,
+          lineItemId: raw?.lineItemId || item?.lineItemId,
+        },
+        grant: eligibilityGrant,
+        sourceType,
+      });
+    };
     const rentCertDueFor = (enrollmentId: string, paymentDate: string) => (
       enrollmentId && paymentDate ? rentCertDueByEnrollmentTarget.get(`${enrollmentId}:${paymentDate}`) || "" : ""
     );
@@ -1352,6 +1385,7 @@ export function BudgetActivityTab({
           displayType: "Projected",
           sourceType: "projected",
           complianceStatus: "none" as ComplianceStatus,
+          budgetEligibility: eligibilityFor(raw, item, "paymentQueue"),
           searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, rentCertDueOn, item?.merchant, item?.paymentId, item?.id].join(" ")),
         });
         continue;
@@ -1421,6 +1455,11 @@ export function BudgetActivityTab({
         displayType: isReversal ? "Reversal" : "Paid",
         sourceType: "paid",
         complianceStatus,
+        budgetEligibility: eligibilityFor(
+          raw,
+          (raw?.ledgerEntry && typeof raw.ledgerEntry === "object" ? raw.ledgerEntry : raw) as Record<string, any>,
+          raw?.sourceType === "legacySpend" ? "legacySpend" : "ledger",
+        ),
         searchText: normalizeText([noteText, customerLabel, customerId, userLabel, budgetTypeLabel, rentCertDueOn, paymentId, raw?.id].join(" ")),
       });
     }
@@ -1431,7 +1470,7 @@ export function BudgetActivityTab({
     });
 
     return rows;
-  }, [allActivity, customerNameById, enrollmentInfoById, grantId, lineItemLookup, lineItemTypeByKey, paymentComplianceByKey, rentCertDueByEnrollmentTarget, resolveUserLabel]);
+  }, [allActivity, budget, customerNameById, enrollmentInfoById, grantId, lineItemLookup, lineItemTypeByKey, model, paymentComplianceByKey, rentCertDueByEnrollmentTarget, resolveUserLabel]);
 
   const activityByLineItem = useMemo(() => {
     const map = new Map<string, GrantActivityRow[]>();
