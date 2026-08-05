@@ -1316,9 +1316,19 @@ export type TJotformSyncSelectionResp = Ok<{
         formId: string;
         alias: string | null;
         count: number;
+        jotformTotal: number;
+        localTotal: number;
+        countMismatch: boolean;
+        hasMore: boolean;
     }>;
     ids: string[];
     count: number;
+    partial: boolean;
+    errors: Array<{
+        formId: string;
+        stage: string;
+        error: string;
+    }>;
 }>;
 export declare const JotformDigestFieldType: z.ZodEnum<{
     question: "question";
