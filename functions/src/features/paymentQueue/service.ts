@@ -16,6 +16,7 @@ import {
   type TPaymentQueuePostToLedgerBody,
   type TPaymentQueueReopenBody,
 } from './schemas';
+import {isOperationalQueueGrantVisible, type OperationalGrantState} from './operationalVisibility';
 
 const COLLECTION = 'paymentQueue';
 const FN = 'paymentQueueService';
@@ -104,6 +105,20 @@ function applyLocalOverrides<T extends Record<string, unknown>>(extracted: T, pr
 
 function docToItem(doc: FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.QueryDocumentSnapshot): TPaymentQueueItem {
   return {...(doc.data() as TPaymentQueueItem), id: doc.id};
+}
+
+async function filterOperationalGrantRows(items: TPaymentQueueItem[]): Promise<TPaymentQueueItem[]> {
+  const grantIds = Array.from(new Set(items.map((item) => String(item.grantId || '').trim()).filter(Boolean)));
+  const states = new Map<string, OperationalGrantState>();
+  for (let index = 0; index < grantIds.length; index += 100) {
+    const ids = grantIds.slice(index, index + 100);
+    const snaps = await db.getAll(...ids.map((id) => db.collection('grants').doc(id)));
+    for (const snap of snaps) {
+      const data = snap.data() || {};
+      states.set(snap.id, {exists: snap.exists, status: data.status, deleted: data.deleted});
+    }
+  }
+  return items.filter((item) => isOperationalQueueGrantVisible(item.grantId, states));
 }
 
 export function projectionQueueDocId(enrollmentId: string, paymentId: string): string {
@@ -373,9 +388,11 @@ export async function listVisiblePaymentQueueItemsForOrg(
       if (items.length + verified.length > body.limit) break;
     }
     const merged = [...items, ...verified].slice(0, body.limit);
-    return {items: merged, count: merged.length, hasMore, nextCursor};
+    const visible = await filterOperationalGrantRows(merged);
+    return {items: visible, count: visible.length, hasMore, nextCursor};
   }
 
+  items = await filterOperationalGrantRows(items);
   return {items, count: items.length, hasMore, nextCursor};
 }
 

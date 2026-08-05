@@ -18,6 +18,11 @@ and workflow status:
   as Needs HMIS, Needs CW, Posted, and Data Entry Complete.
 - Closed/deleted grants are historical and are excluded from the operational
   invoicing table and reconciliation warnings.
+- `paymentQueueList` enforces that exclusion on refreshed server results. A
+  missing/hard-deleted grant reference intentionally remains visible so an
+  orphan cannot be concealed as ordinary historical data. The web cache still
+  uses the shared payment-queue root invalidation and cannot reintroduce a
+  known closed/deleted grant row after refetch.
 
 The global `ledger` collection remains authoritative for posted spend. Pending
 enrollment or payment-queue rows remain authoritative for projections.
