@@ -1066,13 +1066,14 @@ export async function syncJotformSelection(body: any, caller: Claims, targetOrg:
     selected = forms.filter((f) => aliases.has(normalizeAlias(f.alias || f.title || f.id)));
   }
 
-  if (!selected.length) return { forms: [], ids: [], count: 0 };
+  if (!selected.length) return { forms: [], ids: [], count: 0, partial: false, errors: [] };
 
-  const outForms: Array<{ formId: string; alias: string | null; count: number; jotformTotal: number; localTotal: number; countMismatch: boolean }> = [];
+  const outForms: Array<{ formId: string; alias: string | null; count: number; jotformTotal: number; localTotal: number; countMismatch: boolean; hasMore: boolean }> = [];
+  const errors: Array<{ formId: string; stage: string; error: string }> = [];
   const ids = new Set<string>();
 
   for (const f of selected) {
-    let r: { ids: string[]; count: number };
+    let r: { ids: string[]; count: number; hasMore: boolean };
     try {
       r = await syncJotformSubmissions(
         {
@@ -1086,7 +1087,13 @@ export async function syncJotformSelection(body: any, caller: Claims, targetOrg:
         targetOrg
       );
     } catch (error) {
-      throw syncError(readSyncStageFromError(error), error, { formId: String(f.id), alias: f.alias || null });
+      const stage = readSyncStageFromError(error);
+      errors.push({
+        formId: String(f.id),
+        stage,
+        error: "jotform_form_sync_failed",
+      });
+      continue;
     }
     const jotformTotal = Number(f.count || 0);
     let localTotal = 0;
@@ -1105,11 +1112,25 @@ export async function syncJotformSelection(body: any, caller: Claims, targetOrg:
       jotformTotal,
       localTotal,
       countMismatch: jotformTotal > 0 && localTotal !== jotformTotal,
+      hasMore: r.hasMore === true,
     });
+    if (r.hasMore) {
+      errors.push({
+        formId: String(f.id),
+        stage: "pagination",
+        error: "jotform_sync_page_limit_reached",
+      });
+    }
     (r.ids || []).forEach((id) => ids.add(String(id)));
   }
 
-  return { forms: outForms, ids: Array.from(ids), count: ids.size };
+  return {
+    forms: outForms,
+    ids: Array.from(ids),
+    count: ids.size,
+    partial: errors.length > 0,
+    errors,
+  };
 }
 
 function normalizeDigestMapInput(input: any, targetOrg: string): TJotformDigestMap {

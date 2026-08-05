@@ -377,9 +377,19 @@ export const JotformSyncSelectionBody = z
 
 export type TJotformSyncSelectionBody = z.infer<typeof JotformSyncSelectionBody>;
 export type TJotformSyncSelectionResp = Ok<{
-  forms: Array<{ formId: string; alias: string | null; count: number }>;
+  forms: Array<{
+    formId: string;
+    alias: string | null;
+    count: number;
+    jotformTotal: number;
+    localTotal: number;
+    countMismatch: boolean;
+    hasMore: boolean;
+  }>;
   ids: string[];
   count: number;
+  partial: boolean;
+  errors: Array<{ formId: string; stage: string; error: string }>;
 }>;
 
 // ---------------- Digest map (tools/jotform editor) ----------------

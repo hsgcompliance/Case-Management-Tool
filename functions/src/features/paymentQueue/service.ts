@@ -280,14 +280,14 @@ export function buildProjectionQueueItem(args: {
 export async function listPaymentQueueItems(
     orgId: string,
     body: TPaymentQueueListBody,
-): Promise<{ items: TPaymentQueueItem[]; count: number; hasMore: boolean }> {
+): Promise<{ items: TPaymentQueueItem[]; count: number; hasMore: boolean; nextCursor: string | null }> {
   return listVisiblePaymentQueueItemsForOrg(orgId, body);
 }
 
 export async function listVisiblePaymentQueueItemsForOrg(
     orgId: string,
     body: TPaymentQueueListBody,
-): Promise<{ items: TPaymentQueueItem[]; count: number; hasMore: boolean }> {
+): Promise<{ items: TPaymentQueueItem[]; count: number; hasMore: boolean; nextCursor: string | null }> {
   let q: FirebaseFirestore.Query = db.collection(COLLECTION).where('orgId', '==', orgId);
 
   if (body.source) q = q.where('source', '==', body.source);
@@ -330,6 +330,7 @@ export async function listVisiblePaymentQueueItemsForOrg(
   const snap = await q.get();
   const hasMore = snap.docs.length > body.limit;
   const docs = hasMore ? snap.docs.slice(0, body.limit) : snap.docs;
+  const nextCursor = hasMore ? docs[docs.length - 1]?.id || null : null;
   let items = docs.map(docToItem);
 
   // Migration fallback: older queue docs may have been created before orgId was
@@ -370,10 +371,10 @@ export async function listVisiblePaymentQueueItemsForOrg(
       if (items.length + verified.length > body.limit) break;
     }
     const merged = [...items, ...verified].slice(0, body.limit);
-    return {items: merged, count: merged.length, hasMore: hasMore || items.length + verified.length > body.limit};
+    return {items: merged, count: merged.length, hasMore, nextCursor};
   }
 
-  return {items, count: items.length, hasMore};
+  return {items, count: items.length, hasMore, nextCursor};
 }
 
 export async function unscopedQueueItemBelongsToOrg(item: TPaymentQueueItem, orgId: string): Promise<boolean> {
