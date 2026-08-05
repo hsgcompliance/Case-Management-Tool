@@ -29,22 +29,22 @@ export function ToggleYesNo({
 
   const pad = size === "sm" ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm";
   const activeClass =
-    variant === "soft" ? "bg-slate-600 text-white" : "bg-slate-900 text-white";
+    variant === "soft" ? "bg-slate-600 text-white dark:bg-slate-300 dark:text-slate-900" : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900";
 
   const baseBtn = [
     pad,
     "rounded-lg transition select-none",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600",
     "disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent",
   ].join(" ");
 
-  const inactive = "text-slate-700 hover:bg-slate-100";
+  const inactive = "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800";
 
   return (
     <div
       role="group"
       aria-label={ariaLabel}
-      className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm"
+      className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       data-tour={tourId}
     >
       <button
@@ -108,22 +108,22 @@ export function ToggleYesNoTri({
     value === true ? "yes" : value === false ? "no" : "unknown";
 
   const activeClass =
-    variant === "soft" ? "bg-slate-600 text-white" : "bg-slate-900 text-white";
+    variant === "soft" ? "bg-slate-600 text-white dark:bg-slate-300 dark:text-slate-900" : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900";
 
   const baseBtn = [
     pad,
     "rounded-lg transition select-none",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-slate-600",
     "disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent",
   ].join(" ");
 
-  const inactive = "text-slate-700 hover:bg-slate-100";
+  const inactive = "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800";
 
   return (
     <div
       role="group"
       aria-label={ariaLabel}
-      className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm"
+      className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       data-tour={tourId}
     >
       <button

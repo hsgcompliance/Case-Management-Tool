@@ -24,17 +24,17 @@ export function PageBulkActionsBar({
   return (
     <div
       className={[
-        "rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 shadow-sm backdrop-blur-sm",
+        "rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 shadow-sm backdrop-blur-sm dark:border-sky-900/70 dark:bg-sky-950/30",
         className,
       ].join(" ")}
     >
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">
             Bulk Actions
           </div>
-          <div className="text-sm font-semibold text-slate-900">{label}</div>
-          {statusText ? <div className="mt-1 text-xs text-slate-600">{statusText}</div> : null}
+          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</div>
+          {statusText ? <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">{statusText}</div> : null}
         </div>
 
         <div className="flex flex-1 flex-wrap items-center gap-2 xl:justify-end">

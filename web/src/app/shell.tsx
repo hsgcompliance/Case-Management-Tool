@@ -5,6 +5,7 @@ import React, { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@app/auth/AuthProvider";
 import { parseTextScalePreference, parseThemeMode, type TextScalePreference, type ThemeMode } from "@lib/userSettings";
+import { isDarkModeFeatureEnabled } from "@lib/themeFeature";
 
 type ShellProfile = {
   settings?: {
@@ -30,6 +31,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const shellProfile = (profile || null) as ShellProfile | null;
   const textScalePref = parseTextScalePreference(shellProfile?.settings?.textScale);
   const themeMode = parseThemeMode(shellProfile?.settings?.themeMode);
+  const darkModeEnabled = isDarkModeFeatureEnabled();
 
   useEffect(() => {
     // Don't touch the class while auth is still booting — initThemeScript already
@@ -38,6 +40,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if (loading) return;
     if (typeof window === "undefined") return;
     const root = document.documentElement;
+    if (!darkModeEnabled) {
+      root.classList.remove("dark");
+      return;
+    }
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
 
     const apply = () => {
@@ -49,7 +55,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     apply();
     mql.addEventListener("change", apply);
     return () => mql.removeEventListener("change", apply);
-  }, [loading, themeMode]);
+  }, [darkModeEnabled, loading, themeMode]);
 
   return (
     <div className={`min-h-screen flex flex-col text-sm hdb-text-scale-${textScalePref}`}>

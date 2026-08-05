@@ -107,9 +107,9 @@ export default function CustomerPaymentsTable({
   }, [rows, rentCertStatuses]);
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <table className="min-w-full text-sm">
-        <thead className="bg-slate-50 text-slate-700">
+        <thead className="bg-slate-50 text-slate-700 dark:bg-slate-950 dark:text-slate-300">
           <tr>
             <th className="px-3 py-2 text-left">Due</th>
             <th className="px-3 py-2 text-left">Type</th>
@@ -142,8 +142,8 @@ export default function CustomerPaymentsTable({
                 : !!p?.compliance?.caseworthyComplete;
             return (
               <React.Fragment key={key}>
-                <tr className={["border-t border-slate-200 odd:bg-white even:bg-slate-50/60", isVoided ? "bg-slate-100/80 text-slate-500" : "", isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : ""].join(" ")}>
-                  <td className="px-3 py-2 text-slate-800">
+                <tr className={["border-t border-slate-200 odd:bg-white even:bg-slate-50/60 dark:border-slate-800 dark:odd:bg-slate-900 dark:even:bg-slate-950/60", isVoided ? "bg-slate-100/80 text-slate-500 dark:bg-slate-800/80 dark:text-slate-400" : "", isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200 dark:bg-sky-950/30 dark:ring-sky-800" : ""].join(" ")}>
+                  <td className="px-3 py-2 text-slate-800 dark:text-slate-200">
                     <span className="inline-flex items-center gap-2">
                       <span>{fmtDateOrDash(paymentDate(p))}</span>
                       {issue ? (
@@ -162,11 +162,11 @@ export default function CustomerPaymentsTable({
                   <td className="px-3 py-2">
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <PaymentTypeBadge payment={p} />
-                      {isVoided ? <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">Voided</span> : null}
+                      {isVoided ? <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">Voided</span> : null}
                     </span>
                   </td>
-                  <td className={["px-3 py-2 text-slate-800", isVoided ? "line-through text-slate-500" : ""].join(" ")}>{fmtCurrencyUSD(p.amount || 0)}</td>
-                  <td className="px-3 py-2 text-slate-800">
+                  <td className={["px-3 py-2 text-slate-800 dark:text-slate-200", isVoided ? "line-through text-slate-500 dark:text-slate-400" : ""].join(" ")}>{fmtCurrencyUSD(p.amount || 0)}</td>
+                  <td className="px-3 py-2 text-slate-800 dark:text-slate-200">
                     <label className="inline-flex items-center gap-2 text-xs">
                       <input
                         type="checkbox"
@@ -193,7 +193,7 @@ export default function CustomerPaymentsTable({
                     </label>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
                       <label className="inline-flex items-center gap-1">
                         <input
                           type="checkbox"
@@ -280,7 +280,7 @@ export default function CustomerPaymentsTable({
                       }}
                     />
                   </td>
-                  <td className="px-3 py-2 text-base font-semibold leading-snug text-slate-900">
+                  <td className="px-3 py-2 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">
                     {formatEnrollmentLabel(row.enrollment, { fallback: String(row.enrollmentId || "") })}
                   </td>
                   <td className="px-3 py-2">
@@ -316,7 +316,7 @@ export default function CustomerPaymentsTable({
                   </td>
                 </tr>
                 {isSelected && renderSelectedRowDetail ? (
-                  <tr className="border-t border-sky-100 bg-sky-50/70">
+                  <tr className="border-t border-sky-100 bg-sky-50/70 dark:border-sky-900/70 dark:bg-sky-950/30">
                     <td className="px-3 py-3" colSpan={8}>
                       {renderSelectedRowDetail(row, key)}
                     </td>

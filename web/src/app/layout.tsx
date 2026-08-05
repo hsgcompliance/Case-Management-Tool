@@ -5,6 +5,7 @@ import Providers from "./providers";
 import { Topbar } from "@app/layout/Topbar";
 import GlobalPending from "@app/layout/GlobalPending";
 import { Shell } from "./shell";
+import { isDarkModeFeatureEnabled } from "@lib/themeFeature";
 
 export const metadata = {
   title: "Case Management Dashboard",
@@ -31,10 +32,16 @@ const preconnectOrigins = [
 ];
 
 
+const darkModeEnabled = isDarkModeFeatureEnabled();
 const initThemeScript = `
     (function () {
       try {
         var root = document.documentElement;
+        var featureEnabled = ${JSON.stringify(darkModeEnabled)};
+        if (!featureEnabled) {
+          root.classList.remove("dark");
+          return;
+        }
         var mode = localStorage.getItem("hdb_theme_mode") || "system";
         var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
         var shouldDark = mode === "dark" || (mode === "system" && prefersDark);

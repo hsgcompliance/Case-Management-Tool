@@ -91,7 +91,7 @@ export default function ActionMenu({
   const menu = open ? (
     <div
       ref={menuRef}
-      className="fixed z-[1300] min-w-44 rounded-md border border-slate-200 bg-white shadow-md"
+      className="fixed z-[1300] min-w-44 rounded-md border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-900"
       style={{ top: menuPos.top, left: menuPos.left }}
       data-tour={tourId ? `${tourId}-menu` : undefined}
     >
@@ -101,8 +101,8 @@ export default function ActionMenu({
           type="button"
           disabled={disabled || item.disabled}
           className={[
-            "block w-full px-3 py-2 text-left text-sm hover:bg-slate-50",
-            item.danger ? "text-red-700" : "text-slate-700",
+            "block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800",
+            item.danger ? "text-red-700 dark:text-red-300" : "text-slate-700 dark:text-slate-200",
             (disabled || item.disabled) ? "opacity-50 cursor-not-allowed" : "",
           ].join(" ")}
           onClick={async () => {

@@ -12,6 +12,7 @@ import DevMenu from "./DevMenu";
 import { shouldUseEmulators } from "@lib/runtimeEnv";
 import { isAdminLike, isDevLike, isViewerLike } from "@lib/roles";
 import { TasksDueBell } from "@entities/tasks/TasksDueBell";
+import { isDarkModeFeatureEnabled } from "@lib/themeFeature";
 
 const nav = [
   { to: "/reports", label: "Reports" },
@@ -35,6 +36,7 @@ export function Topbar() {
   const [themeBusy, setThemeBusy] = React.useState(false);
   const [currentThemeMode, setCurrentThemeMode] = React.useState<ThemeMode>("system");
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const darkModeEnabled = isDarkModeFeatureEnabled();
   const mobileMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   const topRole = String(profile?.topRole || profile?.role || "").toLowerCase();
@@ -99,6 +101,7 @@ export function Topbar() {
   };
 
   const toggleTheme = async () => {
+    if (!darkModeEnabled) return;
     const nextMode: ThemeMode = currentThemeMode === "dark" ? "light" : "dark";
     applyThemeMode(nextMode);
     setCurrentThemeMode(nextMode);
@@ -232,20 +235,22 @@ export function Topbar() {
             </div>
           ) : null}
           {showNav && user ? <TasksDueBell /> : null}
-          <button
-            className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            onClick={toggleTheme}
-            disabled={themeBusy}
-            title={`Switch theme (current: ${currentThemeMode})`}
-            data-tour="topbar-theme-toggle"
-          >
-            <span className="hidden sm:inline">
-              {currentThemeMode === "dark" ? "Dark" : currentThemeMode === "light" ? "Light" : "System"}
-            </span>
-            <span className="sm:hidden" aria-hidden>
-              {currentThemeMode === "dark" ? "D" : currentThemeMode === "light" ? "L" : "S"}
-            </span>
-          </button>
+          {darkModeEnabled ? (
+            <button
+              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              onClick={toggleTheme}
+              disabled={themeBusy}
+              title={`Switch theme (current: ${currentThemeMode})`}
+              data-tour="topbar-theme-toggle"
+            >
+              <span className="hidden sm:inline">
+                {currentThemeMode === "dark" ? "Dark" : currentThemeMode === "light" ? "Light" : "System"}
+              </span>
+              <span className="sm:hidden" aria-hidden>
+                {currentThemeMode === "dark" ? "D" : currentThemeMode === "light" ? "L" : "S"}
+              </span>
+            </button>
+          ) : null}
           {user ? (
             <MyProfileDropdown />
           ) : (

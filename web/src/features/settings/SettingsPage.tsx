@@ -18,6 +18,7 @@ import {
   setGoogleDriveTokenPersistence,
 } from "@lib/googleDriveAccessToken";
 import { parseTextScalePreference, parseThemeMode, type TextScalePreference, type ThemeMode } from "@lib/userSettings";
+import { isDarkModeFeatureEnabled } from "@lib/themeFeature";
 import type { TTaskMode } from "@hdb/contracts";
 
 const TEXT_SCALES: ReadonlyArray<{ value: TextScalePreference; label: string }> = [
@@ -25,6 +26,7 @@ const TEXT_SCALES: ReadonlyArray<{ value: TextScalePreference; label: string }> 
   { value: "large", label: "Large" },
 ];
 const THEME_MODES: readonly ThemeMode[] = ["light", "dark", "system"] as const;
+const DARK_MODE_ENABLED = isDarkModeFeatureEnabled();
 const TASK_MODES: ReadonlyArray<{ value: TTaskMode; label: string }> = [
   { value: "viewer", label: "Viewer" },
   { value: "workflow", label: "Workflow" },
@@ -405,7 +407,9 @@ export default function SettingsPage() {
             options={THEME_MODES.map((mode) => ({
               value: mode,
               label: mode[0].toUpperCase() + mode.slice(1),
+              disabled: !DARK_MODE_ENABLED,
             }))}
+            helperText={DARK_MODE_ENABLED ? undefined : "Dark mode is temporarily unavailable while visual-system coverage is completed. Your saved preference is preserved."}
             fullWidth
             inputClassName="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800"
             optionClassName="rounded-lg px-3 py-1.5 text-sm capitalize transition"

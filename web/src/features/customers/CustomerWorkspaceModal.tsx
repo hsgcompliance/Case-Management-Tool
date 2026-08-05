@@ -53,7 +53,7 @@ class CustomerWorkspaceErrorBoundary extends React.Component<
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
           <div className="text-sm font-semibold">Customer page failed to load</div>
           <p className="mt-2 text-sm">
             {this.state.error.message || "An unexpected customer page error occurred."}
@@ -104,7 +104,7 @@ export default function CustomerWorkspaceModal({ customerId, onClose, initialTab
           {canShare ? (
             <button
               type="button"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-100"
               onClick={() => void shareCustomerLink()}
               title="Copy customer link"
               aria-label="Copy customer link"
