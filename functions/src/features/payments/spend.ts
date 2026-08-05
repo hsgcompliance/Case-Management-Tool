@@ -122,21 +122,17 @@ export async function paymentsSpendHandler(req: Request, res: Response) {
       const inWin = isInGrantWindow(dueDateISO, win);
       const dueMonth = monthKey(dueDateISO);
 
-      // ---- adjust LI projected/spent ----
-      // Policy: projected = all unpaid obligations
-      if (!reverse) {
-        li.projected = Math.max(0, Number(li.projected || 0) - amt);
-        li.spent = Number(li.spent || 0) + amt;
-
-        if (inWin) {
+      // ---- adjust eligible LI projected/spent ----
+      // Out-of-period assignments remain on the payment but never alter totals.
+      if (inWin) {
+        if (!reverse) {
+          li.projected = Math.max(0, Number(li.projected || 0) - amt);
+          li.spent = Number(li.spent || 0) + amt;
           li.projectedInWindow = Math.max(0, Number(li.projectedInWindow || 0) - amt);
           li.spentInWindow = Number(li.spentInWindow || 0) + amt;
-        }
-      } else {
-        li.spent = Math.max(0, Number(li.spent || 0) - amt);
-        li.projected = Math.max(0, Number(li.projected || 0) + amt);
-
-        if (inWin) {
+        } else {
+          li.spent = Math.max(0, Number(li.spent || 0) - amt);
+          li.projected = Math.max(0, Number(li.projected || 0) + amt);
           li.spentInWindow = Math.max(0, Number(li.spentInWindow || 0) - amt);
           li.projectedInWindow = Math.max(0, Number(li.projectedInWindow || 0) + amt);
         }

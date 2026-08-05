@@ -661,15 +661,6 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
       const normalized = targetList.map(ensureMonthlySubtypeTag);
       const withIds = carryRentCertState(ensurePaymentIds(normalized, oldPayments, enrollmentId), oldPayments);
 
-      const sumUnpaidByLI = (arr: any[]) =>
-        arr.reduce((m, p) => {
-          if (!p?.paid) {
-            const k = String(p?.lineItemId || "");
-            m[k] = (m[k] || 0) + Number(p?.amount || 0);
-          }
-          return m;
-        }, {} as Record<string, number>);
-
       const sumUnpaidInWindowByLI = (arr: any[]) =>
         arr.reduce((m, p) => {
           if (!p?.paid && isInGrantWindow(p?.dueDate || p?.date, win)) {
@@ -678,9 +669,6 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
           }
           return m;
         }, {} as Record<string, number>);
-
-      const oldUnpaid = sumUnpaidByLI(oldPayments);
-      const newUnpaid = sumUnpaidByLI(withIds);
 
       const oldUnpaidWin = sumUnpaidInWindowByLI(oldPayments);
       const newUnpaidWin = sumUnpaidInWindowByLI(withIds);
@@ -694,8 +682,6 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
       );
 
       const touched = new Set([
-        ...Object.keys(oldUnpaid),
-        ...Object.keys(newUnpaid),
         ...Object.keys(oldUnpaidWin),
         ...Object.keys(newUnpaidWin),
       ]);
@@ -705,14 +691,11 @@ export async function paymentsAdjustProjectionsHandler(req: Request, res: Respon
         if (!li) throw new Error(`Unknown lineItemId: ${id}`);
         if (li.locked) throw new Error(`Line item locked: ${id}`);
 
-        const prevProjected = Number(li.projected || 0);
-        const delta = Number(newUnpaid[id] || 0) - Number(oldUnpaid[id] || 0);
-        li.projected = Math.max(0, prevProjected + delta);
-
         const prevProjectedWin = Number(li.projectedInWindow || 0);
         const deltaWin =
           Number(newUnpaidWin[id] || 0) - Number(oldUnpaidWin[id] || 0);
         li.projectedInWindow = Math.max(0, prevProjectedWin + deltaWin);
+        li.projected = li.projectedInWindow;
 
         const overBy = computeGrantLineItemOverCap(grant, li);
         if (overBy != null) li.overCap = overBy;

@@ -211,17 +211,7 @@ export async function runEnrollmentProjectionsUpsert(
         if (conflicts.length) throw new ScheduleMonthCollisionError(conflicts);
       }
 
-      // projected totals by LI: ALL unpaid
-      const sumUnpaidByLI = (arr: any[]) =>
-        arr.reduce((m, p) => {
-          if (!p?.paid) {
-            const k = String(p?.lineItemId || '');
-            m[k] = (m[k] || 0) + Number(p?.amount || 0);
-          }
-          return m;
-        }, {} as Record<string, number>);
-
-      // projected-in-window by LI: unpaid AND within grant window
+      // Eligible projected totals by LI: unpaid and inside the grant window.
       const sumUnpaidInWindowByLI = (arr: any[]) =>
         arr.reduce((m, p) => {
           if (!p?.paid && isInGrantWindow(p?.dueDate || p?.date, win)) {
@@ -231,9 +221,6 @@ export async function runEnrollmentProjectionsUpsert(
           return m;
         }, {} as Record<string, number>);
 
-      const oldUnpaid = sumUnpaidByLI(oldPayments);
-      const newUnpaid = sumUnpaidByLI(withIds);
-
       const oldUnpaidWin = sumUnpaidInWindowByLI(oldPayments);
       const newUnpaidWin = sumUnpaidInWindowByLI(withIds);
 
@@ -242,8 +229,6 @@ export async function runEnrollmentProjectionsUpsert(
         [];
       const liById: Record<string, any> = Object.fromEntries(lineItems.map((li: any) => [String(li.id), li]));
       const touched = new Set([
-        ...Object.keys(oldUnpaid),
-        ...Object.keys(newUnpaid),
         ...Object.keys(oldUnpaidWin),
         ...Object.keys(newUnpaidWin),
       ]);
@@ -255,15 +240,11 @@ export async function runEnrollmentProjectionsUpsert(
         if (!li) throw new Error(`Unknown lineItemId: ${id}`);
         if (li.locked) throw new Error(`Line item locked: ${id}`);
 
-        const prevProjected = Number(li.projected || 0);
-        const delta = Number(newUnpaid[id] || 0) - Number(oldUnpaid[id] || 0);
-        const nextProjected = Math.max(0, prevProjected + delta);
-
         const prevProjectedWin = Number(li.projectedInWindow || 0);
         const deltaWin = Number(newUnpaidWin[id] || 0) - Number(oldUnpaidWin[id] || 0);
         const nextProjectedWin = Math.max(0, prevProjectedWin + deltaWin);
 
-        li.projected = nextProjected;
+        li.projected = nextProjectedWin;
         li.projectedInWindow = nextProjectedWin;
 
         const overBy = computeGrantLineItemOverCap(grant, li);

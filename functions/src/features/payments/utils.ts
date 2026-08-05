@@ -12,6 +12,7 @@ import {
 } from "../../core";
 
 import { createHash } from "crypto";
+import { grantBudgetIsoDate } from "@hdb/contracts";
 
 // ---------------- Date helpers ----------------
 export const toISO10 = (d: Date | string | number) => toDateOnly(d as any);
@@ -76,17 +77,14 @@ export type GrantWindowISO = {
 };
 
 export function getGrantWindowISO(grant: any): GrantWindowISO {
-  const s = toDate(grant?.startDate);
-  const e = toDate(grant?.endDate);
-
-  const startISO = s ? toISO10(s) : null;
-  const endISO = e ? toISO10(e) : null;
+  const startISO = grantBudgetIsoDate(grant?.startDate) || null;
+  const endISO = grantBudgetIsoDate(grant?.endDate) || null;
   return { startISO, endISO };
 }
 
 /** Inclusive window check. If no window, treat as "in window". */
 export function isInGrantWindow(dateISO: any, win: GrantWindowISO): boolean {
-  const d = String(dateISO || "").slice(0, 10);
+  const d = grantBudgetIsoDate(dateISO);
   if (!d) return false;
 
   const { startISO, endISO } = win;

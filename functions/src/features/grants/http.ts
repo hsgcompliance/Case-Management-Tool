@@ -14,8 +14,6 @@ import {
   normStr,
   sanitizeFlatObject,
   newBulkWriter,
-  fromBudgetCents,
-  toBudgetCents,
   z,
   type AuthedRequest,
   type Claims,
@@ -38,6 +36,8 @@ import {
   softDeleteGrants,
   hardDeleteGrants,
 } from "./service";
+import { evaluateGrantBudgetEligibility } from "@hdb/contracts";
+import { recomputeGrantBudgetFromLedger } from "./budgetRecompute";
 
 /** Pull explicit orgId for dev/superdev scenarios (supports arrays + query param). */
 function explicitOrgFromReq(req: AuthedRequest, src: unknown): string {
@@ -473,6 +473,11 @@ export const grantsActivity = secureHandler(
     };
     const clean = (row: Record<string, unknown>) =>
       Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+    const eligibilityGrant = { ...gData, id: grantId };
+    const budgetEligibility = (
+      row: Record<string, unknown>,
+      sourceType: "ledger" | "paymentQueue" | "legacySpend",
+    ) => evaluateGrantBudgetEligibility({ transaction: row, grant: eligibilityGrant, sourceType });
     const activity: Array<Record<string, unknown>> = [];
     const ledgerKeys = new Set<string>();
     const legacyKeys = new Set<string>();
@@ -515,6 +520,7 @@ export const grantsActivity = secureHandler(
         grantNameAtSpend: row.grantNameAtSpend ?? null,
         lineItemLabelAtSpend: row.lineItemLabelAtSpend ?? null,
         paymentLabelAtSpend: row.paymentLabelAtSpend ?? null,
+        budgetEligibility: budgetEligibility(row, "ledger"),
         ledgerEntry: row,
       }));
     }
@@ -549,6 +555,7 @@ export const grantsActivity = secureHandler(
           queueStatus: row.queueStatus ?? null,
           customerId: row.customerId ?? null,
           customerName: row.customer ?? null,
+          budgetEligibility: budgetEligibility(row, "paymentQueue"),
           paymentQueueItem: row,
         }));
       }
@@ -581,6 +588,7 @@ export const grantsActivity = secureHandler(
           ts: isoFrom(s.ts, d.updateTime),
           by: s.by ?? null,
           reversalOf: s.reversalOf ?? null,
+          budgetEligibility: budgetEligibility({ ...s, grantId }, "legacySpend"),
         }));
       }
     } catch {
@@ -614,6 +622,7 @@ export const grantsActivity = secureHandler(
           ts: isoFrom(spend.ts, doc.updateTime),
           by: spend.by ?? null,
           reversalOf: spend.reversalOf ?? null,
+          budgetEligibility: budgetEligibility({ ...spend, grantId }, "legacySpend"),
         }));
       }
     }
@@ -799,73 +808,6 @@ function _canRunSpendDownBudgetAction(data: Record<string, unknown>): boolean {
   return getGrantFinancialCapabilities(data).drawsDownBudget;
 }
 
-function _isoDate10(value: unknown): string {
-  if (!value) return "";
-  if (typeof value === "string") {
-    const s = value.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-    const d = new Date(s);
-    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-  }
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if (typeof value === "object" && value && typeof (value as { toDate?: unknown }).toDate === "function") {
-    const d = (value as { toDate: () => Date }).toDate();
-    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-  }
-  const d = new Date(value as never);
-  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
-}
-
-function _budgetRowDate(row: Record<string, unknown>): string {
-  return _isoDate10(row.dueDate || row.date || row.paymentDate || row.serviceDate || row.postedAt || row.createdAt || row.updatedAt);
-}
-
-function _addSplitAmount(
-  splitAcc: Record<string, Record<string, { spentCents: number; projectedCents: number }>>,
-  lineItem: Record<string, unknown> | undefined,
-  kind: "spent" | "projected",
-  amountCents: number,
-  date: string,
-) {
-  const lineItemId = String(lineItem?.id || "");
-  const splitGoals = Array.isArray(lineItem?.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
-  if (!lineItemId || !splitGoals.length || !amountCents || !date) return;
-  for (const goal of splitGoals) {
-    const goalId = String(goal.id || "");
-    const start = _isoDate10(goal.startDate);
-    const end = _isoDate10(goal.endDate);
-    if (!goalId || !start || !end || date < start || date > end) continue;
-    const byGoal = splitAcc[lineItemId] ?? (splitAcc[lineItemId] = {});
-    const acc = byGoal[goalId] ?? (byGoal[goalId] = { spentCents: 0, projectedCents: 0 });
-    if (kind === "spent") acc.spentCents += amountCents;
-    else acc.projectedCents += amountCents;
-  }
-}
-
-function _applySplitRollups(
-  lineItem: Record<string, unknown>,
-  splitAcc: Record<string, { spentCents: number; projectedCents: number }> | undefined,
-) {
-  const splitGoals = Array.isArray(lineItem.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
-  if (!splitGoals.length) return lineItem;
-  return {
-    ...lineItem,
-    splitGoals: splitGoals.map((goal) => {
-      const acc = splitAcc?.[String(goal.id || "")] ?? { spentCents: 0, projectedCents: 0 };
-      const amountCents = toBudgetCents(goal.amount);
-      const spentCents = Math.max(0, acc.spentCents);
-      const projectedCents = Math.max(0, acc.projectedCents);
-      return {
-        ...goal,
-        spent: fromBudgetCents(spentCents),
-        projected: fromBudgetCents(projectedCents),
-        balance: fromBudgetCents(amountCents - spentCents),
-        projectedBalance: fromBudgetCents(amountCents - spentCents - projectedCents),
-      };
-    }),
-  };
-}
-
 /**
  * Recomputes budget totals from live ledger + pending paymentQueue data and
  * writes them back to the grant document.  Both callers (clearPayments and
@@ -888,91 +830,16 @@ async function recomputeAndWriteBudget(
       ? "billing_mode_has_no_spend_down_budget"
       : "grant_budget_action_not_enabled");
   }
-
-  const [ledgerSnap, queueSnap] = await Promise.all([
-    db.collection("ledger").where("grantId", "==", grantId).get(),
-    db.collection("paymentQueue")
-      .where("grantId", "==", grantId)
-      .where("queueStatus", "==", "pending")
-      .get(),
-  ]);
-
-  const budget = (grantData.budget || {}) as Record<string, unknown>;
-  const total = Number(budget.total ?? 0);
-  const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
-  const lineItemById = new Map(lineItems.map((li) => [String(li.id || ""), li]));
-  const splitAccByLineId: Record<string, Record<string, { spentCents: number; projectedCents: number }>> = {};
-
-  const spentByLineCents: Record<string, number> = {};
-  let ledgerCounted = 0;
-  for (const d of ledgerSnap.docs) {
-    const row = d.data() as Record<string, unknown>;
-    if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
-    const lineId = normStr(row.lineItemId) || "__none__";
-    const amountCents = row.amountCents != null
-      ? Math.round(Number(row.amountCents) || 0)
-      : toBudgetCents(row.amount);
-    if (amountCents) {
-      spentByLineCents[lineId] = (spentByLineCents[lineId] ?? 0) + amountCents;
-      _addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "spent", amountCents, _budgetRowDate(row));
-      ledgerCounted++;
-    }
-  }
-
-  const projectedByLineCents: Record<string, number> = {};
-  let queueCounted = 0;
-  for (const d of queueSnap.docs) {
-    const row = d.data() as Record<string, unknown>;
-    if (!_docBelongsToGrant(row, grantId, grantOrg)) continue;
-    const source = normStr(row.source) || "";
-    if (!["projection", "invoice", "credit-card"].includes(source)) continue;
-    const lineId = normStr(row.lineItemId) || "__none__";
-    const amountCents = toBudgetCents(row.amount);
-    if (amountCents) {
-      projectedByLineCents[lineId] = (projectedByLineCents[lineId] ?? 0) + amountCents;
-      _addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "projected", amountCents, _budgetRowDate(row));
-      queueCounted++;
-    }
-  }
-
-  const updatedLineItems = lineItems.map((li) => {
-    const liId = String(li.id || "");
-    const spent = fromBudgetCents(spentByLineCents[liId] ?? 0);
-    const projected = fromBudgetCents(projectedByLineCents[liId] ?? 0);
-    return _applySplitRollups({ ...li, spent, projected, spentInWindow: spent, projectedInWindow: projected }, splitAccByLineId[liId]);
-  });
-
-  const totalCents = toBudgetCents(total);
-  const totalSpentCents =
-    updatedLineItems.reduce((a, li) => a + toBudgetCents(li.spent), 0) +
-    (spentByLineCents["__none__"] ?? 0);
-  const totalProjectedCents =
-    updatedLineItems.reduce((a, li) => a + toBudgetCents(li.projected), 0) +
-    (projectedByLineCents["__none__"] ?? 0);
-  const totalSpent = fromBudgetCents(totalSpentCents);
-  const totalProjected = fromBudgetCents(totalProjectedCents);
-
-  const newTotals = {
-    total,
-    spent: totalSpent,
-    projected: totalProjected,
-    projectedSpend: fromBudgetCents(totalSpentCents + totalProjectedCents),
-    balance: fromBudgetCents(totalCents - totalSpentCents),
-    projectedBalance: fromBudgetCents(totalCents - totalSpentCents - totalProjectedCents),
-    remaining: fromBudgetCents(totalCents - totalSpentCents),
-    spentInWindow: totalSpent,
-    projectedInWindow: totalProjected,
-    windowBalance: fromBudgetCents(totalCents - totalSpentCents),
-    windowProjectedBalance: fromBudgetCents(totalCents - totalSpentCents - totalProjectedCents),
+  void grantOrg;
+  const result = await recomputeGrantBudgetFromLedger(grantId);
+  if (!result.recomputed || !result.totals) throw new Error(result.skipped || "budget_recompute_failed");
+  const updated = await db.collection("grants").doc(grantId).get();
+  const updatedBudget = (updated.data()?.budget || {}) as Record<string, unknown>;
+  return {
+    updatedLineItems: (Array.isArray(updatedBudget.lineItems) ? updatedBudget.lineItems : []) as Record<string, unknown>[],
+    newTotals: result.totals,
+    counts: result.counts || { ledger: 0, paymentQueue: 0 },
   };
-
-  await db.collection("grants").doc(grantId).update({
-    "budget.totals": { ...((budget.totals || {}) as Record<string, unknown>), ...newTotals },
-    "budget.lineItems": updatedLineItems,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-
-  return { updatedLineItems, newTotals, counts: { ledger: ledgerCounted, paymentQueue: queueCounted } };
 }
 
 // ─── Admin handlers ───────────────────────────────────────────────────────────

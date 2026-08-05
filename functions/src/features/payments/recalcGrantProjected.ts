@@ -4,8 +4,8 @@
  * POST /paymentsRecalcGrantProjected
  * Body: { grantId, effectiveFrom?, activeOnly?, source?, dryRun? }
  *
- * - projected = sum of unpaid enrollment payments w/ lineItemId (ALL TYPES)
- * - projectedInWindow = same, but dueDate within grant window
+ * - projected = eligible unpaid enrollment/queue payments with valid line-item assignments
+ * - projectedInWindow is the same canonical eligible value (legacy compatibility field)
  * - spent: recompute from /ledger (authoritative)
  *
  * Notes:
@@ -26,10 +26,13 @@ import {
   toBudgetCents,
 } from "../../core";
 import type { Request, Response } from "express";
-import { computeGrantLineItemOverCap } from "@hdb/contracts";
+import {
+  computeGrantLineItemOverCap,
+  evaluateGrantBudgetEligibility,
+  type GrantBudgetEligibilityResult,
+} from "@hdb/contracts";
 
-import { assertOrgAccessMaybe, getGrantWindowISO, isInGrantWindow } from "./utils";
-import type { GrantWindowISO } from "./utils";
+import { assertOrgAccessMaybe } from "./utils";
 import { unscopedQueueItemBelongsToOrg } from "../paymentQueue/service";
 
 import { PaymentsRecalcGrantProjectedBody } from "./schemas";
@@ -75,40 +78,19 @@ function queueAmountCents(row: any): number {
   return 0;
 }
 
-function budgetRowDate(row: any): string {
-  return (
-    toDateOnly(row?.dueDate) ||
-    toDateOnly(row?.date) ||
-    toDateOnly(row?.paymentDate) ||
-    toDateOnly(row?.serviceDate) ||
-    toDateOnly(row?.postedAt) ||
-    toDateOnly(row?.createdAt) ||
-    toDateOnly(row?.ts?.toDate ? row.ts.toDate() : row?.ts) ||
-    ""
-  );
-}
-
-function dateInRange(date: string, start?: unknown, end?: unknown): boolean {
-  if (!date) return false;
-  const s = String(start || "").slice(0, 10);
-  const e = String(end || "").slice(0, 10);
-  if (!s || !e) return false;
-  return date >= s && date <= e;
-}
-
 function addSplitAmount(
   splitAcc: Record<string, Record<string, { spentCents: number; projectedCents: number }>>,
   lineItem: any,
   kind: "spent" | "projected",
   amountCents: number,
-  date: string,
+  eligibility: GrantBudgetEligibilityResult,
 ) {
-  if (!lineItem || !amountCents || !date) return;
+  if (!lineItem || !amountCents || !eligibility.eligibleForSpendingCycleTotals || !eligibility.spendingCycleId) return;
   const lineItemId = String(lineItem?.id || "");
   if (!lineItemId || !Array.isArray(lineItem?.splitGoals)) return;
   for (const goal of lineItem.splitGoals as any[]) {
     const goalId = String(goal?.id || "");
-    if (!goalId || !dateInRange(date, goal?.startDate, goal?.endDate)) continue;
+    if (!goalId || goalId !== eligibility.spendingCycleId) continue;
     const byGoal = splitAcc[lineItemId] ?? (splitAcc[lineItemId] = {});
     const acc = byGoal[goalId] ?? (byGoal[goalId] = { spentCents: 0, projectedCents: 0 });
     if (kind === "spent") acc.spentCents += amountCents;
@@ -134,19 +116,6 @@ function applySplitRollups(lineItem: any, splitAcc: Record<string, { spentCents:
       };
     }),
   };
-}
-
-/** Decide if a ledger row counts toward grant window. */
-function isLedgerInWindow(row: any, win: GrantWindowISO): boolean {
-  // Prefer explicit dueDate; fallback to date; fallback to ts.
-  const d =
-    toDateOnly(row?.dueDate) ||
-    toDateOnly(row?.date) ||
-    toDateOnly(row?.ts?.toDate ? row.ts.toDate() : row?.ts) ||
-    "";
-
-  if (!d) return false;
-  return isInGrantWindow(d, win);
 }
 
 /**
@@ -192,7 +161,7 @@ export async function recalcProjectedForGrant(
   const grant: any = gSnap.data() || {};
   assertOrgAccessMaybe(user, grant);
 
-  const win = getGrantWindowISO(grant);
+  const eligibilityGrant = {...grant, id: grantId};
 
   // Preserve existing line item order and non-budget fields
   const originalLineItems: any[] = Array.isArray(grant?.budget?.lineItems)
@@ -266,13 +235,20 @@ export async function recalcProjectedForGrant(
 
       const dueISO = toDateOnly(p?.dueDate || p?.date);
 
-      // projected policy = all unpaid obligations
+      // Unpaid obligations contribute only when their assignment and spending
+      // date are eligible under the same model used by queue and ledger rows.
       if (!p?.paid) {
-        acc.projectedCents += amtCents;
-        if (dueISO && isInGrantWindow(dueISO, win)) {
-          acc.projectedWinCents += amtCents;
+        const eligibility = evaluateGrantBudgetEligibility({
+          transaction: {...p, grantId, lineItemId: liId, transactionDate: dueISO},
+          grant: eligibilityGrant,
+        });
+        if (!eligibility.eligibleForGrantTotals) {
+          warnings.push(`Excluded enrollment projection ${doc.id}:${String(p?.id || "unknown")} (${eligibility.reason})`);
+          continue;
         }
-        addSplitAmount(splitAccByLineId, liById[liId], "projected", amtCents, dueISO);
+        acc.projectedCents += amtCents;
+        acc.projectedWinCents += amtCents;
+        addSplitAmount(splitAccByLineId, liById[liId], "projected", amtCents, eligibility);
         const paymentId = String(p?.id || "").trim();
         if (paymentId) countedEnrollmentProjectionKeys.add(`${doc.id}:${paymentId}`);
       }
@@ -324,12 +300,18 @@ export async function recalcProjectedForGrant(
     const amtCents = queueAmountCents(row);
     if (!amtCents) continue;
 
-    acc.projectedCents += amtCents;
-    const dueISO = toDateOnly(row?.dueDate || row?.createdAt || row?.postedAt);
-    if (dueISO && isInGrantWindow(dueISO, win)) {
-      acc.projectedWinCents += amtCents;
+    const eligibility = evaluateGrantBudgetEligibility({
+      transaction: row,
+      grant: eligibilityGrant,
+      sourceType: "paymentQueue",
+    });
+    if (!eligibility.eligibleForGrantTotals) {
+      warnings.push(`Excluded paymentQueue row ${doc.id} (${eligibility.reason})`);
+      continue;
     }
-    addSplitAmount(splitAccByLineId, liById[liId], "projected", amtCents, budgetRowDate(row));
+    acc.projectedCents += amtCents;
+    acc.projectedWinCents += amtCents;
+    addSplitAmount(splitAccByLineId, liById[liId], "projected", amtCents, eligibility);
   }
 
   // --------- Pass 2: spent from ledger (authoritative) ----------
@@ -359,11 +341,18 @@ export async function recalcProjectedForGrant(
     const amtCents = ledgerAmountCents(row); // reversals are negative already
     if (!amtCents) continue;
 
-    acc.spentCents += amtCents;
-    if (isLedgerInWindow(row, win)) {
-      acc.spentWinCents += amtCents;
+    const eligibility = evaluateGrantBudgetEligibility({
+      transaction: {...row, grantId},
+      grant: eligibilityGrant,
+      sourceType: "ledger",
+    });
+    if (!eligibility.eligibleForGrantTotals) {
+      warnings.push(`Excluded ledger row ${doc.id} (${eligibility.reason})`);
+      continue;
     }
-    addSplitAmount(splitAccByLineId, liById[liId], "spent", amtCents, budgetRowDate(row));
+    acc.spentCents += amtCents;
+    acc.spentWinCents += amtCents;
+    addSplitAmount(splitAccByLineId, liById[liId], "spent", amtCents, eligibility);
   }
 
   // --------- materialize numeric fields onto line items ----------
@@ -399,7 +388,7 @@ export async function recalcProjectedForGrant(
     return applySplitRollups(base, splitAccByLineId[id]);
   });
 
-  // Over-cap bookkeeping per LI (based on total, not windowed)
+  // Over-cap bookkeeping per LI uses canonical eligible totals.
   for (const li of lineItemsOut as any[]) {
     const overNow = computeGrantLineItemOverCap(grant, li);
     if (overNow != null) li.overCap = overNow;

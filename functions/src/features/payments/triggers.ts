@@ -1,7 +1,7 @@
 // functions/src/features/payments/triggers.ts
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import { computeGrantLineItemOverCap } from "@hdb/contracts";
-import { db, FieldValue, computeBudgetTotals, normId } from "../../core";
+import { recomputeGrantBudgetFromLedger } from "../grants/budgetRecompute";
+import { db, FieldValue } from "../../core";
 import { RUNTIME } from "../../core/env";
 import { syncEnrollmentProjectionQueueItems } from "../paymentQueue/service";
 import { syncContinuumRentCertReminders } from "../enrollments/continuity";
@@ -9,7 +9,6 @@ import {
   changedTopLevelKeys,
   debugTriggerEvent,
   debugWrite,
-  deepEqualDeterministic,
   selfWriteMetadataOnly,
 } from "../../core/triggerDebug";
 
@@ -168,118 +167,14 @@ export const onLedgerWrite = onDocumentWritten(
 
     if (!isNonEnrollment(after) && !isNonEnrollment(before)) return;
 
-    const toCents = (row: any | null | undefined) => {
-      if (!row) return 0;
-      if (Number.isFinite(row.amountCents)) return Number(row.amountCents);
-      if (Number.isFinite(row.amount)) return Math.round(Number(row.amount) * 100);
-      return 0;
-    };
-
-    const bucketFor = (row: any | null | undefined) => {
-      if (!isNonEnrollment(row)) return null;
-      const grantId = String(row?.grantId || "");
-      const lineItemId = String(row?.lineItemId || "");
-      if (!grantId || !lineItemId) return null;
-      const rowOrgId = row?.orgId ? normId(row.orgId) : null;
-      return { grantId, lineItemId, rowOrgId };
-    };
-
-    const bucketDeltas = new Map<string, { grantId: string; lineItemId: string; rowOrgId: string | null; deltaCents: number }>();
-    const addDelta = (row: any | null | undefined, centsDelta: number) => {
-      if (!centsDelta) return;
-      const b = bucketFor(row);
-      if (!b) return;
-      const key = `${b.grantId}::${b.lineItemId}::${b.rowOrgId || ""}`;
-      const cur = bucketDeltas.get(key);
-      if (cur) {
-        cur.deltaCents += centsDelta;
-      } else {
-        bucketDeltas.set(key, { ...b, deltaCents: centsDelta });
-      }
-    };
-
-    addDelta(before, -toCents(before));
-    addDelta(after, toCents(after));
-
-    const deltas = Array.from(bucketDeltas.values()).filter((x) => !!x.deltaCents);
-    if (deltas.length === 0) return;
-
-    const byGrant = new Map<string, Array<{ lineItemId: string; rowOrgId: string | null; deltaCents: number }>>();
-    for (const d of deltas) {
-      const arr = byGrant.get(d.grantId) || [];
-      arr.push({ lineItemId: d.lineItemId, rowOrgId: d.rowOrgId, deltaCents: d.deltaCents });
-      byGrant.set(d.grantId, arr);
-    }
-
-    for (const [grantId, grantDeltas] of byGrant.entries()) {
-      const gref = db.doc(`grants/${grantId}`);
-      await db.runTransaction(async (tx) => {
-        const gsnap = await tx.get(gref);
-        if (!gsnap.exists) return;
-
-        const g: any = gsnap.data() || {};
-        const grantOrgId = g?.orgId ? normId(g.orgId) : null;
-
-        const itemsBefore: any[] = Array.isArray(g?.budget?.lineItems)
-          ? g.budget.lineItems
-          : [];
-        const items: any[] = itemsBefore.map((x: any) => ({ ...x }));
-
-        let touched = false;
-        for (const deltaRow of grantDeltas) {
-          if (deltaRow.rowOrgId && grantOrgId && deltaRow.rowOrgId !== grantOrgId) continue;
-
-          const li = items.find((x: any) => String(x.id) === deltaRow.lineItemId);
-          if (!li) continue;
-          if (li.locked) continue;
-
-          const delta = deltaRow.deltaCents / 100;
-          li.spent = Math.max(0, Number(li.spent || 0) + delta);
-
-          const over = computeGrantLineItemOverCap(g, li);
-          if (over != null) li.overCap = over;
-          else delete li.overCap;
-
-          touched = true;
-        }
-
-        if (!touched) return;
-
-        const baseTotals = computeBudgetTotals(items as any[]);
-        const existingTotals =
-          g?.budget?.totals && typeof g.budget.totals === "object"
-            ? g.budget.totals
-            : {};
-
-        const totals = {
-          ...existingTotals,
-          ...baseTotals,
-          remaining: baseTotals.balance,
-          projectedSpend: baseTotals.projectedSpend,
-        };
-
-        const currentTotals =
-          g?.budget?.totals && typeof g.budget.totals === "object"
-            ? g.budget.totals
-            : {};
-
-        const changedLineItems = !deepEqualDeterministic(itemsBefore, items);
-        const changedTotals = !deepEqualDeterministic(currentTotals, totals);
-        const changedTotal = Number(g?.budget?.total || 0) !== Number(baseTotals.total || 0);
-        if (!changedLineItems && !changedTotals && !changedTotal) return;
-
-        const write = {
-          "budget.lineItems": items,
-          "budget.total": baseTotals.total,
-          "budget.totals": totals,
-          "budget.updatedAt": FieldValue.serverTimestamp(),
-          "system.lastWriter": FN_LEDGER_WRITE,
-          "system.lastWriteAt": FieldValue.serverTimestamp(),
-        } as Record<string, unknown>;
-
-        debugWrite({ fn: FN_LEDGER_WRITE, path: gref.path, write });
-        tx.update(gref, write);
-      });
+    const grantIds = new Set(
+      [before, after]
+        .filter(isNonEnrollment)
+        .map((row) => String(row?.grantId || "").trim())
+        .filter(Boolean),
+    );
+    for (const grantId of grantIds) {
+      await recomputeGrantBudgetFromLedger(grantId);
     }
   }
 );

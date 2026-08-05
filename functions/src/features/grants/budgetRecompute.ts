@@ -15,7 +15,11 @@
 import { db, FieldValue, isoNow, normId, toBudgetCents, fromBudgetCents } from "../../core";
 import { writeLedgerEntry } from "../ledger/service";
 import { getGrantFinancialCapabilities } from "./schemas";
-import { computeGrantLineItemOverCap } from "@hdb/contracts";
+import {
+  computeGrantLineItemOverCap,
+  evaluateGrantBudgetEligibility,
+  type GrantBudgetEligibilityResult,
+} from "@hdb/contracts";
 
 function docBelongsToGrant(
   row: Record<string, unknown>,
@@ -30,46 +34,20 @@ function docBelongsToGrant(
   return true;
 }
 
-function isoDate10(value: unknown): string {
-  return String(value ?? "").trim().slice(0, 10);
-}
-
-function rowBudgetDate(row: Record<string, unknown>): string {
-  return isoDate10(row.dueDate || row.date || row.postedAt || row.createdAt || row.updatedAtISO || row.updatedAt);
-}
-
-function rowInGrantWindow(row: Record<string, unknown>, grantData: Record<string, unknown>): boolean {
-  const start = isoDate10(grantData.startDate);
-  const end = isoDate10(grantData.endDate);
-  if (!start && !end) return true;
-  const date = rowBudgetDate(row);
-  if (!date) return true;
-  if (start && date < start) return false;
-  if (end && date > end) return false;
-  return true;
-}
-
-function rowInSplitWindow(date: string, goal: Record<string, unknown>): boolean {
-  const start = isoDate10(goal.startDate);
-  const end = isoDate10(goal.endDate);
-  if (!date || !start || !end) return false;
-  return date >= start && date <= end;
-}
-
 function addSplitAmount(
   splitAcc: Record<string, Record<string, { spentCents: number; projectedCents: number }>>,
   lineItem: Record<string, unknown> | undefined,
   kind: "spent" | "projected",
   amountCents: number,
-  date: string,
+  eligibility: GrantBudgetEligibilityResult,
 ) {
-  if (!lineItem || !amountCents || !date) return;
+  if (!lineItem || !amountCents || !eligibility.eligibleForSpendingCycleTotals || !eligibility.spendingCycleId) return;
   const lineItemId = String(lineItem.id || "");
   const splitGoals = Array.isArray(lineItem.splitGoals) ? lineItem.splitGoals as Record<string, unknown>[] : [];
   if (!lineItemId || !splitGoals.length) return;
   for (const goal of splitGoals) {
     const goalId = String(goal.id || "");
-    if (!goalId || !rowInSplitWindow(date, goal)) continue;
+    if (!goalId || goalId !== eligibility.spendingCycleId) continue;
     const byGoal = splitAcc[lineItemId] ?? (splitAcc[lineItemId] = {});
     const acc = byGoal[goalId] ?? (byGoal[goalId] = { spentCents: 0, projectedCents: 0 });
     if (kind === "spent") acc.spentCents += amountCents;
@@ -107,6 +85,7 @@ export type GrantBudgetRecomputeResult = {
   /** Reason when recomputed === false. */
   skipped?: "grant_not_found" | "not_spend_down_budget";
   totals?: Record<string, number>;
+  counts?: { ledger: number; paymentQueue: number };
   /** paymentQueue docs found desynced (queueStatus stuck pending despite a valid, non-reversal ledger entry) and auto-flipped to posted this run. */
   queueDocsRepaired?: Array<{ queueId: string; ledgerEntryId: string }>;
 };
@@ -186,6 +165,7 @@ export async function recomputeGrantBudgetFromLedger(
   }
 
   const grantOrg = normId(grantData.orgId);
+  const eligibilityGrant = { ...grantData, id };
   const budget = (grantData.budget || {}) as Record<string, unknown>;
   const total = Number(budget.total ?? 0);
   const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
@@ -200,30 +180,50 @@ export async function recomputeGrantBudgetFromLedger(
   const lineItemById = new Map(lineItems.map((li) => [String(li.id || ""), li]));
   const splitAccByLineId: Record<string, Record<string, { spentCents: number; projectedCents: number }>> = {};
   const spentByLineCents: Record<string, number> = {};
+  let ledgerCounted = 0;
   for (const d of ledgerSnap.docs) {
     const row = d.data() as Record<string, unknown>;
     if (!docBelongsToGrant(row, id, grantOrg)) continue;
-    if (!rowInGrantWindow(row, grantData)) continue;
+    const eligibility = evaluateGrantBudgetEligibility({
+      transaction: row,
+      grant: eligibilityGrant,
+      sourceType: "ledger",
+    });
+    if (!eligibility.eligibleForGrantTotals) continue;
     const lineId = String(row.lineItemId || "") || "__none__";
     const amountCents = row.amountCents != null
       ? Math.round(Number(row.amountCents) || 0)
       : toBudgetCents(row.amount);
-    if (amountCents) spentByLineCents[lineId] = (spentByLineCents[lineId] ?? 0) + amountCents;
-    addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "spent", amountCents, rowBudgetDate(row));
+    if (amountCents) {
+      spentByLineCents[lineId] = (spentByLineCents[lineId] ?? 0) + amountCents;
+      ledgerCounted += 1;
+    }
+    addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "spent", amountCents, eligibility);
   }
 
   const projectedByLineCents: Record<string, number> = {};
+  let queueCounted = 0;
   for (const d of queueSnap.docs) {
     if (repairedIds.has(d.id)) continue; // now posted + already counted via ledgerSnap above
     const row = d.data() as Record<string, unknown>;
     if (!docBelongsToGrant(row, id, grantOrg)) continue;
-    if (!rowInGrantWindow(row, grantData)) continue;
     const source = String(row.source || "");
     if (!["projection", "invoice", "credit-card"].includes(source)) continue;
+    const eligibility = evaluateGrantBudgetEligibility({
+      transaction: row,
+      grant: eligibilityGrant,
+      sourceType: "paymentQueue",
+    });
+    if (!eligibility.eligibleForGrantTotals) continue;
     const lineId = String(row.lineItemId || "") || "__none__";
-    const amountCents = toBudgetCents(row.amount);
-    if (amountCents) projectedByLineCents[lineId] = (projectedByLineCents[lineId] ?? 0) + amountCents;
-    addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "projected", amountCents, rowBudgetDate(row));
+    const amountCents = row.amountCents != null
+      ? Math.round(Number(row.amountCents) || 0)
+      : toBudgetCents(row.amount);
+    if (amountCents) {
+      projectedByLineCents[lineId] = (projectedByLineCents[lineId] ?? 0) + amountCents;
+      queueCounted += 1;
+    }
+    addSplitAmount(splitAccByLineId, lineItemById.get(lineId), "projected", amountCents, eligibility);
   }
 
   const updatedLineItems = lineItems.map((li) => {
@@ -263,7 +263,13 @@ export async function recomputeGrantBudgetFromLedger(
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  return { grantId: id, recomputed: true, totals: newTotals, queueDocsRepaired };
+  return {
+    grantId: id,
+    recomputed: true,
+    totals: newTotals,
+    counts: { ledger: ledgerCounted, paymentQueue: queueCounted },
+    queueDocsRepaired,
+  };
 }
 
 /**

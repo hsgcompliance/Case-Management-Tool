@@ -3,6 +3,10 @@ import {db, isoNow} from '../../core';
 import {recomputeGrantBudgetFromLedger} from '../grants/budgetRecompute';
 import {recomputeCustomerSpendForGrant} from '../grants/lineItemCaps';
 import {
+  evaluateGrantBudgetEligibility,
+  type GrantBudgetEligibilityReason,
+} from '@hdb/contracts';
+import {
   type TBudgetPipeline,
   type TBudgetPipelineUpsertBody,
   type TBudgetPipelineListQuery,
@@ -80,6 +84,11 @@ export type BudgetRollupPreviewSource = {
   caseManagerId: string;
   ledgerId: string | null;
   paymentQueueId: string | null;
+  assignedToGrant: boolean;
+  eligibleForGrantTotals: boolean;
+  eligibleForSpendingCycleTotals: boolean;
+  eligibilityReason: GrantBudgetEligibilityReason;
+  suggestedCorrectiveWorkflow: 'none' | 'assign-grant' | 'assign-line-item' | 'review-date' | 'reassign-transaction';
   reason?: string;
 };
 
@@ -748,9 +757,6 @@ export async function rollupBudgetPipelines(
 
   // 3. Aggregate pending + posted queue rows per pipeline (equality-only queries
   //    need no composite index).
-  const sumAmount = (snap: FirebaseFirestore.QuerySnapshot) =>
-    snap.docs.reduce((s, d) => s + Number((d.data() as Record<string, unknown>).amount ?? 0), 0);
-
   const rows: TBudgetPipelineRollupRow[] = await Promise.all(
     pipelines.map(async (p) => {
       const base = db
@@ -767,6 +773,17 @@ export async function rollupBudgetPipelines(
         ? (grant as any).budget.lineItems
         : [];
       const li = p.lineItemId ? lineItems.find((x) => String(x?.id || '') === p.lineItemId) : null;
+      const eligibilityGrant = grant ? {...grant, id: p.grantId} : null;
+      const eligibleDocs = (snap: FirebaseFirestore.QuerySnapshot) => eligibilityGrant
+        ? snap.docs.filter((doc) => evaluateGrantBudgetEligibility({
+            transaction: doc.data() as Record<string, unknown>,
+            grant: eligibilityGrant,
+          }).eligibleForGrantTotals)
+        : [];
+      const pendingDocs = eligibleDocs(pendingSnap);
+      const postedDocs = eligibleDocs(postedSnap);
+      const sumAmount = (docs: FirebaseFirestore.QueryDocumentSnapshot[]) =>
+        docs.reduce((sum, doc) => sum + rowAmount(doc.data() as Record<string, unknown>), 0);
 
       return {
         pipelineId: p.id,
@@ -779,10 +796,10 @@ export async function rollupBudgetPipelines(
         lineItemBudget: round2(Number((li as any)?.amount ?? 0)),
         lineItemProjected: round2(Number((li as any)?.projected ?? 0)),
         lineItemSpent: round2(Number((li as any)?.spent ?? 0)),
-        pendingCount: pendingSnap.size,
-        pendingAmount: round2(sumAmount(pendingSnap)),
-        postedCount: postedSnap.size,
-        postedAmount: round2(sumAmount(postedSnap)),
+        pendingCount: pendingDocs.length,
+        pendingAmount: round2(sumAmount(pendingDocs)),
+        postedCount: postedDocs.length,
+        postedAmount: round2(sumAmount(postedDocs)),
       } satisfies TBudgetPipelineRollupRow;
     }),
   );
@@ -817,6 +834,7 @@ export async function previewGrantBudgetRollup(
   }
 
   const budget = (grant.budget || {}) as Record<string, unknown>;
+  const eligibilityGrant = {...grant, id: grantId};
   const lineItems = (Array.isArray(budget.lineItems) ? budget.lineItems : []) as Record<string, unknown>[];
   const startDate = isoDate10(opts.startDate);
   const endDate = isoDate10(opts.endDate);
@@ -866,10 +884,12 @@ export async function previewGrantBudgetRollup(
     const lineItemId = String(raw.lineItemId || '');
     const line = lineItemId ? previewLineById.get(lineItemId) : null;
     let splitGoalId: string | null = null;
-    let reason = '';
-
-    if (!lineItemId) reason = 'Missing line item assignment.';
-    else if (!line) reason = 'Line item ID does not match this grant budget.';
+    const eligibility = evaluateGrantBudgetEligibility({
+      transaction: raw,
+      grant: eligibilityGrant,
+      sourceType,
+    });
+    const reason = eligibility.reason === 'eligible' ? '' : eligibility.reasonLabel;
 
     const src: BudgetRollupPreviewSource = {
       id,
@@ -885,10 +905,15 @@ export async function previewGrantBudgetRollup(
       caseManagerId: String(raw.caseManagerId || raw.caseManagerUid || raw.cmUid || ''),
       ledgerId: sourceType === 'ledger' ? id : (String(raw.ledgerEntryId || '') || null),
       paymentQueueId: sourceType === 'paymentQueue' ? id : null,
+      assignedToGrant: eligibility.assignedToGrant,
+      eligibleForGrantTotals: eligibility.eligibleForGrantTotals,
+      eligibleForSpendingCycleTotals: eligibility.eligibleForSpendingCycleTotals,
+      eligibilityReason: eligibility.reason,
+      suggestedCorrectiveWorkflow: eligibility.suggestedCorrectiveWorkflow,
       ...(reason ? {reason} : {}),
     };
 
-    if (!line) {
+    if (!line || !eligibility.eligibleForGrantTotals) {
       unmatched.push(src);
       return;
     }
@@ -897,8 +922,7 @@ export async function previewGrantBudgetRollup(
     else line.projected = round2(line.projected + amount);
 
     for (const goal of line.splitGoals) {
-      if (!goal.id || !date || !goal.startDate || !goal.endDate) continue;
-      if (date < goal.startDate || date > goal.endDate) continue;
+      if (!goal.id || goal.id !== eligibility.spendingCycleId) continue;
       splitGoalId = goal.id;
       if (status === 'spent') goal.spent = round2(goal.spent + amount);
       else goal.projected = round2(goal.projected + amount);
@@ -912,7 +936,7 @@ export async function previewGrantBudgetRollup(
 
   const [ledgerSnap, queueSnap] = await Promise.all([
     db.collection('ledger').where('grantId', '==', grantId).get(),
-    db.collection(QUEUE_COLLECTION).where('grantId', '==', grantId).get(),
+    db.collection(QUEUE_COLLECTION).where('grantId', '==', grantId).where('queueStatus', '==', 'pending').get(),
   ]);
 
   for (const doc of ledgerSnap.docs) {
@@ -925,7 +949,6 @@ export async function previewGrantBudgetRollup(
   for (const doc of queueSnap.docs) {
     const data = doc.data() as Record<string, unknown>;
     if (orgId && String(data.orgId || '') && String(data.orgId || '') !== orgId) continue;
-    if (String(data.queueStatus || '') === 'void') continue;
     queueCount += 1;
     addRow(data, doc.id, 'paymentQueue');
   }

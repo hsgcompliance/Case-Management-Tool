@@ -157,9 +157,9 @@ export async function paymentsDeleteRowsHandler(req: Request, res: Response) {
             const dueDateISO = String(sp?.dueDate || p?.dueDate || p?.date || "").slice(0, 10);
             const inWin = /^\d{4}-\d{2}-\d{2}$/.test(dueDateISO) ? isInGrantWindow(dueDateISO, win) : false;
 
-            li.spent = Math.max(0, Number(li.spent || 0) - amt);
-            li.projected = Math.max(0, Number(li.projected || 0) + amt);
             if (inWin) {
+              li.spent = Math.max(0, Number(li.spent || 0) - amt);
+              li.projected = Math.max(0, Number(li.projected || 0) + amt);
               li.spentInWindow = Math.max(0, Number(li.spentInWindow || 0) - amt);
               li.projectedInWindow = Math.max(0, Number(li.projectedInWindow || 0) + amt);
             }
