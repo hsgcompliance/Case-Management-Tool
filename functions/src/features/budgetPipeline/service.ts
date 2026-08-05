@@ -603,53 +603,65 @@ export async function previewBudgetPipeline(
   orgId: string,
   body: TBudgetPipelinePreviewBody,
 ) {
-  // Load normalized transactions from paymentQueue. Pending rows are projected;
-  // posted rows are spent; void rows are excluded below.
-  let q = db
-    .collection(QUEUE_COLLECTION)
-    .where('orgId', '==', orgId) as FirebaseFirestore.Query;
-
-  if (body.sourceFormId) q = q.where('formId', '==', body.sourceFormId);
-  if (body.month) q = q.where('month', '==', body.month);
-  q = q.limit(body.limit);
-
-  const snap = await q.get();
-  const items: Array<Record<string, unknown> & {id: string}> = snap.docs
-    .map((d): Record<string, unknown> & {id: string} => {
-      const data = d.data() as Record<string, unknown>;
-      return {...data, id: d.id};
-    })
-    .filter((item) => String(item.queueStatus || '') !== 'void');
   const previewStartDate = isoDate10(body.startDate) ||
     await grantStartDate(body.grantId ?? null, orgId);
 
-  // Evaluate each item
+  // `limit` bounds returned matches, not the candidate scan. Applying it to the
+  // first arbitrary Firestore page made the small preview appear empty whenever
+  // matching rows happened to live on a later page.
   const matched: Array<Record<string, unknown> & {id: string}> = [];
   const perItem: PreviewItemResult[] = [];
+  const pageSize = 500;
+  const maxPages = 100;
+  let cursor: FirebaseFirestore.QueryDocumentSnapshot | null = null;
 
-  for (const item of items) {
-    if (!isOnOrAfterPipelineStart(item, previewStartDate)) continue;
-    const inc = evalIncludes(item, body.includeGroups, body.includeTree ?? null);
-    if (!inc.matched) continue;
+  for (let page = 0; page < maxPages && matched.length < body.limit; page += 1) {
+    let q = db
+      .collection(QUEUE_COLLECTION)
+      .where('orgId', '==', orgId) as FirebaseFirestore.Query;
+    if (body.sourceFormId) q = q.where('formId', '==', body.sourceFormId);
+    if (body.month) q = q.where('month', '==', body.month);
+    q = q.limit(pageSize);
+    if (cursor) q = q.startAfter(cursor);
 
-    const exc = evalExcludes(item, body.excludeGroups, body.excludeTree ?? null);
-    if (exc.excluded) {
+    const snap = await q.get();
+    if (snap.empty) break;
+
+    for (const doc of snap.docs) {
+      const item: Record<string, unknown> & {id: string} = {
+        ...(doc.data() as Record<string, unknown>),
+        id: doc.id,
+      };
+      if (String(item.queueStatus || '') === 'void') continue;
+      if (!isOnOrAfterPipelineStart(item, previewStartDate)) continue;
+      const inc = evalIncludes(item, body.includeGroups, body.includeTree ?? null);
+      if (!inc.matched) continue;
+
+      const exc = evalExcludes(item, body.excludeGroups, body.excludeTree ?? null);
+      if (exc.excluded) {
+        if (perItem.length < body.limit) {
+          perItem.push({
+            itemId: item.id,
+            matchReasons: inc.reasons,
+            exclusionReasons: exc.reasons,
+            conflictPipelineIds: [],
+          });
+        }
+        continue;
+      }
+
+      matched.push(item);
       perItem.push({
-        itemId: item.id as string,
+        itemId: item.id,
         matchReasons: inc.reasons,
-        exclusionReasons: exc.reasons,
+        exclusionReasons: [],
         conflictPipelineIds: [],
       });
-      continue;
+      if (matched.length >= body.limit) break;
     }
 
-    matched.push(item);
-    perItem.push({
-      itemId: item.id as string,
-      matchReasons: inc.reasons,
-      exclusionReasons: [],
-      conflictPipelineIds: [],
-    });
+    cursor = snap.docs[snap.docs.length - 1] ?? null;
+    if (snap.size < pageSize) break;
   }
 
   // Conflict detection: check active pipelines that also match these items
