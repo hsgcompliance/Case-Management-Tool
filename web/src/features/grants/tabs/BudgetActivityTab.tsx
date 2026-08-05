@@ -26,6 +26,12 @@ import {
   moneyFromCents,
   type SplitMode,
 } from "../budgetSplitGoals";
+import {
+  activityBelongsToCycle,
+  activityIsOutsideConfiguredCycles,
+  stableCycleDisclosureId,
+  stableLineItemDisclosureId,
+} from "@features/budgetPipeline/project3Workflow";
 
 type ActivityMode = "paid" | "projected" | "all";
 type ActivityKindFilter = "all" | "paid" | "projected" | "reversal" | "data-entry-complete" | "data-entry-incomplete";
@@ -238,6 +244,7 @@ function ActivityDrawer({
   mode,
   onModeChange,
   onSelectItem,
+  disclosureId,
 }: {
   items: GrantActivityRow[];
   currency: (n: number) => string;
@@ -246,6 +253,7 @@ function ActivityDrawer({
   mode: ActivityMode;
   onModeChange: (mode: ActivityMode) => void;
   onSelectItem: (item: SpendRow) => void;
+  disclosureId?: string;
 }) {
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<ActivityKindFilter>("all");
@@ -308,7 +316,7 @@ function ActivityDrawer({
   );
 
   return (
-    <tr>
+    <tr id={disclosureId}>
       <td colSpan={colSpan} className="p-0">
         <div className="space-y-2 border-y border-sky-100 bg-sky-50 px-4 py-3 dark:border-sky-900 dark:bg-sky-950/20">
           <div className="flex items-center justify-between gap-3">
@@ -1026,7 +1034,9 @@ export function BudgetActivityTab({
   );
   const { data: users = [] } = useUsers({ status: "all", limit: 500 });
 
-  const [expandedId, setExpandedId] = useState<string | "all" | null>("all");
+  const [expandedLineItemIds, setExpandedLineItemIds] = useState<Set<string>>(() => new Set());
+  const [expandedCycleIds, setExpandedCycleIds] = useState<Set<string>>(() => new Set());
+  const [allActivityExpanded, setAllActivityExpanded] = useState(false);
   const [activityMode, setActivityMode] = useState<ActivityMode>("all");
   const [fundsState, setFundsState] = useState<{ index: number; mode: "add" | "move" } | null>(null);
   const [spendCapIdx, setSpendCapIdx] = useState<number | null>(null);
@@ -1533,9 +1543,29 @@ export function BudgetActivityTab({
     void activityQ.refetch();
   };
   const toggleLineItemActivity = (lineItemId: string, lineItem: any) => {
-    const nextExpandedId = expandedId === lineItemId ? null : lineItemId;
-    setExpandedId(nextExpandedId);
-    if (nextExpandedId && !isRentalAssistanceLineItem(lineItem)) refreshActivityData();
+    setAllActivityExpanded(false);
+    setExpandedLineItemIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(lineItemId)) next.delete(lineItemId);
+      else next.add(lineItemId);
+      return next;
+    });
+    if (!isRentalAssistanceLineItem(lineItem)) refreshActivityData();
+  };
+  const toggleCycleActivity = (cycleId: string) => {
+    setExpandedCycleIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(cycleId)) next.delete(cycleId);
+      else next.add(cycleId);
+      return next;
+    });
+  };
+  const toggleAllActivity = () => {
+    if (!allActivityExpanded) {
+      setExpandedLineItemIds(new Set());
+      setExpandedCycleIds(new Set());
+    }
+    setAllActivityExpanded((previous) => !previous);
   };
   const colCount = editing ? 11 : 10;
   const amountLabel = drawsDownBudget ? "Budget" : "Reference";
@@ -1671,15 +1701,16 @@ export function BudgetActivityTab({
               </tr>
             ) : (
               sortedLineItems.flatMap(({ li, index: i }) => {
-                const liId = String(li.id ?? `idx_${i}`);
+                const liId = stableLineItemDisclosureId(li as Record<string, unknown>);
                 const liAmount = num(li.amount, 0);
                 const liSpent = num(li.spent, 0);
                 const liProj = num(li.projected, 0);
                 const liProjectedSpend = liSpent + liProj;
                 const liProjBal = liAmount - liProjectedSpend;
                 const liSpentBal = liAmount - liSpent;
-                const isExpanded = expandedId === liId;
-                const liActivity = grantId ? activityForLineItem(liId) : [];
+                const isExpanded = expandedLineItemIds.has(liId);
+                const storedLineItemId = String(li.id || "").trim();
+                const liActivity = grantId && storedLineItemId ? activityForLineItem(storedLineItemId) : [];
 
                 const menuItems: ActionItem[] = [
                   ...(canEditBudget && drawsDownBudget
@@ -1701,7 +1732,8 @@ export function BudgetActivityTab({
                     label: "View Activity",
                     onSelect: () => {
                       setActivityMode("all");
-                      setExpandedId(liId);
+                      setAllActivityExpanded(false);
+                      setExpandedLineItemIds((previous) => new Set(previous).add(liId));
                       if (!isRentalAssistanceLineItem(li)) refreshActivityData();
                     },
                   },
@@ -1736,6 +1768,8 @@ export function BudgetActivityTab({
                           type="button"
                           className="group inline-flex items-center gap-2 text-left"
                           onClick={() => toggleLineItemActivity(liId, li)}
+                          aria-expanded={isExpanded}
+                          aria-controls={`line-item-disclosure-${liId}`}
                           title={isExpanded ? tip("Collapse activity for this line item.") : tip(`Expand ${liActivity.length} activity row${liActivity.length === 1 ? "" : "s"} for this line item.`)}
                         >
                           <span className="text-xs text-slate-400 transition group-hover:text-sky-600">{isExpanded ? "▼" : "▶"}</span>
@@ -1842,7 +1876,8 @@ export function BudgetActivityTab({
                 // split windows are listed in this display. Defaults to shown.
                 const showSplitGoals = (li.display?.showSplitGoals ?? true) !== false;
                 const splitGoals = showSplitGoals && Array.isArray(li.splitGoals) ? li.splitGoals : [];
-                const splitRows = splitGoals.length > 0 ? splitGoals.map((goal: any, goalIndex: number) => {
+                const splitRows: React.ReactElement[] = [];
+                if (isExpanded && !editing && splitGoals.length > 0) splitGoals.forEach((goal: any, goalIndex: number) => {
                   const goalAmount = num(goal.amount, 0);
                   const goalSpent = num(goal.spent, 0);
                   const goalProjected = num(goal.projected, 0);
@@ -1850,12 +1885,27 @@ export function BudgetActivityTab({
                   const goalBalance = goalAmount - goalSpent;
                   const goalProjectedBalance = goalAmount - goalProjectedSpend;
                   const period = goal.startDate || goal.endDate ? `${goal.startDate || "TBD"} - ${goal.endDate || "TBD"}` : "Date range TBD";
-                  return (
-                    <tr key={`${liId}_split_${goal.id || goalIndex}`} className="bg-slate-50/70 text-xs dark:bg-slate-900/60">
+                  const cycleDisclosureId = stableCycleDisclosureId(liId, goal as Record<string, unknown>);
+                  const storedCycleId = String(goal.id || "").trim();
+                  const cycleActivity = storedCycleId
+                    ? liActivity.filter((activity) => activityBelongsToCycle(activity.budgetEligibility, storedCycleId))
+                    : [];
+                  const cycleExpanded = expandedCycleIds.has(cycleDisclosureId);
+                  splitRows.push(
+                    <tr key={`${cycleDisclosureId}:row`} id={goalIndex === 0 ? `line-item-disclosure-${liId}` : `cycle-row-${cycleDisclosureId}`} className="bg-slate-50/70 text-xs dark:bg-slate-900/60">
                       <td className="pl-8 text-slate-700 dark:text-slate-300">
-                        <span className="mr-2 text-slate-400">↳</span>
-                        <span className="font-medium">{String(goal.label || `Cycle ${goalIndex + 1}`)}</span>
-                        <span className="ml-2 text-[10px] font-normal text-slate-400">{period}</span>
+                        <button
+                          type="button"
+                          className="group inline-flex items-center gap-2 text-left"
+                          aria-expanded={cycleExpanded}
+                          aria-controls={`cycle-disclosure-${cycleDisclosureId}`}
+                          onClick={() => toggleCycleActivity(cycleDisclosureId)}
+                        >
+                          <span className="text-slate-400 transition group-hover:text-sky-600">{cycleExpanded ? "▼" : "▶"}</span>
+                          <span className="font-medium">{String(goal.label || `Cycle ${goalIndex + 1}`)}</span>
+                          <span className="text-[10px] font-normal text-slate-400">{period}</span>
+                          <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-950">{cycleActivity.length}</span>
+                        </button>
                       </td>
                       <td>
                         <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-950">
@@ -1874,22 +1924,132 @@ export function BudgetActivityTab({
                       {!editing && <td />}
                       {editing && <td />}
                       {editing && <td />}
-                    </tr>
+                    </tr>,
                   );
-                }) : [];
+                  if (cycleExpanded) {
+                    if (activityQ.isLoading) {
+                      splitRows.push(
+                        <tr key={`${cycleDisclosureId}:loading`} id={`cycle-disclosure-${cycleDisclosureId}`}>
+                          <td colSpan={colCount} className="bg-sky-50 px-8 py-4 text-xs text-slate-500 dark:bg-sky-950/20">Loading activity for this spending cycle…</td>
+                        </tr>,
+                      );
+                    } else if (activityQ.isError) {
+                      splitRows.push(
+                        <tr key={`${cycleDisclosureId}:error`} id={`cycle-disclosure-${cycleDisclosureId}`}>
+                          <td colSpan={colCount} className="bg-rose-50 px-8 py-4 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-300">
+                            Spending-cycle activity could not be loaded. <button type="button" className="font-semibold underline" onClick={refreshActivityData}>Retry</button>
+                          </td>
+                        </tr>,
+                      );
+                    } else {
+                      splitRows.push(
+                        <ActivityDrawer
+                          key={`${cycleDisclosureId}:drawer`}
+                          disclosureId={`cycle-disclosure-${cycleDisclosureId}`}
+                          items={cycleActivity}
+                          currency={currency}
+                          colSpan={colCount}
+                          onClose={() => toggleCycleActivity(cycleDisclosureId)}
+                          mode={activityMode}
+                          onModeChange={setActivityMode}
+                          onSelectItem={setSelectedActivity}
+                        />,
+                      );
+                    }
+                  }
+                });
+                if (isExpanded && !editing && splitGoals.length > 0) {
+                  const configuredCycleIds = new Set(splitGoals.map((goal: any) => String(goal?.id || "").trim()).filter(Boolean));
+                  const unallocatedActivity = liActivity.filter((activity) => activityIsOutsideConfiguredCycles(activity.budgetEligibility, configuredCycleIds));
+                  const unallocatedDisclosureId = `${liId}:unallocated`;
+                  const unallocatedExpanded = expandedCycleIds.has(unallocatedDisclosureId);
+                  splitRows.push(
+                    <tr key={`${unallocatedDisclosureId}:row`} className="bg-amber-50/70 text-xs dark:bg-amber-950/20">
+                      <td className="pl-8 text-amber-900 dark:text-amber-200">
+                        <button
+                          type="button"
+                          className="group inline-flex items-center gap-2 text-left"
+                          aria-expanded={unallocatedExpanded}
+                          aria-controls={`cycle-disclosure-${unallocatedDisclosureId}`}
+                          onClick={() => toggleCycleActivity(unallocatedDisclosureId)}
+                        >
+                          <span className="text-amber-500 transition group-hover:text-amber-700">{unallocatedExpanded ? "▼" : "▶"}</span>
+                          <span className="font-medium">Outside configured spending cycles</span>
+                          <span className="rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[10px] text-amber-700 dark:border-amber-700 dark:bg-slate-950">{unallocatedActivity.length}</span>
+                        </button>
+                      </td>
+                      <td colSpan={colCount - 1} className="text-[10px] text-amber-700 dark:text-amber-300">Review rows that do not map to a configured cycle; grant eligibility remains authoritative.</td>
+                    </tr>,
+                  );
+                  if (unallocatedExpanded) {
+                    if (activityQ.isLoading) {
+                      splitRows.push(
+                        <tr key={`${unallocatedDisclosureId}:loading`} id={`cycle-disclosure-${unallocatedDisclosureId}`}>
+                          <td colSpan={colCount} className="bg-amber-50 px-8 py-4 text-xs text-slate-500 dark:bg-amber-950/20">Loading activity outside configured cycles…</td>
+                        </tr>,
+                      );
+                    } else if (activityQ.isError) {
+                      splitRows.push(
+                        <tr key={`${unallocatedDisclosureId}:error`} id={`cycle-disclosure-${unallocatedDisclosureId}`}>
+                          <td colSpan={colCount} className="bg-rose-50 px-8 py-4 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-300">
+                            Activity outside configured cycles could not be loaded. <button type="button" className="font-semibold underline" onClick={refreshActivityData}>Retry</button>
+                          </td>
+                        </tr>,
+                      );
+                    } else {
+                      splitRows.push(
+                        <ActivityDrawer
+                          key={`${unallocatedDisclosureId}:drawer`}
+                          disclosureId={`cycle-disclosure-${unallocatedDisclosureId}`}
+                          items={unallocatedActivity}
+                          currency={currency}
+                          colSpan={colCount}
+                          onClose={() => toggleCycleActivity(unallocatedDisclosureId)}
+                          mode={activityMode}
+                          onModeChange={setActivityMode}
+                          onSelectItem={setSelectedActivity}
+                        />,
+                      );
+                    }
+                  }
+                }
 
-                const drawer = isExpanded && !editing ? (
-                  <ActivityDrawer
-                    key={`${liId}_drawer`}
-                    items={liActivity}
-                    currency={currency}
-                    colSpan={colCount}
-                    onClose={() => setExpandedId(null)}
-                    mode={activityMode}
-                    onModeChange={setActivityMode}
-                    onSelectItem={setSelectedActivity}
-                  />
-                ) : null;
+                let drawer: React.ReactElement | null = null;
+                if (isExpanded && !editing && splitGoals.length === 0) {
+                  if (activityQ.isLoading) {
+                    drawer = (
+                      <tr key={`${liId}:loading`} id={`line-item-disclosure-${liId}`}>
+                        <td colSpan={colCount} className="bg-sky-50 px-8 py-4 text-xs text-slate-500 dark:bg-sky-950/20">Loading line-item activity…</td>
+                      </tr>
+                    );
+                  } else if (activityQ.isError) {
+                    drawer = (
+                      <tr key={`${liId}:error`} id={`line-item-disclosure-${liId}`}>
+                        <td colSpan={colCount} className="bg-rose-50 px-8 py-4 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-300">
+                          Line-item activity could not be loaded. <button type="button" className="font-semibold underline" onClick={refreshActivityData}>Retry</button>
+                        </td>
+                      </tr>
+                    );
+                  } else {
+                    drawer = (
+                      <ActivityDrawer
+                        key={`${liId}:drawer`}
+                        disclosureId={`line-item-disclosure-${liId}`}
+                        items={liActivity}
+                        currency={currency}
+                        colSpan={colCount}
+                        onClose={() => setExpandedLineItemIds((previous) => {
+                          const next = new Set(previous);
+                          next.delete(liId);
+                          return next;
+                        })}
+                        mode={activityMode}
+                        onModeChange={setActivityMode}
+                        onSelectItem={setSelectedActivity}
+                      />
+                    );
+                  }
+                }
 
                 return [row, ...splitRows, drawer].filter(Boolean) as React.ReactElement[];
               })
@@ -1898,15 +2058,15 @@ export function BudgetActivityTab({
           {budget.lineItems.length > 0 && (
             <tfoot>
               <tr
-                className={`cursor-pointer border-t border-slate-200 font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${expandedId === "all" ? "bg-sky-50 dark:bg-sky-950/20" : "bg-slate-50 dark:bg-slate-900"}`}
-                onClick={() => !editing && setExpandedId((prev) => (prev === "all" ? null : "all"))}
-                title={!editing ? (expandedId === "all" ? tip("Hide all activity.") : tip("View all grant activity across line items.")) : undefined}
+                className={`cursor-pointer border-t border-slate-200 font-semibold transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${allActivityExpanded ? "bg-sky-50 dark:bg-sky-950/20" : "bg-slate-50 dark:bg-slate-900"}`}
+                onClick={() => { if (!editing) toggleAllActivity(); }}
+                title={!editing ? (allActivityExpanded ? tip("Hide all activity.") : tip("View all grant activity across line items.")) : undefined}
               >
                 <td className="text-slate-700 dark:text-slate-300">
                   Totals{" "}
                   {!editing && (
                     <span className="ml-1 text-xs font-normal text-slate-400">
-                      {expandedId === "all" ? "▲ hide" : `▼ all activity (${activityRows.length})`}
+                      {allActivityExpanded ? "▲ hide" : `▼ all activity (${activityRows.length})`}
                     </span>
                   )}
                 </td>
@@ -1922,12 +2082,12 @@ export function BudgetActivityTab({
                 {editing && <td />}
                 {editing && <td />}
               </tr>
-              {expandedId === "all" && !editing && (
+              {allActivityExpanded && !editing && (
                 <ActivityDrawer
                   items={activityRows}
                   currency={currency}
                   colSpan={colCount}
-                  onClose={() => setExpandedId(null)}
+                  onClose={() => setAllActivityExpanded(false)}
                   mode={activityMode}
                   onModeChange={setActivityMode}
                   onSelectItem={setSelectedActivity}
