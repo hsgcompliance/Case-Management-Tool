@@ -34,6 +34,7 @@ const PaymentEditorSheetSurface = dynamic(
 );
 import { CustomerPaymentsTable } from "../components";
 import { addMonthsISO } from "../components/paymentScheduleUtils";
+import { activeScheduleRows, isVoidedSchedulePayment } from "../paymentScheduleVisibility";
 import { summarizePaymentScheduleBuild, type PaymentScheduleBuildSummary } from "../paymentScheduleBuildSummary";
 import { paymentScheduleGrantIds } from "../paymentScheduleEligibility";
 import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
@@ -190,6 +191,8 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     return sorted.filter((r) => String(r.enrollmentId || "") === enrollmentFilterId);
   }, [sorted, enrollmentFilterId]);
 
+  const activeFilteredRows = React.useMemo(() => activeScheduleRows(filteredRows), [filteredRows]);
+
   const filteredEnrollmentIds = React.useMemo(
     () => Array.from(new Set(filteredRows.map((row) => String(row.enrollmentId || "")).filter(Boolean))),
     [filteredRows],
@@ -278,7 +281,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   const rowIssues = React.useMemo(() => {
     if (!customerId || isLedgerLoading || isLedgerError) return {};
     const issues: Record<string, { label: string }> = {};
-    for (const row of filteredRows) {
+    for (const row of activeFilteredRows) {
       const payment = row.payment as Record<string, unknown>;
       if (!payment?.paid) continue;
       const pid = String(payment.id || "").trim();
@@ -290,7 +293,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       }
     }
     return issues;
-  }, [customerId, filteredRows, isLedgerError, isLedgerLoading, ledgerPaymentKeys]);
+  }, [activeFilteredRows, customerId, isLedgerError, isLedgerLoading, ledgerPaymentKeys]);
 
   const totals = React.useMemo(() => {
     let total = 0;
@@ -301,7 +304,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     const today = new Date().toISOString().slice(0, 10);
     const thisMonth = today.slice(0, 7);
     let nextDue = "";
-    for (const row of filteredRows) {
+    for (const row of activeFilteredRows) {
       const amt = Number((row.payment as any)?.amount || 0);
       if (!Number.isFinite(amt)) continue;
       total += amt;
@@ -316,11 +319,11 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
       }
     }
     return { total, paid, projectedUnpaid, overdue, dueThisMonth, nextDue };
-  }, [filteredRows]);
+  }, [activeFilteredRows]);
 
   const byType = React.useMemo(() => {
     const m = new Map<string, { count: number; total: number; paid: number; unpaid: number }>();
-    for (const row of filteredRows) {
+    for (const row of activeFilteredRows) {
       const key = paymentTypeKey(row.payment);
       const amt = Number((row.payment as any)?.amount || 0) || 0;
       const cur = m.get(key) || { count: 0, total: 0, paid: 0, unpaid: 0 };
@@ -333,11 +336,11 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     return Array.from(m.entries())
       .map(([key, v]) => ({ key, ...v }))
       .sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
-  }, [filteredRows]);
+  }, [activeFilteredRows]);
 
   const byLineItem = React.useMemo(() => {
     const m = new Map<string, { count: number; total: number; paid: number; unpaid: number }>();
-    for (const row of filteredRows) {
+    for (const row of activeFilteredRows) {
       const key = String((row.payment as any)?.lineItemId || "").trim() || "(none)";
       const amt = Number((row.payment as any)?.amount || 0) || 0;
       const cur = m.get(key) || { count: 0, total: 0, paid: 0, unpaid: 0 };
@@ -350,11 +353,11 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     return Array.from(m.entries())
       .map(([key, v]) => ({ key, ...v }))
       .sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
-  }, [filteredRows]);
+  }, [activeFilteredRows]);
 
   const byEnrollment = React.useMemo(() => {
     const m = new Map<string, { label: string; count: number; total: number; paid: number; unpaid: number }>();
-    for (const row of filteredRows) {
+    for (const row of activeFilteredRows) {
       const key = String(row.enrollmentId || "");
       const amt = Number((row.payment as any)?.amount || 0) || 0;
       const cur = m.get(key) || {
@@ -373,7 +376,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
     return Array.from(m.entries())
       .map(([key, v]) => ({ key, ...v }))
       .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-  }, [filteredRows]);
+  }, [activeFilteredRows]);
 
   const builderEnrollments = React.useMemo(() => {
     return grantEnrollments.map((e) => {
@@ -444,7 +447,9 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
   );
 
   const selectedIssue = selected ? rowIssues[selected.paymentKey] || null : null;
+  const selectedVoided = selected ? isVoidedSchedulePayment(selected.payment) : false;
   const rowIssueCount = React.useMemo(() => Object.keys(rowIssues).length, [rowIssues]);
+  const visibleVoidedCount = filteredRows.length - activeFilteredRows.length;
 
   React.useEffect(() => {
     setError(null);
@@ -782,6 +787,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
           </label>
           <div className="text-xs text-slate-500">
             Showing {filteredRows.length} payment row{filteredRows.length === 1 ? "" : "s"} from funded grant enrollments
+            {visibleVoidedCount ? ` (${visibleVoidedCount} voided)` : ""}
           </div>
         </div>
 
@@ -915,6 +921,13 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
 
                 {error ? <div className="mb-2 text-sm text-red-700">{error}</div> : null}
 
+                {selectedVoided ? (
+                  <div className="mb-3 rounded border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-700">
+                    <div className="font-semibold">Voided projection</div>
+                    <div className="mt-1 text-xs">This row is retained for history and excluded from active schedule totals. It cannot be edited or posted.</div>
+                  </div>
+                ) : null}
+
                 {selectedIssue ? (
                   <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     <div className="font-semibold">Paid row is not in ledger.</div>
@@ -937,6 +950,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
                     <input
                       type="checkbox"
                       checked={hmisComplete}
+                      disabled={selectedVoided}
                       onChange={(e) => setHmisComplete(e.currentTarget.checked)}
                     />
                     <span>HMIS complete</span>
@@ -945,6 +959,7 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
                     <input
                       type="checkbox"
                       checked={caseworthyComplete}
+                      disabled={selectedVoided}
                       onChange={(e) => setCaseworthyComplete(e.currentTarget.checked)}
                     />
                     <span>Caseworthy complete</span>
@@ -955,26 +970,28 @@ export function PaymentsTab({ customerId, customerName }: { customerId: string; 
                   <button
                     className="btn btn-sm"
                     onClick={() => setPaidDialogOpen(true)}
+                    disabled={selectedVoided}
                   >
                     Mark paid
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => void markUnpaid()}
+                    disabled={selectedVoided}
                   >
                     Mark unpaid
                   </button>
                   <button
                     className="btn btn-sm"
                     onClick={() => void saveCompliance()}
-                    disabled={compliance.isPending}
+                    disabled={selectedVoided || compliance.isPending}
                   >
                     {compliance.isPending ? "Saving..." : "Save compliance"}
                   </button>
                   <button
                     className="btn btn-ghost btn-sm text-rose-700"
                     onClick={() => setDeleteOpen(true)}
-                    disabled={deleteRows.isPending}
+                    disabled={selectedVoided || deleteRows.isPending}
                   >
                     {deleteRows.isPending ? "Deleting..." : "Delete..."}
                   </button>

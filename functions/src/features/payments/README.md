@@ -85,6 +85,9 @@ row-level Post action so the existing transaction identity is reused.
 - Pending `paymentQueue` rows are projected spend. Posted queue rows are shadows
   of their linked authoritative ledger entries and are never counted a second
   time.
+- Voiding an enrollment projection through `paymentQueueVoid` atomically marks
+  the matching embedded enrollment payment `void: true`. Customer schedules
+  retain that row for history but exclude it from active totals and edits.
 - Primary totals and legacy `*InWindow` fields now represent the same canonical
   eligible period. Keep the aliases for compatibility; do not restore all-time
   values to the primary fields.

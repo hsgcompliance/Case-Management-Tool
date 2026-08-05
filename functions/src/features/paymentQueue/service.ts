@@ -815,22 +815,50 @@ export async function voidPaymentQueueItemById(
     actorUid?: string,
 ): Promise<number> {
   const ref = db.collection(COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) return 0;
-  const item = docToItem(snap);
-  if (item.queueStatus === 'void') return 1;
-  if (item.queueStatus === 'posted') {
-    throw new Error(`PaymentQueueItem ${id} is posted; reopen it before voiding.`);
-  }
   const now = isoNow();
-  await ref.update({
-    'queueStatus': 'void',
-    'voidedAt': now,
-    'voidedBy': actorUid ?? null,
-    'updatedAtISO': now,
-    'system.lastWriter': FN,
-    'system.lastWriteAt': now,
+  const item = await db.runTransaction(async (trx) => {
+    const snap = await trx.get(ref);
+    if (!snap.exists) return null;
+    const current = docToItem(snap);
+    if (current.queueStatus === 'posted') {
+      throw new Error(`PaymentQueueItem ${id} is posted; reopen it before voiding.`);
+    }
+
+    const enrollmentId = current.source === 'projection' ? String(current.enrollmentId || '').trim() : '';
+    const paymentId = current.source === 'projection' ? String(current.paymentId || current.submissionId || '').trim() : '';
+    const enrollmentRef = enrollmentId ? db.collection('customerEnrollments').doc(enrollmentId) : null;
+    const enrollmentSnap = enrollmentRef ? await trx.get(enrollmentRef) : null;
+
+    if (current.queueStatus !== 'void') {
+      trx.update(ref, {
+        'queueStatus': 'void',
+        'voidedAt': now,
+        'voidedBy': actorUid ?? null,
+        'updatedAtISO': now,
+        'system.lastWriter': FN,
+        'system.lastWriteAt': now,
+      });
+    }
+
+    if (enrollmentRef && enrollmentSnap?.exists && paymentId) {
+      const payments = Array.isArray(enrollmentSnap.get('payments')) ? enrollmentSnap.get('payments') as Array<Record<string, unknown>> : [];
+      let matched = false;
+      const nextPayments = payments.map((payment) => {
+        if (String(payment?.id || '').trim() !== paymentId) return payment;
+        matched = true;
+        return payment.void === true ? payment : {...payment, void: true};
+      });
+      if (matched) {
+        trx.update(enrollmentRef, {
+          payments: nextPayments,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+
+    return current;
   });
+  if (!item) return 0;
   await recomputeLinkedGrantBudgets([item]);
   return 1;
 }

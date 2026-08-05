@@ -8,6 +8,7 @@ import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
 import { safeISODate10 } from "@lib/date";
 import { formatEnrollmentLabel } from "@lib/enrollmentLabels";
 import { RentCertToggle, type RentCertToggleValue } from "@entities/dialogs/payments/RentCertToggle";
+import { isVoidedSchedulePayment } from "../paymentScheduleVisibility";
 
 type Props = {
   rows: CustomerPaymentRow[];
@@ -126,6 +127,7 @@ export default function CustomerPaymentsTable({
             const key = `${row.enrollmentId}:${String(p.id || idx)}`;
             const issue = rowIssues?.[key];
             const isSelected = selectedKey === key;
+            const isVoided = isVoidedSchedulePayment(p);
             const optimisticPaid = Object.prototype.hasOwnProperty.call(paidOverrides, key)
               ? !!paidOverrides[key]
               : !!p.paid;
@@ -140,7 +142,7 @@ export default function CustomerPaymentsTable({
                 : !!p?.compliance?.caseworthyComplete;
             return (
               <React.Fragment key={key}>
-                <tr className={["border-t border-slate-200 odd:bg-white even:bg-slate-50/60", isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : ""].join(" ")}>
+                <tr className={["border-t border-slate-200 odd:bg-white even:bg-slate-50/60", isVoided ? "bg-slate-100/80 text-slate-500" : "", isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : ""].join(" ")}>
                   <td className="px-3 py-2 text-slate-800">
                     <span className="inline-flex items-center gap-2">
                       <span>{fmtDateOrDash(paymentDate(p))}</span>
@@ -157,14 +159,19 @@ export default function CustomerPaymentsTable({
                       ) : null}
                     </span>
                   </td>
-                  <td className="px-3 py-2"><PaymentTypeBadge payment={p} /></td>
-                  <td className="px-3 py-2 text-slate-800">{fmtCurrencyUSD(p.amount || 0)}</td>
+                  <td className="px-3 py-2">
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <PaymentTypeBadge payment={p} />
+                      {isVoided ? <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">Voided</span> : null}
+                    </span>
+                  </td>
+                  <td className={["px-3 py-2 text-slate-800", isVoided ? "line-through text-slate-500" : ""].join(" ")}>{fmtCurrencyUSD(p.amount || 0)}</td>
                   <td className="px-3 py-2 text-slate-800">
                     <label className="inline-flex items-center gap-2 text-xs">
                       <input
                         type="checkbox"
                         checked={optimisticPaid}
-                        disabled={!onTogglePaid || !!pendingPaid[key]}
+                        disabled={isVoided || !onTogglePaid || !!pendingPaid[key]}
                         onChange={(e) => {
                           const nextPaid = e.currentTarget.checked;
                           setPaidOverrides((prev) => ({ ...prev, [key]: nextPaid }));
@@ -191,7 +198,7 @@ export default function CustomerPaymentsTable({
                         <input
                           type="checkbox"
                           checked={optimisticHmis}
-                          disabled={!onToggleCompliance || !!pendingCompliance[`${key}:hmisComplete`]}
+                          disabled={isVoided || !onToggleCompliance || !!pendingCompliance[`${key}:hmisComplete`]}
                           onChange={(e) => {
                             const nextValue = e.currentTarget.checked;
                             setComplianceOverrides((prev) => ({
@@ -222,7 +229,7 @@ export default function CustomerPaymentsTable({
                         <input
                           type="checkbox"
                           checked={optimisticCw}
-                          disabled={!onToggleCompliance || !!pendingCompliance[`${key}:caseworthyComplete`]}
+                          disabled={isVoided || !onToggleCompliance || !!pendingCompliance[`${key}:caseworthyComplete`]}
                           onChange={(e) => {
                             const nextValue = e.currentTarget.checked;
                             setComplianceOverrides((prev) => ({
@@ -254,7 +261,7 @@ export default function CustomerPaymentsTable({
                   <td className="px-3 py-2">
                     <RentCertToggle
                       value={rentCertOverrides[key] ?? rentCertStatuses?.[key] ?? "notDue"}
-                      disabled={!onSetRentCert || !!pendingRentCert[key]}
+                      disabled={isVoided || !onSetRentCert || !!pendingRentCert[key]}
                       title="Rent cert due date is the month prior to the payment date."
                       onChange={(next) => {
                         setRentCertOverrides((prev) => ({ ...prev, [key]: next }));
@@ -289,6 +296,7 @@ export default function CustomerPaymentsTable({
                               {
                                 key: "adjust",
                                 label: "Adjust schedule",
+                                disabled: isVoided,
                                 onSelect: () => onAdjustSchedule(row, key),
                               },
                             ]
@@ -298,6 +306,7 @@ export default function CustomerPaymentsTable({
                               {
                                 key: "delete",
                                 label: "Delete row",
+                                disabled: isVoided,
                                 danger: true,
                                 onSelect: () => onDeleteRow(row, key),
                               },
