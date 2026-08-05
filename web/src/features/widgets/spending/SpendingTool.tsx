@@ -40,6 +40,7 @@ import { ToolTable } from "@entities/ui/dashboardStyle/ToolTable";
 import ActionMenu from "@entities/ui/ActionMenu";
 import { PageFilterBar } from "@entities/Page/PageFilterBar";
 import { FilterToggleGroup } from "@entities/ui/FilterToggleGroup";
+import { isVoidedProjection, shouldShowVoidedProjection } from "./voidedProjectionVisibility";
 import {
   complexDateMatchesIsoDate,
   complexDatePrimaryMonth,
@@ -107,6 +108,7 @@ export type SpendingFilterState = {
   cardBucketFilter: string;
   search: string;
   showReversals: boolean;
+  showVoidedProjections: boolean;
   customerId: string;
   cmId: string;
   advancedQueueFilters: AdvancedQueueFilter[];
@@ -128,6 +130,7 @@ export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   cardBucketFilter: "",
   search: "",
   showReversals: false,
+  showVoidedProjections: false,
   customerId: "",
   cmId: "",
   advancedQueueFilters: [],
@@ -316,6 +319,7 @@ type SpendingRow = {
   purchaser: string;
   isReversal: boolean;
   isReversalRelated: boolean;
+  isVoidedProjection: boolean;
   linkedLedgerId?: string;
   reversalLedgerId?: string;
   ledgerEntry?: Record<string, unknown>;
@@ -1580,7 +1584,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     !!filterState.customerId ||
     !!filterState.cmId ||
     filterState.advancedQueueFilters.length > 0 ||
-    !!filterState.showReversals;
+    !!filterState.showReversals ||
+    !!filterState.showVoidedProjections;
 
   // ── Row assembly ─────────────────────────────────────────────────────────
 
@@ -1684,6 +1689,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         purchaser: String(e?.purchaser || "").trim(),
         isReversal,
         isReversalRelated: reversalRelatedLedgerIds.has(entryId),
+        isVoidedProjection: false,
         searchText: [vendor, displayTitle, grantId, lineItemId, String(e?.customerId || "")].join(" ").toLowerCase(),
         ledgerEntry: e,
         // A ledger-only enrollment row is valid historical data. The queue query
@@ -1698,7 +1704,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       const queueItem = item as PaymentQueueItem;
       const source = String(queueItem.source || "").toLowerCase();
       if (source !== "credit-card" && source !== "invoice" && source !== "projection") continue;
-      if (String(queueItem.queueStatus || "").toLowerCase() === "void") continue;
+      const queueStatus = String(queueItem.queueStatus || "pending").toLowerCase();
+      const voidedProjection = isVoidedProjection(source, queueStatus, (queueItem as Record<string, unknown>).void);
+      if (queueStatus === "void" && !voidedProjection) continue;
 
       const queueId = String(queueItem.id || "");
       const submissionId = String(queueItem.paymentId || queueItem.submissionId || queueId || "").trim();
@@ -1714,14 +1722,13 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           .filter(Boolean)
           .join(" ")
       );
-      const queueStatus = String(queueItem.queueStatus || "pending").toLowerCase();
       const linkedLedgers = reconciliation.ledgersForQueue(queueItem as Record<string, unknown>);
       const linkedLedger = reconciliation.primaryLedgerForQueue(queueItem as Record<string, unknown>);
       const postedLedger = queueStatus === "posted" ? linkedLedger : null;
       const amountCents = postedLedger
         ? toCents(postedLedger.amountCents, postedLedger.amount)
         : Math.round(Number(queueItem.amount || 0) * 100);
-      const workflowState: SpendingWorkflowState = queueStatus === "posted" ? "closed" : "open";
+      const workflowState: SpendingWorkflowState = queueStatus === "posted" || voidedProjection ? "closed" : "open";
       const bypassClosed = !!queueItem.closedBypassLedger;
       const isProjection = source === "projection";
       const queueVendor = String(queueItem.merchant || postedLedger?.vendor || "").trim();
@@ -1753,7 +1760,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         completed: workflowState === "closed",
         workflowState,
         workflowReason:
-          workflowState === "closed"
+          voidedProjection
+            ? "Voided projection"
+            : workflowState === "closed"
             ? bypassClosed ? "Closed without ledger" : "Posted to ledger"
             : isProjection
             ? "Projected spend, not yet paid"
@@ -1778,6 +1787,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         isReversal: amountCents < 0 || String((queueItem as any).direction || "").toLowerCase() === "return",
         isReversalRelated: workflowState === "closed"
           && reversalRelatedLedgerIds.has(String(postedLedger?.id || queueItem.ledgerEntryId || "")),
+        isVoidedProjection: voidedProjection,
         searchText: [
           merchant,
           queueVendor,
@@ -1802,7 +1812,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           ? undefined
           : queueLedgerIssue(queueItem as Record<string, unknown>, linkedLedgers) || undefined,
         complianceStatus: isProjection
-          ? complianceStatusLabel(effectiveCompliance, queueStatus === "posted")
+          ? voidedProjection ? "Voided" : complianceStatusLabel(effectiveCompliance, queueStatus === "posted")
           : queueStatus === "posted" ? "Posted" : "Open",
         budgetEligibility: budgetEligibilityFor(
           eligibilityRecord,
@@ -2007,12 +2017,13 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   const baseFilteredRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    const { showReversals, customerId: filterCustomerId, cmId: filterCmId } = filterState;
+    const { showReversals, showVoidedProjections, customerId: filterCustomerId, cmId: filterCmId } = filterState;
     const selectedSources = selectedInvoicingSources(typeFilter);
     return allRows.filter((row) => {
       // Closed/deleted grants are historical and intentionally excluded from
       // the operational invoicing queue.
       if (row.grantId && closedGrantIds.has(row.grantId)) return false;
+      if (!shouldShowVoidedProjection(row.isVoidedProjection, showVoidedProjections)) return false;
       const normalizedQueueSource = row.paymentQueueItem?.source || (row.kind === "queue-invoice" ? "invoice" : row.kind === "queue-credit-card" ? "credit-card" : "");
       const typePass =
         !typeFilter ? true
@@ -2983,6 +2994,15 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 onChange={(e) => setFilter({ showReversals: e.currentTarget.checked })}
               />
               Show reversals and linked spends
+            </label>
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-xs"
+                checked={!!filterState.showVoidedProjections}
+                onChange={(e) => setFilter({ showVoidedProjections: e.currentTarget.checked })}
+              />
+              Show voided projections
             </label>
           </div>
 
