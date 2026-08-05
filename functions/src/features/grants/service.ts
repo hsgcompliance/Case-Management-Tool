@@ -36,6 +36,7 @@ import {
   toArray,
 } from "./schemas";
 import { copyCyclePipelineConfiguration } from "./cyclePipelineCopy";
+import { summarizeGrantDeletionSafety } from "./deletionSafety";
 
 /* ---------------- Budget helpers (server-derived totals) ---------------- */
 
@@ -1082,7 +1083,7 @@ export async function cascadeGrantToEnrollments(
   const grantEndDate = String((grant as Record<string, unknown>).endDate || "").slice(0, 10);
   const closeEndDate = grantEndDate || new Date().toISOString().slice(0, 10);
 
-  // --- READ FIRST: all enrollments for this grant that are not already terminal ---
+  // --- READ FIRST: every enrollment for this grant ---
   let snap: FirebaseFirestore.QuerySnapshot;
   try {
     snap = await db
@@ -1101,9 +1102,19 @@ export async function cascadeGrantToEnrollments(
     return s !== "closed" && s !== "deleted";
   });
 
-  if (!toProcess.length) return;
-
-  const closedEnrollments: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string | null }> = [];
+  // Projection cleanup applies to every enrollment reference, including rows
+  // already closed/deleted by an earlier partial cascade. Otherwise a retry can
+  // leave pending projections attached to a terminal grant.
+  const projectionEnrollments: Array<{ id: string; orgId: string | null; grantId: string | null; customerId: string | null }> =
+    snap.docs.map((doc) => {
+      const data = doc.data() as any;
+      return {
+        id: doc.id,
+        orgId: data?.orgId ?? null,
+        grantId: data?.grantId ?? grantId,
+        customerId: data?.customerId ?? null,
+      };
+    });
 
   if (targetStatus === "closed") {
     // Re-read each enrollment fresh inside its own transaction right before
@@ -1131,12 +1142,6 @@ export async function cascadeGrantToEnrollments(
         closedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
-      closedEnrollments.push({
-        id: doc.id,
-        orgId: data?.orgId ?? null,
-        grantId: data?.grantId ?? grantId,
-        customerId: data?.customerId ?? null,
-      });
     })));
     for (const r of results) {
       if (r.status === "rejected") console.error(`[cascadeGrant] close failed for grant ${grantId}:`, r.reason?.message || r.reason);
@@ -1145,14 +1150,7 @@ export async function cascadeGrantToEnrollments(
     // Deletion never touches `payments` — no race risk, bulk writer is fine.
     const writer = newBulkWriter(2);
     for (const doc of toProcess) {
-      const data = doc.data() as any;
       writer.set(doc.ref, { status: "deleted", active: false, deleted: true, deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-      closedEnrollments.push({
-        id: doc.id,
-        orgId: data?.orgId ?? null,
-        grantId: data?.grantId ?? grantId,
-        customerId: data?.customerId ?? null,
-      });
     }
     try {
       await writer.close();
@@ -1162,9 +1160,9 @@ export async function cascadeGrantToEnrollments(
     }
   }
 
-  // --- VOID projections for all affected enrollments (non-fatal per-enrollment) ---
+  // --- VOID projections for all grant enrollments (non-fatal per-enrollment) ---
   await Promise.allSettled(
-    closedEnrollments.map(({ id, orgId, grantId: gid, customerId }) =>
+    projectionEnrollments.map(({ id, orgId, grantId: gid, customerId }) =>
       syncEnrollmentProjectionQueueItems({
         orgId,
         enrollmentId: id,
@@ -1258,14 +1256,47 @@ export async function hardDeleteGrants(
     assertDocOrgWritable(caller, targetOrg, s.data() || {});
   });
 
-  // Read all enrollments for every grant before any writes.
+  // Read every relationship before any write. A hard delete is allowed only
+  // after financial records have been explicitly reassigned, reversed, voided,
+  // or removed through their owning workflow.
   const enrollmentSnaps = await Promise.all(
     arr.map((id) =>
       db.collection("customerEnrollments").where("grantId", "==", id).get()
         .then((s) => ({ grantId: id, docs: s.docs }))
-        .catch(() => ({ grantId: id, docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }))
     )
   );
+
+  const financialSafety = await Promise.all(enrollmentSnaps.map(async ({ grantId, docs }) => {
+    const [ledgerSnap, queueSnap, spendSnaps] = await Promise.all([
+      db.collection("ledger").where("grantId", "==", grantId).get(),
+      db.collection("paymentQueue").where("grantId", "==", grantId).get(),
+      Promise.all(docs.map((doc) => doc.ref.collection("spends").get())),
+    ]);
+    return {
+      grantId,
+      summary: summarizeGrantDeletionSafety({
+        enrollments: docs.map((doc) => doc.data()),
+        ledgerCount: ledgerSnap.size,
+        paymentQueueCount: queueSnap.size,
+        spendMirrorCount: spendSnaps.reduce((count, snap) => count + snap.size, 0),
+      }),
+    };
+  }));
+
+  const blockers = financialSafety.filter(({ summary }) => summary.blocked);
+  if (blockers.length) {
+    const error = new Error("grant_has_financial_records") as Error & {
+      code: number;
+      meta: Record<string, unknown>;
+    };
+    error.code = 409;
+    error.meta = {
+      grantsBlocked: blockers.length,
+      relationships: blockers.map(({ grantId, summary }) => ({ grantId, ...summary })),
+      requiredAction: "reassign_or_cleanup_financial_records_before_hard_delete",
+    };
+    throw error;
+  }
 
   // --- CASCADE: hard-delete enrollments first ---
   const cascadeErrors: Array<{ grantId: string; enrollmentId: string; error: string }> = [];
@@ -1280,10 +1311,19 @@ export async function hardDeleteGrants(
           caller
         );
       } catch (e: any) {
-        // Non-fatal: log and continue so remaining enrollments + grant still get deleted.
         cascadeErrors.push({ grantId, enrollmentId: d.id, error: String(e?.message || e) });
       }
     }
+  }
+
+  if (cascadeErrors.length) {
+    const error = new Error("grant_enrollment_delete_failed") as Error & {
+      code: number;
+      meta: Record<string, unknown>;
+    };
+    error.code = 409;
+    error.meta = { failures: cascadeErrors.length };
+    throw error;
   }
 
   const batch = db.batch();
@@ -1295,6 +1335,5 @@ export async function hardDeleteGrants(
   return {
     ids: arr,
     deleted: true,
-    ...(cascadeErrors.length ? { cascadeErrors } : {}),
   };
 }

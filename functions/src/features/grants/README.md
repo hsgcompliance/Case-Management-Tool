@@ -127,11 +127,32 @@ All handlers are wrapped by `core/secureHandler`.
 - `POST /grantsDelete` (auth: `admin`)
   - Body: `id | ids[]`
   - Writes: `status:"deleted"`, `active:false`, `deleted:true`, stamps `deletedAt`
+  - Cascades terminal status to non-terminal enrollments.
+  - Voids pending enrollment projections for every enrollment reference,
+    including enrollments that were already closed/deleted before a retry.
+  - Does not delete or reassign ledger, invoice, credit-card, or Jotform source
+    records.
 
 ### Hard delete
 - `POST /grantsAdminDelete` (auth: `admin`)
-  - Body: `id | ids[]`
-  - Deletes documents.
+  - Body: `id | ids[]`.
+  - Refuses with `grant_has_financial_records` while the grant has ledger rows,
+    payment-queue rows, enrollment payment schedules, embedded spends, or spend
+    subcollection mirrors.
+  - The operator must first reassign legitimate transactions or use the owning
+    payment/test-cleanup workflow. Hard delete is not a financial cascade.
+  - If enrollment deletion fails, the grant document is retained and the
+    request fails with `grant_enrollment_delete_failed`.
+
+### Reviewed test-data cleanup
+
+`scripts/cleanup-test-grant-data.mjs` is dry-run by default and accepts an
+ID-only reviewed manifest. It rejects relationship drift, non-projection queue
+sources, unexpected Jotform/pipeline/allocation/audit records, and unreviewed
+grant markers. The Project 4 cleanup soft-deletes grants/enrollments, voids
+pending projections, retains posted queue shadows and enrollment spend mirrors,
+and creates explicit compensating ledger reversals. It never deletes customer
+or Jotform source records.
 
 ### Get
 - `GET /grantsGet?id=...` (auth: `user`)
