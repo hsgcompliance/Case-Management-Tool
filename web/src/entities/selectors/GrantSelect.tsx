@@ -3,9 +3,11 @@
 import React from "react";
 import { useGrants } from "@hooks/useGrants";
 import type { GrantsListQuery } from "@types";
+import { buildAdvancedGrantOptionGroups } from "@features/budgetPipeline/project3Workflow";
 import { asEntityArray, EntitySelect, entitySelectInputClassName, resolveEntityPlaceholder } from "./shared";
 
 type Props = {
+  id?: string;
   value: string | null;
   onChange: (grantId: string | null) => void;
   className?: string;
@@ -15,6 +17,7 @@ type Props = {
   filters?: GrantsListQuery;
   mode?: "all" | "grant" | "program";
   groupByKind?: boolean;
+  optionPolicy?: "default" | "advanced-assignment";
 };
 
 type GrantLite = {
@@ -22,10 +25,15 @@ type GrantLite = {
   name?: string;
   code?: string;
   kind?: string;
+  status?: string;
+  active?: boolean;
+  deleted?: boolean;
   budget?: { total?: number | null } | null;
+  financialConfig?: { model?: string | null } | null;
 };
 
 export default function GrantSelect({
+  id,
   value,
   onChange,
   className = "",
@@ -35,6 +43,7 @@ export default function GrantSelect({
   filters = { active: true, limit: 500 },
   mode = "all",
   groupByKind = true,
+  optionPolicy = "default",
 }: Props) {
   const q = useGrants(filters, { enabled: true });
 
@@ -79,9 +88,14 @@ export default function GrantSelect({
     emptyLabel: "No grants found",
     placeholderLabel,
   });
+  const advancedGroups = React.useMemo(
+    () => optionPolicy === "advanced-assignment" ? buildAdvancedGrantOptionGroups(grants, value || "") : [],
+    [grants, optionPolicy, value],
+  );
 
   return (
     <EntitySelect
+      id={id}
       value={value}
       onChange={onChange}
       disabled={isDisabled}
@@ -90,7 +104,9 @@ export default function GrantSelect({
       placeholderOption={includeUnassigned ? placeholder : undefined}
       placeholderDisabled={false}
       options={
-        mode === "all" && groupByKind
+        optionPolicy === "advanced-assignment"
+          ? advancedGroups
+          : mode === "all" && groupByKind
           ? [
               ...(grouped.grantsOnly.length > 0
                 ? [{

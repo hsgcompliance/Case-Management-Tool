@@ -23,11 +23,13 @@ import type {
   TPipelineFormSchema,
 } from "@types";
 import {
+  evaluateGrantBudgetEligibility,
   inferTransactionWindowModel,
   type TransactionWindowModel,
 } from "@hdb/contracts";
 import { LINE_ITEMS_FORM_IDS } from "@features/widgets/jotform/lineItemsFormMap";
 import { HelpButton } from "@entities/help/HelpButton";
+import ActionMenu from "@entities/ui/ActionMenu";
 import GrantSelect from "@entities/selectors/GrantSelect";
 import LineItemSelect from "@entities/selectors/LineItemSelect";
 import {
@@ -47,6 +49,10 @@ import {
   rowSourceType,
   type MatchingSourceFilter,
 } from "./matchingModalUtils";
+import {
+  isOutOfGrantPeriod,
+  normalizePipelineDateInput,
+} from "./project3Workflow";
 
 const SOURCE_FORMS = [
   { key: "creditCard", label: "Credit Card", title: "Line Items Card Checkout", id: LINE_ITEMS_FORM_IDS.creditCard },
@@ -886,15 +892,15 @@ export function BulkGrantDesignationModal({
                 <option value="pullAll">Pull All Transactions</option>
                 <option value="pullDateRange">Pull Date Range</option>
               </select>
-              <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div className="relative">
                   <label className="block text-[11px] font-semibold uppercase text-slate-500">Date on and after</label>
-                  <input className="input pr-8" type="date" value={startDate} onChange={(e) => setStartDate(e.currentTarget.value)} />
+                  <input className="input pr-8" type="date" value={startDate} onChange={(e) => setStartDate(normalizePipelineDateInput(e.currentTarget.value))} />
                   {startDate ? <button type="button" className="absolute bottom-1 right-1 h-6 w-6 rounded text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => setStartDate("")}>x</button> : null}
                 </div>
                 <div className="relative">
                   <label className="block text-[11px] font-semibold uppercase text-slate-500">Date on and before</label>
-                  <input className="input pr-8" type="date" value={endDate} onChange={(e) => setEndDate(e.currentTarget.value)} />
+                  <input className="input pr-8" type="date" value={endDate} onChange={(e) => setEndDate(normalizePipelineDateInput(e.currentTarget.value))} />
                   {endDate ? <button type="button" className="absolute bottom-1 right-1 h-6 w-6 rounded text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => setEndDate("")}>x</button> : null}
                 </div>
               </div>
@@ -1064,6 +1070,17 @@ export function BulkGrantDesignationModal({
                 const blockers = draft.status === "posted"
                   ? ledgerPostBlockers({ ...item, grantId: draft.grantId || null, lineItemId: draft.lineItemId || null }, { conflict, duplicate: !!item.ledgerEntryId })
                   : [];
+                const assignedGrant = draft.grantId
+                  ? (grants as Array<Record<string, any>>).find((grant) => String(grant?.id || "") === draft.grantId) || null
+                  : null;
+                const budgetEligibility = assignedGrant
+                  ? evaluateGrantBudgetEligibility({
+                      transaction: { ...item, grantId: draft.grantId, lineItemId: draft.lineItemId },
+                      grant: assignedGrant,
+                      sourceType: item.queueStatus === "posted" ? "ledger" : "paymentQueue",
+                    })
+                  : null;
+                const outsideGrantPeriod = isOutOfGrantPeriod(budgetEligibility);
                 const statusLabel = item.queueStatus === "posted" ? "Posted" : draft.status === "posted" ? "Post on save" : "Projected";
                 return (
                   <tr
@@ -1092,10 +1109,13 @@ export function BulkGrantDesignationModal({
                     <td className="px-3 py-2 align-top text-xs text-slate-600 dark:text-slate-400" onClick={(e) => e.stopPropagation()}>
                       <div className="space-y-1.5">
                         <GrantSelect
+                          id={`advanced-grant-${item.id}`}
                           value={draft.grantId || null}
                           onChange={(next) => updateRowDraft(item, { grantId: String(next || "") })}
                           includeUnassigned
-                          mode="grant"
+                          filters={{ limit: 500 }}
+                          mode="all"
+                          optionPolicy="advanced-assignment"
                           placeholderLabel="Unassigned"
                           className="min-w-0 text-xs"
                         />
@@ -1107,6 +1127,21 @@ export function BulkGrantDesignationModal({
                           inputClassName="min-h-8 w-full rounded-md border-slate-200 bg-slate-50 text-xs dark:border-slate-700 dark:bg-slate-900"
                           placeholderLabel="Select line item"
                         />
+                        {outsideGrantPeriod && budgetEligibility ? (
+                          <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-2 py-2 text-[11px] text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                            <div className="font-semibold">Outside grant spending period</div>
+                            <div className="mt-0.5">
+                              Transaction {budgetEligibility.transactionDate || "date unavailable"}; grant {budgetEligibility.grantStartDate || "no start"} to {budgetEligibility.grantEndDate || "no end"}. This assignment stays reviewable but is excluded from eligible totals.
+                            </div>
+                            <button
+                              type="button"
+                              className="mt-1 font-semibold underline underline-offset-2"
+                              onClick={() => document.getElementById(`advanced-grant-${item.id}`)?.focus()}
+                            >
+                              Review or reassign
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-2 align-top text-xs" title={blockers.join(", ")}>
@@ -1504,33 +1539,47 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
   const selectCls = inputCls;
   const activeIncludeCount = countRuleConditions(activeSchema.includeTree);
   const activeExcludeCount = countRuleConditions(activeSchema.excludeTree);
+  const secondaryActions = [
+    { key: "preview", label: isPreviewLoading ? "Previewing..." : "Preview", disabled: isPreviewLoading || isSaving, onSelect: handlePreview },
+    { key: "export", label: isExporting ? "Exporting..." : "Export Blob", disabled: isExporting || isPreviewLoading || isSaving, onSelect: handleExportPipelineBlob },
+    ...(draft.status === "active"
+      ? [{ key: "deactivate", label: "Deactivate", disabled: isSaving, onSelect: () => handleSave("inactive") }]
+      : []),
+  ];
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm">
-        {isEmbedded ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors mr-1 shrink-0"
-          >
-            Back to pipelines
-          </button>
-        ) : null}
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-950">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {isEmbedded ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-sm text-slate-500 transition-colors hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              Back to pipelines
+            </button>
+          ) : <span />}
+          <div className="flex items-center gap-2">
+            <StatusBadge status={draft.status} />
+            <HelpButton pageKey="budgetPipeline" />
+          </div>
+        </div>
 
-        <div className="flex items-center gap-1.5 min-w-0">
-          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Grant</label>
+        <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(170px,1fr)_minmax(160px,0.9fr)_minmax(160px,0.8fr)_minmax(220px,1.4fr)_auto] xl:items-end">
+          <label className="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span className="mb-1 block">Grant</span>
           <select
-            className={`${selectCls} max-w-[180px]`}
+            className={`${selectCls} w-full min-w-0`}
             value={draft.grantId ?? ""}
             onChange={(e) => {
-              const grantId = e.target.value || null;
+              const grantId = e.currentTarget.value || null;
               const grant = (grantsData as any[]).find((candidate: any) => candidate.id === grantId);
               setDraft((current) => ({
                 ...current,
                 grantId,
                 lineItemId: null,
-                startDate: isoDate10(grant?.startDate),
+                startDate: normalizePipelineDateInput(isoDate10(grant?.startDate)),
               }));
             }}
           >
@@ -1541,14 +1590,14 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
               </option>
             ))}
           </select>
-        </div>
+          </label>
 
-        <div className="flex items-center gap-1.5 min-w-0">
-          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Line Item</label>
+          <label className="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span className="mb-1 block">Line Item</span>
           <select
-            className={`${selectCls} max-w-[160px]`}
+            className={`${selectCls} w-full min-w-0`}
             value={draft.lineItemId ?? ""}
-            onChange={(e) => setDraft((d) => ({ ...d, lineItemId: e.target.value || null }))}
+            onChange={(e) => setDraft((d) => ({ ...d, lineItemId: e.currentTarget.value || null }))}
             disabled={!draft.grantId}
           >
             <option value="">Any line item</option>
@@ -1558,39 +1607,39 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
               </option>
             ))}
           </select>
-        </div>
+          </label>
 
-        <div className="flex items-center gap-1.5 min-w-0">
-          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Date after</label>
+          <label className="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span className="mb-1 block">Date on and after</span>
           <input
             type="date"
-            className={`${inputCls} w-[142px]`}
+            className={`${inputCls} w-full min-w-0`}
             value={draft.startDate}
-            onChange={(e) => setDraft((current) => ({...current, startDate: e.currentTarget.value}))}
+            onChange={(e) => {
+              const nextDate = normalizePipelineDateInput(e.currentTarget.value);
+              setDraft((current) => ({ ...current, startDate: nextDate }));
+            }}
             disabled={!draft.grantId}
             title="Transactions on or after this date may enter the pipeline."
           />
-        </div>
+          </label>
 
-        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">Name</label>
+          <label className="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span className="mb-1 block">Name</span>
           <input
             type="text"
-            className={`${inputCls} min-w-[160px] flex-1`}
+            className={`${inputCls} w-full min-w-0`}
             value={draft.name}
-            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+            onChange={(e) => setDraft((d) => ({ ...d, name: e.currentTarget.value }))}
             placeholder="Pipeline name"
           />
-        </div>
+          </label>
 
-        <StatusBadge status={draft.status} />
-        <HelpButton pageKey="budgetPipeline" />
-
-        <div className="flex items-center gap-2 ml-auto">
-          <button type="button" className="btn btn-sm btn-ghost" onClick={handlePreview} disabled={isPreviewLoading || isSaving}>
+          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-1 xl:flex-nowrap xl:justify-end">
+          <button type="button" className="btn btn-sm btn-ghost hidden xl:inline-flex" onClick={handlePreview} disabled={isPreviewLoading || isSaving}>
             Preview
           </button>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => void handleExportPipelineBlob()} disabled={isExporting || isPreviewLoading || isSaving}>
+          <button type="button" className="btn btn-sm btn-ghost hidden xl:inline-flex" onClick={() => void handleExportPipelineBlob()} disabled={isExporting || isPreviewLoading || isSaving}>
             {isExporting ? "Exporting..." : "Export Blob"}
           </button>
           <button type="button" className="btn btn-sm btn-secondary" onClick={() => void handleSave()} disabled={isSaving}>
@@ -1600,17 +1649,23 @@ export function PipelineBuilderPage({ pipelineId, onBack, onSaved }: Props) {
             <button type="button" className="btn btn-sm btn-primary" onClick={() => void handleSave("active")} disabled={isSaving}>
               Activate
             </button>
-          ) : (
-            <button type="button" className="btn btn-sm btn-ghost text-slate-500" onClick={() => void handleSave("inactive")} disabled={isSaving}>
+          ) : <button type="button" className="btn btn-sm btn-ghost hidden text-slate-500 xl:inline-flex" onClick={() => void handleSave("inactive")} disabled={isSaving}>
               Deactivate
-            </button>
-          )}
+            </button>}
+          <div className="xl:hidden">
+            <ActionMenu
+              items={secondaryActions}
+              buttonAriaLabel="More pipeline actions"
+              buttonTitle="More pipeline actions"
+            />
+          </div>
+          </div>
         </div>
 
         {startDateDiffersFromGrant ? (
           <div
             role="alert"
-            className="basis-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+            className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
           >
             The pipeline boundary ({draft.startDate || "not set"}) differs from the selected grant start date ({selectedGrantStartDate}). Transactions before the pipeline boundary will never be assigned by this pipeline.
           </div>

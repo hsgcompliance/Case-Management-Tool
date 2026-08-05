@@ -4,9 +4,9 @@
 // Replaces BudgetMapTool as the single pipeline management surface.
 // Shows a list of pipelines and an inline builder — no page navigation.
 //
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { usePipelines, usePipelineDelete, usePipelineRollup, useReconcileGrant } from "@hooks/useBudgetPipeline";
+import { usePipelines, usePipelineDelete, useReconcileGrant } from "@hooks/useBudgetPipeline";
 import { PipelineBuilderPage } from "@features/budgetPipeline/PipelineBuilderPage";
 import { toast } from "@lib/toast";
 import type { TBudgetPipeline } from "@types";
@@ -14,13 +14,6 @@ import { HelpButton } from "@entities/help/HelpButton";
 import { useAuth } from "@app/auth/AuthProvider";
 import { isAdminLike } from "@lib/roles";
 import PaymentQueue, { type PaymentQueueAdminSyncResp } from "@client/paymentQueue";
-import type { BudgetPipelineRollupRow } from "@client/budgetPipeline";
-import { BudgetRollupPreviewPanel } from "@features/budget/BudgetRollupPreviewPanel";
-
-function fmtMoney(n: number | null | undefined) {
-  const v = Number(n ?? 0);
-  return v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -186,15 +179,8 @@ type ListPanelProps = {
 function ListPanel({ onNew, onEdit }: ListPanelProps) {
   const { data: pipelines = [], isLoading } = usePipelines();
   const del = usePipelineDelete();
-  const { data: rollup } = usePipelineRollup();
   const reconcile = useReconcileGrant();
   const [reconcilingId, setReconcilingId] = useState<string | null>(null);
-  const [previewGrantId, setPreviewGrantId] = useState<string>("");
-
-  const rollupByPipeline = useMemo(
-    () => Object.fromEntries((rollup?.rows ?? []).map((r) => [r.pipelineId, r])) as Record<string, BudgetPipelineRollupRow>,
-    [rollup],
-  );
 
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete pipeline "${name}"?`)) return;
@@ -260,11 +246,13 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
           </ol>
         </div>
 
-        <QueueSyncPanel />
-
-        <BudgetRollupPreviewPanel
-          grantId={previewGrantId || active.find((p) => p.grantId)?.grantId || inactive.find((p) => p.grantId)?.grantId || null}
-        />
+        <section aria-labelledby="pipeline-advanced-tools" className="space-y-2">
+          <div>
+            <h3 id="pipeline-advanced-tools" className="text-sm font-semibold text-slate-700 dark:text-slate-200">Advanced tools</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Audit, reconcile, or repair pipeline classification without opening a budget preview.</p>
+          </div>
+          <QueueSyncPanel />
+        </section>
 
         {isLoading && (
           <div className="text-center py-10 text-sm text-slate-400 dark:text-slate-500 animate-pulse">
@@ -286,11 +274,9 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
           <PipelineTable
             title="Active"
             rows={active}
-            rollup={rollupByPipeline}
             onEdit={onEdit}
             onDelete={handleDelete}
             onReconcile={handleReconcile}
-            onPreview={(grantId) => setPreviewGrantId(grantId || "")}
             reconcilingId={reconcilingId}
           />
         )}
@@ -300,11 +286,9 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
           <PipelineTable
             title="Draft / Inactive"
             rows={inactive}
-            rollup={rollupByPipeline}
             onEdit={onEdit}
             onDelete={handleDelete}
             onReconcile={handleReconcile}
-            onPreview={(grantId) => setPreviewGrantId(grantId || "")}
             reconcilingId={reconcilingId}
             muted
           />
@@ -317,23 +301,21 @@ function ListPanel({ onNew, onEdit }: ListPanelProps) {
 type TableProps = {
   title: string;
   rows: TBudgetPipeline[];
-  rollup: Record<string, BudgetPipelineRollupRow>;
   onEdit: (id: string) => void;
   onDelete: (id: string, name: string) => void;
   onReconcile: (grantId: string | null, name: string) => void;
-  onPreview: (grantId: string | null) => void;
   reconcilingId: string | null;
   muted?: boolean;
 };
 
-function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, onPreview, reconcilingId, muted }: TableProps) {
+function PipelineTable({ title, rows, onEdit, onDelete, onReconcile, reconcilingId, muted }: TableProps) {
   return (
     <div className="space-y-2">
       <h3 className={`text-xs font-semibold uppercase tracking-wide ${muted ? "text-slate-400 dark:text-slate-500" : "text-slate-500 dark:text-slate-400"}`}>
         {title} ({rows.length})
       </h3>
-      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+        <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
             <tr>
               <th className="px-4 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Name</th>
@@ -341,7 +323,6 @@ function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, onP
               <th className="px-4 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Grant target</th>
               <th className="px-4 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Form filter</th>
               <th className="px-4 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Rules</th>
-              <th className="px-4 py-2 text-left font-medium text-slate-500 dark:text-slate-400" title="This pipeline's classified transactions: pending (projected) and posted (spent), vs the target line-item budget.">Budget rollup</th>
               <th className="px-4 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Updated</th>
               <th className="px-4 py-2" />
             </tr>
@@ -370,27 +351,6 @@ function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, onP
                 <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs tabular-nums">
                   {schemaRuleSummary(p)}
                 </td>
-                <td className="px-4 py-3 text-xs tabular-nums">
-                  {(() => {
-                    const r = rollup[p.id];
-                    if (!r) return <span className="text-slate-300 dark:text-slate-600">—</span>;
-                    return (
-                      <div className="flex flex-col leading-tight">
-                        <span className="text-amber-600 dark:text-amber-400" title={`${r.pendingCount} pending item(s)`}>
-                          {fmtMoney(r.pendingAmount)} pending
-                        </span>
-                        <span className="text-emerald-600 dark:text-emerald-400" title={`${r.postedCount} posted item(s)`}>
-                          {fmtMoney(r.postedAmount)} spent
-                        </span>
-                        {r.lineItemId ? (
-                          <span className="text-slate-400 dark:text-slate-500" title="Authoritative line-item budget (all sources)">
-                            of {fmtMoney(r.lineItemBudget)} budget
-                          </span>
-                        ) : null}
-                      </div>
-                    );
-                  })()}
-                </td>
                 <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs">
                   {fmtDate(p.updatedAt)}
                 </td>
@@ -403,15 +363,6 @@ function PipelineTable({ title, rows, rollup, onEdit, onDelete, onReconcile, onP
                     title={p.grantId ? "Recompute this grant's projected/spent from queue + ledger" : "No grant target"}
                   >
                     {reconcilingId === p.grantId ? "Reconciling…" : "Reconcile"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!p.grantId}
-                    onClick={(e) => { e.stopPropagation(); onPreview(p.grantId); }}
-                    className="mr-3 text-xs text-slate-400 dark:text-slate-500 hover:text-sky-600 dark:hover:text-sky-400 transition-colors disabled:opacity-40 disabled:hover:text-slate-400"
-                    title={p.grantId ? "Preview grant line-item and split rollup" : "No grant target"}
-                  >
-                    Preview
                   </button>
                   <button
                     type="button"
