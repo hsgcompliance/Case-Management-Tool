@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import PaymentQueue, {
   type PaymentQueueItem,
+  type CompletePaymentQueueResult,
   type PaymentQueueBypassCloseReq,
   type PaymentQueueBulkDesignateReq,
   type PaymentQueueBulkDesignateResp,
@@ -22,6 +23,7 @@ import {
 
 export type {
   PaymentQueueItem,
+  CompletePaymentQueueResult,
   PaymentQueueBypassCloseReq,
   PaymentQueueBulkDesignateReq,
   PaymentQueueBulkDesignateResp,
@@ -31,6 +33,27 @@ export type {
   PaymentQueueReopenReq,
   PaymentQueueVoidReq,
 };
+
+/**
+ * Retrieves every backend page for one stable queue-coverage key. React Query
+ * retains the last successful coverage while a wider range is loading.
+ */
+export function useCompletePaymentQueueItems(
+  query?: PaymentQueueListReq,
+  opts?: { enabled?: boolean; staleTime?: number; pageSize?: number; maxPages?: number }
+) {
+  return useQuery<CompletePaymentQueueResult>({
+    ...RQ_DEFAULTS,
+    enabled: opts?.enabled ?? true,
+    staleTime: opts?.staleTime ?? 60_000,
+    queryKey: qk.paymentQueue.list({ complete: true, ...((query as Record<string, unknown>) || {}) }),
+    placeholderData: (previous) => previous,
+    queryFn: () => PaymentQueue.listAll(query || {}, {
+      pageSize: opts?.pageSize,
+      maxPages: opts?.maxPages,
+    }),
+  });
+}
 
 export function usePaymentQueueItems(
   query?: PaymentQueueListReq,

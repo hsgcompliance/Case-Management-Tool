@@ -7,7 +7,7 @@ import { useGrants } from "@hooks/useGrants";
 import { useJotformFormQuestions } from "@hooks/useJotform";
 import { useJotformSubmissionsLite, useSyncJotformSelection } from "@hooks/useJotform";
 import { usePipelineUpsert, usePipelinePreview, usePipeline } from "@hooks/useBudgetPipeline";
-import { usePaymentQueueItems, usePatchPaymentQueueItem, usePostPaymentQueueToLedger, type PaymentQueueItem } from "@hooks/usePaymentQueue";
+import { useCompletePaymentQueueItems, usePatchPaymentQueueItem, usePostPaymentQueueToLedger, type PaymentQueueItem } from "@hooks/usePaymentQueue";
 import PaymentQueueClient from "@client/paymentQueue";
 import { qk } from "@hooks/queryKeys";
 import { useDashboardSharedData } from "@entities/Page/dashboardStyle/hooks/useDashboardSharedData";
@@ -403,6 +403,7 @@ function queueItemToSpendRow(item: PaymentQueueItem): SpendRow {
     creditCardId: String(item.creditCardId || ""),
     creditCardName: String(item.card || ""),
     cardBucket: String(item.cardBucket || ""),
+    enrollmentTypeHint: "",
     taskToken: String(item.id || ""),
     linkedLedgerId: String(item.ledgerEntryId || "") || undefined,
     paymentQueueItem: item,
@@ -479,13 +480,13 @@ function BulkGrantDesignationModal({
   const initialGrantPullKey = useRef("");
   const modalShellRef = useRef<HTMLDivElement | null>(null);
 
-  const creditCardQueueQ = usePaymentQueueItems(
+  const creditCardQueueQ = useCompletePaymentQueueItems(
     { source: "credit-card", limit: ADVANCED_QUEUE_LIMIT },
-    { enabled: open, staleTime: 20_000 },
+    { enabled: open, staleTime: 60_000, pageSize: ADVANCED_QUEUE_LIMIT, maxPages: 100 },
   );
-  const invoiceQueueQ = usePaymentQueueItems(
+  const invoiceQueueQ = useCompletePaymentQueueItems(
     { source: "invoice", limit: ADVANCED_QUEUE_LIMIT },
-    { enabled: open, staleTime: 20_000 },
+    { enabled: open, staleTime: 60_000, pageSize: ADVANCED_QUEUE_LIMIT, maxPages: 100 },
   );
   const creditCardSubmissionsQ = useJotformSubmissionsLite(
     { formId: LINE_ITEMS_FORM_IDS.creditCard, limit: 500 },
@@ -567,7 +568,7 @@ function BulkGrantDesignationModal({
         mode: "formIds",
         formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
         limit: 500,
-        maxPages: 10,
+        maxPages: 25,
         includeRaw: true,
         ...(grantWindowStart ? { since: grantWindowStart } : {}),
       })
@@ -617,7 +618,7 @@ function BulkGrantDesignationModal({
   }, [creditCardSubmissionsQ.data, invoiceSubmissionsQ.data]);
   const queueRows = useMemo(() => {
     const byId = new Map<string, PaymentQueueItem>();
-    for (const item of [...(creditCardQueueQ.data ?? []), ...(invoiceQueueQ.data ?? [])]) byId.set(item.id, item);
+    for (const item of [...(creditCardQueueQ.data?.items ?? []), ...(invoiceQueueQ.data?.items ?? [])]) byId.set(item.id, item);
     return Array.from(byId.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
   }, [creditCardQueueQ.data, invoiceQueueQ.data]);
   const projectOptions = useMemo(() => {
@@ -647,6 +648,8 @@ function BulkGrantDesignationModal({
   if (!open) return null;
 
   const loading = refreshingSubmissions || creditCardQueueQ.isLoading || invoiceQueueQ.isLoading || creditCardSubmissionsQ.isLoading || invoiceSubmissionsQ.isLoading;
+  const incrementalLoading = (refreshingSubmissions || creditCardQueueQ.isFetching || invoiceQueueQ.isFetching) && queueRows.length > 0;
+  const sidebarError = creditCardQueueQ.isError || invoiceQueueQ.isError || creditCardSubmissionsQ.isError || invoiceSubmissionsQ.isError;
   const selectedCount = selectedIds.size;
   const activeAdvancedFilterCount = Object.values(advancedFilters).filter((value) => String(value || "").trim()).length;
   const selectedQueueItem = queueRows.find((item) => item.id === selectedQueueId) || null;
@@ -737,16 +740,23 @@ function BulkGrantDesignationModal({
         ]);
         return;
       }
-      await syncSelection.mutateAsync({
+      const syncResult = await syncSelection.mutateAsync({
         mode: "formIds",
         formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
         limit: 500,
-        maxPages: submissionScope === "pullAll" ? 25 : 10,
+        maxPages: 25,
         includeRaw: true,
-        ...(submissionScope === "pullDateRange" && startDate ? { since: startDate } : {}),
+        ...(submissionScope === "pullDateRange" && startDate
+          ? { since: startDate }
+          : submissionScope === "pullAll"
+            ? { since: new Date(Date.now() - 730 * 86_400_000).toISOString() }
+            : {}),
       });
       await Promise.all([creditCardQueueQ.refetch(), invoiceQueueQ.refetch(), creditCardSubmissionsQ.refetch(), invoiceSubmissionsQ.refetch()]);
-      toast("Transaction list refreshed.", { type: "success" });
+      toast(
+        syncResult.partial ? "Transaction list partially refreshed; one or more source pages failed." : "Transaction list refreshed.",
+        { type: syncResult.partial ? "error" : "success" },
+      );
     } catch {
       toast("Could not refresh Jotform transactions.", { type: "error" });
     } finally {
@@ -869,12 +879,12 @@ function BulkGrantDesignationModal({
               </select>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="relative">
-                  <label className="block text-[11px] font-semibold uppercase text-slate-500">Start Date</label>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-500">Date on and after</label>
                   <input className="input pr-8" type="date" value={startDate} onChange={(e) => setStartDate(e.currentTarget.value)} />
                   {startDate ? <button type="button" className="absolute bottom-1 right-1 h-6 w-6 rounded text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => setStartDate("")}>x</button> : null}
                 </div>
                 <div className="relative">
-                  <label className="block text-[11px] font-semibold uppercase text-slate-500">End Date</label>
+                  <label className="block text-[11px] font-semibold uppercase text-slate-500">Date on and before</label>
                   <input className="input pr-8" type="date" value={endDate} onChange={(e) => setEndDate(e.currentTarget.value)} />
                   {endDate ? <button type="button" className="absolute bottom-1 right-1 h-6 w-6 rounded text-slate-400 hover:bg-slate-100 hover:text-rose-600" onClick={() => setEndDate("")}>x</button> : null}
                 </div>
@@ -887,7 +897,7 @@ function BulkGrantDesignationModal({
               </button>
             </div>
             <div className="relative min-h-0 flex-1 overflow-auto overscroll-contain">
-              {loading ? (
+              {loading && queueRows.length === 0 ? (
                 <div className="absolute inset-0 z-10 grid place-items-center bg-white/80 backdrop-blur-[1px] dark:bg-slate-950/80">
                   <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800 dark:border-slate-600 dark:border-t-white" />
@@ -959,11 +969,30 @@ function BulkGrantDesignationModal({
                       </React.Fragment>
                     );
                   })}
-                  {!loading && submissionRows.length === 0 ? (
+                  {sidebarError && queueRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-8 text-center text-xs text-rose-600">
+                        <div>Transactions could not be loaded.</div>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-ghost mt-2"
+                          onClick={() => void Promise.all([creditCardQueueQ.refetch(), invoiceQueueQ.refetch(), creditCardSubmissionsQ.refetch(), invoiceSubmissionsQ.refetch()])}
+                        >
+                          Retry
+                        </button>
+                      </td>
+                    </tr>
+                  ) : !loading && submissionRows.length === 0 ? (
                     <tr><td colSpan={4} className="px-3 py-8 text-center text-xs text-slate-500">No loaded transactions match the sidebar filters.</td></tr>
                   ) : null}
                 </tbody>
               </table>
+              {incrementalLoading ? (
+                <div className="sticky bottom-0 flex items-center justify-center gap-2 border-t border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/95 dark:text-slate-300">
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+                  Loading more transactions...
+                </div>
+              ) : null}
             </div>
             <button
               type="button"

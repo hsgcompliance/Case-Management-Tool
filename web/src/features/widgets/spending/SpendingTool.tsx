@@ -1,3 +1,4 @@
+// ***invoicingtool.tsx***
 import React from "react";
 import { toApiError } from "@client/api";
 import UsersClient from "@client/users";
@@ -14,7 +15,7 @@ import {
 } from "@hooks/usePayments";
 import { useAutoAssignLedgerEntries, useLedgerEntries } from "@hooks/useLedger";
 import {
-  usePaymentQueueItems,
+  useCompletePaymentQueueItems,
   useBypassClosePaymentQueueItems,
   useBulkVoidPaymentQueueItems,
   useBulkDesignatePaymentQueueItems,
@@ -36,7 +37,6 @@ import ActionMenu from "@entities/ui/ActionMenu";
 import { PageFilterBar } from "@entities/Page/PageFilterBar";
 import { FilterToggleGroup } from "@entities/ui/FilterToggleGroup";
 import {
-  ComplexDateSelector,
   complexDateMatchesIsoDate,
   complexDatePrimaryMonth,
   complexDateValueLabel,
@@ -64,6 +64,15 @@ import { buildNormalizedAnswerFields, jotformValueText } from "@features/widgets
 import { GRANT_ACCENT_COLORS, grantAccentSolid, grantAccentChip } from "@lib/colorRegistry";
 import { todayISO } from "@lib/date";
 import { buildQueueLedgerIndex, linkedReversalLedgerIds, queueLedgerIssue } from "./spendingReconciliation";
+import {
+  dateFilterToRange,
+  dateRangeContains,
+  defaultInvoicingDateRange,
+  extendDateRange,
+  selectedInvoicingSources,
+  sourceMatchesSelection,
+  validateInvoicingDateRange,
+} from "./invoicingFeed";
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -98,9 +107,15 @@ export type SpendingFilterState = {
   advancedQueueFilters: AdvancedQueueFilter[];
 };
 
+const DEFAULT_INVOICING_RANGE = defaultInvoicingDateRange();
+
 export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
   month: monthKeyOffsetDays(5),
-  dateFilter: { mode: "month", month: monthKeyOffsetDays(5) },
+  dateFilter: {
+    mode: "between",
+    startDate: DEFAULT_INVOICING_RANGE.startDate,
+    endDate: DEFAULT_INVOICING_RANGE.endDate,
+  },
   typeFilter: "",
   workflowFilter: "",
   grantId: "",
@@ -178,7 +193,7 @@ function builtInSpendingViews(): SpendingSavedView[] {
       name: "All Spending",
       filterState: cloneSpendingFilter(DEFAULT_SPENDING_FILTER),
       builtIn: true,
-      description: "All spending types, current month",
+      description: "All spending types in the default cached period",
     },
     {
       id: "builtin-cc-invoices",
@@ -340,10 +355,6 @@ function dateIso10(value: unknown): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function todayIso10() {
-  return dateIso10(new Date().toISOString());
 }
 
 function monthFromDate(value: unknown): string {
@@ -1053,24 +1064,27 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
 
   const dateFilter = normalizeComplexDateValue(filterState.dateFilter, filterState.month);
-  const month = complexDatePrimaryMonth(dateFilter);
+  const month = complexDatePrimaryMonth(dateFilter) || filterState.month || monthKeyOffsetDays(5);
   const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search, advancedQueueFilters } = filterState;
-  const dueDateRange = React.useMemo(() => {
-    if (dateFilter.mode === "before" && dateFilter.date) return { dueDateTo: dateFilter.date };
-    if (dateFilter.mode === "after" && dateFilter.date) return { dueDateFrom: dateFilter.date };
-    if (dateFilter.mode === "between") {
-      const start = dateFilter.startDate || "";
-      const end = dateFilter.endDate || "";
-      if (start && end) {
-        return start <= end
-          ? { dueDateFrom: start, dueDateTo: end }
-          : { dueDateFrom: end, dueDateTo: start };
-      }
-      if (start) return { dueDateFrom: start };
-      if (end) return { dueDateTo: end };
-    }
-    return {};
-  }, [dateFilter]);
+  const appliedDateRange = React.useMemo(
+    () => dateFilterToRange(dateFilter, DEFAULT_INVOICING_RANGE),
+    [dateFilter],
+  );
+  const [loadedDateRange, setLoadedDateRange] = React.useState(() =>
+    extendDateRange(DEFAULT_INVOICING_RANGE, appliedDateRange),
+  );
+  const [draftStartDate, setDraftStartDate] = React.useState(appliedDateRange.startDate);
+  const [draftEndDate, setDraftEndDate] = React.useState(appliedDateRange.endDate);
+  const [dateRangeError, setDateRangeError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setDraftStartDate(appliedDateRange.startDate);
+    setDraftEndDate(appliedDateRange.endDate);
+    setDateRangeError(null);
+  }, [appliedDateRange.endDate, appliedDateRange.startDate]);
+  const dueDateRange = React.useMemo(() => ({
+    dueDateFrom: appliedDateRange.startDate,
+    dueDateTo: appliedDateRange.endDate,
+  }), [appliedDateRange.endDate, appliedDateRange.startDate]);
   const [saveViewName, setSaveViewName] = React.useState("");
   const [saveViewColor, setSaveViewColor] = React.useState("");
   const [savingViews, setSavingViews] = React.useState(false);
@@ -1278,17 +1292,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     },
     { enabled: !queueOnlyOpenView }
   );
-  const { data: paymentQueueItems = [], isLoading: queueLoading, isError: queueError } = usePaymentQueueItems(
+  const queueFeed = useCompletePaymentQueueItems(
     {
-      ...(month ? { month } : {}),
-      ...dueDateRange,
-      ...(grantId ? { grantId } : {}),
-      ...(workflowFilter === "open" ? { queueStatus: "pending" as const } : {}),
-      ...(workflowFilter === "closed" ? { queueStatus: "posted" as const } : {}),
+      dueDateFrom: loadedDateRange.startDate,
+      dueDateTo: loadedDateRange.endDate,
       limit: 500,
     },
-    { enabled: true, staleTime: 30_000 }
+    { enabled: true, staleTime: 60_000, pageSize: 500, maxPages: 100 }
   );
+  const paymentQueueItems = queueFeed.data?.items ?? [];
+  const queueLoading = queueFeed.isLoading;
+  const queueError = queueFeed.isError;
   const { data: otherTasks = [], isLoading: otherTasksLoading, isError: otherTasksError } = useMyOtherTasks(
     { ...(month ? { month } : {}), includeGroup: true },
     { enabled: true, staleTime: 10_000 }
@@ -1511,14 +1525,25 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     [usersRaw]
   );
 
-  const setFilter = (patch: Partial<SpendingFilterState>) =>
+  const setFilter = (patch: Partial<SpendingFilterState>) => {
+    setActiveSpendingViewId("");
     setFilterState({ ...filterState, ...patch });
+  };
 
-  const setDateFilter = (next: ComplexDateValue) => {
-    const normalized = normalizeComplexDateValue(next, month);
+  const applyDateSearch = () => {
+    const validation = validateInvoicingDateRange(draftStartDate, draftEndDate, DEFAULT_INVOICING_RANGE);
+    if (!validation.range) {
+      setDateRangeError(validation.error);
+      return;
+    }
+    setDateRangeError(null);
+    const requested = validation.range;
+    if (!dateRangeContains(loadedDateRange, requested)) {
+      setLoadedDateRange((coverage) => extendDateRange(coverage, requested));
+    }
     setFilter({
-      dateFilter: normalized,
-      month: complexDatePrimaryMonth(normalized),
+      dateFilter: { mode: "between", startDate: requested.startDate, endDate: requested.endDate },
+      month: requested.startDate.slice(0, 7),
     });
   };
 
@@ -1930,16 +1955,18 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   const baseFilteredRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     const { showReversals, customerId: filterCustomerId, cmId: filterCmId } = filterState;
+    const selectedSources = selectedInvoicingSources(typeFilter);
     return allRows.filter((row) => {
       // Closed/deleted grants are historical and intentionally excluded from
       // the operational invoicing queue.
       if (row.grantId && closedGrantIds.has(row.grantId)) return false;
+      const normalizedQueueSource = row.paymentQueueItem?.source || (row.kind === "queue-invoice" ? "invoice" : row.kind === "queue-credit-card" ? "credit-card" : "");
       const typePass =
         !typeFilter ? true
-        : typeFilter === "forms" ? isQueueTransactionRow(row)
+        : typeFilter === "forms" ? isQueueTransactionRow(row) && sourceMatchesSelection(normalizedQueueSource, selectedSources)
         : typeFilter === "enrollment" ? (row.kind === "grant-ledger" || row.kind === "queue-projection")
-        : typeFilter === "card" ? isCardBudgetRow(row)
-        : typeFilter === "invoice" ? row.kind === "queue-invoice"
+        : typeFilter === "card" ? row.kind === "card-ledger" || (isQueueTransactionRow(row) && sourceMatchesSelection(normalizedQueueSource, selectedSources))
+        : typeFilter === "invoice" ? isQueueTransactionRow(row) && sourceMatchesSelection(normalizedQueueSource, selectedSources)
         : true;
       const workflowPass =
         !workflowFilter ? true
@@ -2157,8 +2184,9 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
       const result = await syncJotformSelection.mutateAsync({
         mode: "formIds",
         formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
-        limit: 50,
-        maxPages: 1,
+        since: loadedDateRange.startDate,
+        limit: 500,
+        maxPages: 25,
         includeRaw: false,
       });
 
@@ -2168,8 +2196,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
       ]);
 
-      toast(`Jotforms refreshed (${Number(result?.count || 0)} recent submission${Number(result?.count || 0) === 1 ? "" : "s"} synced).`, {
-        type: "success",
+      toast(`${result?.partial ? "Jotform refresh partially completed" : "Jotforms refreshed"} (${Number(result?.count || 0)} submission${Number(result?.count || 0) === 1 ? "" : "s"} synced).`, {
+        type: result?.partial ? "error" : "success",
       });
     } catch (e: unknown) {
       toast(toApiError(e).error, { type: "error" });
@@ -2186,7 +2214,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         mode: "formIds",
         formIds: [LINE_ITEMS_FORM_IDS.creditCard, LINE_ITEMS_FORM_IDS.invoice],
         limit: 500,
-        maxPages: 10,
+        maxPages: 25,
+        since: loadedDateRange.startDate,
         includeRaw: true,
       });
 
@@ -2196,8 +2225,8 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
         queryClient.invalidateQueries({ queryKey: qk.ledger.root }),
       ]);
 
-      toast(`Jotforms reconciled (${Number(result?.count || 0)} submission${Number(result?.count || 0) === 1 ? "" : "s"} synced).`, {
-        type: "success",
+      toast(`${result?.partial ? "Jotform reconciliation partially completed" : "Jotforms reconciled"} (${Number(result?.count || 0)} submission${Number(result?.count || 0) === 1 ? "" : "s"} synced).`, {
+        type: result?.partial ? "error" : "success",
       });
     } catch (e: unknown) {
       toast(toApiError(e).error, { type: "error" });
@@ -2575,6 +2604,12 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
             Payment queue data is available, but ledger verification could not load. Posting remains available; reconciliation details may be incomplete.
           </div>
         )}
+        {queueFeed.data?.partialError && (
+          <div className="flex items-center justify-between gap-3 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+            <span>{paymentQueueItems.length} transaction rows remain available, but a later page failed. Results may be incomplete.</span>
+            <button type="button" className="btn btn-xs btn-ghost" onClick={() => void queueFeed.refetch()}>Retry</button>
+          </div>
+        )}
         {/* ── Saved view strip ──────────────────────────────────────────── */}
         <div className="flex flex-wrap items-start gap-1.5">
 
@@ -2771,27 +2806,46 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           <button
             type="button"
             className="btn btn-sm rounded-lg"
-            onClick={() => setFilterState({ ...DEFAULT_SPENDING_FILTER, month, dateFilter })}
+            onClick={() => {
+              setActiveSpendingViewId("");
+              setFilterState({ ...DEFAULT_SPENDING_FILTER, month, dateFilter });
+            }}
           >
             Clear
           </button>
         }
       >
         <div className="flex flex-wrap gap-4">
-          {/* Date */}
+          {/* Date search is drafted locally and applied explicitly. */}
           <div className="space-y-1">
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date</div>
-            <div className="flex items-center gap-1">
-              <ComplexDateSelector value={dateFilter} onChange={setDateFilter} />
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost h-8 w-8 px-0 text-slate-500"
-                onClick={() => setDateFilter({ mode: "before", date: todayIso10() })}
-                title="Switch date filter to before today."
-                aria-label="Use before today date filter"
-              >
-                ✕
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="space-y-1">
+                <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date on and after</span>
+                <input
+                  type="date"
+                  className="input input-sm"
+                  value={draftStartDate}
+                  onChange={(event) => setDraftStartDate(event.currentTarget.value)}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date on and before</span>
+                <input
+                  type="date"
+                  className="input input-sm"
+                  value={draftEndDate}
+                  onChange={(event) => setDraftEndDate(event.currentTarget.value)}
+                />
+              </label>
+              <button type="button" className="btn btn-sm" onClick={applyDateSearch}>
+                Search
               </button>
+            </div>
+            {dateRangeError ? <div className="text-xs text-rose-600" role="alert">{dateRangeError}</div> : null}
+            <div className="text-[11px] text-slate-500">
+              {queueFeed.isFetching && paymentQueueItems.length > 0
+                ? "Extending cached coverage..."
+                : `Cache covers ${loadedDateRange.startDate} through ${loadedDateRange.endDate} (${queueFeed.data?.pagesFetched ?? 0} page${queueFeed.data?.pagesFetched === 1 ? "" : "s"}).`}
             </div>
           </div>
 
@@ -2954,7 +3008,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
               disabled={syncJotformSelection.isPending}
               buttonLabel={syncJotformSelection.isPending ? "Refreshing..." : "Refresh"}
               buttonAriaLabel="Refresh options"
-              buttonTitle="Pull latest data from Jotform or refresh enrollment/payment queue data. 'Refresh Jotforms' syncs recent submissions; 'Reconcile' does a full deep sync."
+              buttonTitle="Pull fresh source data from Jotform or refresh enrollment/payment queue data."
               items={[
                 {
                   key: "enrollments",
@@ -2963,7 +3017,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
                 },
                 {
                   key: "jotforms",
-                  label: "Refresh Jotforms",
+                  label: "Refresh from Jotform",
                   disabled: !canSyncJotforms,
                   onSelect: () => void onRefreshJotforms(),
                 },

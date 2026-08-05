@@ -1,6 +1,7 @@
 import api from "./api";
 import { idemKey } from "@lib/idem";
 import type { TBudgetAssignmentSource } from "@hdb/contracts";
+import { fetchAllPaymentQueuePages } from "@lib/paymentQueuePagination";
 
 export type PaymentQueueItem = Record<string, unknown> & {
   id: string;
@@ -71,6 +72,21 @@ export type PaymentQueueListReq = {
   isFlex?: boolean;
   limit?: number;
   cursor?: string;
+};
+
+export type PaymentQueueListResp = {
+  ok: true;
+  items: PaymentQueueItem[];
+  count: number;
+  hasMore: boolean;
+  nextCursor?: string | null;
+};
+
+export type CompletePaymentQueueResult = {
+  items: PaymentQueueItem[];
+  pagesFetched: number;
+  complete: boolean;
+  partialError: string | null;
 };
 
 export type PaymentQueuePatchReq = {
@@ -177,12 +193,14 @@ export type PaymentQueueAdminSyncResp = {
 
 const PaymentQueue = {
   list: (query: PaymentQueueListReq = {}) =>
-    api.get("paymentQueueList", query) as Promise<{
-      ok: true;
-      items: PaymentQueueItem[];
-      count: number;
-      hasMore: boolean;
-    }>,
+    api.get("paymentQueueList", query) as Promise<PaymentQueueListResp>,
+
+  listAll: (query: PaymentQueueListReq = {}, options?: { pageSize?: number; maxPages?: number }) =>
+    fetchAllPaymentQueuePages(
+      (pageQuery) => api.get("paymentQueueList", pageQuery) as Promise<PaymentQueueListResp>,
+      query,
+      options,
+    ),
 
   get: (id: string) =>
     api.get("paymentQueueGet", { id }) as Promise<{ ok: true; item: PaymentQueueItem }>,
