@@ -21,10 +21,10 @@ function monthEnd(month: string): string {
   return localIsoDate(new Date(year, monthNumber, 0));
 }
 
-/** Previous two full calendar months through today, using the user's local day. */
+/** The full previous calendar month through today, using the user's local day. */
 export function defaultInvoicingDateRange(now = new Date()): InvoicingDateRange {
   return {
-    startDate: localIsoDate(new Date(now.getFullYear(), now.getMonth() - 2, 1)),
+    startDate: localIsoDate(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
     endDate: localIsoDate(now),
   };
 }

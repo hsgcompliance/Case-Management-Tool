@@ -117,7 +117,9 @@ export type SpendingFilterState = {
 const DEFAULT_INVOICING_RANGE = defaultInvoicingDateRange();
 
 export const DEFAULT_SPENDING_FILTER: SpendingFilterState = {
-  month: monthKeyOffsetDays(5),
+  // Only month-mode date filters restrict rows to a single month; a between
+  // range must never inherit a hidden month, so the default is empty.
+  month: "",
   dateFilter: {
     mode: "between",
     startDate: DEFAULT_INVOICING_RANGE.startDate,
@@ -1086,7 +1088,10 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
 
   const dateFilter = normalizeComplexDateValue(filterState.dateFilter, filterState.month);
-  const month = complexDatePrimaryMonth(dateFilter) || filterState.month || monthKeyOffsetDays(5);
+  // Single-month row scoping applies only when the date filter is in month
+  // mode. Range searches rely solely on the range so multi-month windows show
+  // every month they cover.
+  const month = complexDatePrimaryMonth(dateFilter);
   const { typeFilter, workflowFilter, cardFilterId, grantId, cardBucketFilter, search, advancedQueueFilters } = filterState;
   const appliedDateRange = React.useMemo(
     () => dateFilterToRange(dateFilter, DEFAULT_INVOICING_RANGE),
@@ -1097,12 +1102,25 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
   );
   const [draftStartDate, setDraftStartDate] = React.useState(appliedDateRange.startDate);
   const [draftEndDate, setDraftEndDate] = React.useState(appliedDateRange.endDate);
+  const [draftDateMode, setDraftDateMode] = React.useState<"between" | "month">(
+    dateFilter.mode === "month" ? "month" : "between",
+  );
+  const [draftMonth, setDraftMonth] = React.useState(month || monthKeyOffsetDays(0));
   const [dateRangeError, setDateRangeError] = React.useState<string | null>(null);
   React.useEffect(() => {
     setDraftStartDate(appliedDateRange.startDate);
     setDraftEndDate(appliedDateRange.endDate);
+    setDraftDateMode(month ? "month" : "between");
+    if (month) setDraftMonth(month);
     setDateRangeError(null);
-  }, [appliedDateRange.endDate, appliedDateRange.startDate]);
+  }, [appliedDateRange.endDate, appliedDateRange.startDate, month]);
+  // Saved views and month searches can point outside the fetched window; grow
+  // coverage so the queue fetch always spans the applied filter.
+  React.useEffect(() => {
+    setLoadedDateRange((coverage) =>
+      dateRangeContains(coverage, appliedDateRange) ? coverage : extendDateRange(coverage, appliedDateRange),
+    );
+  }, [appliedDateRange]);
   const dueDateRange = React.useMemo(() => ({
     dueDateFrom: appliedDateRange.startDate,
     dueDateTo: appliedDateRange.endDate,
@@ -1567,12 +1585,23 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
     }
     setDateRangeError(null);
     const requested = validation.range;
-    if (!dateRangeContains(loadedDateRange, requested)) {
-      setLoadedDateRange((coverage) => extendDateRange(coverage, requested));
-    }
+    // A range search must not stamp a hidden single-month restriction — that
+    // previously hid every row outside the range's first month.
     setFilter({
       dateFilter: { mode: "between", startDate: requested.startDate, endDate: requested.endDate },
-      month: requested.startDate.slice(0, 7),
+      month: "",
+    });
+  };
+
+  const applyMonthSearch = () => {
+    if (!/^\d{4}-\d{2}$/.test(draftMonth)) {
+      setDateRangeError("Pick a month to search.");
+      return;
+    }
+    setDateRangeError(null);
+    setFilter({
+      dateFilter: { mode: "month", month: draftMonth },
+      month: draftMonth,
     });
   };
 
@@ -2229,7 +2258,7 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
 
   async function onAutoAssign() {
     try {
-      await autoAssignMutation.mutateAsync({ month, apply: true, limit: 400, forceReclass: false });
+      await autoAssignMutation.mutateAsync({ month: month || monthKeyOffsetDays(0), apply: true, limit: 400, forceReclass: false });
       toast("Auto assign applied.", { type: "success" });
     } catch (e: unknown) {
       toast(toApiError(e).error, { type: "error" });
@@ -2888,25 +2917,48 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           {/* Date search is drafted locally and applied explicitly. */}
           <div className="space-y-1">
             <div className="flex flex-wrap items-end gap-2">
-              <label className="space-y-1">
-                <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date on and after</span>
-                <input
-                  type="date"
-                  className="input input-sm"
-                  value={draftStartDate}
-                  onChange={(event) => setDraftStartDate(event.currentTarget.value)}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date on and before</span>
-                <input
-                  type="date"
-                  className="input input-sm"
-                  value={draftEndDate}
-                  onChange={(event) => setDraftEndDate(event.currentTarget.value)}
-                />
-              </label>
-              <button type="button" className="btn btn-sm" onClick={applyDateSearch}>
+              <FilterToggleGroup
+                label="Dates"
+                value={draftDateMode}
+                options={[
+                  { value: "between", label: "Between" },
+                  { value: "month", label: "Month =" },
+                ]}
+                onChange={(v) => setDraftDateMode(v === "month" ? "month" : "between")}
+              />
+              {draftDateMode === "month" ? (
+                <label className="space-y-1">
+                  <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Month</span>
+                  <input
+                    type="month"
+                    className="input input-sm"
+                    value={draftMonth}
+                    onChange={(event) => setDraftMonth(event.currentTarget.value)}
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="space-y-1">
+                    <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date on and after</span>
+                    <input
+                      type="date"
+                      className="input input-sm"
+                      value={draftStartDate}
+                      onChange={(event) => setDraftStartDate(event.currentTarget.value)}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">Date on and before</span>
+                    <input
+                      type="date"
+                      className="input input-sm"
+                      value={draftEndDate}
+                      onChange={(event) => setDraftEndDate(event.currentTarget.value)}
+                    />
+                  </label>
+                </>
+              )}
+              <button type="button" className="btn btn-sm" onClick={draftDateMode === "month" ? applyMonthSearch : applyDateSearch}>
                 Search
               </button>
             </div>
@@ -3143,17 +3195,17 @@ export function LineItemSpendingTool(props: SpendingToolProps = {}) {
           >
             {bulkPosting ? "Updating..." : "Bulk Actions"}
           </button>
-          {typeFilter === "invoice" ? (
+          {selectedDesignationQueueRows.length > 0 ? (
             <button
               type="button"
               className="btn btn-xs btn-ghost text-sky-700"
-              disabled={bulkPosting || bulkVoiding || bulkBypassClosing || selectedDesignationQueueRows.length === 0}
+              disabled={bulkPosting || bulkVoiding || bulkBypassClosing}
               onClick={() => {
                 setBulkPostDialogOpen(false);
                 setAdvancedDesignationQueueIds(selectedDesignationQueueRows.map((row) => String(row.paymentQueueItem?.id || "")).filter(Boolean));
                 setAdvancedDesignationOpen(true);
               }}
-              title="Open the advanced pipeline designation grid for the selected invoices."
+              title="Open the advanced pipeline designation grid for the selected credit-card and invoice transactions."
             >
               Advanced Designation
             </button>

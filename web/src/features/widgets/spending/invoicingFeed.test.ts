@@ -10,10 +10,14 @@ import {
 } from "./invoicingFeed";
 
 describe("invoicing feed date coverage", () => {
-  it("defaults to the previous two full calendar months through today", () => {
+  it("defaults to the full previous calendar month through today", () => {
     expect(defaultInvoicingDateRange(new Date(2026, 7, 5))).toEqual({
-      startDate: "2026-06-01",
+      startDate: "2026-07-01",
       endDate: "2026-08-05",
+    });
+    expect(defaultInvoicingDateRange(new Date(2026, 0, 15))).toEqual({
+      startDate: "2025-12-01",
+      endDate: "2026-01-15",
     });
   });
 
