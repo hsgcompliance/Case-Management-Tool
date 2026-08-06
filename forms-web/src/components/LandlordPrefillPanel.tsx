@@ -16,7 +16,7 @@ export function LandlordPrefillPanel({ snapshot }: { snapshot: IntakeWebhookSnap
     <section className="rounded-xl border border-sky-200 bg-sky-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-sky-950">Landlord information from Step 13</h3>
+          <h3 className="text-sm font-semibold text-sky-950">Landlord information from the Eligibility Determination</h3>
           <p className="mt-0.5 text-xs text-sky-700">Review these values before opening the Landlord Verification prefill builder.</p>
         </div>
         {hasAny ? (
@@ -40,7 +40,7 @@ export function LandlordPrefillPanel({ snapshot }: { snapshot: IntakeWebhookSnap
         </dl>
       ) : (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          No landlord fields have arrived yet. Complete and submit Step 13, then refresh the submissions sidebar.
+          No landlord fields have arrived yet. Complete and submit the Eligibility Determination Request step, then refresh the submissions sidebar.
         </div>
       )}
     </section>

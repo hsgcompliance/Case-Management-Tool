@@ -84,6 +84,9 @@ export const FORMS: FormDef[] = [
 export const WEB_APP_BASE = "https://housing-db-v2.web.app";
 const HOMELESSNESS_STATUS_CERTIFICATION_URL =
   "https://drive.google.com/file/d/1BTNL1fNO6oRH_EMGjQIR0qENXPw94up6/view?usp=drive_link";
+/** Printable Basic Intake packet (Drive today; may become a bundled PDF later). */
+export const BASIC_INTAKE_PDF_URL =
+  "https://drive.google.com/file/d/1AHeUnhpuAiezou_zPQ_0dapqyjAH6HS9/view?usp=drive_link";
 
 /** Intake programs selected in step 1. PATH and TSS may accompany another path. */
 export type IntakeTypeId =
@@ -140,6 +143,8 @@ export type IntakeFlowStep = {
   customerSetup?: boolean;
   /** Section header rendered above this step in the list ("Basic intake" / "Full intake"). */
   section?: string;
+  /** Link buttons rendered beside the section header (e.g. the printable packet). */
+  sectionLinks?: { href: string; label: string }[];
   /**
    * Payer/non-payer gate: the step opens with a full-page choice that decides
    * which TSS form to embed. The choice also presets the customer-folder build
@@ -190,6 +195,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   {
     title: "Choose intake type",
     section: "Basic intake",
+    sectionLinks: [{ href: BASIC_INTAKE_PDF_URL, label: "Printable intake packet (PDF)" }],
     intakeTypeGate: true,
     note: "Select every program involved. PATH and TSS can accompany one primary program. HUD Rental, Bridging Home, and Eviction Prevention are mutually exclusive.",
   },
@@ -262,20 +268,16 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
     prominentLinks: true,
   },
   {
-    title: "Send to compliance or continue",
-    staffHandoff: true,
-    noCompletionRequired: true,
-    note: "Continue the full intake yourself, or send the saved workflow to any active staff member so they can pick it up from their task queue.",
-  },
-  {
     formId: "251001226310030",
     title: "Eligibility Determination Request",
-    note: "Collect landlord / company name, mailing address, phone, and email here. The submitted values flow into Steps 14 and 17.",
+    note:
+      "Collect landlord / company name, mailing address, phone, and email here — the submitted values flow into the later landlord and schedule steps. " +
+      "From here on the remaining steps are typically completed by compliance: hand the intake off at any time with Send to person in the Actions menu.",
   },
   {
     title: "Create Landlord Verification prefill",
     landlordPrefill: true,
-    note: "Review the landlord information collected in Step 13, then use it on the Landlord Verification prefill page.",
+    note: "Review the landlord information collected in the Eligibility Determination step, then use it on the Landlord Verification prefill page.",
     links: [
       { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },
     ],
@@ -305,6 +307,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
 
 /** Reference links pinned at the bottom of the intake flow page. */
 export const INTAKE_RESOURCES: { href: string; label: string }[] = [
+  { href: BASIC_INTAKE_PDF_URL, label: "Basic Intake packet (PDF)" },
   { href: "https://drive.google.com/file/d/1WY57mEu6-RW9Ry2bpTJWYsYmWwyYDZNT/view", label: "HQS Inspection form (PDF)" },
   { href: "https://www.jotform.com/sign/250647693231055/send", label: "MOU — send for signature" },
   { href: "https://www.jotform.com/build/250646887611061/publish/prefill", label: "Landlord Verification prefill builder" },

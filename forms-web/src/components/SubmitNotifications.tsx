@@ -13,10 +13,13 @@ import {
   type IntakeSession,
 } from "@/lib/intakeSessions";
 import {
+  claimIntakeFlow,
   deleteRemoteIntakeFlow,
+  listOrgIntakeFlows,
   listRemoteIntakeFlows,
   transferIntakeFlow,
   type IntakeFlowProgress,
+  type RemoteIntakeFlow,
 } from "@/lib/intakeFlowsApi";
 import { complianceFirst, loadUsers, type FormsUser } from "@/lib/usersApi";
 import { useAuth } from "@/hooks/useAuth";
@@ -54,6 +57,9 @@ export function SubmitNotifications() {
   const [transferring, setTransferring] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [clearingAll, setClearingAll] = useState(false);
+  // Compliance/admin only (null = no access): other staff's unfinished intakes.
+  const [orgFlows, setOrgFlows] = useState<RemoteIntakeFlow[] | null>(null);
+  const [claiming, setClaiming] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const notifyForms = useMemo(
@@ -75,8 +81,29 @@ export function SubmitNotifications() {
       setSessions(listIntakeSessions());
       setUsers(orgUsers.filter((candidate) => candidate.uid !== user?.uid));
     }).catch(() => {});
+    // Backend 403s for non-compliance/admin → null → section stays hidden.
+    void listOrgIntakeFlows().then((flows) => {
+      setOrgFlows(flows === null ? null : flows.filter((f) => f.ownerUid !== user?.uid && f.session.doneCount < f.session.totalSteps));
+    });
     return onIntakeSessionsChange(refresh);
   }, [user?.uid]);
+
+  const claimFlow = async (flow: RemoteIntakeFlow) => {
+    const who = flow.session.customerName || "this intake";
+    const owner = users.find((candidate) => candidate.uid === flow.ownerUid);
+    if (!window.confirm(`Take over ${who} from ${owner?.name || "its current owner"}? It will move to your Active Intakes.`)) return;
+    setClaiming(flow.id);
+    try {
+      await claimIntakeFlow(flow.ownerUid, flow.customerId);
+      importRemoteIntakeSession(flow.session, flow.progress as unknown as Record<string, unknown>);
+      setOrgFlows((current) => (current ?? []).filter((f) => f.id !== flow.id));
+      setSessions(listIntakeSessions());
+    } catch (error) {
+      window.alert(`Could not claim this intake: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setClaiming(null);
+    }
+  };
 
   const sendIntake = async (session: IntakeSession) => {
     const key = session.customerId || "";
@@ -182,7 +209,7 @@ export function SubmitNotifications() {
 
   const badgeCount = items.length + incompleteIntakes;
 
-  if (notifyForms.size === 0 && sessions.length === 0) return null;
+  if (notifyForms.size === 0 && sessions.length === 0 && !orgFlows?.length) return null;
 
   return (
     <div ref={ref} className="relative">
@@ -307,6 +334,40 @@ export function SubmitNotifications() {
               })
             )}
           </div>
+          {orgFlows?.length ? (
+            <>
+              <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Org intakes in progress ({orgFlows.length})
+              </div>
+              <div className="max-h-44 overflow-y-auto border-b border-slate-100">
+                {orgFlows.map((flow) => {
+                  const owner = users.find((candidate) => candidate.uid === flow.ownerUid);
+                  return (
+                    <div key={flow.id} className="flex items-center gap-2 border-b border-slate-50 px-3 py-2 last:border-0">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-semibold text-slate-800">
+                          {flow.session.customerName || "No customer linked"}
+                          <span className="font-normal text-slate-400"> · {flow.session.doneCount}/{flow.session.totalSteps}</span>
+                        </span>
+                        <span className="block truncate text-[11px] text-slate-400">
+                          with {owner?.name || "unknown"} · {shortDate(flow.updatedAtISO)}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        disabled={claiming === flow.id}
+                        onClick={() => void claimFlow(flow)}
+                        title="Take over this intake — it moves to your Active Intakes"
+                        className="shrink-0 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                      >
+                        {claiming === flow.id ? "…" : "Claim"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
           <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
             Watched submissions · last 7 days
           </div>

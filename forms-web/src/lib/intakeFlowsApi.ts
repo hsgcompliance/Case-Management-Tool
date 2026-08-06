@@ -8,6 +8,9 @@ export type IntakeFlowProgress = {
   intakeTypes?: string[];
 };
 
+/** One hop in a flow's hand-off history (claimed = taken, not sent). */
+export type TransferHop = { uid: string; name: string | null; atISO: string; claimed?: boolean };
+
 export type RemoteIntakeFlow = {
   id: string;
   ownerUid: string;
@@ -17,11 +20,30 @@ export type RemoteIntakeFlow = {
   updatedAtISO: string;
   transferredByUid?: string | null;
   transferredByName?: string | null;
+  transferChain?: TransferHop[];
 };
 
 export async function listRemoteIntakeFlows(): Promise<RemoteIntakeFlow[]> {
   const out = await getAuthed<{ ok: true; items: RemoteIntakeFlow[] }>("formsIntakeFlowsList");
   return out.items || [];
+}
+
+/**
+ * Every unfinished intake in the org — compliance/admin only (the backend
+ * 403s otherwise; callers treat null as "not allowed, hide the section").
+ */
+export async function listOrgIntakeFlows(): Promise<RemoteIntakeFlow[] | null> {
+  try {
+    const out = await getAuthed<{ ok: true; items: RemoteIntakeFlow[] }>("formsIntakeFlowsList", { scope: "org" });
+    return out.items || [];
+  } catch {
+    return null;
+  }
+}
+
+/** Compliance/admin takes over another staff member's saved intake. */
+export function claimIntakeFlow(ownerUid: string, customerId: string) {
+  return postAuthed<{ ok: true; id: string }>("formsIntakeFlowClaim", { ownerUid, customerId });
 }
 
 export function saveRemoteIntakeFlow(session: IntakeSession, progress: IntakeFlowProgress) {

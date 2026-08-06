@@ -3,6 +3,7 @@ import { listWebhookEventDetails, type WebhookEventDetail } from "@/lib/webhookD
 import { getSubmissionLinks, linkSubmission, type SubmissionLink } from "@/lib/submissionLinksApi";
 import { extractHousehold, type ExtractedValue, type HouseholdMember, type SlotValue } from "@/lib/householdExtract";
 import type { IntakeWebhookSnapshot } from "@/lib/intakeWebhookSnapshot";
+import type { TransferHop } from "@/lib/intakeFlowsApi";
 import { formById, intakeTypesLabel, type IntakeTypeId } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { matchName, type NameMatch } from "@/lib/nameMatch";
@@ -361,6 +362,8 @@ export function WebhooksSidebar({
   onSnapshot,
   /** Programs selected in Step 1 — surfaced at the top of the household model. */
   intakeTypes,
+  /** Hand-off history of the active intake flow (bottom of the Structured tab). */
+  transferChain,
 }: {
   formIds: string[];
   refreshKey?: number;
@@ -368,6 +371,7 @@ export function WebhooksSidebar({
   receivedSubmission?: JfSubmission | null;
   onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
   intakeTypes?: IntakeTypeId[];
+  transferChain?: TransferHop[];
 }) {
   const { customer } = useCurrentCustomer();
   const [collapsed, setCollapsed] = useState(() => {
@@ -1248,6 +1252,24 @@ export function WebhooksSidebar({
                   )
                 ) : null}
               </div>
+
+              {transferChain?.length ? (
+                <div className="border-t border-slate-100 pt-2">
+                  <SectionTitle>Hand-off history</SectionTitle>
+                  <div className="mt-1 space-y-0.5">
+                    {transferChain.map((hop, i) => (
+                      <div key={`${hop.uid}:${hop.atISO}`} className="flex items-baseline gap-1.5 text-[11px] text-slate-500">
+                        <span className="shrink-0 text-slate-300">{i + 1}.</span>
+                        <span className="min-w-0">
+                          <b className="text-slate-700">{hop.name || "Unknown"}</b>
+                          {hop.claimed ? " (claimed from)" : " sent it on"}
+                          {hop.atISO ? <span className="text-slate-300"> · {shortTime(hop.atISO) || hop.atISO.slice(0, 10)}</span> : null}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <p className="text-[10px] leading-relaxed text-slate-300">
                 One household model, merged continuously from the forms this session (since{" "}

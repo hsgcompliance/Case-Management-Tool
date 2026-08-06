@@ -27,14 +27,12 @@ import {
   deleteRemoteIntakeFlow,
   listRemoteIntakeFlows,
   saveRemoteIntakeFlow,
-  transferIntakeFlow,
+  type TransferHop,
 } from "@/lib/intakeFlowsApi";
-import { complianceFirst, loadUsers, type FormsUser } from "@/lib/usersApi";
-import { useAuth } from "@/hooks/useAuth";
 import type { JfSubmission } from "@/lib/jotformManagerApi";
 import { IntakeActionsMenu } from "./IntakeActionsMenu";
 
-/** Step 13 — Eligibility Determination Request; triggers the compliance hand-off. */
+/** Eligibility Determination Request; triggers the compliance hand-off. */
 const ELIGIBILITY_DETERMINATION_FORM_ID = "251001226310030";
 
 // ── Flow progress (localStorage, per customer) ─────────────────────────────
@@ -233,7 +231,6 @@ export function FormsCategoryView({
   resources?: { href: string; label: string }[];
   autoStart?: boolean;
 }) {
-  const { user } = useAuth();
   const { customer } = useCurrentCustomer();
   const [view, setView] = useState<View>({ kind: "list" });
   const [sendForm, setSendForm] = useState<FormDef | null>(null);
@@ -245,10 +242,8 @@ export function FormsCategoryView({
   const [driveCustomers, setDriveCustomers] = useState<FormsCustomer[]>([]);
   const [driveLoading, setDriveLoading] = useState(false);
   const [driveLoadError, setDriveLoadError] = useState<string | null>(null);
-  const [handoffUsers, setHandoffUsers] = useState<FormsUser[]>([]);
-  const [handoffTargetUid, setHandoffTargetUid] = useState("");
-  const [handoffLoading, setHandoffLoading] = useState(false);
-  const [handoffError, setHandoffError] = useState<string | null>(null);
+  // Hand-off history of the active flow (shown at the bottom of the sidebar).
+  const [transferChain, setTransferChain] = useState<TransferHop[]>([]);
 
   // Resolve flow steps against the full catalog (flow forms may live in other categories).
   const resolvedSteps = useMemo<ResolvedStep[]>(() => {
@@ -306,6 +301,7 @@ export function FormsCategoryView({
   useEffect(() => {
     let cancelled = false;
     setRemoteReady(false);
+    setTransferChain([]);
     if (!customer?.id) return () => { cancelled = true; };
     void listRemoteIntakeFlows()
       .then((items) => {
@@ -314,6 +310,7 @@ export function FormsCategoryView({
         const local = loadProgress(storageKey);
         lastRemoteProgressRef.current = remote ? JSON.stringify(remote.progress) : null;
         flowStartedAtRef.current = remote?.session.startedAtISO || new Date().toISOString();
+        setTransferChain(remote?.transferChain ?? []);
         const hasLocal = Object.keys(local.done).length > 0 || Object.keys(local.checks).length > 0 || !!local.intakeTypes?.length;
         if (remote && !hasLocal) {
           const imported = remote.progress as FlowProgress;
@@ -412,13 +409,6 @@ export function FormsCategoryView({
   const step = view.kind === "step" ? steps[view.idx] : null;
   const stepKey = step?.key ?? null;
   const driveStepIndex = steps.findIndex((candidate) => candidate.driveSetup);
-
-  useEffect(() => {
-    if (!resolvedSteps.some((candidate) => candidate.staffHandoff)) return;
-    void loadUsers()
-      .then((items) => setHandoffUsers(items.filter((candidate) => candidate.uid !== user?.uid)))
-      .catch(() => setHandoffError("Could not load active staff."));
-  }, [resolvedSteps, user?.uid]);
 
   const refreshDriveReadiness = useCallback(async (force = false) => {
     setDriveLoading(true);
@@ -583,48 +573,6 @@ export function FormsCategoryView({
     updateProgress((p) => ({ ...p, tssVariant: v }));
   };
 
-  const sendIntakeToStaff = async (currentStep: ResolvedStep) => {
-    if (!customer?.id || !handoffTargetUid || handoffLoading) return;
-    const target = handoffUsers.find((candidate) => candidate.uid === handoffTargetUid);
-    if (!target) return;
-    if (!window.confirm(
-      `Send ${customer.name}'s saved intake to ${target.name}? It will leave your Active Intakes and appear in their task queue.`,
-    )) return;
-    setHandoffLoading(true);
-    setHandoffError(null);
-    try {
-      const nextProgress: FlowProgress = {
-        ...progress,
-        done: { ...progress.done, [currentStep.key]: true },
-      };
-      const nextDoneCount = steps.filter((candidate) => nextProgress.done[candidate.key]).length;
-      const now = new Date().toISOString();
-      await transferIntakeFlow(handoffTargetUid, {
-        customerId: customer.id,
-        customerName: customer.name,
-        cwId: customer.cwId,
-        dob: customer.dob,
-        caseManagerName: customer.caseManagerName,
-        intakeType: nextProgress.intakeTypes?.[0] ?? null,
-        intakeTypes: nextProgress.intakeTypes ?? [],
-        doneCount: nextDoneCount,
-        totalSteps: steps.length,
-        startedAtISO: flowStartedAtRef.current,
-        updatedAtISO: now,
-      }, nextProgress);
-      lastRemoteProgressRef.current = null;
-      updateProgress(() => EMPTY_PROGRESS);
-      removeIntakeSession(customer.id);
-      setHandoffTargetUid("");
-      setView({ kind: "list" });
-      window.alert(`Intake sent to ${target.name}.`);
-    } catch (error) {
-      setHandoffError(error instanceof Error ? error.message : "Could not send this intake.");
-    } finally {
-      setHandoffLoading(false);
-    }
-  };
-
   // Step 1 supports program combinations, except the primary assistance paths
   // (HUD RRH, HUD PSH, Bridging Home, Eviction Prevention), which are mutually
   // exclusive with each other. TSS is also blocked alongside Eviction
@@ -676,6 +624,7 @@ export function FormsCategoryView({
           receivedSubmission={receivedSubmission}
           onSnapshot={setWebhookSnapshot}
           intakeTypes={intakeTypes}
+          transferChain={transferChain}
         />
       </div>
     ) : (
@@ -954,62 +903,6 @@ export function FormsCategoryView({
             )}
           </section>
         ) : null}
-        {step.staffHandoff ? (
-          <section className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-5">
-            <h3 className="text-sm font-semibold text-indigo-950">Who should continue this intake?</h3>
-            <p className="mt-1 text-xs text-indigo-700">
-              Continue now, or transfer the saved intake and its open task to another active staff member.
-            </p>
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => {
-                  setDone(step.key, true);
-                  if (next) setView({ kind: "step", idx: idx + 1 });
-                }}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
-              >
-                Continue intake myself →
-              </button>
-              <select
-                value={handoffTargetUid}
-                onChange={(event) => setHandoffTargetUid(event.target.value)}
-                aria-label="Send intake to active staff member"
-                className="min-w-0 flex-1 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm text-slate-700"
-              >
-                <option value="">Send to active staff…</option>
-                {(() => {
-                  const { compliance, others } = complianceFirst(handoffUsers);
-                  const opt = (candidate: FormsUser) => (
-                    <option key={candidate.uid} value={candidate.uid}>
-                      {candidate.name}{candidate.email ? ` — ${candidate.email}` : ""}
-                    </option>
-                  );
-                  return compliance.length ? (
-                    <>
-                      <optgroup label="Compliance">{compliance.map(opt)}</optgroup>
-                      <optgroup label="All staff">{others.map(opt)}</optgroup>
-                    </>
-                  ) : (
-                    others.map(opt)
-                  );
-                })()}
-              </select>
-              <button
-                type="button"
-                disabled={!customer || !handoffTargetUid || handoffLoading}
-                onClick={() => void sendIntakeToStaff(step)}
-                className="rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {handoffLoading ? "Sending…" : "Send intake"}
-              </button>
-            </div>
-            {!customer ? (
-              <p className="mt-2 text-xs font-medium text-amber-700">Link a customer before sending this intake.</p>
-            ) : null}
-            {handoffError ? <p className="mt-2 text-xs font-medium text-red-600">{handoffError}</p> : null}
-          </section>
-        ) : null}
         {step.landlordPrefill ? <LandlordPrefillPanel snapshot={webhookSnapshot} /> : null}
         {step.mouSend ? (
           <MouSendPanel
@@ -1285,7 +1178,20 @@ export function FormsCategoryView({
             {steps.map((s, i) => (
               <div key={s.key} className="space-y-1.5">
                 {s.section ? (
-                  <div className="pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">{s.section}</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{s.section}</span>
+                    {s.sectionLinks?.map((link) => (
+                      <a
+                        key={link.href}
+                        href={resolveHref(link.href)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                      >
+                        📄 {link.label} ↗
+                      </a>
+                    ))}
+                  </div>
                 ) : null}
                 <StepRow
                   step={s}
