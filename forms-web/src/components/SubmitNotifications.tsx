@@ -155,7 +155,7 @@ export function SubmitNotifications() {
         sessions
           .map((session) => session.customerId)
           .filter((customerId): customerId is string => !!customerId)
-          .map(deleteRemoteIntakeFlow),
+          .map((customerId) => deleteRemoteIntakeFlow(customerId)),
       );
       clearIntakeSessions();
     } catch (error) {

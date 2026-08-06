@@ -33,7 +33,11 @@ const Session = z.object({
 
 const SaveBody = z.object({ session: Session, progress: Progress });
 const TransferBody = SaveBody.extend({ targetUid: z.string().trim().min(1).max(200) });
-const DeleteBody = z.object({ customerId: z.string().trim().min(1).max(200) });
+const DeleteBody = z.object({
+  customerId: z.string().trim().min(1).max(200),
+  /** Compliance/admin only: close another staff member's flow (All Intakes page). */
+  ownerUid: z.string().trim().min(1).max(200).optional(),
+});
 const EligibilityConfirmBody = z.object({
   customerId: z.string().trim().min(1).max(200),
   submissionId: z.string().trim().min(1).max(100),
@@ -318,14 +322,19 @@ export const formsIntakeFlowDelete_http = secureHandler(async (req, res) => {
   const caller = req.user! as Record<string, unknown>;
   const uid = String(caller.uid || "");
   const orgId = orgFor(caller);
-  const flowRef = db.collection("formsIntakeFlows").doc(flowId(uid, body.customerId));
+  if (body.ownerUid && body.ownerUid !== uid && !canSeeOrgFlows(caller)) {
+    res.status(403).json({ ok: false, error: "compliance_or_admin_only" });
+    return;
+  }
+  const targetUid = body.ownerUid || uid;
+  const flowRef = db.collection("formsIntakeFlows").doc(flowId(targetUid, body.customerId));
   const taskRef = db.collection("userTasks").doc(intakeTaskId(body.customerId));
 
   const deleted = await db.runTransaction(async (tx) => {
     const [flowSnap, taskSnap] = await Promise.all([tx.get(flowRef), tx.get(taskRef)]);
     if (!flowSnap.exists) return false;
     const flow = flowSnap.data() || {};
-    if (normId(flow.orgId) !== orgId || String(flow.ownerUid || "") !== uid) {
+    if (normId(flow.orgId) !== orgId || String(flow.ownerUid || "") !== targetUid) {
       const err = new Error("intake_flow_not_found") as Error & { code?: number };
       err.code = 404;
       throw err;
@@ -336,7 +345,7 @@ export const formsIntakeFlowDelete_http = secureHandler(async (req, res) => {
       taskSnap.exists &&
       normId(task.orgId) === orgId &&
       String(task.source || "") === "formsIntake" &&
-      String(task.assignedToUid || "") === uid
+      String(task.assignedToUid || "") === targetUid
     ) {
       tx.delete(taskRef);
     }

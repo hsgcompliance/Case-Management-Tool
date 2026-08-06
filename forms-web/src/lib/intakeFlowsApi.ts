@@ -54,8 +54,13 @@ export function transferIntakeFlow(targetUid: string, session: IntakeSession, pr
   return postAuthed<{ ok: true; id: string }>("formsIntakeFlowTransfer", { targetUid, session, progress });
 }
 
-export function deleteRemoteIntakeFlow(customerId: string) {
-  return postAuthed<{ ok: true; deleted: boolean }>("formsIntakeFlowDelete", { customerId });
+/**
+ * Deletes the caller's own flow by default. Compliance/admin may pass
+ * `ownerUid` to close another staff member's flow (All Intakes page) — the
+ * backend 403s that for anyone else.
+ */
+export function deleteRemoteIntakeFlow(customerId: string, ownerUid?: string) {
+  return postAuthed<{ ok: true; deleted: boolean }>("formsIntakeFlowDelete", { customerId, ...(ownerUid ? { ownerUid } : {}) });
 }
 
 /** Manual backstop confirming the step-13 compliance hand-off happened. */

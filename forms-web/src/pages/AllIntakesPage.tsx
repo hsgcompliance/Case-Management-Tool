@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   claimIntakeFlow,
+  deleteRemoteIntakeFlow,
   listOrgIntakeFlows,
   type RemoteIntakeFlow,
 } from "@/lib/intakeFlowsApi";
 import { loadUsers, type FormsUser } from "@/lib/usersApi";
 import { useAuth } from "@/hooks/useAuth";
-import { importRemoteIntakeSession, sessionCustomer } from "@/lib/intakeSessions";
+import { importRemoteIntakeSession, removeIntakeProgress, removeIntakeSession, sessionCustomer } from "@/lib/intakeSessions";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
 import { intakeTypeLabel, intakeTypesLabel } from "@/lib/formsCatalog";
 
@@ -40,6 +41,7 @@ export default function AllIntakesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState<string | null>(null);
+  const [closing, setClosing] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -80,6 +82,26 @@ export default function AllIntakesPage() {
       window.alert(`Could not claim this intake: ${e instanceof Error ? e.message : "unknown error"}`);
     } finally {
       setClaiming(null);
+    }
+  };
+
+  const close = async (flow: RemoteIntakeFlow) => {
+    const isMine = flow.ownerUid === user?.uid;
+    const who = flow.session.customerName || "this intake";
+    const ownerNote = isMine ? "" : ` (owned by ${userName.get(flow.ownerUid) || "another staff member"})`;
+    if (!window.confirm(`Close and delete ${who}${ownerNote}? This removes the saved progress and cannot be undone.`)) return;
+    setClosing(flow.id);
+    try {
+      await deleteRemoteIntakeFlow(flow.customerId, isMine ? undefined : flow.ownerUid);
+      if (isMine) {
+        removeIntakeSession(flow.customerId);
+        removeIntakeProgress(flow.customerId);
+      }
+      setFlows((current) => (current ?? []).filter((f) => f.id !== flow.id));
+    } catch (e) {
+      window.alert(`Could not close this intake: ${e instanceof Error ? e.message : "unknown error"}`);
+    } finally {
+      setClosing(null);
     }
   };
 
@@ -157,30 +179,41 @@ export default function AllIntakesPage() {
                       {shortDate(flow.session.startedAtISO)}
                       <div className="text-slate-400">{daysAgo(flow.session.startedAtISO)}</div>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {isMine ? (
+                    <td className="px-3 py-2.5">
+                      <div className="flex justify-end gap-1.5">
+                        {isMine ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const c = sessionCustomer(flow.session);
+                              if (c) setCustomer(c);
+                              navigate("/staff/intake");
+                            }}
+                            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                          >
+                            Resume
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={claiming === flow.id}
+                            onClick={() => void claim(flow)}
+                            title="Take over this intake — it moves to your Active Intakes"
+                            className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                          >
+                            {claiming === flow.id ? "…" : "Claim"}
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => {
-                            const c = sessionCustomer(flow.session);
-                            if (c) setCustomer(c);
-                            navigate("/staff/intake");
-                          }}
-                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                          disabled={closing === flow.id}
+                          onClick={() => void close(flow)}
+                          title="Close and delete this intake — the saved progress cannot be recovered"
+                          className="rounded-md border border-rose-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
                         >
-                          Resume
+                          {closing === flow.id ? "…" : "Close"}
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={claiming === flow.id}
-                          onClick={() => void claim(flow)}
-                          title="Take over this intake — it moves to your Active Intakes"
-                          className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-                        >
-                          {claiming === flow.id ? "…" : "Claim"}
-                        </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
