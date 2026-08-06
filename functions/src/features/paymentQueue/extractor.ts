@@ -17,7 +17,7 @@ import {
 
 // ─── Schema version ───────────────────────────────────────────────────────────
 /** Bump when extraction logic changes in a way that produces different output. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // ─── Form IDs ─────────────────────────────────────────────────────────────────
 export const SPENDING_FORM_IDS = {
@@ -497,8 +497,8 @@ function extractCreditCard(
   const rawStatus = asText(sub.status || "");
   const returnSubmission = isReturnSubmission(answers);
   const createdAt =
-    (returnSubmission ? toISO(getAns(answers, CC_SCHEMA.globals.returnDateTime)) : "") ||
     toISO(getAns(answers, CC_SCHEMA.globals.checkoutDateTime)) ||
+    (returnSubmission ? toISO(getAns(answers, CC_SCHEMA.globals.returnDateTime)) : "") ||
     submissionTimestampISO(sub) ||
     new Date().toISOString();
   const month = toMonth(createdAt);
@@ -749,6 +749,7 @@ function extractInvoice(
   const purchaser = asText(getAns(answers, INVOICE_SCHEMA.globals.purchaser));
   const paymentMethod = asText(getAns(answers, INVOICE_SCHEMA.globals.paymentMethod));
   const email = asText(getAns(answers, INVOICE_SCHEMA.globals.email));
+  const purposeDetail = asText(getAns(answers, INVOICE_SCHEMA.globals.purposeDetail));
   const note = asText(getAns(answers, INVOICE_SCHEMA.globals.note));
   const serviceType = asText(getAns(answers, INVOICE_SCHEMA.globals.serviceType));
   const otherService = asText(getAns(answers, INVOICE_SCHEMA.globals.otherService));
@@ -784,7 +785,7 @@ function extractInvoice(
     formId, formAlias, formTitle, schemaVersion: SCHEMA_VERSION,
     source: "invoice", createdAt, month,
     merchant: vendor, expenseType, purchasePath,
-    card: "", cardBucket: "", purpose: "", paymentMethod, serviceType, otherService,
+    card: "", cardBucket: "", purpose: purposeDetail, paymentMethod, serviceType, otherService,
     serviceScope, wex, descriptor, customer, customerKey: makeCustomerKey(customer),
     purchaser, email,
     isFlex: subFlex.isFlex, flexReasons: subFlex.reasons, submissionIsFlex: subFlex.isFlex,

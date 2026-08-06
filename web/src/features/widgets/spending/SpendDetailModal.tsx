@@ -37,7 +37,7 @@ import {
 import { useClassifyLedgerEntries, useCreateLedgerEntry, useLedgerEntry } from "@hooks/useLedger";
 import { useJotformSubmission } from "@hooks/useJotform";
 import { useTaskOtherCreate, useTaskOtherStatus } from "@hooks/useTasks";
-import { fmtCurrencyUSD, fmtDateOrDash } from "@lib/formatters";
+import { fmtCurrencyUSD, fmtDateOrDash, fmtDateSmartOrDash } from "@lib/formatters";
 import { toast } from "@lib/toast";
 import type { TPayment } from "@types";
 import {
@@ -48,6 +48,12 @@ import { paymentTypeLabel, PaymentTypeChip, paymentNoteMeta } from "@entities/pa
 import FormSessionLauncherButton from "@entities/payments/FormSessionLauncherButton";
 import { budgetAssignment } from "@hdb/contracts";
 import { enrollmentPaymentStatus, spendingDisplayTypeLabel } from "./spendingPresentation";
+import {
+  clusteredCategoryFields,
+  clusteredPaymentFiles,
+  clusteredTransactionAnswer,
+  rawSubmissionAnswer,
+} from "./spendDetailFields";
 
 // ---------------------------------------------------------------------------
 // Shared types (mirror SpendingTool internals without importing them)
@@ -210,14 +216,6 @@ function queueString(item: Record<string, unknown> | null | undefined, key: stri
   return displayText(item?.[key]);
 }
 
-function queueFieldAnswer(item: Record<string, unknown> | null | undefined, fieldKey: string): string {
-  const group = asObject(item?.extractionGroup);
-  const fieldIds = asObject(group.fieldIds);
-  const fieldId = displayText(fieldIds[fieldKey]);
-  if (!fieldId) return "";
-  return displayText(asObject(item?.rawAnswers)[fieldId]);
-}
-
 function queueFieldOrder(item: Record<string, unknown> | null | undefined, fieldKey?: string): number {
   const group = asObject(item?.extractionGroup);
   const fieldOrders = asObject(group.fieldOrders);
@@ -247,18 +245,7 @@ function queueFieldOrder(item: Record<string, unknown> | null | undefined, field
 }
 
 function queueFiles(item: Record<string, unknown> | null | undefined): string[] {
-  const out: string[] = [];
-  for (const value of [item?.files_txn, item?.files, item?.files_uploadAll]) {
-    if (Array.isArray(value)) out.push(...value.map(displayText).filter(Boolean));
-  }
-  const typed = asObject(item?.files_typed);
-  out.push(
-    ...Object.values(typed)
-      .flatMap((value) => (Array.isArray(value) ? value : []))
-      .map(displayText)
-      .filter(Boolean),
-  );
-  return Array.from(new Set(out));
+  return clusteredPaymentFiles(item);
 }
 
 function isUsefulFreeText(value: unknown): boolean {
@@ -1574,17 +1561,18 @@ function CardSpendCard({
   const isReturn = direction === "return";
   const purchaser = firstText(queueString(queueItem, "purchaser"), row.title);
   const merchant = firstText(queueString(queueItem, "merchant"), row.title);
-  const cardType = firstText(queueFieldAnswer(queueItem, "cardUsed"), queueString(queueItem, "card"), row.creditCardName, row.creditCardId);
+  const cardType = firstText(clusteredTransactionAnswer(queueItem, "Card Used", ["cardUsed"]), queueString(queueItem, "card"), row.creditCardName, row.creditCardId);
   const purpose = firstText(queueString(queueItem, "purpose"), queueString(queueItem, "descriptor"));
   const expenseType = queueString(queueItem, "expenseType");
-  const supportServicesProgram = firstText(queueFieldAnswer(queueItem, "supportiveProgram"), queueString(queueItem, "program"));
-  const tssSpendCategory = firstText(queueFieldAnswer(queueItem, "tssCategory"));
-  const programOperationsFor = firstText(queueFieldAnswer(queueItem, "programOperations"), queueString(queueItem, "billedTo"));
-  const queueCustomerName = firstText(customerName, queueString(queueItem, "customer"), queueString(queueItem, "customerName"));
+  const supportServicesProgram = firstText(clusteredTransactionAnswer(queueItem, "Supportive Services Program", ["supportiveProgram"]), queueString(queueItem, "program"));
+  const programOperationsFor = firstText(clusteredTransactionAnswer(queueItem, "Program Operations for:", ["programOperations"]), queueString(queueItem, "billedTo"));
+  const queueCustomerName = firstText(queueString(queueItem, "customer"), queueString(queueItem, "customerName"));
   const purchasePath = queueString(queueItem, "purchasePath") || (queueCustomerName ? "customer" : programOperationsFor ? "program" : "");
   const isProgramSpend = purchasePath === "program" || (!!programOperationsFor && !queueCustomerName);
   const isFlex = Boolean(queueItem?.isFlex || queueItem?.submissionIsFlex);
-  const queueNotes = firstUsefulText(queueString(queueItem, "notes"), queueString(queueItem, "note"), queueFieldAnswer(queueItem, "notes"));
+  const queueNotes = firstUsefulText(queueString(queueItem, "notes"), queueString(queueItem, "note"), clusteredTransactionAnswer(queueItem, "Notes (optional)", ["notes"]));
+  const categoryFields = clusteredCategoryFields(queueItem);
+  const purchaseDate = firstText(rawSubmissionAnswer(queueItem, ["101"]), row.date);
   const receiptFiles = queueFiles(queueItem);
   const sourceUrl = jotformInboxUrl(queueItem?.formId || asObject(queueItem?.rawMeta).form_id, submissionId);
   const otherTransactions = ((sameSubmissionQ.data || []) as Array<Record<string, unknown> & { id: string }>)
@@ -1773,6 +1761,7 @@ function CardSpendCard({
 
           <div className="space-y-4 p-4">
             <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+              <SummaryItem label="Purchase Date" value={fmtDateSmartOrDash(purchaseDate)} />
               <SummaryItem label="Purchaser" value={purchaser} />
               <SummaryItem label="Card Used" value={cardType} />
               <SummaryItem label="Merchant / Vendor" value={merchant} />
@@ -1785,10 +1774,12 @@ function CardSpendCard({
                 <>
                   <SummaryItem label="Customer Name" value={queueCustomerName} />
                   <SummaryItem label="Support Services Program" value={supportServicesProgram} />
-                  <SummaryItem label="TSS Spend Category" value={tssSpendCategory} />
                   <SummaryItem label="YHDP Flex Funds" value={isFlex ? "Yes" : "No"} />
                 </>
               )}
+              {categoryFields.map((field) => (
+                <SummaryItem key={field.key} label={field.label} value={field.value} />
+              ))}
             </div>
 
             <div className="grid grid-cols-1 gap-3 border-t border-amber-200/80 pt-3 md:grid-cols-2">
@@ -2251,7 +2242,7 @@ function InvoiceSpendCard({
   const queueStatus = String(queueItem?.queueStatus || "pending");
   const legacyInvoiceStatus = queueItem?.invoiceStatus ? String(queueItem.invoiceStatus) : "";
   const vendor = firstText(queueString(queueItem, "merchant"), queueString(queueItem, "vendor"), row.title);
-  const purchaser = firstText(queueString(queueItem, "purchaser"), queueString(queueItem, "email"));
+  const purchaser = queueString(queueItem, "purchaser");
   const paymentMethod = queueString(queueItem, "paymentMethod");
   const expenseType = queueString(queueItem, "expenseType");
   const purchasePath = queueString(queueItem, "purchasePath");
@@ -2261,10 +2252,15 @@ function InvoiceSpendCard({
   const invoiceNote = firstUsefulText(queueString(queueItem, "note"), queueString(queueItem, "notes"));
   const project = firstText(queueString(queueItem, "project"), queueString(queueItem, "program"));
   const billTo = firstText(queueString(queueItem, "billedTo"), queueString(queueItem, "program"));
-  const serviceType = firstText(queueString(queueItem, "serviceType"), queueString(queueItem, "otherService"));
-  const wioaScope = firstText(queueString(queueItem, "serviceScope"), queueString(queueItem, "wex"));
-  const descriptor = firstText(queueString(queueItem, "descriptor"), queueString(queueItem, "purpose"));
-  const invoiceCustomerName = firstText(customerName, queueString(queueItem, "customer"));
+  const serviceType = queueString(queueItem, "serviceType");
+  const otherService = queueString(queueItem, "otherService");
+  const wioaScope = firstText(rawSubmissionAnswer(queueItem, ["134"]), Array.from(new Set([
+    queueString(queueItem, "serviceScope"),
+    queueString(queueItem, "wex"),
+  ].filter(Boolean))).join(" / "));
+  const descriptor = firstText(queueString(queueItem, "purpose"), rawSubmissionAnswer(queueItem, ["75"]), queueString(queueItem, "descriptor"));
+  const invoiceCustomerName = queueString(queueItem, "customer");
+  const invoiceDate = firstText(rawSubmissionAnswer(queueItem, ["31", "4"]), row.date);
   const receiptFiles = queueFiles(queueItem);
   const sourceUrl = jotformInboxUrl(queueItem?.formId || asObject(queueItem?.rawMeta).form_id, submissionId);
   const otherTransactions = ((sameSubmissionQ.data || []) as Array<Record<string, unknown> & { id: string }>)
@@ -2406,12 +2402,12 @@ function InvoiceSpendCard({
 
         <div className="space-y-4 p-4">
           <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+            <SummaryItem label="Invoice Date" value={fmtDateOrDash(invoiceDate)} />
             <SummaryItem label="Purchaser" value={purchaser} />
             <SummaryItem label="Vendor / Merchant" value={vendor} />
             <SummaryItem label="Payment Method" value={paymentMethod} />
             <SummaryItem label="Expense Type" value={expenseType} />
             <SummaryItem label="Purpose" value={descriptor} />
-            <SummaryItem label="Bill to Multiple Grants" value={isSplitInvoice ? "Yes" : "No"} />
             {isCreditCardInvoice ? (
               <SummaryItem label="Card Used" value={row.creditCardName || row.creditCardId || assignCardId} />
             ) : null}
@@ -2420,13 +2416,16 @@ function InvoiceSpendCard({
                 <SummaryItem label="Customer Name" value={invoiceCustomerName} />
                 <SummaryItem label="Support Services Program" value={project} />
                 <SummaryItem label="Service Type" value={serviceType} />
-                <SummaryItem label="WIOA Scope" value={wioaScope} />
+                <SummaryItem label="Other Service" value={otherService} />
+                <SummaryItem label="WIOA / WEX Scope" value={wioaScope} />
               </>
             ) : (
               <>
                 <SummaryItem label="Program Operations For" value={billTo} />
                 <SummaryItem label="Project" value={project} />
                 <SummaryItem label="Service Type" value={serviceType} />
+                <SummaryItem label="Other Service" value={otherService} />
+                <SummaryItem label="WIOA / WEX Scope" value={wioaScope} />
               </>
             )}
           </div>

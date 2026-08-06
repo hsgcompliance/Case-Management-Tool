@@ -248,7 +248,7 @@ export type SpendLineItem = {
 // ─── Schema version ───────────────────────────────────────────────────────────
 // Bump this when extraction logic changes in a way that might produce different
 // output from the same raw answers.
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // ─── Helpers (TypeScript ports of formSchemas.js helpers) ────────────────────
 
@@ -476,8 +476,8 @@ function extractCreditCard(
   const rawStatus = asText(sub.status || "");
   const returnSubmission = isReturnSubmission(answers);
   const createdAt =
-    (returnSubmission ? toISO(getAns(answers, CC_SCHEMA.globals.returnDateTime)) : "") ||
     toISO(getAns(answers, CC_SCHEMA.globals.checkoutDateTime)) ||
+    (returnSubmission ? toISO(getAns(answers, CC_SCHEMA.globals.returnDateTime)) : "") ||
     submissionTimestampISO(sub) ||
     new Date().toISOString();
   const month = toMonth(createdAt);
@@ -833,6 +833,7 @@ function extractInvoice(
   const purchaser = asText(getAns(answers, INVOICE_SCHEMA.globals.purchaser));
   const paymentMethod = asText(getAns(answers, INVOICE_SCHEMA.globals.paymentMethod));
   const email = asText(getAns(answers, INVOICE_SCHEMA.globals.email));
+  const purposeDetail = asText(getAns(answers, INVOICE_SCHEMA.globals.purposeDetail));
   const note = asText(getAns(answers, INVOICE_SCHEMA.globals.note));
   const serviceType = asText(getAns(answers, INVOICE_SCHEMA.globals.serviceType));
   const otherService = asText(getAns(answers, INVOICE_SCHEMA.globals.otherService));
@@ -889,7 +890,7 @@ function extractInvoice(
     purchasePath,
     card: "",
     cardBucket: "",
-    purpose: "",
+    purpose: purposeDetail,
     paymentMethod,
     serviceType,
     otherService,
