@@ -85,6 +85,9 @@ row-level Post action so the existing transaction identity is reused.
 - Pending `paymentQueue` rows are projected spend. Posted queue rows are shadows
   of their linked authoritative ledger entries and are never counted a second
   time.
+- Credit-card and invoice queue rows mirror their extracted business transaction
+  date (`createdAt`) into `dueDate` so inclusive Invoicing range queries can use
+  one indexed field. Re-extraction preserves any existing operator-set due date.
 - Voiding an enrollment projection through `paymentQueueVoid` atomically marks
   the matching embedded enrollment payment `void: true`. Customer schedules
   retain that row for history but exclude it from active totals and edits.

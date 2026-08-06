@@ -111,6 +111,13 @@ Audit and optionally close past CC `paymentQueue` items (source=credit-card, sta
 node scripts/close-past-credit-card-payments.mjs [--apply --yes --bypass-ledger]
 ```
 
+### `backfill-payment-queue-due-dates.mjs`
+Audit and optionally populate missing `paymentQueue.dueDate` values for credit-card and invoice rows from their extracted business-date `createdAt`. Existing due dates and all other sources are preserved. **Dry-run by default.** Applying requires an explicit org scope.
+```sh
+node scripts/backfill-payment-queue-due-dates.mjs --project=housing-db-v2 --orgId=HRDC_IX
+node scripts/backfill-payment-queue-due-dates.mjs --project=housing-db-v2 --orgId=HRDC_IX --apply --yes
+```
+
 ### `jotform-pull-shape.mjs`
 Fetches Jotform form shape/schema from the Jotform API. Requires `JOTFORM_API_KEY` env var.
 ```sh
