@@ -30,6 +30,7 @@ const MENU_TABS = [
     label: "New Rent Cert",
   },
   { to: "/staff/forms", label: "All forms" },
+  { to: "/staff/intakes", label: "All Intakes" },
   { to: "/staff/webhooks", label: "Webhooks" },
   { to: "/staff/activity", label: "Activity" },
 ];

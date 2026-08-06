@@ -16,6 +16,7 @@ import IntakeFormsPage from "@/pages/IntakeFormsPage";
 import AllFormsPage from "@/pages/AllFormsPage";
 import WebhookEventsPage from "@/pages/WebhookEventsPage";
 import AdminFormsPage from "@/pages/AdminFormsPage";
+import AllIntakesPage from "@/pages/AllIntakesPage";
 import SubmissionManagerPage from "@/pages/SubmissionManagerPage";
 import { AuthGuard } from "@/components/AuthGuard";
 import { StaffLayout } from "@/components/StaffLayout";
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="forms" element={<AllFormsPage />} />
         <Route path="submissions" element={<SubmissionManagerPage />} />
         <Route path="webhooks" element={<WebhookEventsPage />} />
+        <Route path="intakes" element={<AllIntakesPage />} />
         <Route path="admin" element={<AdminFormsPage />} />
         <Route path="activity" element={<StaffHomePage />} />
       </Route>
