@@ -15,6 +15,8 @@ export type RemoteIntakeFlow = {
   session: IntakeSession;
   progress: IntakeFlowProgress;
   updatedAtISO: string;
+  transferredByUid?: string | null;
+  transferredByName?: string | null;
 };
 
 export async function listRemoteIntakeFlows(): Promise<RemoteIntakeFlow[]> {

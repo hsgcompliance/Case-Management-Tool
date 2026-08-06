@@ -30,11 +30,17 @@ import { expandWidgetAnswer } from "@/lib/widgetAnswers";
 // auto-linked to the current customer's integrations.
 
 const COLLAPSE_KEY = "hdb:forms:webhooks-sidebar-collapsed";
+const SIDE_KEY = "hdb:forms:webhooks-sidebar-side";
 const SESSION_KEY = "hdb:forms:webhooks-session-start";
 const ANCHOR_KEY = "hdb:forms:webhooks-anchor";
 const INCLUDE_KEY = "hdb:forms:webhooks-include";
 const EXCLUDE_KEY = "hdb:forms:webhooks-exclude";
 const POLL_MS = 20_000;
+// A referral that "pipes to intake" submits its webhook, then navigates here
+// a couple seconds later — often faster than the webhook's own round trip.
+// Back-dating a brand-new session's watermark keeps that submission in view
+// instead of racing it out. "New session" still resets to exactly now.
+const NEW_SESSION_LOOKBACK_MS = 10 * 60 * 1000;
 
 function answerValue(answer: JfAnswer): string {
   const value = answer.answer;
@@ -367,6 +373,18 @@ export function WebhooksSidebar({
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
   });
+  // Which side of the step content the sidebar docks on (desktop only).
+  const [side, setSide] = useState<"left" | "right">(() => {
+    try { return localStorage.getItem(SIDE_KEY) === "left" ? "left" : "right"; } catch { return "right"; }
+  });
+  const toggleSide = () => {
+    setSide((s) => {
+      const next = s === "left" ? "right" : "left";
+      try { localStorage.setItem(SIDE_KEY, next); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  const orderClass = side === "left" ? "lg:order-first" : "";
   const [tab, setTab] = useState<"structured" | "raw">("structured");
   const [events, setEvents] = useState<WebhookEventDetail[] | null>(null);
   const [browserSubmissionIds, setBrowserSubmissionIds] = useState<Set<string>>(new Set());
@@ -396,12 +414,12 @@ export function WebhooksSidebar({
     try {
       let v = sessionStorage.getItem(SESSION_KEY);
       if (!v) {
-        v = new Date().toISOString();
+        v = new Date(Date.now() - NEW_SESSION_LOOKBACK_MS).toISOString();
         sessionStorage.setItem(SESSION_KEY, v);
       }
       return v;
     } catch {
-      return new Date().toISOString();
+      return new Date(Date.now() - NEW_SESSION_LOOKBACK_MS).toISOString();
     }
   });
   // Anchor overrides (all session-scoped; wiped by "New session").
@@ -948,15 +966,17 @@ export function WebhooksSidebar({
   };
 
   if (collapsed) {
+    // Mobile: full-width horizontal button (a vertical rail below the page
+    // content was effectively invisible). Desktop: the thin vertical rail.
     return (
       <button
         type="button"
         onClick={toggleCollapsed}
         title="Open the Webhooks sidebar"
-        className="sticky top-3 flex shrink-0 flex-col items-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-1.5 py-3 text-slate-500 hover:border-indigo-300 hover:text-indigo-600"
+        className={`sticky top-3 flex w-full shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-500 hover:border-indigo-300 hover:text-indigo-600 lg:w-auto lg:flex-col lg:px-1.5 lg:py-3 ${orderClass}`}
       >
-        <span className="text-sm">⟨</span>
-        <span className="text-[11px] font-semibold [writing-mode:vertical-rl]">Webhooks</span>
+        <span className="text-sm">{side === "left" ? "⟩" : "⟨"}</span>
+        <span className="text-[11px] font-semibold lg:[writing-mode:vertical-rl]">Webhooks</span>
         {visibleRows.length ? (
           <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{visibleRows.length}</span>
         ) : null}
@@ -965,7 +985,7 @@ export function WebhooksSidebar({
   }
 
   return (
-    <aside className="sticky top-3 w-full shrink-0 self-start lg:w-80 xl:w-96">
+    <aside className={`sticky top-3 w-full shrink-0 self-start lg:w-80 xl:w-96 ${orderClass}`}>
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
           <div className="flex items-center gap-1">
@@ -998,6 +1018,14 @@ export function WebhooksSidebar({
               className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600"
             >
               {rebuildingLinked ? "…" : "↻"}
+            </button>
+            <button
+              type="button"
+              onClick={toggleSide}
+              title={`Move sidebar to the ${side === "left" ? "right" : "left"} (desktop)`}
+              className="hidden rounded px-1.5 py-0.5 text-[11px] font-semibold text-slate-400 hover:bg-slate-50 hover:text-slate-600 lg:block"
+            >
+              ⇄
             </button>
             <button
               type="button"

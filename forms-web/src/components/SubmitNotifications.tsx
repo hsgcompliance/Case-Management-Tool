@@ -18,7 +18,7 @@ import {
   transferIntakeFlow,
   type IntakeFlowProgress,
 } from "@/lib/intakeFlowsApi";
-import { loadUsers, type FormsUser } from "@/lib/usersApi";
+import { complianceFirst, loadUsers, type FormsUser } from "@/lib/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import { intakeTypeLabel, intakeTypesLabel } from "@/lib/formsCatalog";
 import { useCurrentCustomer } from "@/context/CurrentCustomer";
@@ -65,7 +65,13 @@ export function SubmitNotifications() {
     const refresh = () => setSessions(listIntakeSessions());
     refresh();
     void Promise.all([listRemoteIntakeFlows(), loadUsers()]).then(([flows, orgUsers]) => {
-      for (const flow of flows) importRemoteIntakeSession(flow.session, flow.progress);
+      for (const flow of flows) {
+        // "Sent by" attribution: prefer the stored name; resolve legacy
+        // uid-only transfers against the org user list.
+        const transferredByName = flow.transferredByName
+          ?? (flow.transferredByUid ? orgUsers.find((u) => u.uid === flow.transferredByUid)?.name ?? null : null);
+        importRemoteIntakeSession({ ...flow.session, transferredByName }, flow.progress);
+      }
       setSessions(listIntakeSessions());
       setUsers(orgUsers.filter((candidate) => candidate.uid !== user?.uid));
     }).catch(() => {});
@@ -239,6 +245,9 @@ export function SubmitNotifications() {
                         </span>
                       </div>
                       <div className="truncate text-[11px] text-slate-400">
+                        {s.transferredByName ? (
+                          <span className="font-semibold text-indigo-500">Sent by {s.transferredByName} · </span>
+                        ) : null}
                         {intakeTypesLabel(s.intakeTypes) || intakeTypeLabel(s.intakeType) || "Intake"} · {shortDate(s.updatedAtISO)} · resume →
                       </div>
                     </button>
@@ -254,7 +263,25 @@ export function SubmitNotifications() {
                           className="max-w-24 rounded border border-slate-200 bg-white px-1 py-1 text-[10px] text-slate-600"
                         >
                           <option value="">Send to...</option>
-                          {users.map((candidate) => <option key={candidate.uid} value={candidate.uid}>{candidate.name}</option>)}
+                          {(() => {
+                            const { compliance, others } = complianceFirst(users);
+                            return (
+                              <>
+                                {compliance.length ? (
+                                  <optgroup label="Compliance">
+                                    {compliance.map((candidate) => <option key={candidate.uid} value={candidate.uid}>{candidate.name}</option>)}
+                                  </optgroup>
+                                ) : null}
+                                {compliance.length ? (
+                                  <optgroup label="All staff">
+                                    {others.map((candidate) => <option key={candidate.uid} value={candidate.uid}>{candidate.name}</option>)}
+                                  </optgroup>
+                                ) : (
+                                  others.map((candidate) => <option key={candidate.uid} value={candidate.uid}>{candidate.name}</option>)
+                                )}
+                              </>
+                            );
+                          })()}
                         </select>
                         <button
                           type="button"

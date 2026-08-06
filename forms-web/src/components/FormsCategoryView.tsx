@@ -29,7 +29,7 @@ import {
   saveRemoteIntakeFlow,
   transferIntakeFlow,
 } from "@/lib/intakeFlowsApi";
-import { loadUsers, type FormsUser } from "@/lib/usersApi";
+import { complianceFirst, loadUsers, type FormsUser } from "@/lib/usersApi";
 import { useAuth } from "@/hooks/useAuth";
 import type { JfSubmission } from "@/lib/jotformManagerApi";
 import { IntakeActionsMenu } from "./IntakeActionsMenu";
@@ -781,7 +781,8 @@ export function FormsCategoryView({
       : null;
 
     return withSidebar(
-      <div className="space-y-3">
+      // pb clears the fixed bottom action bar on small screens.
+      <div className={`space-y-3 ${menuSession ? "pb-16 lg:pb-0" : ""}`}>
         {menuSession ? (
           <IntakeActionsMenu
             session={menuSession}
@@ -977,11 +978,22 @@ export function FormsCategoryView({
                 className="min-w-0 flex-1 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm text-slate-700"
               >
                 <option value="">Send to active staff…</option>
-                {handoffUsers.map((candidate) => (
-                  <option key={candidate.uid} value={candidate.uid}>
-                    {candidate.name}{candidate.email ? ` — ${candidate.email}` : ""}
-                  </option>
-                ))}
+                {(() => {
+                  const { compliance, others } = complianceFirst(handoffUsers);
+                  const opt = (candidate: FormsUser) => (
+                    <option key={candidate.uid} value={candidate.uid}>
+                      {candidate.name}{candidate.email ? ` — ${candidate.email}` : ""}
+                    </option>
+                  );
+                  return compliance.length ? (
+                    <>
+                      <optgroup label="Compliance">{compliance.map(opt)}</optgroup>
+                      <optgroup label="All staff">{others.map(opt)}</optgroup>
+                    </>
+                  ) : (
+                    others.map(opt)
+                  );
+                })()}
               </select>
               <button
                 type="button"
@@ -1064,6 +1076,21 @@ export function FormsCategoryView({
               >
                 Continue →
               </button>
+            </div>
+            <div className="mx-auto mt-4 max-w-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  if (next) setView({ kind: "step", idx: idx + 1 });
+                  else setView({ kind: "list" });
+                }}
+                className="w-full rounded-xl border-2 border-slate-300 bg-white px-6 py-4 text-sm font-bold text-slate-500 transition hover:border-slate-400 hover:bg-slate-50"
+              >
+                Not sure yet? Skip for now →
+              </button>
+              <p className="mt-1.5 text-center text-[11px] text-slate-400">
+                No pressure — come back and set this whenever it's clear. Nothing you've done gets lost.
+              </p>
             </div>
           </div>
         ) : step.tssGate && !tssVariant ? (

@@ -24,6 +24,8 @@ export type IntakeSession = {
   totalSteps: number;
   startedAtISO: string;
   updatedAtISO: string;
+  /** Set when this session arrived via a staff hand-off ("Sent by Ally"). */
+  transferredByName?: string | null;
 };
 
 const KEY = "hdb:forms:intake-sessions";

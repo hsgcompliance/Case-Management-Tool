@@ -143,7 +143,7 @@ export default function ReferralsPage() {
       <div>
         <h2 className="text-base font-semibold text-slate-900">Referrals</h2>
         <p className="text-sm text-slate-500">
-          Bridging Home and Homelessness Prevention referrals continue into Basic Intake after submission.
+          Referrals marked <span className="rounded bg-indigo-100 px-1 py-0.5 text-[10px] font-semibold text-indigo-700">→ intake</span> continue into Basic Intake automatically after submission.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

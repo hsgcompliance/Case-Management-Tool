@@ -58,7 +58,7 @@ async function assertActiveUserInOrg(targetUid: string, orgId: string) {
   }
 }
 
-function savedDoc(args: { orgId: string; ownerUid: string; session: z.infer<typeof Session>; progress: z.infer<typeof Progress>; transferredByUid?: string | null }) {
+function savedDoc(args: { orgId: string; ownerUid: string; session: z.infer<typeof Session>; progress: z.infer<typeof Progress>; transferredByUid?: string | null; transferredByName?: string | null }) {
   const now = isoNow();
   return {
     orgId: args.orgId,
@@ -67,6 +67,7 @@ function savedDoc(args: { orgId: string; ownerUid: string; session: z.infer<type
     session: { ...args.session, updatedAtISO: now },
     progress: args.progress,
     transferredByUid: args.transferredByUid || null,
+    transferredByName: args.transferredByName || null,
     updatedAt: FieldValue.serverTimestamp(),
     updatedAtISO: now,
   };
@@ -80,6 +81,7 @@ async function upsertIntakeTask(args: {
   orgId: string;
   ownerUid: string;
   session: z.infer<typeof Session>;
+  transferredByName?: string | null;
 }) {
   const rule = FORM_WORKFLOW_TASK_RULES.intakeIncomplete;
   if (!rule.enabled) return;
@@ -113,9 +115,10 @@ async function upsertIntakeTask(args: {
       formId: null,
     },
     title: rule.title,
-    note: complete
+    note: (complete
       ? "The Forms intake workflow is complete."
-      : `${args.session.doneCount} of ${args.session.totalSteps} intake steps complete.`,
+      : `${args.session.doneCount} of ${args.session.totalSteps} intake steps complete.`)
+      + (args.transferredByName ? ` Sent to you by ${args.transferredByName}.` : ""),
     labels: ["forms", "intake", "workflow"],
     actionUrl: intakeActionUrl(args.session.customerId),
     actionLabel: complete ? "Review intake workflow" : "Continue intake workflow",
@@ -164,16 +167,17 @@ export const formsIntakeFlowTransfer_http = secureHandler(async (req, res) => {
     assertCustomerInOrg(body.session.customerId, orgId),
     assertActiveUserInOrg(body.targetUid, orgId),
   ]);
+  const transferredByName = String(caller.name || caller.email || "") || null;
   const source = db.collection("formsIntakeFlows").doc(flowId(uid, body.session.customerId));
   const target = db.collection("formsIntakeFlows").doc(flowId(body.targetUid, body.session.customerId));
   await db.runTransaction(async (tx) => {
     tx.set(target, {
-      ...savedDoc({ orgId, ownerUid: body.targetUid, session: body.session, progress: body.progress, transferredByUid: uid }),
+      ...savedDoc({ orgId, ownerUid: body.targetUid, session: body.session, progress: body.progress, transferredByUid: uid, transferredByName }),
       createdAt: FieldValue.serverTimestamp(),
     }, { merge: true });
     tx.delete(source);
   });
-  await upsertIntakeTask({ orgId, ownerUid: body.targetUid, session: body.session });
+  await upsertIntakeTask({ orgId, ownerUid: body.targetUid, session: body.session, transferredByName });
   res.status(200).json({ ok: true, id: target.id });
 }, { auth: "user", methods: ["POST", "OPTIONS"] });
 

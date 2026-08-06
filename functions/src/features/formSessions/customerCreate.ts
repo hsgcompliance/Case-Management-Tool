@@ -84,6 +84,7 @@ export const formsUsersList_http = secureHandler(
         uid: u.uid,
         name: String(u.displayName || u.email || u.uid),
         email: u.email ?? null,
+        roles: Array.isArray(u.roles) ? u.roles : [],
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
     res.status(200).json({ ok: true, items, count: items.length });
