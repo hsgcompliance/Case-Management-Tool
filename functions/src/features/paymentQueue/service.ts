@@ -17,6 +17,7 @@ import {
   type TPaymentQueueReopenBody,
 } from './schemas';
 import {isOperationalQueueGrantVisible, type OperationalGrantState} from './operationalVisibility';
+import {paymentQueueDueDateForUpsert} from './queueDates';
 
 const COLLECTION = 'paymentQueue';
 const FN = 'paymentQueueService';
@@ -1664,7 +1665,7 @@ export async function upsertPaymentQueueItems(
       {
         paymentId: prev.paymentId ?? null,
         grantId: prev.grantId ?? null,
-        dueDate: prev.dueDate ?? null,
+        dueDate: paymentQueueDueDateForUpsert(extracted.source, prev.dueDate, extracted.createdAt),
         lineItemId: prev.lineItemId ?? null,
         pipelineId: prev.pipelineId ?? null,
         budgetAssignmentSource: paymentQueueBudgetAssignmentSource(prev),
@@ -1695,7 +1696,7 @@ export async function upsertPaymentQueueItems(
         createdAtISO: prev.createdAtISO ?? now,
       } :
       {
-        paymentId: null, grantId: null, dueDate: null, lineItemId: null, pipelineId: null, budgetAssignmentSource: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
+        paymentId: null, grantId: null, dueDate: paymentQueueDueDateForUpsert(extracted.source, null, extracted.createdAt), lineItemId: null, pipelineId: null, budgetAssignmentSource: null, customerId: null, enrollmentId: null, creditCardId: extracted.creditCardId ?? null, ledgerEntryId: null, reversalEntryId: null,
         invoiceStatus: null, invoicedAt: null, invoicedBy: null, invoiceRef: null,
         okUnassigned: false, okUnassignedAt: null, okUnassignedBy: null,
         queueStatus: 'pending' as const,
