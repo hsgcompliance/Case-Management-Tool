@@ -364,8 +364,8 @@ export function WebhooksSidebar({
   intakeTypes,
   /** Hand-off history of the active intake flow (bottom of the Structured tab). */
   transferChain,
-  /** True for ~10s after an embedded Jotform's height grows unexpectedly (heuristic for a stuck validation-error banner) — shows a dismissible floating notice over this sidebar. */
-  formIssueActive = false,
+  /** Bumped every time an embedded Jotform's height grows on its own page (heuristic for a stuck validation-error banner). Drives the warn-once-per-form lifecycle below. */
+  formIssueEvent = null,
 }: {
   formIds: string[];
   refreshKey?: number;
@@ -374,7 +374,7 @@ export function WebhooksSidebar({
   onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
   intakeTypes?: IntakeTypeId[];
   transferChain?: TransferHop[];
-  formIssueActive?: boolean;
+  formIssueEvent?: { formId: string; at: number } | null;
 }) {
   const { customer } = useCurrentCustomer();
   const [collapsed, setCollapsed] = useState(() => {
@@ -414,15 +414,41 @@ export function WebhooksSidebar({
   const [linkedDetailErrors, setLinkedDetailErrors] = useState<Record<string, string>>({});
   const [rebuildingLinked, setRebuildingLinked] = useState(false);
 
-  // The "form issue" notice re-arms every time the parent raises a fresh
-  // anomaly, but staff can dismiss it early without waiting out the timer.
-  const [issueDismissed, setIssueDismissed] = useState(false);
-  const wasIssueActive = useRef(false);
+  // Form-issue lifecycle: the big warning shows once per form id (never
+  // again for that same form), then shrinks — by timeout or manual close —
+  // into a small persistent "open in new tab" chip that stays put.
+  const [issueMode, setIssueMode] = useState<"hidden" | "big" | "chip">("hidden");
+  const [issueFormId, setIssueFormId] = useState<string | null>(null);
+  const warnedFormIds = useRef<Set<string>>(new Set());
+  const lastIssueEventAt = useRef(0);
+  const issueTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    if (formIssueActive && !wasIssueActive.current) setIssueDismissed(false);
-    wasIssueActive.current = formIssueActive;
-  }, [formIssueActive]);
-  const showIssueBanner = formIssueActive && !issueDismissed;
+    if (!formIssueEvent || formIssueEvent.at === lastIssueEventAt.current) return;
+    lastIssueEventAt.current = formIssueEvent.at;
+    const { formId } = formIssueEvent;
+    setIssueFormId(formId);
+    if (warnedFormIds.current.has(formId)) {
+      // Already warned once for this form — keep it to a quiet chip.
+      setIssueMode((m) => (m === "big" ? m : "chip"));
+      return;
+    }
+    warnedFormIds.current.add(formId);
+    setIssueMode("big");
+    if (issueTimerRef.current) window.clearTimeout(issueTimerRef.current);
+    issueTimerRef.current = window.setTimeout(() => setIssueMode("chip"), 30_000);
+  }, [formIssueEvent]);
+  useEffect(() => () => {
+    if (issueTimerRef.current) window.clearTimeout(issueTimerRef.current);
+  }, []);
+  const closeIssueToChip = () => {
+    if (issueTimerRef.current) window.clearTimeout(issueTimerRef.current);
+    setIssueMode("chip");
+  };
+  const dismissIssueChip = () => {
+    if (issueTimerRef.current) window.clearTimeout(issueTimerRef.current);
+    setIssueMode("hidden");
+    setIssueFormId(null);
+  };
 
   // The sidebar starts blank each browser-tab session and builds out from the
   // forms submitted DURING it (older webhook traffic stays hidden). Survives
@@ -982,18 +1008,83 @@ export function WebhooksSidebar({
     URL.revokeObjectURL(url);
   };
 
-  const issueBanner = showIssueBanner ? (
-    <div className="absolute inset-x-1 top-1 z-30 rounded-lg border-2 border-amber-400 bg-amber-50 px-2.5 py-2 pr-7 text-[11px] font-semibold leading-snug text-amber-900 shadow-lg">
+  // The small persistent nub: an "open in new tab" circle with its own tiny
+  // dismiss button, reused by both the collapsed rail and the animated morph.
+  const issueChip = (
+    <div className="relative flex h-full w-full items-center justify-center">
+      <a
+        href={issueFormId ? `https://form.jotform.com/${issueFormId}` : undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="This form had trouble embedded here — open it in a new tab"
+        className="flex h-full w-full items-center justify-center rounded-full text-base font-bold text-amber-700 hover:bg-amber-100"
+      >
+        ↗
+      </a>
       <button
         type="button"
-        onClick={() => setIssueDismissed(true)}
+        onClick={dismissIssueChip}
         title="Dismiss"
-        aria-label="Dismiss form-issue warning"
-        className="absolute right-1 top-1 rounded px-1 text-sm font-bold leading-none text-amber-500 hover:bg-amber-100 hover:text-amber-800"
+        aria-label="Dismiss form-issue button"
+        className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-amber-300 bg-white text-[9px] font-bold leading-none text-amber-500 hover:bg-amber-100"
       >
         ✕
       </button>
-      ⚠️ Problems with the embedded Jotform? Open the Jotform in a new tab — sometimes errors happen and the form can't be filled out. Jotform can be finicky.
+    </div>
+  );
+
+  // Full-detail warning content — crossfades against issueChip as the
+  // container morphs between the two sizes below.
+  const issueBig = (
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+      <div className="text-3xl">⚠️</div>
+      <div className="text-base font-bold text-amber-900">Problems with the embedded Jotform?</div>
+      <p className="max-w-[16rem] text-sm font-medium leading-snug text-amber-800">
+        Sometimes errors happen and the form can't be filled out — Jotform can be finicky. Try opening it in a new tab.
+      </p>
+      <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+        {issueFormId ? (
+          <a
+            href={`https://form.jotform.com/${issueFormId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500"
+          >
+            Open in new tab ↗
+          </a>
+        ) : null}
+        <button
+          type="button"
+          onClick={closeIssueToChip}
+          className="rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+        >
+          Close warning
+        </button>
+      </div>
+    </div>
+  );
+
+  const isBig = issueMode === "big";
+  // One box that morphs size/shape/radius between the two states, with its
+  // two content layers crossfading — no animation library, just CSS transitions.
+  const issueOverlay = issueMode !== "hidden" ? (
+    <div
+      className={`absolute right-2 top-2 z-30 overflow-hidden border-2 border-amber-400 bg-amber-50 shadow-xl transition-all duration-500 ease-in-out ${
+        isBig ? "h-[calc(100%-1rem)] w-[calc(100%-1rem)] rounded-xl p-5" : "h-11 w-11 rounded-full p-0"
+      }`}
+    >
+      <div className={`transition-opacity duration-300 ${isBig ? "opacity-100" : "pointer-events-none absolute inset-0 opacity-0"}`}>
+        {issueBig}
+      </div>
+      <div className={`transition-opacity duration-300 ${isBig ? "pointer-events-none absolute inset-0 opacity-0" : "opacity-100"}`}>
+        {issueChip}
+      </div>
+    </div>
+  ) : null;
+  // The collapsed rail has no room for the full warning — always the chip.
+  const issueChipCollapsed = issueMode !== "hidden" ? (
+    <div className="absolute -right-2 -top-2 z-30 h-9 w-9 rounded-full border-2 border-amber-400 bg-amber-50 shadow-lg">
+      {issueChip}
     </div>
   ) : null;
 
@@ -1002,7 +1093,7 @@ export function WebhooksSidebar({
     // content was effectively invisible). Desktop: the thin vertical rail.
     return (
       <div className={`relative w-full shrink-0 self-start lg:w-auto ${orderClass}`}>
-        {issueBanner}
+        {issueChipCollapsed}
         <button
           type="button"
           onClick={toggleCollapsed}
@@ -1021,7 +1112,7 @@ export function WebhooksSidebar({
 
   return (
     <aside className={`sticky top-3 w-full shrink-0 self-start lg:w-80 xl:w-96 ${orderClass}`}>
-      {issueBanner}
+      {issueOverlay}
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
           <div className="flex items-center gap-1">

@@ -86,7 +86,7 @@ export function JotformEmbed({
   /** Supplies the authoritative submission to the in-browser webhook model. */
   onSubmissionReceived?: (submission: JfSubmission) => void;
   /** Fired when the form's height grows on its OWN page (no page-change message nearby) after it already loaded — the only observable symptom of Jotform's "there are N errors on this page" banner, which never crosses postMessage as text. */
-  onHeightAnomaly?: () => void;
+  onHeightAnomaly?: (formId: string) => void;
   /** Head-of-household name to watch for as a fallback: some Jotform dropdowns occasionally refuse to render, forcing staff to finish the submission in a separate tab where the postMessage listener below never fires. */
   hohName?: string;
 }) {
@@ -99,7 +99,13 @@ export function JotformEmbed({
   const openedAt = useRef(Date.now());
   const detecting = useRef(false);
   const initialHeightSeen = useRef(false);
-  const lastPageChangeAt = useRef(0);
+  const lastHeightPx = useRef(0);
+  const lastSetHeightAt = useRef(0);
+  const heightGrowthStreak = useRef(0);
+  // Anomaly detection stays off until the form has settled at least once —
+  // its own initial load commonly posts several setHeight bumps (images,
+  // conditional fields, widgets) that are not errors.
+  const formSettledSeen = useRef(false);
 
   function resetEmbed() {
     setSubmitted(false);
@@ -107,7 +113,10 @@ export function JotformEmbed({
     setLoadingSubmission(false);
     detecting.current = false;
     initialHeightSeen.current = false;
-    lastPageChangeAt.current = 0;
+    lastHeightPx.current = 0;
+    lastSetHeightAt.current = 0;
+    heightGrowthStreak.current = 0;
+    formSettledSeen.current = false;
     openedAt.current = Date.now();
     setEmbedKey((value) => value + 1);
   }
@@ -118,7 +127,10 @@ export function JotformEmbed({
     setLoadingSubmission(false);
     detecting.current = false;
     initialHeightSeen.current = false;
-    lastPageChangeAt.current = 0;
+    lastHeightPx.current = 0;
+    lastSetHeightAt.current = 0;
+    heightGrowthStreak.current = 0;
+    formSettledSeen.current = false;
     openedAt.current = Date.now();
 
     async function resolveSubmission(raw: string) {
@@ -157,12 +169,16 @@ export function JotformEmbed({
       // eslint-disable-next-line no-console
       console.log("[forms][jotform]", formId, text);
 
+      // Jotform posts this once the form has finished its initial render —
+      // everything before it is the form loading, not a validation error.
+      if (/formSettled/i.test(text)) formSettledSeen.current = true;
+
       // Jotform requests scrollIntoView when a multi-page form advances,
       // including submit → signature transitions. Ignore resize-only messages
       // so expanding fields do not unexpectedly move the host page.
       if (requestsPageScroll(text)) {
         scrollHostToTop();
-        lastPageChangeAt.current = Date.now();
+        heightGrowthStreak.current = 0;
       }
 
       // Auto-resize: Jotform posts "setHeight:<px>:<formId>".
@@ -172,15 +188,30 @@ export function JotformEmbed({
         if (Number.isFinite(px) && px > 0) {
           setHeight(Math.min(MAX_FORM_HEIGHT_PX, px + FORM_BOTTOM_BUFFER_PX));
           // Jotform never posts "there are N errors on this page" as text — the
-          // only observable symptom is the iframe growing taller on its OWN
-          // page (no page-change message nearby), because the error banner
-          // pushed the content down. Heuristic, not proof — hence the callback
-          // rather than an outright error state.
-          if (!initialHeightSeen.current) {
-            initialHeightSeen.current = true;
-          } else if (Date.now() - lastPageChangeAt.current > 2_000) {
-            onHeightAnomaly?.();
+          // only observable symptom is the iframe growing taller MULTIPLE times
+          // in a row on the same page (each error nudges it further), with no
+          // page-change message in between. Two things are excluded so this
+          // doesn't misfire: the form's initial load (which can post several
+          // bumps before it settles — gated above) and a normal page turn —
+          // including the submit/signature page — which posts exactly ONE
+          // setHeight for the new page's content.
+          const now = Date.now();
+          if (formSettledSeen.current) {
+            if (!initialHeightSeen.current) {
+              initialHeightSeen.current = true;
+              heightGrowthStreak.current = 0;
+            } else if (px > lastHeightPx.current && now - lastSetHeightAt.current < 5_000) {
+              heightGrowthStreak.current += 1;
+              if (heightGrowthStreak.current >= 2) {
+                heightGrowthStreak.current = 0;
+                onHeightAnomaly?.(formId);
+              }
+            } else {
+              heightGrowthStreak.current = px > lastHeightPx.current ? 1 : 0;
+            }
           }
+          lastHeightPx.current = px;
+          lastSetHeightAt.current = now;
         }
       }
 

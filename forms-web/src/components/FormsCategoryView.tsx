@@ -172,7 +172,7 @@ function IntakeInspection({
   intakeTypes: IntakeTypeId[];
   onSubmitted: () => void;
   onSubmissionReceived: (submission: JfSubmission) => void;
-  onHeightAnomaly?: () => void;
+  onHeightAnomaly?: (formId: string) => void;
   hohName?: string;
 }) {
   if (intakeTypes.includes("eviction-prevention")) {
@@ -470,18 +470,14 @@ export function FormsCategoryView({
     }
     return latest;
   }, [webhookSnapshot]);
-  // Surfaces a dismissible ~10s notice over the sidebar whenever an embedded
-  // Jotform's height grows on its own page — heuristic for a stuck validation
+  // Reports every "this embedded Jotform's height grew on its own page"
+  // anomaly up to the sidebar, which owns the warn-once-per-form lifecycle:
+  // a big notice the first time a given form misbehaves, then a lasting small
+  // "open in new tab" button in its place — heuristic for a stuck validation
   // error, since Jotform never tells us "there are N errors" as text.
-  const [formIssueActive, setFormIssueActive] = useState(false);
-  const formIssueTimerRef = useRef<number | null>(null);
-  const handleFormHeightAnomaly = useCallback(() => {
-    setFormIssueActive(true);
-    if (formIssueTimerRef.current) window.clearTimeout(formIssueTimerRef.current);
-    formIssueTimerRef.current = window.setTimeout(() => setFormIssueActive(false), 10_000);
-  }, []);
-  useEffect(() => () => {
-    if (formIssueTimerRef.current) window.clearTimeout(formIssueTimerRef.current);
+  const [formIssueEvent, setFormIssueEvent] = useState<{ formId: string; at: number } | null>(null);
+  const handleFormHeightAnomaly = useCallback((formId: string) => {
+    setFormIssueEvent({ formId, at: Date.now() });
   }, []);
 
   const [rentCertSubmitted, setRentCertSubmitted] = useState(false);
@@ -645,7 +641,7 @@ export function FormsCategoryView({
           onSnapshot={setWebhookSnapshot}
           intakeTypes={intakeTypes}
           transferChain={transferChain}
-          formIssueActive={formIssueActive}
+          formIssueEvent={formIssueEvent}
         />
       </div>
     ) : (
