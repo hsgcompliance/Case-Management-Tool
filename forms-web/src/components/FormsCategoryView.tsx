@@ -166,10 +166,14 @@ function IntakeInspection({
   intakeTypes,
   onSubmitted,
   onSubmissionReceived,
+  onHeightAnomaly,
+  hohName,
 }: {
   intakeTypes: IntakeTypeId[];
   onSubmitted: () => void;
   onSubmissionReceived: (submission: JfSubmission) => void;
+  onHeightAnomaly?: () => void;
+  hohName?: string;
 }) {
   if (intakeTypes.includes("eviction-prevention")) {
     return (
@@ -182,6 +186,8 @@ function IntakeInspection({
           title="Habitability Inspection"
           onSubmitted={onSubmitted}
           onSubmissionReceived={onSubmissionReceived}
+          onHeightAnomaly={onHeightAnomaly}
+          hohName={hohName}
         />
       </div>
     );
@@ -464,6 +470,20 @@ export function FormsCategoryView({
     }
     return latest;
   }, [webhookSnapshot]);
+  // Surfaces a dismissible ~10s notice over the sidebar whenever an embedded
+  // Jotform's height grows on its own page — heuristic for a stuck validation
+  // error, since Jotform never tells us "there are N errors" as text.
+  const [formIssueActive, setFormIssueActive] = useState(false);
+  const formIssueTimerRef = useRef<number | null>(null);
+  const handleFormHeightAnomaly = useCallback(() => {
+    setFormIssueActive(true);
+    if (formIssueTimerRef.current) window.clearTimeout(formIssueTimerRef.current);
+    formIssueTimerRef.current = window.setTimeout(() => setFormIssueActive(false), 10_000);
+  }, []);
+  useEffect(() => () => {
+    if (formIssueTimerRef.current) window.clearTimeout(formIssueTimerRef.current);
+  }, []);
+
   const [rentCertSubmitted, setRentCertSubmitted] = useState(false);
   const handleRentCertSubmissionState = useCallback((state: { submitted: boolean }) => {
     setRentCertSubmitted(state.submitted);
@@ -625,6 +645,7 @@ export function FormsCategoryView({
           onSnapshot={setWebhookSnapshot}
           intakeTypes={intakeTypes}
           transferChain={transferChain}
+          formIssueActive={formIssueActive}
         />
       </div>
     ) : (
@@ -920,6 +941,8 @@ export function FormsCategoryView({
             intakeTypes={intakeTypes}
             onSubmitted={handleSubmitted}
             onSubmissionReceived={handleSubmissionReceived}
+            onHeightAnomaly={handleFormHeightAnomaly}
+            hohName={customer?.name}
           />
         ) : null}
         {step.intakeTypeGate ? (
@@ -1043,6 +1066,8 @@ export function FormsCategoryView({
                   title={step.title}
                   onSubmitted={handleSubmitted}
                   onSubmissionReceived={handleSubmissionReceived}
+                  onHeightAnomaly={handleFormHeightAnomaly}
+                  hohName={customer?.name}
                 />
                 {isEligibilityStep && customer?.id ? (
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -1112,7 +1137,12 @@ export function FormsCategoryView({
         <h2 className="text-base font-semibold text-slate-900">{f.title}</h2>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
-            <JotformEmbed formId={f.id} title={f.title} />
+            <JotformEmbed
+              formId={f.id}
+              title={f.title}
+              onHeightAnomaly={handleFormHeightAnomaly}
+              hohName={customer?.name}
+            />
           </div>
           {webhooksSidebar ? null : <ReferencePanel className="lg:w-80 lg:shrink-0" />}
         </div>

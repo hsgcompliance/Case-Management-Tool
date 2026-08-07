@@ -216,7 +216,7 @@ export const INTAKE_FLOW: IntakeFlowStep[] = [
   {
     title: "Caseworthy: create client / update assessments",
     section: "Full intake",
-    note: "Open Caseworthy and create the client, or update the existing client's assessments.",
+    note: "Open Caseworthy and create the client, or update the existing client's assessments and  add a casenote for the intake.",
     links: [{ href: "https://cw.caseworthy.net/hrdc09_prod.ecm", label: "Open Caseworthy" }],
     prominentLinks: true,
   },

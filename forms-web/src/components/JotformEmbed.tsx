@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listSubmissions, type JfSubmission } from "@/lib/jotformManagerApi";
+import { matchName } from "@/lib/nameMatch";
+import { getSubmissionLabel } from "@/lib/submissionLabel";
 import { SubmissionResultPanel } from "./SubmissionResultPanel";
 
 // Embeds a Jotform in an iframe. Because the iframe is cross-origin (jotform.com),
@@ -75,12 +77,18 @@ export function JotformEmbed({
   title,
   onSubmitted,
   onSubmissionReceived,
+  onHeightAnomaly,
+  hohName,
 }: {
   formId: string;
   title: string;
   onSubmitted?: (raw: string) => void;
   /** Supplies the authoritative submission to the in-browser webhook model. */
   onSubmissionReceived?: (submission: JfSubmission) => void;
+  /** Fired when the form's height grows on its OWN page (no page-change message nearby) after it already loaded — the only observable symptom of Jotform's "there are N errors on this page" banner, which never crosses postMessage as text. */
+  onHeightAnomaly?: () => void;
+  /** Head-of-household name to watch for as a fallback: some Jotform dropdowns occasionally refuse to render, forcing staff to finish the submission in a separate tab where the postMessage listener below never fires. */
+  hohName?: string;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(900 + FORM_BOTTOM_BUFFER_PX);
@@ -90,12 +98,16 @@ export function JotformEmbed({
   const [embedKey, setEmbedKey] = useState(0);
   const openedAt = useRef(Date.now());
   const detecting = useRef(false);
+  const initialHeightSeen = useRef(false);
+  const lastPageChangeAt = useRef(0);
 
   function resetEmbed() {
     setSubmitted(false);
     setSubmission(null);
     setLoadingSubmission(false);
     detecting.current = false;
+    initialHeightSeen.current = false;
+    lastPageChangeAt.current = 0;
     openedAt.current = Date.now();
     setEmbedKey((value) => value + 1);
   }
@@ -105,6 +117,8 @@ export function JotformEmbed({
     setSubmission(null);
     setLoadingSubmission(false);
     detecting.current = false;
+    initialHeightSeen.current = false;
+    lastPageChangeAt.current = 0;
     openedAt.current = Date.now();
 
     async function resolveSubmission(raw: string) {
@@ -146,7 +160,10 @@ export function JotformEmbed({
       // Jotform requests scrollIntoView when a multi-page form advances,
       // including submit → signature transitions. Ignore resize-only messages
       // so expanding fields do not unexpectedly move the host page.
-      if (requestsPageScroll(text)) scrollHostToTop();
+      if (requestsPageScroll(text)) {
+        scrollHostToTop();
+        lastPageChangeAt.current = Date.now();
+      }
 
       // Auto-resize: Jotform posts "setHeight:<px>:<formId>".
       const h = /setHeight:(\d+)/.exec(text);
@@ -154,6 +171,16 @@ export function JotformEmbed({
         const px = Number(h[1]);
         if (Number.isFinite(px) && px > 0) {
           setHeight(Math.min(MAX_FORM_HEIGHT_PX, px + FORM_BOTTOM_BUFFER_PX));
+          // Jotform never posts "there are N errors on this page" as text — the
+          // only observable symptom is the iframe growing taller on its OWN
+          // page (no page-change message nearby), because the error banner
+          // pushed the content down. Heuristic, not proof — hence the callback
+          // rather than an outright error state.
+          if (!initialHeightSeen.current) {
+            initialHeightSeen.current = true;
+          } else if (Date.now() - lastPageChangeAt.current > 2_000) {
+            onHeightAnomaly?.();
+          }
         }
       }
 
@@ -173,6 +200,39 @@ export function JotformEmbed({
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [embedKey, formId, onSubmitted, onSubmissionReceived]);
+
+  // Fallback for the occasional Jotform dropdown that refuses to render: staff
+  // finish the submission in a separate tab, so the postMessage listener above
+  // never fires. Poll for a same-form submission whose best-guess name matches
+  // the household head and treat it exactly like a detected submission.
+  useEffect(() => {
+    if (!hohName || submitted) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled || detecting.current) return;
+      try {
+        const rows = await listSubmissions(formId);
+        const match = rows.find((row) => {
+          const created = row.created_at ? new Date(row.created_at).getTime() : 0;
+          if (created < openedAt.current - 60_000) return false;
+          return matchName(getSubmissionLabel(row), hohName) !== "none";
+        });
+        if (match && !cancelled && !detecting.current) {
+          detecting.current = true;
+          const resolved = { ...match, formId: String(match.formId || match.form_id || formId) };
+          // eslint-disable-next-line no-console
+          console.log("[forms][SUBMITTED-fallback]", { formId, submissionId: match.id });
+          setSubmitted(true);
+          scrollHostToTop();
+          setSubmission(resolved);
+          onSubmitted?.(`fallback-match:${match.id}`);
+          onSubmissionReceived?.(resolved);
+        }
+      } catch { /* best-effort; try again next tick */ }
+    };
+    const t = window.setInterval(poll, 8_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [formId, hohName, submitted, embedKey, onSubmitted, onSubmissionReceived]);
 
   // Defensive: Jotform form ids are numeric. Never inject anything else into src.
   if (!/^\d{6,24}$/.test(formId)) {

@@ -364,6 +364,8 @@ export function WebhooksSidebar({
   intakeTypes,
   /** Hand-off history of the active intake flow (bottom of the Structured tab). */
   transferChain,
+  /** True for ~10s after an embedded Jotform's height grows unexpectedly (heuristic for a stuck validation-error banner) — shows a dismissible floating notice over this sidebar. */
+  formIssueActive = false,
 }: {
   formIds: string[];
   refreshKey?: number;
@@ -372,6 +374,7 @@ export function WebhooksSidebar({
   onSnapshot?: (snapshot: IntakeWebhookSnapshot) => void;
   intakeTypes?: IntakeTypeId[];
   transferChain?: TransferHop[];
+  formIssueActive?: boolean;
 }) {
   const { customer } = useCurrentCustomer();
   const [collapsed, setCollapsed] = useState(() => {
@@ -410,6 +413,16 @@ export function WebhooksSidebar({
   const [linkedDetailLoading, setLinkedDetailLoading] = useState<Set<string>>(new Set());
   const [linkedDetailErrors, setLinkedDetailErrors] = useState<Record<string, string>>({});
   const [rebuildingLinked, setRebuildingLinked] = useState(false);
+
+  // The "form issue" notice re-arms every time the parent raises a fresh
+  // anomaly, but staff can dismiss it early without waiting out the timer.
+  const [issueDismissed, setIssueDismissed] = useState(false);
+  const wasIssueActive = useRef(false);
+  useEffect(() => {
+    if (formIssueActive && !wasIssueActive.current) setIssueDismissed(false);
+    wasIssueActive.current = formIssueActive;
+  }, [formIssueActive]);
+  const showIssueBanner = formIssueActive && !issueDismissed;
 
   // The sidebar starts blank each browser-tab session and builds out from the
   // forms submitted DURING it (older webhook traffic stays hidden). Survives
@@ -969,31 +982,50 @@ export function WebhooksSidebar({
     URL.revokeObjectURL(url);
   };
 
+  const issueBanner = showIssueBanner ? (
+    <div className="absolute inset-x-1 top-1 z-30 rounded-lg border-2 border-amber-400 bg-amber-50 px-2.5 py-2 pr-7 text-[11px] font-semibold leading-snug text-amber-900 shadow-lg">
+      <button
+        type="button"
+        onClick={() => setIssueDismissed(true)}
+        title="Dismiss"
+        aria-label="Dismiss form-issue warning"
+        className="absolute right-1 top-1 rounded px-1 text-sm font-bold leading-none text-amber-500 hover:bg-amber-100 hover:text-amber-800"
+      >
+        ✕
+      </button>
+      ⚠️ Problems with the embedded Jotform? Open the Jotform in a new tab — sometimes errors happen and the form can't be filled out. Jotform can be finicky.
+    </div>
+  ) : null;
+
   if (collapsed) {
     // Mobile: full-width horizontal button (a vertical rail below the page
     // content was effectively invisible). Desktop: the thin vertical rail.
     return (
-      <button
-        type="button"
-        onClick={toggleCollapsed}
-        title="Open the Webhooks sidebar"
-        className={`sticky top-3 flex w-full shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-500 hover:border-indigo-300 hover:text-indigo-600 lg:w-auto lg:flex-col lg:px-1.5 lg:py-3 ${orderClass}`}
-      >
-        <span className="text-sm">{side === "left" ? "⟩" : "⟨"}</span>
-        <span className="text-[11px] font-semibold lg:[writing-mode:vertical-rl]">Webhooks</span>
-        {visibleRows.length ? (
-          <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{visibleRows.length}</span>
-        ) : null}
-      </button>
+      <div className={`relative w-full shrink-0 self-start lg:w-auto ${orderClass}`}>
+        {issueBanner}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          title="Open the Norm HH information sidebar"
+          className="sticky top-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-500 hover:border-indigo-300 hover:text-indigo-600 lg:w-auto lg:flex-col lg:px-1.5 lg:py-3"
+        >
+          <span className="text-sm">{side === "left" ? "⟩" : "⟨"}</span>
+          <span className="text-[11px] font-semibold lg:[writing-mode:vertical-rl]">Norm HH information</span>
+          {visibleRows.length ? (
+            <span className="rounded-full bg-indigo-100 px-1.5 text-[10px] font-bold text-indigo-700">{visibleRows.length}</span>
+          ) : null}
+        </button>
+      </div>
     );
   }
 
   return (
     <aside className={`sticky top-3 w-full shrink-0 self-start lg:w-80 xl:w-96 ${orderClass}`}>
+      {issueBanner}
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
           <div className="flex items-center gap-1">
-            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Webhooks</span>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Norm HH information</span>
             {loading ? <span className="text-[10px] text-slate-300">refreshing…</span> : null}
           </div>
           <div className="flex items-center gap-1">
