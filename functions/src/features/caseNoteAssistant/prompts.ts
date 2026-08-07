@@ -1,5 +1,13 @@
 import type { TCaseNoteAction, TGenerateCaseNoteSuggestionReq } from "@hdb/contracts";
 
+export const CASE_NOTE_STAFF_LABELS = ["CM", "Writer", "case manager", "casemanger"] as const;
+
+/** Select once per generation so a note varies between requests but never within itself. */
+export function selectCaseNoteStaffLabel(randomValue = Math.random()): (typeof CASE_NOTE_STAFF_LABELS)[number] {
+  const bounded = Math.min(Math.max(randomValue, 0), 0.9999999999999999);
+  return CASE_NOTE_STAFF_LABELS[Math.floor(bounded * CASE_NOTE_STAFF_LABELS.length)];
+}
+
 const UNIVERSAL_SYSTEM = `You are assisting a case manager with professional case documentation.
 Improve documentation quality while preserving the meaning of the user's draft.
 
@@ -42,7 +50,7 @@ Return exactly one JSON object and nothing else — no markdown fences, no comme
 
 function requiredLanguage(client: string, staff: string): string {
   return `REQUIRED LANGUAGE PATTERNS
-Open the note with the phrasing that matches the actual contact, and use these patterns naturally when the facts support them. Never fabricate the underlying facts to fit a pattern.
+Express the supplied contact method naturally within the note's prose when draftNote is being produced. Never add a standalone contact-type label or prefix such as "In Person -", "In Person —", "On Behalf of -", or "On Behalf of —". Never fabricate the underlying facts to fit a pattern.
 - In-person session: "${staff} met with ${client} to…"
 - Phone contact with the client: "${staff} spoke with ${client} by phone to…"
 - Attempted phone contact: "${staff} attempted to contact ${client} by phone to…"
@@ -81,7 +89,7 @@ export function sentenceTarget(minutes: number | null | undefined): string {
 }
 
 export function promptTemplateIds(action: TCaseNoteAction): string[] {
-  return ["universal-system-v2", "case-note-global-standards-v3", "identity-normalization-v2", "staff-voice-normalization-v2", "client-quote-preservation-v2", "required-language-v1", "missing-info-rules-v1", "structured-json-output-v1", TASKS[action].id, "backend-metadata-v3"];
+  return ["universal-system-v2", "case-note-global-standards-v3", "identity-normalization-v2", "staff-voice-normalization-v3", "client-quote-preservation-v2", "required-language-v2", "missing-info-rules-v1", "structured-json-output-v1", TASKS[action].id, "backend-metadata-v3"];
 }
 
 function structuredSource(input: TGenerateCaseNoteSuggestionReq): string {
@@ -99,8 +107,8 @@ export function assemblePrompt(input: TGenerateCaseNoteSuggestionReq, meta: { cl
   const identity = `PERSON AND ROLE NORMALIZATION
 - Use "${input.clientLabel}" consistently for the person receiving services.
 - Replace known client names/aliases (${meta.clientNames.join(" | ") || "none provided"}) with "${input.clientLabel}"; use "${input.clientLabel}'s" for possessives.
-- Use "${input.staffLabel}" consistently for staff actions.
-- Replace known staff names/aliases (${meta.staffNames.join(" | ") || "none provided"}) and staff first-person I/me/my with "${input.staffLabel}"/"${input.staffLabel}'s".
+- For this note, the single selected staff narrator label is "${input.staffLabel}". Use exactly that label for every staff reference throughout draftNote; never switch to another staff label within the note.
+- Replace known staff names/aliases (${meta.staffNames.join(" | ") || "none provided"}), ME/I/Casemanager variants, and other staff first-person I/me/my references with "${input.staffLabel}"/"${input.staffLabel}'s".
 - Do not include actual client or staff names. Do not alter first-person language inside direct client quotes.`;
   const metadata = `BACKEND METADATA
 Mode: ${input.mode}

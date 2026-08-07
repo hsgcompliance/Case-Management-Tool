@@ -3,14 +3,59 @@ import { getApp } from "firebase-admin/app";
 import { FieldValue } from "firebase-admin/firestore";
 import { tss } from "@hdb/contracts";
 import type { TGenerateCaseNoteSuggestionReq, TGenerateSmartGoalSuggestionReq } from "@hdb/contracts";
-import { canAccessDoc, db, isDev, requireOrgId, requireUid } from "../../core";
-import { assemblePrompt, promptTemplateIds } from "./prompts";
+import {
+  canAccessDoc,
+  CASE_NOTE_PHI_BAA_CONFIRMED,
+  CASE_NOTE_PHI_REQUEST_RESPONSE_LOGGING_DISABLED,
+  CASE_NOTE_PHI_ZERO_RETENTION_CONFIRMED,
+  db,
+  isDev,
+  requireOrgId,
+  requireUid,
+} from "../../core";
+import { assemblePrompt, promptTemplateIds, selectCaseNoteStaffLabel } from "./prompts";
 import { assembleSmartGoalPrompt, SMART_GOAL_TEMPLATE_IDS } from "./smartGoalPrompts";
 import { hydrateCaseNoteBetaConfig } from "./config";
 import { estimateAiCostUsd } from "./pricing";
 import { buildAiUsageAudit } from "./privacy";
 
 export class CaseNoteAssistantError extends Error { constructor(public status: number, public safeMessage: string) { super(safeMessage); } }
+const PHI_APPROVED_MODEL = "gemini-3.1-flash-lite";
+const PHI_APPROVED_LOCATION = "us-central1";
+const RETIRING_CASE_NOTE_MODELS = new Set(["gemini-2.5-flash-lite"]);
+
+function isTrue(value: unknown): boolean {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+export function caseNotePhiControlsVerified(values: readonly unknown[]): boolean {
+  return values.length === 3 && values.every(isTrue);
+}
+
+/** Fail closed: these external Google Cloud controls cannot be proven by app code. */
+export function assertCaseNotePhiControls(): void {
+  const verified = caseNotePhiControlsVerified([
+    CASE_NOTE_PHI_BAA_CONFIRMED.value(),
+    CASE_NOTE_PHI_ZERO_RETENTION_CONFIRMED.value(),
+    CASE_NOTE_PHI_REQUEST_RESPONSE_LOGGING_DISABLED.value(),
+  ]);
+  if (!verified) {
+    throw new CaseNoteAssistantError(503, "AI assistance is unavailable until the required PHI privacy controls are verified.");
+  }
+}
+
+/** Existing org config may still contain 2.5; migrate that value without sending to it. */
+export function resolveCaseNoteModel(configuredModel: unknown, environmentModel: unknown): string {
+  const candidate = String(environmentModel || configuredModel || PHI_APPROVED_MODEL).trim();
+  if (candidate === PHI_APPROVED_MODEL || RETIRING_CASE_NOTE_MODELS.has(candidate)) return PHI_APPROVED_MODEL;
+  throw new CaseNoteAssistantError(503, "AI assistance is unavailable because the configured model is not approved for PHI.");
+}
+
+export function resolveCaseNoteLocation(environmentLocation: unknown): string {
+  const candidate = String(environmentLocation || PHI_APPROVED_LOCATION).trim();
+  if (candidate === PHI_APPROVED_LOCATION) return candidate;
+  throw new CaseNoteAssistantError(503, "AI assistance is unavailable because the configured AI region is not approved for PHI.");
+}
 // Canonical variant token: lowercase, no spaces/dashes ("nonpayer", "payer").
 // Applied to BOTH the stored workbook variant and the org-config allowlist so
 // admin-entered spellings ("non-payer", "Non Payer") can't silently mismatch.
@@ -102,6 +147,7 @@ export async function getCaseNoteUsageSummary(
 }
 
 export async function generateSuggestion(caller: Record<string, unknown>, input: TGenerateCaseNoteSuggestionReq) {
+  assertCaseNotePhiControls();
   const uid = requireUid(caller); const orgId = requireOrgId(caller); const requestId = randomUUID();
   const [customerSnap, configDocs, userSnap] = await Promise.all([
     db.collection("customers").doc(input.customerId).get(),
@@ -132,7 +178,14 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
   const dailyTokenLimit = userLimits.dailyTokenLimit ?? config.dailyUserTokenLimit;
   if ((Number(dailyUsage.data()?.requests) || 0) >= dailyRequestLimit || (Number(dailyUsage.data()?.tokens) || 0) >= dailyTokenLimit || (Number(orgUsage.data()?.requests) || 0) >= config.monthlyRequestLimit || (Number(orgUsage.data()?.tokens) || 0) >= config.monthlyTokenLimit) throw new CaseNoteAssistantError(429, "AI suggestions are temporarily unavailable because the usage limit has been reached.");
 
-  const normalized: TGenerateCaseNoteSuggestionReq = { ...input, clientLabel: input.clientLabel || config.defaultClientLabel, staffLabel: input.staffLabel || config.defaultStaffLabel };
+  // Choose the narrator once per request. The prompt then requires this one label
+  // for every staff reference, producing variation between notes without mixing
+  // voices inside an individual note.
+  const normalized: TGenerateCaseNoteSuggestionReq = {
+    ...input,
+    clientLabel: input.clientLabel || config.defaultClientLabel,
+    staffLabel: selectCaseNoteStaffLabel(),
+  };
   const sourceLength = input.mode === "interview"
     ? Object.values(input.interviewFields ?? {}).reduce((total, value) => total + String(value ?? "").length, 0)
     : String(input.draft ?? "").length;
@@ -141,19 +194,19 @@ export async function generateSuggestion(caller: Record<string, unknown>, input:
     clientNames: [customer.name, customer.firstName, customer.lastName, ...(Array.isArray(customer.aliases) ? customer.aliases : [])].filter(Boolean),
     staffNames: [profile.displayName, profile.name, profile.firstName, profile.lastName, ...(Array.isArray(profile.aliases) ? profile.aliases : [])].filter(Boolean),
   });
-  const model = process.env.CASE_NOTE_VERTEX_MODEL || config.defaultModel;
-  const location = process.env.CASE_NOTE_VERTEX_LOCATION || "us-central1";
+  const model = resolveCaseNoteModel(config.defaultModel, process.env.CASE_NOTE_VERTEX_MODEL);
+  const location = resolveCaseNoteLocation(process.env.CASE_NOTE_VERTEX_LOCATION);
   const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
   if (!project) throw new CaseNoteAssistantError(503, "Could not generate suggestion. Please try again.");
   const token = await getApp().options.credential?.getAccessToken();
   const started = Date.now();
   const response = await fetch(`https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`, {
     method: "POST", headers: { Authorization: `Bearer ${token?.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature, responseMimeType: "application/json", maxOutputTokens: Math.min(config.maxOutputTokens, ["grammar_only", "shorten", "missing_questions", "compliance_review"].includes(input.action) ? 500 : 900) } }),
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature, thinkingConfig: { thinkingLevel: "MINIMAL" }, responseMimeType: "application/json", maxOutputTokens: Math.min(config.maxOutputTokens, ["grammar_only", "shorten", "missing_questions", "compliance_review"].includes(input.action) ? 500 : 900) } }),
   });
   if (!response.ok) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
   const data: any = await response.json();
-  const rawText = String(data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "").trim();
+  const rawText = String(data.candidates?.[0]?.content?.parts?.filter((p: any) => p.thought !== true).map((p: any) => p.text || "").join("") || "").trim();
   if (!rawText) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
   const parsed = parseStructuredSuggestion(rawText);
   if (!parsed.draftNote && !parsed.missingOrUnclear.length && !parsed.complianceSuggestions.length) throw new CaseNoteAssistantError(502, "Could not generate suggestion. Please try again.");
@@ -189,6 +242,7 @@ function parseSmartGoalSuggestion(text: string): { goalSmart: string; objective:
 // allowAiAssistance → payer-variant workbook → daily/monthly quotas), so the
 // existing AI admin controls govern both features.
 export async function generateSmartGoalSuggestion(caller: Record<string, unknown>, input: TGenerateSmartGoalSuggestionReq) {
+  assertCaseNotePhiControls();
   const uid = requireUid(caller); const orgId = requireOrgId(caller); const requestId = randomUUID();
   const [customerSnap, configDocs, userSnap] = await Promise.all([
     db.collection("customers").doc(input.customerId).get(),
@@ -226,19 +280,19 @@ export async function generateSmartGoalSuggestion(caller: Record<string, unknown
     staffNames: [profile.displayName, profile.name, profile.firstName, profile.lastName, ...(Array.isArray(profile.aliases) ? profile.aliases : [])].filter(Boolean),
     serviceTiers: [...tss.TSS_DROPDOWN_LISTS.serviceTier.values],
   });
-  const model = process.env.CASE_NOTE_VERTEX_MODEL || config.defaultModel;
-  const location = process.env.CASE_NOTE_VERTEX_LOCATION || "us-central1";
+  const model = resolveCaseNoteModel(config.defaultModel, process.env.CASE_NOTE_VERTEX_MODEL);
+  const location = resolveCaseNoteLocation(process.env.CASE_NOTE_VERTEX_LOCATION);
   const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
   if (!project) throw new CaseNoteAssistantError(503, "Could not generate the goal. Please try again.");
   const token = await getApp().options.credential?.getAccessToken();
   const started = Date.now();
   const response = await fetch(`https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`, {
     method: "POST", headers: { Authorization: `Bearer ${token?.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature, responseMimeType: "application/json", maxOutputTokens: Math.min(config.maxOutputTokens, 700) } }),
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature: config.temperature, thinkingConfig: { thinkingLevel: "MINIMAL" }, responseMimeType: "application/json", maxOutputTokens: Math.min(config.maxOutputTokens, 700) } }),
   });
   if (!response.ok) throw new CaseNoteAssistantError(502, "Could not generate the goal. Please try again.");
   const data: any = await response.json();
-  const rawText = String(data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "").trim();
+  const rawText = String(data.candidates?.[0]?.content?.parts?.filter((p: any) => p.thought !== true).map((p: any) => p.text || "").join("") || "").trim();
   if (!rawText) throw new CaseNoteAssistantError(502, "Could not generate the goal. Please try again.");
   const parsed = parseSmartGoalSuggestion(rawText);
   if (!parsed.goalSmart) throw new CaseNoteAssistantError(502, "Could not generate the goal. Please try again.");

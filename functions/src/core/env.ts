@@ -30,6 +30,12 @@ export const GDRIVE_CUSTOMER_INDEX_SHEET_ID: any = defineString("GDRIVE_CUSTOMER
 export const HSG_COMPLIANCE_CALENDAR_EMAIL: any = defineString("HSG_COMPLIANCE_CALENDAR_EMAIL", {
   default: "hsgcompliance@hrdc.org",
 });
+// PHI-bearing AI requests fail closed until an authorized administrator has
+// verified each contractual/project-level control. These are attestations, not
+// secrets; default false prevents an unreviewed deploy from sending PHI.
+export const CASE_NOTE_PHI_BAA_CONFIRMED: any = defineString("CASE_NOTE_PHI_BAA_CONFIRMED", { default: "false" });
+export const CASE_NOTE_PHI_ZERO_RETENTION_CONFIRMED: any = defineString("CASE_NOTE_PHI_ZERO_RETENTION_CONFIRMED", { default: "false" });
+export const CASE_NOTE_PHI_REQUEST_RESPONSE_LOGGING_DISABLED: any = defineString("CASE_NOTE_PHI_REQUEST_RESPONSE_LOGGING_DISABLED", { default: "false" });
 
 // Secrets
 export const GMAIL_CLIENT_ID: any = defineSecret("GMAIL_CLIENT_ID");

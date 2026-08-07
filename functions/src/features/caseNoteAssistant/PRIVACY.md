@@ -1,6 +1,18 @@
 # AI Case Note Assistant data-handling policy
 
-The assistant uses Vertex AI Gemini only as a transient drafting processor. It does not train or fine-tune a model and does not create prompt datasets, response datasets, batch jobs, grounding requests, resumable Live sessions, or application-side prompt/response caches.
+The assistant uses the generally available `gemini-3.1-flash-lite` model only as a transient drafting processor through the regional `us-central1` endpoint. The backend rejects other model or region overrides and explicitly uses the model's `MINIMAL` thinking level to limit unnecessary reasoning tokens. It does not train or fine-tune a model and does not create prompt datasets, response datasets, batch jobs, grounding requests, resumable Live sessions, Interactions API records, or application-side prompt/response caches.
+
+Google necessarily processes each request to generate an answer. Do not describe this integration as preventing Google from processing or technically accessing the submission. The enforceable objective is: BAA-covered processing, no model training, least-privilege access, no optional logging or grounding, and verified zero data retention controls.
+
+## Required PHI controls (fail closed)
+
+Both generation endpoints return a 503 without contacting Google unless all three runtime attestations are explicitly true:
+
+- `CASE_NOTE_PHI_BAA_CONFIRMED`: an authorized owner has verified that the active Google Cloud account/project is governed by an executed BAA covering this GA service.
+- `CASE_NOTE_PHI_ZERO_RETENTION_CONFIRMED`: Google has approved any abuse-monitoring exception required for zero data retention and the project is confirmed in scope.
+- `CASE_NOTE_PHI_REQUEST_RESPONSE_LOGGING_DISABLED`: per-model/per-project request-response logging is confirmed disabled.
+
+These settings attest external controls; setting them does not create those controls. An authorized privacy/security owner must verify the Google Cloud configuration and contractual status before enabling them. Reconfirm them after account, project, model, region, or terms changes.
 
 ## Data lifecycle
 
@@ -32,4 +44,4 @@ Do not add localStorage, sessionStorage, IndexedDB, Firestore, BigQuery, analyti
 
 The two case-note functions default to `case-note-vertex-runtime@housing-db-v2.iam.gserviceaccount.com`. It has `roles/aiplatform.user` and `roles/datastore.user`; it has no project-wide admin role. `CASE_NOTE_VERTEX_SERVICE_ACCOUNT` may override the identity for a different deployment project. No other function references this identity.
 
-Request/response logging and project-level Gemini in-memory caching are Google Cloud controls and must also be verified manually; this code does not enable either feature.
+Request/response logging, abuse-monitoring exceptions, and any Google-managed caching controls must be verified manually. This code does not enable request/response logging, explicit caching, grounding, tuning, or data-store features.
